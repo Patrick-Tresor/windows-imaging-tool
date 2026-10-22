@@ -7,6 +7,9 @@
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
+.EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Iso -CaptureConfig D:\DeployShare\config\capture.json -BootVM Win11-Ref
+    Builds capture media and boots the Hyper-V VM Win11-Ref from it.
 #>
 [CmdletBinding()]
 param(
@@ -17,12 +20,21 @@ param(
     [string]$OutputPath = (Get-Location).Path,
     [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
+    [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
+    [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
+if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
+if ($BootVM) {
+    # Check the VM before spending minutes on the build.
+    $vm = Get-VM -Name $BootVM
+    if ($vm.Generation -ne 2) { throw "VM $BootVM is generation $($vm.Generation). Only generation 2 (UEFI) VMs are supported." }
+    if ($vm.State -ne 'Off') { throw "VM $BootVM is $($vm.State). Let sysprep shut it down first." }
+}
 
 $adk = "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit"
 $peRoot = "$adk\Windows Preinstallation Environment"
@@ -54,6 +66,7 @@ try {
     New-Item -ItemType Directory -Path "$deployDir\config" -Force | Out-Null
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
+    if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
 }
 catch {
@@ -68,10 +81,32 @@ switch ($Target) {
         Write-Host "boot.wim written to $OutputPath. Import it into WDS (Boot Images > Add Boot Image)."
     }
     'Iso' {
-        $iso = Join-Path $OutputPath 'Deploy-WinPE.iso'
-        & cmd /c "MakeWinPEMedia /ISO /F `"$WorkDir`" `"$iso`""
-        if ($LASTEXITCODE -ne 0) { throw 'MakeWinPEMedia /ISO failed' }
+        $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
+        if (Test-Path $iso) { Remove-Item $iso }
+        # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
+        $efi = if ($CaptureConfig) { "$adk\Deployment Tools\amd64\Oscdimg\efisys_noprompt.bin" } else { "$WorkDir\fwfiles\efisys.bin" }
+        $bootData = "2#p0,e,b`"$WorkDir\fwfiles\etfsboot.com`"#pEF,e,b`"$efi`""
+        & cmd /c "oscdimg -m -o -u2 -udfver102 -bootdata:$bootData `"$WorkDir\media`" `"$iso`""
+        if ($LASTEXITCODE -ne 0) { throw 'oscdimg failed' }
         Write-Host "ISO written to $iso"
+
+        if ($BootVM) {
+            $dvd = Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1
+            if ($dvd) { Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $iso }
+            else { $dvd = Add-VMDvdDrive -VMName $BootVM -Path $iso -Passthru }
+            Set-VMFirmware -VMName $BootVM -FirstBootDevice (Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1)
+            Start-VM -Name $BootVM
+            Write-Host "Started $BootVM from $iso. Watch it with: vmconnect localhost `"$BootVM`""
+
+            # The capture shuts the VM down when it finishes. Then eject the ISO and boot from disk again,
+            # or the next start would capture a second time.
+            Write-Host 'Waiting for the capture to finish and the VM to shut down...'
+            while ((Get-VM -Name $BootVM).State -ne 'Off') { Start-Sleep -Seconds 30 }
+            Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $null
+            $disk = Get-VMHardDiskDrive -VMName $BootVM | Select-Object -First 1
+            if ($disk) { Set-VMFirmware -VMName $BootVM -FirstBootDevice $disk }
+            Write-Host "$BootVM is off, the ISO is ejected and it boots from its disk again. Check the Logs folder for the capture result."
+        }
     }
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
@@ -90,6 +125,8 @@ switch ($Target) {
         $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
         $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
         robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL | Out-Null
+        # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
+        New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
         if ($ContentSource) {
             foreach ($dir in 'Images', 'Drivers', 'config') {
                 robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" /E /NFL /NDL | Out-Null

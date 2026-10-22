@@ -65,6 +65,31 @@ try {
     $s.defaultImage = 'Win11.wim'
     Save-DeploySettings -ContentRoot $root -Settings $s
     Assert-Equal (Get-DeploySettings -ContentRoot $root).defaultImage 'Win11.wim' 'settings round-trip'
+
+    # Capture wizard data.
+    Assert-Equal (Test-Path (Join-Path $root 'Tools/Prepare-Reference.ps1')) $true 'content root gets the prepare script'
+    Assert-Equal (Test-ImageName 'Win11_24H2-v1.0') $true 'valid image name accepted'
+    Assert-Equal (Test-ImageName 'Win 11') $false 'image name with a space rejected'
+    $cfgPath = New-CaptureConfig -ContentRoot $root -Name 'Win11_Ref' -Description 'Base' -SplitForFat32 -Unattended
+    $cfg = Get-Content -Raw $cfgPath | ConvertFrom-Json
+    Assert-Equal "$($cfg.name)|$($cfg.splitSizeMB)|$($cfg.noPrompt)|$($cfg.shutdownWhenDone)|$($cfg.compression)" 'Win11_Ref|3800|True|True|max' 'capture config is written'
+    $threw = $false
+    try { New-CaptureConfig -ContentRoot $root -Name 'Win11' | Out-Null } catch { $threw = $true }
+    Assert-Equal $threw $true 'capture refuses a name that already exists'
+
+    $s = Get-DeploySettings -ContentRoot $root
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 0 'share from defaults is accepted'
+    $s.share.path = ''
+    Save-DeploySettings -ContentRoot $root -Settings $s
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'network capture without a share is flagged'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Usb).Count) 0 'USB capture does not need a share'
+    $s.share.path = 'server\Deploy'
+    Save-DeploySettings -ContentRoot $root -Settings $s
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'non-UNC share is flagged'
+
+    Set-Content (Join-Path $root 'Logs/CAPTURE-Win11_Ref_20261022-1700_FAILED.log') 'x'
+    $cap = Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'CAPTURE-*'
+    Assert-Equal "$($cap.Serial)|$($cap.Status)" 'CAPTURE-Win11_Ref|FAILED' 'capture log with underscore in the name is parsed'
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

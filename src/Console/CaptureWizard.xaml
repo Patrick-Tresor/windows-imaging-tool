@@ -1,0 +1,142 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Capture Wizard" Width="760" Height="560" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="8,0,0,0"/>
+      <Setter Property="MinWidth" Value="90"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="Title" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+    <Style x:Key="Body" TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Foreground" Value="#374151"/>
+      <Setter Property="Margin" Value="0,0,0,10"/>
+    </Style>
+    <Style x:Key="StepLabel" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,6"/>
+      <Setter Property="Foreground" Value="#9CA3AF"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- Step list -->
+    <Border DockPanel.Dock="Left" Width="180" Background="#1F2937" Padding="18,20">
+      <StackPanel>
+        <TextBlock Text="Capture an image" Foreground="White" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,16"/>
+        <TextBlock x:Name="Step0" Text="1. Prepare reference" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step1" Text="2. Image details" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step2" Text="3. Reference machine" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step3" Text="4. Summary" Style="{StaticResource StepLabel}"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Buttons -->
+    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="BtnBack" Content="Back"/>
+        <Button x:Name="BtnNext" Content="Next" Style="{StaticResource Primary}"/>
+        <Button x:Name="BtnCancel" Content="Cancel"/>
+      </StackPanel>
+    </Border>
+
+    <Grid Margin="24,20">
+      <!-- Page 1: prepare -->
+      <StackPanel x:Name="Page0">
+        <TextBlock Style="{StaticResource Title}" Text="Prepare the reference machine"/>
+        <TextBlock Style="{StaticResource Body}" Text="Build the reference in a Hyper-V VM if you can: install Windows 10 or 11, updates and your apps, but no OEM drivers. Take a checkpoint first so you can update the image later."/>
+        <TextBlock Style="{StaticResource Body}" Text="Then run this in an elevated PowerShell window on the reference machine. It checks for a pending reboot, BitLocker and Store apps that break sysprep, then runs sysprep and shuts the machine down."/>
+        <DockPanel Margin="0,0,0,8">
+          <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
+          <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
+        </DockPanel>
+        <TextBlock Style="{StaticResource Body}" Foreground="#6B7280"
+                   Text="Add -CheckOnly to only report problems, or -RemoveUserApps to remove the Store apps that block sysprep."/>
+        <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
+                  Content="The reference machine has been prepared with sysprep and is shut down"/>
+      </StackPanel>
+
+      <!-- Page 2: image details -->
+      <StackPanel x:Name="Page1" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Image details"/>
+        <TextBlock Style="{StaticResource Body}" Text="The image is saved to the Images folder of the content root."/>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
+            <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+          </Grid.RowDefinitions>
+          <Label Content="Name"/>
+          <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Becomes the file name."/>
+          <Label Grid.Row="2" Content="Description"/>
+          <TextBox x:Name="TxtDescription" Grid.Row="2" Grid.Column="1"/>
+          <Label Grid.Row="4" Content="Compression"/>
+          <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
+            <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
+            <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
+          </ComboBox>
+          <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
+                    Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
+          <CheckBox x:Name="ChkUnattended" Grid.Row="8" Grid.Column="1" IsChecked="True"
+                    Content="Start without asking and shut down when done (needed for the Hyper-V option)"/>
+        </Grid>
+      </StackPanel>
+
+      <!-- Page 3: reference machine -->
+      <StackPanel x:Name="Page2" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Where is the reference machine?"/>
+
+        <RadioButton x:Name="RbVM" GroupName="Ref" Content="A Hyper-V VM on this PC" FontWeight="SemiBold" Margin="0,6,0,4"/>
+        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                   Text="Builds a capture ISO, boots the VM from it, and ejects it again when the capture is done. The VM needs network access to the share."/>
+        <DockPanel Margin="22,0,0,12">
+          <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
+          <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
+        </DockPanel>
+
+        <RadioButton x:Name="RbIso" GroupName="Ref" Content="Another VM or a PC that boots from an ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
+        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                   Text="Builds a capture ISO you attach yourself. The machine saves the image to the network share."/>
+        <DockPanel Margin="22,0,0,12">
+          <Button x:Name="BtnIsoFolder" DockPanel.Dock="Right" Content="Browse..."/>
+          <TextBox x:Name="TxtIsoFolder" ToolTip="Folder for Capture-WinPE.iso"/>
+        </DockPanel>
+
+        <RadioButton x:Name="RbUsb" GroupName="Ref" Content="A physical PC, with a USB stick" FontWeight="SemiBold" Margin="0,6,0,4"/>
+        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                   Text="Erases the stick and makes it capture media. The image is saved on the stick's DEPLOY partition; copy it to the content root afterwards."/>
+        <DockPanel Margin="22,0,0,0">
+          <Button x:Name="BtnUsbRefresh" DockPanel.Dock="Right" Content="Refresh"/>
+          <ComboBox x:Name="CmbUsb" DisplayMemberPath="Label"/>
+        </DockPanel>
+      </StackPanel>
+
+      <!-- Page 4: summary -->
+      <DockPanel x:Name="Page3" Visibility="Collapsed">
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Title}" Text="Summary"/>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Body}"
+                   Text="Clicking Build and start opens a window that builds the capture media (a few minutes) and, for a Hyper-V VM, starts the capture. The new image appears on the Images tab when it finishes."/>
+        <TextBlock x:Name="TxtIssues" DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="#B91C1C" Margin="0,10,0,0"/>
+        <TextBox x:Name="TxtSummary" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap"
+                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Background="#F9FAFB"/>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>

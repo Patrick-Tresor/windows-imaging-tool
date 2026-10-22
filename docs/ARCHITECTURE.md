@@ -7,6 +7,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 
 | Piece | Runs on | What it does |
 |---|---|---|
+| **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
 | **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
@@ -23,6 +24,21 @@ window with `-Force` (the console already confirmed the erase) and bake in the
 content root's `deploy-settings.json`. `Deploy-Image.ps1` re-reads that file
 from the content root at run time, so settings such as the default image take
 effect without rebuilding media.
+
+## Capture wizard
+
+`CaptureWizard.ps1` writes `config\capture.json` (name, description,
+compression, split, unattended) and calls `New-DeploymentMedia.ps1
+-CaptureConfig`, which bakes it into WinPE. `startnet.cmd` runs
+`Capture-GoldenImage.ps1 -ConfigPath` when that file exists, and runs the deploy
+otherwise, so capture media and deploy media share one build path.
+
+For a Hyper-V VM (`-BootVM`), the ISO is built with `efisys_noprompt.bin` so
+it boots without a key press. The script checks the VM is generation 2 and off,
+attaches the ISO, sets the DVD as first boot device and starts the VM. It then
+waits for the unattended capture to shut the VM down, ejects the ISO and sets
+the boot order back to the disk. The ISO is kept under `%ProgramData%` because
+Hyper-V cannot mount one from a share without delegation.
 
 ## Why the golden image is hardware-independent
 

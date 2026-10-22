@@ -19,6 +19,7 @@ if (-not $isAdmin -or [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA'
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
+. (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 $srcDir = Split-Path $PSScriptRoot -Parent
 
 # A real .NET type so the editable grid can add rows and bind two-way.
@@ -125,13 +126,17 @@ function Update-Logs {
     $ui.TxtLog.Text = ''
 }
 
-function Update-UsbDisks {
-    $ui.CmbUsb.ItemsSource = @(Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object {
+function Get-UsbDiskChoices {
+    Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object {
         [pscustomobject]@{
             Number = $_.Number
             Label  = '{0}: {1} ({2:N1} GB)' -f $_.Number, $_.FriendlyName, ($_.Size / 1GB)
         }
-    })
+    }
+}
+
+function Update-UsbDisks {
+    $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
 }
 
@@ -166,6 +171,12 @@ $ui.BtnInitRoot.Add_Click({ Invoke-Safely {
 #region Images
 
 $ui.BtnImagesRefresh.Add_Click({ Invoke-Safely { Update-Images; Set-Status 'Images refreshed' } })
+$ui.BtnCapture.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
+        Set-Status 'Capture started in a separate window. Click Refresh on the Images tab when it finishes.'
+    }
+} })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 $ui.BtnImageDefault.Add_Click({ Invoke-Safely {
     $img = $ui.GridImages.SelectedItem

@@ -9,8 +9,8 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, Capture-GoldenImage.ps1, New-DeploymentMedia.ps1, DeployCommon.psm1
-src/Console/         ImagingConsole.ps1 (WPF GUI), MainWindow.xaml, ConsoleData.psm1
+src/                 Deploy-Image.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1, New-DeploymentMedia.ps1, DeployCommon.psm1
+src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, unattend.xml
 winpe/               startnet.cmd (auto-starts the deploy in WinPE)
 tests/               ConsoleData.Tests.ps1 (pwsh -File tests/ConsoleData.Tests.ps1)
@@ -23,6 +23,7 @@ Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
 and click **Create folders** the first time. Then:
 
 - **Images**: see captured images, their size and editions, and pick the default.
+  **Capture new image...** opens the capture wizard (below).
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
@@ -47,10 +48,21 @@ Logs\     one log per deployed PC
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe` and import `boot.wim` into WDS).
-2. **Build the reference** in a Hyper-V VM: install Windows, apps, updates, then
-   `sysprep /generalize /oobe /shutdown`.
-3. **Capture**: boot the VM from the media, press Ctrl+C at the deploy prompt's
-   confirmation, and run `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
+2. **Build the reference** in a generation 2 Hyper-V VM: install Windows, apps
+   and updates, no OEM drivers. Take a checkpoint.
+3. **Capture** with the console's capture wizard (Images > Capture new image...):
+   1. Run the prepare command it shows on the reference machine
+      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
+      Store apps that break sysprep, then runs sysprep and shuts down.
+   2. Name the image and choose compression.
+   3. Choose the reference machine. For a **Hyper-V VM** the wizard builds a capture
+      ISO, boots the VM from it, and ejects it when the capture finishes. Use an
+      **ISO** for other VMs, or a **USB stick** for a physical PC.
+   4. Review and click Build and start.
+   The image is saved to the share's `Images` folder, or to the USB stick, and a
+   `CAPTURE-<name>` log appears on the Deployment Logs tab.
+   Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
+   `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 4. **Add drivers** in the console's Driver Library tab, or extract each vendor's
    enterprise driver pack into `Drivers\<Maker>\<Model>` and add a line to
    `driver-catalog.json` by hand.
