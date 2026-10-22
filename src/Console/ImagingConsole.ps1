@@ -17,7 +17,7 @@ if (-not $isAdmin -or [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA'
 }
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, Microsoft.VisualBasic
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 $srcDir = Split-Path $PSScriptRoot -Parent
@@ -87,12 +87,17 @@ function Test-RootReady {
 
 function Update-Images {
     if (-not (Test-ContentRoot $script:root)) { $ui.GridImages.ItemsSource = $null; return }
-    $default = (Get-DeploySettings -ContentRoot $script:root).defaultImage
-    $images = @(Get-ImageList -ContentRoot $script:root | ForEach-Object {
-        $_ | Add-Member -NotePropertyName IsDefault -NotePropertyValue $(if ($_.Name -eq $default) { 'Yes' } else { '' }) -PassThru
+    $usage = Get-ImageUsage -ContentRoot $script:root
+    $ui.GridImages.ItemsSource = @(Get-ImageList -ContentRoot $script:root | ForEach-Object {
+        $_ | Add-Member -NotePropertyName UsedBy -NotePropertyValue ($(if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' })) -PassThru
     })
-    $ui.GridImages.ItemsSource = $images
-    $ui.CmbDefaultImage.ItemsSource = @($images.Name)
+}
+
+function Update-Answers {
+    $rows = if (Test-ContentRoot $script:root) { @(Get-AnswerFileRows -ContentRoot $script:root) } else { @() }
+    $ui.GridAnswers.ItemsSource = $rows
+    $ui.CmbDefaultAnswer.ItemsSource = @($rows.Name)
+    $ui.TxtAnswerIssues.Text = ''
 }
 
 function Update-Drivers {
@@ -113,12 +118,7 @@ function Update-Settings {
     $ui.TxtSharePath.Text   = $s.share.path
     $ui.TxtShareUser.Text   = $s.share.user
     $ui.TxtSharePwFile.Text = $s.share.passwordFile
-    $ui.CmbDefaultImage.Text = $s.defaultImage
-    $ui.TxtImageIndex.Text  = $s.imageIndex
-    $ui.TxtDiskNumber.Text  = $s.diskNumber
-    $ui.TxtNamePattern.Text = $s.computerNamePattern
-    $ui.ChkPrompt.IsChecked = [bool]$s.prompt
-    $ui.ChkReboot.IsChecked = [bool]$s.rebootWhenDone
+    $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
 }
 
 function Update-Logs {
@@ -142,7 +142,7 @@ function Update-UsbDisks {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Images; Update-Drivers; Update-Settings; Update-Logs
+    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -163,7 +163,7 @@ $ui.BtnInitRoot.Add_Click({ Invoke-Safely {
     if (-not $script:root) { Show-Error 'Choose a folder with Browse... first.'; return }
     Initialize-ContentRoot -Path $script:root
     Update-All
-    Set-Status "Created Images, Drivers, config and Logs in $($script:root)"
+    Set-Status "Created the content folders (Images, Drivers, AnswerFiles, Applications, config, Logs) in $($script:root)"
 } })
 
 #endregion
@@ -178,14 +178,65 @@ $ui.BtnCapture.Add_Click({ Invoke-Safely {
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
-$ui.BtnImageDefault.Add_Click({ Invoke-Safely {
-    $img = $ui.GridImages.SelectedItem
-    if (-not $img) { Show-Error 'Select an image first.'; return }
+
+#endregion
+
+#region Answer files
+
+function Set-DefaultAnswerFile([string]$Name) {
     $s = Get-DeploySettings -ContentRoot $script:root
-    $s.defaultImage = $img.Name
+    if ($s.PSObject.Properties['defaultAnswerFile']) { $s.defaultAnswerFile = $Name }
+    else { $s | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue $Name }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
-    Update-Images; Update-Settings
-    Set-Status "Default image is now $($img.Name)"
+}
+
+function Edit-AnswerFile([string]$Path) {
+    # Notepad is always there; the XML is commented setting by setting.
+    Start-Process notepad.exe -ArgumentList (ConvertTo-Arg $Path)
+    Set-Status 'Editing in Notepad. Save there, then click Refresh to check it.'
+}
+
+$ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
+$ui.BtnAnswerOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'AnswerFiles') } } })
+
+$ui.GridAnswers.Add_SelectionChanged({
+    $row = $ui.GridAnswers.SelectedItem
+    $ui.TxtAnswerIssues.Text = if ($row -and $row.Issues) { ($row.Issues | ForEach-Object { "- $_" }) -join "`r`n" } else { '' }
+})
+
+$ui.BtnAnswerNew.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $name = [Microsoft.VisualBasic.Interaction]::InputBox('Name of the new answer file (letters, digits, dot, dash, underscore):', 'New answer file', 'Win11-Standard')
+    if (-not $name) { return }
+    $path = New-AnswerFileFromSample -ContentRoot $script:root -Name $name.Trim()
+    Update-Answers
+    Edit-AnswerFile $path
+} })
+
+$ui.BtnAnswerImport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
+    $dlg.Filter = 'SmartDeploy answer file (*.xml)|*.xml'
+    if (-not $dlg.ShowDialog($window)) { return }
+    $result = Import-SmartDeployAnswerFile -ContentRoot $script:root -Path $dlg.FileName
+    Update-Answers; Update-Images
+    $text = "Imported as $($result.Name). Passwords are not carried over.`n`nTo finish:`n" + (($result.Notes | ForEach-Object { "- $_" }) -join "`n")
+    [Windows.MessageBox]::Show($window, $text, 'SmartDeploy import', 'OK', 'Information') | Out-Null
+    Set-Status "Imported $($result.Name) from $($dlg.FileName)"
+} })
+
+$ui.BtnAnswerEdit.Add_Click({ Invoke-Safely {
+    $row = $ui.GridAnswers.SelectedItem
+    if (-not $row) { Show-Error 'Select an answer file first.'; return }
+    Edit-AnswerFile $row.FullName
+} })
+
+$ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
+    $row = $ui.GridAnswers.SelectedItem
+    if (-not $row) { Show-Error 'Select an answer file first.'; return }
+    Set-DefaultAnswerFile $row.Name
+    Update-Answers; Update-Settings
+    Set-Status "Default answer file is now $($row.Name)"
 } })
 
 #endregion
@@ -272,27 +323,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $index = 0; $disk = 0
-    if (-not [int]::TryParse($ui.TxtImageIndex.Text, [ref]$index) -or $index -lt 1) { Show-Error 'Image index must be a number of 1 or more.'; return }
-    if (-not [int]::TryParse($ui.TxtDiskNumber.Text, [ref]$disk) -or $disk -lt 0) { Show-Error 'Disk number must be 0 or more.'; return }
-
     $s = Get-DeploySettings -ContentRoot $script:root
-    $s.share.path          = $ui.TxtSharePath.Text.Trim()
-    $s.share.user          = $ui.TxtShareUser.Text.Trim()
-    $s.share.passwordFile  = $ui.TxtSharePwFile.Text.Trim()
-    $s.defaultImage        = $ui.CmbDefaultImage.Text.Trim()
-    $s.imageIndex          = $index
-    $s.diskNumber          = $disk
-    $s.computerNamePattern = $ui.TxtNamePattern.Text.Trim()
-    $s.prompt              = [bool]$ui.ChkPrompt.IsChecked
-    $s.rebootWhenDone      = [bool]$ui.ChkReboot.IsChecked
+    $s.share.path         = $ui.TxtSharePath.Text.Trim()
+    $s.share.user         = $ui.TxtShareUser.Text.Trim()
+    $s.share.passwordFile = $ui.TxtSharePwFile.Text.Trim()
     Save-DeploySettings -ContentRoot $script:root -Settings $s
-    Update-Images
+    if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
+    Update-Answers; Update-Settings
     Set-Status 'Deploy settings saved'
-} })
-
-$ui.BtnUnattend.Add_Click({ Invoke-Safely {
-    if (Test-RootReady) { Start-Process notepad.exe -ArgumentList "`"$(Join-Path $script:root 'config\unattend.xml')`"" }
 } })
 
 #endregion

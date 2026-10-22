@@ -2,6 +2,7 @@
 # No UI code here, so it can be tested without Windows.
 
 $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -30,12 +31,16 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'Logs', 'Tools') {
-        New-Item -ItemType Directory -Path (Join-Path $Path $dir) -Force | Out-Null
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications') {
+        New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
-    foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'unattend.xml') {
+    foreach ($file in 'driver-catalog.json', 'deploy-settings.json') {
         $dest = Join-ContentPath $Path "config\$file"
         if (-not (Test-Path $dest)) { Copy-Item (Join-ContentPath $script:RepoRoot "config\$file") $dest }
+    }
+    $sample = Join-ContentPath $Path 'AnswerFiles\Default.xml'
+    if (-not @(Get-ChildItem (Join-Path $Path 'AnswerFiles') -Filter *.xml).Count) {
+        Copy-Item (Join-ContentPath $script:RepoRoot 'config\answer-files\Default.xml') $sample
     }
     Update-ContentTools -ContentRoot $Path
 }
@@ -238,6 +243,93 @@ function Get-ReferenceVMs {
 
 #endregion
 
+#region Answer files
+
+function Get-AnswerFilePath {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    Join-ContentPath $ContentRoot "AnswerFiles\$Name.xml"
+}
+
+function Get-AnswerFileIssues {
+    # Validation plus what Deploy-Image.ps1 would trip over on this content root: missing image,
+    # applications or password files. Paths outside the content root (extra shares) are not checked.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Answer)
+    $a = $Answer
+    @(Test-AnswerFile $a)
+    $local = { param($p) $p -and -not [IO.Path]::IsPathRooted($p) -and -not $p.StartsWith('\\') -and $p -notmatch '^[A-Za-z]:' }
+    if ((& $local $a.ImageFile) -and -not (Test-Path (Join-ContentPath $ContentRoot $a.ImageFile))) { "Image $($a.ImageFile) is not in the content root." }
+    if (& $local $a.AppLocation) {
+        foreach ($app in $a.Applications) {
+            if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json." }
+        }
+    }
+    $secrets = @()
+    if ($a.Membership -eq 'Domain') { $secrets += $a.JoinPasswordFile }
+    if ($a.EnableAdministrator) { $secrets += $a.AdminPasswordFile }
+    $secrets += @($a.Shares | ForEach-Object PasswordFile)
+    foreach ($f in $secrets | Where-Object { $_ }) {
+        if (-not (Test-Path (Join-ContentPath $ContentRoot $f))) { "Password file $f is missing." }
+    }
+}
+
+function Get-AnswerFileRows {
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $default = (Get-DeploySettings -ContentRoot $ContentRoot).defaultAnswerFile
+    Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+        $row = [ordered]@{ IsDefault = ''; Name = $_.BaseName; Mode = ''; Image = ''; Apps = ''; Joins = ''; Status = ''; Issues = @(); FullName = $_.FullName }
+        if ($_.BaseName -eq $default) { $row.IsDefault = 'Yes' }
+        try {
+            $a = Read-AnswerFile -Path $_.FullName -SkipValidation
+            $issues = @(Get-AnswerFileIssues -ContentRoot $ContentRoot -Answer $a)
+            $row.Mode   = $a.Mode
+            $row.Image  = $a.ImageFile
+            $row.Apps   = $a.Applications.Count
+            $row.Joins  = if ($a.Membership -eq 'Domain') { $a.Domain } else { "Workgroup $($a.Workgroup)" }
+            $row.Issues = $issues
+            $row.Status = if ($issues) { "$($issues.Count) problem(s)" } else { 'Ready' }
+        } catch {
+            $row.Status = 'Unreadable'
+            $row.Issues = @($_.Exception.Message)
+        }
+        [pscustomobject]$row
+    }
+}
+
+function New-AnswerFileFromSample {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Answer file name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
+    if (Test-Path $dest) { throw "An answer file named $Name already exists." }
+    Copy-Item (Join-ContentPath $script:RepoRoot 'config\answer-files\Default.xml') $dest
+    $dest
+}
+
+function Import-SmartDeployAnswerFile {
+    # Converts a SmartDeploy deploy wizard XML into AnswerFiles\<name>.xml. Returns the notes to show the user.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Path, [string]$Name)
+    $result = ConvertFrom-SmartDeployAnswerFile -Path $Path
+    if (-not $Name) { $Name = $result.Answer.Name -replace '[^A-Za-z0-9._-]', '_' }
+    $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
+    if (Test-Path $dest) { throw "An answer file named $Name already exists. Rename or delete it first." }
+    Export-AnswerFile -Answer $result.Answer -Path $dest
+    [pscustomobject]@{ Name = $Name; Path = $dest; Notes = $result.Notes }
+}
+
+function Get-ImageUsage {
+    # Image file name -> names of the answer files that deploy it, for the Images tab.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        $leaf = Split-Path ($a.ImageFile -replace '\\', '/') -Leaf
+        if (-not $usage.ContainsKey($leaf)) { $usage[$leaf] = @() }
+        $usage[$leaf] += $f.BaseName
+    }
+    $usage
+}
+
+#endregion
+
 #region Settings and logs
 
 function Get-DeploySettings {
@@ -275,4 +367,5 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
-    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs
+    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
+    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage

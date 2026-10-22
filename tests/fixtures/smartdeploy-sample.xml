@@ -1,0 +1,80 @@
+<smartdeploy version="3.0">
+  <!-- Made-up values in the shape of a real SmartDeploy deploy wizard answer file. -->
+  <deploy_wizard mode="Unattended">
+    <select_image skip="0">
+      <image_file>\\DEPLOYSRV\SDShare\Images\W11_Office_FR_EN.wim</image_file>
+      <image_name>W11_Office_FR_EN</image_name>
+    </select_image>
+    <application_packs skip="0">
+      <location>\\DEPLOYSRV\C$\SmartDeploy\Application Packs</location>
+      <application_pack installation_order="2">Zoom-Latest.spk</application_pack>
+      <application_pack installation_order="1">Dell-Command-Update.spk</application_pack>
+    </application_packs>
+    <disk_options skip="0"><disk_option>0</disk_option></disk_options>
+    <product_key skip="0"><product_key /></product_key>
+    <user_information skip="0">
+      <full_name>Example College</full_name>
+      <organization_name>Example College &amp; Co</organization_name>
+    </user_information>
+    <regional_settings skip="0">
+      <time_zone>Eastern Standard Time</time_zone>
+      <input_locale>French (Canada)</input_locale>
+    </regional_settings>
+    <network_tcpip_settings skip="0"><ipv4><static>0</static></ipv4></network_tcpip_settings>
+    <network_identification skip="0">
+      <computer_name />
+      <membership>0</membership>
+      <domain>example.local</domain>
+      <organizational_unit />
+      <workgroup />
+    </network_identification>
+    <join_domain_credentials skip="0">
+      <username>imaging</username>
+      <domain>EXAMPLE</domain>
+      <password>DEADBEEFDEADBEEFDEADBEEFDEADBEEF</password>
+    </join_domain_credentials>
+    <client skip="0"><install_during_deployment>true</install_during_deployment></client>
+    <advanced_options>
+      <general>
+        <platform_pack skip="0">\\DEPLOYSRV\C$\SmartDeploy\Platform Packs</platform_pack>
+        <system_properties>
+          <system_property enabled="1">DISABLE_SYSTEM_RESTORE</system_property>
+          <system_property enabled="0">ENABLE_ADMINISTRATOR_ACCOUNT</system_property>
+          <system_property enabled="1">PRESERVE_DESKTOP_ICONS</system_property>
+        </system_properties>
+        <reboot_after_deployment>true</reboot_after_deployment>
+        <shutdown_after_deployment>false</shutdown_after_deployment>
+      </general>
+      <identification skip="0">
+        <naming_mode />
+        <custom_naming_scheme>A########</custom_naming_scheme>
+        <prefix></prefix>
+        <wmi_query>SELECT SerialNumber FROM Win32_SystemEnclosure</wmi_query>
+      </identification>
+      <tasks>
+        <task><phase>POSTIMAGE</phase><command>cscript.exe T:\temp\UpdateInputLocale.vbs</command></task>
+        <task><phase>FIRSTLOGON</phase><command>powershell -file C:\temp\Bitlocker.ps1</command></task>
+        <task><phase>FIRSTBOOT</phase><command>powershell -file C:\temp\Cleanup.ps1</command></task>
+      </tasks>
+    </advanced_options>
+    <settings>
+      <network_shares skip="0">
+        <network_share>
+          <local_name>Z:</local_name>
+          <remote_name>\\DEPLOYSRV\C$</remote_name>
+          <username>imaging</username>
+          <domain>EXAMPLE</domain>
+          <password>DEADBEEFDEADBEEFDEADBEEFDEADBEEF</password>
+        </network_share>
+        <network_share>
+          <local_name>Y:</local_name>
+          <remote_name>\\DEPLOYSRV\SDShare</remote_name>
+          <username>imaging</username>
+          <domain>EXAMPLE</domain>
+          <password>DEADBEEFDEADBEEFDEADBEEFDEADBEEF</password>
+        </network_share>
+      </network_shares>
+      <unattend_delay>3</unattend_delay>
+    </settings>
+  </deploy_wizard>
+</smartdeploy>

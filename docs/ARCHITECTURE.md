@@ -75,13 +75,30 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 
 ## Deploy sequence (UEFI/GPT)
 
-1. Detect hardware and content root; pick image and task from settings (or prompt).
-2. `diskpart`: wipe disk 0, create EFI (260 MB, FAT32), MSR (16 MB), Windows (NTFS), Recovery (1 GB).
-3. `DISM /Apply-Image` the WIM to `W:`.
-4. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
-5. Copy `unattend.xml` to `W:\Windows\Panther\` (computer name, locale, domain join, local admin).
-6. `bcdboot W:\Windows /s S: /f UEFI`.
-7. Write a log to `W:\Windows\Temp\Deploy.log` and the share, then reboot.
+1. Detect hardware and content root; choose the answer file (the default, or a
+   menu in interactive mode); map its extra shares.
+2. Check everything before touching the disk: image, driver pack, applications,
+   password files, computer name. Show a summary, then either a countdown
+   (unattended) or a YES prompt (interactive).
+3. `diskpart`: wipe the disk, create EFI (260 MB, FAT32), MSR (16 MB), Windows (NTFS), Recovery (1 GB).
+4. `DISM /Apply-Image` the WIM to `W:`.
+5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
+6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
+   time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
+   Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
+   cached copy after use, and FirstBoot.ps1 deletes it.
+7. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
+   `firstboot.json`, and write `SetupComplete.cmd` to run it.
+8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
+9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then reboot or shut down.
+
+On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
+applications in order, applies the options, runs FIRSTBOOT tasks and removes
+`C:\Deploy`.
+
+`AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
+SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
+by the deploy and the console.
 
 ## Driver packs
 
@@ -94,4 +111,5 @@ HP `HPClientDriverPackCatalog.cab`, Lenovo `catalogv2.xml`).
 ## Not in v1
 
 A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
-legacy BIOS/MBR, app installs after deployment, user state migration (USMT).
+legacy BIOS/MBR, user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
+static IP, display settings, Azure AD join, a management agent, and a form editor for answer files (they are edited as XML).

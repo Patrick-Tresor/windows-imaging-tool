@@ -72,18 +72,17 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it. The default image is what PCs get when the deploy prompt is skipped."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it. Answer files choose which image a PC gets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnImageDefault" Content="Set as default"/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
           <DataGrid x:Name="GridImages" IsReadOnly="True">
             <DataGrid.Columns>
-              <DataGridTextColumn Header="Default" Binding="{Binding IsDefault}" Width="70"/>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+              <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
               <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
               <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
               <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
@@ -189,18 +188,47 @@
         </StackPanel>
       </TabItem>
 
+      <!-- Answer files -->
+      <TabItem Header="Answer Files">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
+            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares, like a SmartDeploy answer file. The PC picks one at boot (or uses the default). Passwords go in files under config\secrets, never in the answer file."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnAnswerImport" Content="Import SmartDeploy XML..."/>
+            <Button x:Name="BtnAnswerEdit" Content="Edit"/>
+            <Button x:Name="BtnAnswerDefault" Content="Set as default"/>
+            <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
+            <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
+          </StackPanel>
+          <TextBox x:Name="TxtAnswerIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="#B91C1C"/>
+          <DataGrid x:Name="GridAnswers" IsReadOnly="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Default" Binding="{Binding IsDefault}" Width="65"/>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+              <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="90"/>
+              <DataGridTextColumn Header="Image" Binding="{Binding Image}" Width="2*"/>
+              <DataGridTextColumn Header="Apps" Binding="{Binding Apps}" Width="50"/>
+              <DataGridTextColumn Header="Joins" Binding="{Binding Joins}" Width="*"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
       <!-- Settings -->
       <TabItem Header="Deploy Settings">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel>
             <TextBlock Style="{StaticResource SectionTitle}" Text="Deploy settings"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Saved to config\deploy-settings.json in the content root. Deployments read it at run time, so changes apply without rebuilding media. The network share details are baked into media when you build it, so rebuild media after changing them."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Saved to config\deploy-settings.json in the content root. The network share is how WinPE finds the content root when it boots from ISO or PXE; it is baked into media, so rebuild media after changing it. Everything else about a deployment is in the answer files."/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Grid.RowDefinitions>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -208,23 +236,11 @@
               <TextBox x:Name="TxtShareUser" Grid.Row="2" Grid.Column="1" ToolTip="DOMAIN\user. Leave empty for guest access."/>
               <Label Grid.Row="4" Content="Password file"/>
               <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
-
-              <Label Grid.Row="6" Content="Default image"/>
-              <ComboBox x:Name="CmbDefaultImage" Grid.Row="6" Grid.Column="1" IsEditable="True"/>
-              <Label Grid.Row="8" Content="Image index"/>
-              <TextBox x:Name="TxtImageIndex" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
-              <Label Grid.Row="10" Content="Target disk number"/>
-              <TextBox x:Name="TxtDiskNumber" Grid.Row="10" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
-              <Label Grid.Row="12" Content="Computer name pattern"/>
-              <TextBox x:Name="TxtNamePattern" Grid.Row="12" Grid.Column="1" ToolTip="{}{SERIAL} is replaced with the BIOS serial number. Max 15 characters."/>
-              <Label Grid.Row="14" Content="Ask before erasing"/>
-              <CheckBox x:Name="ChkPrompt" Grid.Row="14" Grid.Column="1" VerticalAlignment="Center" Content="Show a summary and require typing YES on the PC"/>
-              <Label Grid.Row="16" Content="Reboot when done"/>
-              <CheckBox x:Name="ChkReboot" Grid.Row="16" Grid.Column="1" VerticalAlignment="Center"/>
+              <Label Grid.Row="6" Content="Default answer file"/>
+              <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
-              <Button x:Name="BtnUnattend" Content="Edit unattend.xml"/>
             </StackPanel>
           </StackPanel>
         </ScrollViewer>

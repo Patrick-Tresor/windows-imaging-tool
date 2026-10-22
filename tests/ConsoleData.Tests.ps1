@@ -62,9 +62,29 @@ try {
 
     # Settings round-trip.
     $s = Get-DeploySettings -ContentRoot $root
-    $s.defaultImage = 'Win11.wim'
+    $s.defaultAnswerFile = 'Lab'
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (Get-DeploySettings -ContentRoot $root).defaultImage 'Win11.wim' 'settings round-trip'
+    Assert-Equal (Get-DeploySettings -ContentRoot $root).defaultAnswerFile 'Lab' 'settings round-trip'
+    $s.defaultAnswerFile = 'Default'
+    Save-DeploySettings -ContentRoot $root -Settings $s
+
+    # Answer files.
+    $rows = @(Get-AnswerFileRows -ContentRoot $root)
+    Assert-Equal "$($rows.Name)|$($rows.IsDefault)" 'Default|Yes' 'content root is seeded with the default answer file'
+    Assert-Equal ($rows[0].Issues -join '') 'Image Images\Win11-Enterprise.wim is not in the content root.' 'missing image is reported'
+    $new = New-AnswerFileFromSample -ContentRoot $root -Name 'Lab'
+    Assert-Equal (Test-Path $new) $true 'new answer file is created from the sample'
+    $threw = $false
+    try { New-AnswerFileFromSample -ContentRoot $root -Name 'Lab' | Out-Null } catch { $threw = $true }
+    Assert-Equal $threw $true 'answer file names cannot be reused'
+
+    $imp = Import-SmartDeployAnswerFile -ContentRoot $root -Path (Join-Path $PSScriptRoot 'fixtures/smartdeploy-sample.xml')
+    Assert-Equal $imp.Name 'smartdeploy-sample' 'SmartDeploy file is imported under its own name'
+    Assert-Equal ($imp.Notes.Count -gt 3) $true 'import returns the manual steps'
+    $impRow = Get-AnswerFileRows -ContentRoot $root | Where-Object Name -eq 'smartdeploy-sample'
+    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Password file*' }).Count) 3 'missing join and share password files are reported'
+    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Application*' }).Count) 2 'missing application folders are reported'
+    Assert-Equal ((Get-ImageUsage -ContentRoot $root)['Win11-Enterprise.wim'] -join ',') 'Default,Lab' 'image usage lists the answer files using it'
 
     # Capture wizard data.
     Assert-Equal (Test-Path (Join-Path $root 'Tools/Prepare-Reference.ps1')) $true 'content root gets the prepare script'

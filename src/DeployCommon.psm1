@@ -112,15 +112,31 @@ function Find-ContentRoot {
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
 
-    $netArgs = @('use', 'Z:', $settings.share.path)
-    if ($settings.share.user) {
+    $password = $null
+    if ($settings.share.user -and $settings.share.passwordFile) {
         $pwFile = Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $settings.share.passwordFile
-        $password = if (Test-Path $pwFile) { (Get-Content -Raw $pwFile).Trim() } else { '*' }  # '*' makes net use prompt
-        $netArgs += @("/user:$($settings.share.user)", $password)
+        if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
     }
-    Invoke-Native -FilePath 'net.exe' -ArgumentList $netArgs
+    Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $settings.share.user -Password $password
     Write-DeployLog "Using network content at Z:\"
     'Z:\'
 }
 
-Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Get-HardwareIdentity, Test-UefiBoot, Resolve-DriverPack, Find-ContentRoot
+function Mount-NetworkShare {
+    # Maps a share with net use. With a user but no password, net use prompts for it on the console.
+    param(
+        [Parameter(Mandatory)][string]$LocalName,
+        [Parameter(Mandatory)][string]$RemoteName,
+        [string]$User,
+        [string]$Password
+    )
+    $netArgs = @('use', $LocalName, $RemoteName)
+    if ($User) { $netArgs += @("/user:$User", $(if ($Password) { $Password } else { '*' })) }
+    # Log the command without the password.
+    Write-DeployLog "Mapping $LocalName to $RemoteName$(if ($User) { " as $User" })"
+    if ($User -and -not $Password) { & net.exe @netArgs }   # leave the console attached so the prompt shows
+    else { & net.exe @netArgs 2>&1 | Out-Null }
+    if ($LASTEXITCODE -ne 0) { throw "Could not map $RemoteName (net use exit code $LASTEXITCODE)." }
+}
+
+Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Get-HardwareIdentity, Test-UefiBoot, Resolve-DriverPack, Find-ContentRoot, Mount-NetworkShare
