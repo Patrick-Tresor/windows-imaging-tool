@@ -15,11 +15,14 @@ param(
     [int]$UsbDiskNumber = -1,
     [string]$ContentSource,          # Images, Drivers, config to copy to the USB's DEPLOY partition
     [string]$OutputPath = (Get-Location).Path,
-    [string]$WinPEDrivers            # optional NIC/storage drivers WinPE itself needs on newer hardware
+    [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
+    [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
+    [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
 
 $adk = "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit"
 $peRoot = "$adk\Windows Preinstallation Environment"
@@ -50,7 +53,7 @@ try {
     $deployDir = Join-Path $mount 'Deploy'
     New-Item -ItemType Directory -Path "$deployDir\config" -Force | Out-Null
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
-    Copy-Item "$repo\config\deploy-settings.json" "$deployDir\config\"
+    Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
 }
 catch {
@@ -74,7 +77,7 @@ switch ($Target) {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
         $disk = Get-Disk -Number $UsbDiskNumber
         if ($disk.BusType -ne 'USB') { throw "Disk $UsbDiskNumber is $($disk.BusType), not USB. Refusing to erase it." }
-        if ((Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
+        if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
 
         # Two partitions: FAT32 to boot UEFI, NTFS for images larger than 4 GB.
         Clear-Disk -Number $UsbDiskNumber -RemoveData -RemoveOEM -Confirm:$false

@@ -11,6 +11,18 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
+
+## Admin console
+
+`ImagingConsole.ps1` is a WPF window loaded from `MainWindow.xaml`; all file
+work lives in `ConsoleData.psm1` so it is testable without a UI. The console
+edits the content root directly, so a USB stick or the share is managed the
+same way. Media builds run `New-DeploymentMedia.ps1` in a separate elevated
+window with `-Force` (the console already confirmed the erase) and bake in the
+content root's `deploy-settings.json`. `Deploy-Image.ps1` re-reads that file
+from the content root at run time, so settings such as the default image take
+effect without rebuilding media.
 
 ## Why the golden image is hardware-independent
 
@@ -65,5 +77,5 @@ HP `HPClientDriverPackCatalog.cab`, Lenovo `catalogv2.xml`).
 
 ## Not in v1
 
-GUI console, multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
+A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
 legacy BIOS/MBR, app installs after deployment, user state migration (USMT).

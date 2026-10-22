@@ -33,6 +33,18 @@ try {
     if (-not $hw.IsUefi) { throw 'This PC booted WinPE in legacy BIOS mode. Switch the firmware to UEFI and boot again.' }
 
     $root      = Find-ContentRoot -SettingsPath $SettingsPath
+
+    # Settings on the content root (edited in the console) override the copy baked into the media,
+    # so the default image can change without rebuilding USB sticks. Explicit parameters still win.
+    $rootSettings = Join-Path $root 'config\deploy-settings.json'
+    if (Test-Path $rootSettings) {
+        $settings = Get-Content -Raw $rootSettings | ConvertFrom-Json
+        if (-not $PSBoundParameters.ContainsKey('ImageName'))  { $ImageName  = $settings.defaultImage }
+        if (-not $PSBoundParameters.ContainsKey('ImageIndex')) { $ImageIndex = $settings.imageIndex }
+        if (-not $PSBoundParameters.ContainsKey('DiskNumber')) { $DiskNumber = $settings.diskNumber }
+        $prompt = $settings.prompt -and -not $NoPrompt
+        Write-DeployLog "Using settings from $rootSettings"
+    }
     $imagePath = Join-Path $root "Images\$ImageName"
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 

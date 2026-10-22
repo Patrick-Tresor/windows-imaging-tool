@@ -1,0 +1,258 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Imaging Console" Width="1100" Height="720" MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="13" Background="#F4F5F7">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="MinWidth" Value="90"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False"/>
+      <Setter Property="HeadersVisibility" Value="Column"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="RowHeight" Value="26"/>
+      <Setter Property="SelectionMode" Value="Single"/>
+    </Style>
+    <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+    <Style x:Key="Hint" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#5B6170"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- Content root bar -->
+    <Border DockPanel.Dock="Top" Background="#1F2937" Padding="16,10">
+      <DockPanel>
+        <TextBlock Text="Imaging Console" Foreground="White" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,24,0"/>
+        <Label Content="Content root" Foreground="#CBD5E1"/>
+        <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
+        <Button x:Name="BtnBrowseRoot" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0"/>
+        <TextBox x:Name="TxtRoot" IsReadOnly="True"/>
+      </DockPanel>
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#E1E3E8" BorderThickness="0,1,0,0" Padding="16,6">
+      <TextBlock x:Name="TxtStatus" Text="Ready" Foreground="#5B6170"/>
+    </Border>
+
+    <TabControl x:Name="Tabs" Margin="12" Padding="16" TabStripPlacement="Left" BorderThickness="0" Background="White">
+      <TabControl.Resources>
+        <Style TargetType="TabItem">
+          <Setter Property="Padding" Value="18,10"/>
+          <Setter Property="MinWidth" Value="150"/>
+          <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+      </TabControl.Resources>
+
+      <!-- Images -->
+      <TabItem Header="Images">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Capture one by booting a sysprepped reference VM from the media and running Capture-GoldenImage.ps1. The default image is what PCs get when the deploy prompt is skipped."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
+            <Button x:Name="BtnImageDefault" Content="Set as default" Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnImagesOpen" Content="Open folder"/>
+          </StackPanel>
+          <DataGrid x:Name="GridImages" IsReadOnly="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Default" Binding="{Binding IsDefault}" Width="70"/>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+              <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
+              <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
+              <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
+              <DataGridTextColumn Header="Editions (index: name)" Binding="{Binding Indexes}" Width="3*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- Driver library -->
+      <TabItem Header="Driver Library">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Driver library"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Each row maps a PC to a driver folder. The deploy matches SKU first, then Lenovo machine type, then exact model, then model pattern (wildcards allowed). Run Get-HardwareIdentity in WinPE to see a PC's values. Edit cells directly, then Save."/>
+          </StackPanel>
+
+          <GroupBox DockPanel.Dock="Bottom" Header="Import a driver pack" Margin="0,12,0,0" Padding="10">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="130"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+              <Label Content="Maker"/>
+              <ComboBox x:Name="CmbMaker" Grid.Column="1" IsEditable="True">
+                <ComboBoxItem Content="Dell"/><ComboBoxItem Content="HP"/><ComboBoxItem Content="Lenovo"/>
+              </ComboBox>
+              <Label Grid.Column="2" Content="Model" Margin="8,0,0,0"/>
+              <TextBox x:Name="TxtModel" Grid.Column="3"/>
+              <Label Grid.Column="4" Content="SKU" Margin="8,0,0,0"/>
+              <TextBox x:Name="TxtSku" Grid.Column="5"/>
+              <Label Grid.Column="6" Content="Machine type" Margin="8,0,0,0"/>
+              <TextBox x:Name="TxtMachineType" Grid.Column="7"/>
+
+              <Label Grid.Row="2" Content="Source"/>
+              <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="7">
+                <Button x:Name="BtnImport" DockPanel.Dock="Right" Content="Import" Style="{StaticResource Primary}" Margin="8,0,0,0"/>
+                <Button x:Name="BtnSrcFile" DockPanel.Dock="Right" Content="File..." Margin="8,0,0,0"/>
+                <Button x:Name="BtnSrcFolder" DockPanel.Dock="Right" Content="Folder..." Margin="8,0,0,0"/>
+                <TextBox x:Name="TxtSource" ToolTip="An extracted folder, a .cab (Dell, Lenovo) or a .zip"/>
+              </DockPanel>
+            </Grid>
+          </GroupBox>
+
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnDriversRemove" Content="Remove row"/>
+            <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
+            <Button x:Name="BtnDriversOpen" Content="Open folder"/>
+          </StackPanel>
+
+          <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Maker" Binding="{Binding Maker}" Width="90"/>
+              <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="2*"/>
+              <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="70"/>
+              <DataGridTextColumn Header="Machine type" Binding="{Binding MachineType}" Width="100"/>
+              <DataGridTextColumn Header="Model pattern" Binding="{Binding ModelPattern}" Width="*"/>
+              <DataGridTextColumn Header="Folder (under Drivers)" Binding="{Binding Path}" Width="2*"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="110" IsReadOnly="True"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- Media -->
+      <TabItem Header="Media">
+        <StackPanel>
+          <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
+
+          <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
+          <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
+          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (import into WDS; content comes from the network share)" Margin="0,4"/>
+
+          <Grid Margin="0,16,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+
+            <Label Content="USB disk"/>
+            <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
+            <Button x:Name="BtnUsbRefresh" Grid.Column="2" Content="Refresh" Margin="8,0,0,0"/>
+
+            <Label Grid.Row="2" Content="Copy content to USB"/>
+            <CheckBox x:Name="ChkCopyContent" Grid.Row="2" Grid.Column="1" IsChecked="True" VerticalAlignment="Center"
+                      Content="Images, Drivers and config from the content root (needed for offline use)"/>
+
+            <Label Grid.Row="4" Content="Output folder (ISO/PXE)"/>
+            <TextBox x:Name="TxtOutput" Grid.Row="4" Grid.Column="1"/>
+            <Button x:Name="BtnOutput" Grid.Row="4" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+
+            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
+            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
+            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+          </Grid>
+
+          <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+            <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
+          </StackPanel>
+        </StackPanel>
+      </TabItem>
+
+      <!-- Settings -->
+      <TabItem Header="Deploy Settings">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Deploy settings"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Saved to config\deploy-settings.json in the content root. Deployments read it at run time, so changes apply without rebuilding media. The network share details are baked into media when you build it, so rebuild media after changing them."/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+              </Grid.RowDefinitions>
+              <Label Content="Network share"/>
+              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
+              <Label Grid.Row="2" Content="Share user"/>
+              <TextBox x:Name="TxtShareUser" Grid.Row="2" Grid.Column="1" ToolTip="DOMAIN\user. Leave empty for guest access."/>
+              <Label Grid.Row="4" Content="Password file"/>
+              <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
+
+              <Label Grid.Row="6" Content="Default image"/>
+              <ComboBox x:Name="CmbDefaultImage" Grid.Row="6" Grid.Column="1" IsEditable="True"/>
+              <Label Grid.Row="8" Content="Image index"/>
+              <TextBox x:Name="TxtImageIndex" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
+              <Label Grid.Row="10" Content="Target disk number"/>
+              <TextBox x:Name="TxtDiskNumber" Grid.Row="10" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
+              <Label Grid.Row="12" Content="Computer name pattern"/>
+              <TextBox x:Name="TxtNamePattern" Grid.Row="12" Grid.Column="1" ToolTip="{}{SERIAL} is replaced with the BIOS serial number. Max 15 characters."/>
+              <Label Grid.Row="14" Content="Ask before erasing"/>
+              <CheckBox x:Name="ChkPrompt" Grid.Row="14" Grid.Column="1" VerticalAlignment="Center" Content="Show a summary and require typing YES on the PC"/>
+              <Label Grid.Row="16" Content="Reboot when done"/>
+              <CheckBox x:Name="ChkReboot" Grid.Row="16" Grid.Column="1" VerticalAlignment="Center"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+              <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
+              <Button x:Name="BtnUnattend" Content="Edit unattend.xml"/>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- Logs -->
+      <TabItem Header="Deployment Logs">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment logs"/>
+            <TextBlock Style="{StaticResource Hint}" Text="One log per deployed PC, written to the content root's Logs folder when the deploy finishes or fails."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button x:Name="BtnLogsRefresh" Content="Refresh"/>
+          </StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <DataGrid x:Name="GridLogs" IsReadOnly="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="When" Binding="{Binding When, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
+                <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="*"/>
+                <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="70"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <TextBox x:Name="TxtLog" Grid.Column="2" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
+          </Grid>
+        </DockPanel>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>
