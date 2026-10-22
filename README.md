@@ -27,6 +27,11 @@ and click **Create folders** the first time. Then:
   files use them. **Capture new image...** opens the capture wizard (below).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
   and **Import SmartDeploy XML...** to convert an existing SmartDeploy answer file.
+  **New** and **Edit** (or double-click) open the answer file editor, where every
+  setting is a form field: General, Image and disk, Applications (pick and order
+  them, or add a new installer), Windows settings, Computer name (with a preview),
+  Domain or workgroup, Tasks and Network shares. Passwords are typed into password
+  boxes and saved to their own files.
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
@@ -49,8 +54,8 @@ Logs\          one log per deployed PC or capture
 ## Answer files
 
 An answer file (`AnswerFiles\<name>.xml`) is one deployment profile, like a
-SmartDeploy answer file. See the commented
-[config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
+SmartDeploy answer file. Edit it in the console; the format is documented in the
+commented [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
 - **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
   (start after `unattendDelay` seconds unless a key is pressed).
@@ -74,7 +79,8 @@ can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
 **Applications** are folders under `Applications\` with the installer and an
-`app.json`:
+`app.json`. The editor's **New application...** creates them: pick the installer
+file or folder, and it suggests the silent command for .msi, .exe, .msix and .ps1:
 
 ```json
 { "command": "msiexec /i ZoomInstallerFull.msi /qn", "successCodes": [0, 3010] }

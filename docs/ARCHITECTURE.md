@@ -96,6 +96,11 @@ On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order, applies the options, runs FIRSTBOOT tasks and removes
 `C:\Deploy`.
 
+The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
+loads an answer object, shows each section as a form, and saves through
+`Save-AnswerFromEditor`, which validates it, writes typed passwords to
+`config\secrets\<answer>-*.txt` and exports the XML.
+
 `AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
 SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
@@ -112,4 +117,4 @@ HP `HPClientDriverPackCatalog.cab`, Lenovo `catalogv2.xml`).
 
 A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
 legacy BIOS/MBR, user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
-static IP, display settings, Azure AD join, a management agent, and a form editor for answer files (they are edited as XML).
+static IP, display settings, Azure AD join, and a management agent.

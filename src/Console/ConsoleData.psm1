@@ -315,6 +315,100 @@ function Import-SmartDeployAnswerFile {
     [pscustomobject]@{ Name = $Name; Path = $dest; Notes = $result.Notes }
 }
 
+function Get-NewAnswer {
+    # A fresh answer object for the editor: the repo sample's defaults, with password files named after it.
+    param([Parameter(Mandatory)][string]$Name)
+    $a = Read-AnswerFile -Path (Join-ContentPath $script:RepoRoot 'config\answer-files\Default.xml') -SkipValidation
+    $a.Name = $Name
+    $a.Path = $null
+    $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
+    $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
+    $a
+}
+
+function Test-SecretFile {
+    param([Parameter(Mandatory)][string]$ContentRoot, [string]$RelativePath)
+    [bool]($RelativePath -and (Test-Path (Join-ContentPath $ContentRoot $RelativePath)))
+}
+
+function Save-SecretFile {
+    # Writes one password to its own file under the content root. See the README on who can read it.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath, [Parameter(Mandatory)][string]$Value)
+    if ([IO.Path]::IsPathRooted($RelativePath) -or $RelativePath -match '\.\.') { throw "Password file '$RelativePath' must be a path inside the content root." }
+    $path = Join-ContentPath $ContentRoot $RelativePath
+    New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+    Set-Content -Path $path -Value $Value -NoNewline -Encoding utf8
+}
+
+function Save-AnswerFromEditor {
+    <#
+    .SYNOPSIS
+        Saves an answer object edited in the console. Passwords typed in the editor are written to the answer's
+        password files (named after the answer file when it has none). Throws with the problems if it can't be deployed.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)]$Answer,
+        [string]$JoinPassword,
+        [string]$AdminPassword,
+        [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
+        [switch]$IsNew
+    )
+    $a = $Answer
+    if ($a.Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Answer file name '$($a.Name)' may only contain letters, digits, dot, dash and underscore." }
+    $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $a.Name
+    if ($IsNew -and (Test-Path $dest)) { throw "An answer file named $($a.Name) already exists." }
+
+    if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
+    if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
+    foreach ($sh in $a.Shares) {
+        if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
+    }
+
+    $problems = @(Test-AnswerFile $a)
+    if ($problems) { throw "Can't save yet:`n - " + ($problems -join "`n - ") }
+
+    if ($JoinPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Value $JoinPassword }
+    if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
+    foreach ($sh in $a.Shares) {
+        $pw = $SharePasswords[$sh.LocalName]
+        if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }
+    }
+    Export-AnswerFile -Answer $a -Path $dest
+    $dest
+}
+
+function Get-ApplicationList {
+    # Applications\<name>\app.json folders, for the editor's application picker.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $root = Join-Path $ContentRoot 'Applications'
+    Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+        $cmd = $null; $status = 'Ready'
+        try { $cmd = (Get-AppDefinition -AppRoot $root -Name $_.Name).command } catch { $status = $_.Exception.Message }
+        [pscustomobject]@{ Name = $_.Name; Command = $cmd; Status = $status }
+    }
+}
+
+function New-Application {
+    # Creates Applications\<name>: copies the installer (a file, or a folder's contents) and writes app.json.
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Command,
+        [int[]]$SuccessCodes = @(0, 3010)
+    )
+    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    if (-not (Test-Path $Source)) { throw "Installer not found: $Source" }
+    $dest = Join-ContentPath $ContentRoot "Applications\$Name"
+    if (Test-Path $dest) { throw "An application named $Name already exists." }
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    if (Test-Path $Source -PathType Container) { Copy-Item -Path (Join-Path $Source '*') -Destination $dest -Recurse -Force }
+    else { Copy-Item -Path $Source -Destination $dest }
+    [pscustomobject]@{ command = $Command; successCodes = $SuccessCodes } | ConvertTo-Json | Set-Content (Join-Path $dest 'app.json') -Encoding utf8
+    $dest
+}
+
 function Get-ImageUsage {
     # Image file name -> names of the answer files that deploy it, for the Images tab.
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -368,4 +462,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
-    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage
+    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
+    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application

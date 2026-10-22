@@ -17,10 +17,12 @@ if (-not $isAdmin -or [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA'
 }
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, Microsoft.VisualBasic
-Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
-. (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 $srcDir = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
+Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+. (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
+. (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -190,10 +192,10 @@ function Set-DefaultAnswerFile([string]$Name) {
     Save-DeploySettings -ContentRoot $script:root -Settings $s
 }
 
-function Edit-AnswerFile([string]$Path) {
-    # Notepad is always there; the XML is commented setting by setting.
-    Start-Process notepad.exe -ArgumentList (ConvertTo-Arg $Path)
-    Set-Status 'Editing in Notepad. Save there, then click Refresh to check it.'
+function Edit-AnswerFile([string]$Path, [string]$NewName) {
+    $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
+             else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
+    if ($saved) { Update-Answers; Update-Images; Set-Status 'Answer file saved' }
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
@@ -204,13 +206,14 @@ $ui.GridAnswers.Add_SelectionChanged({
     $ui.TxtAnswerIssues.Text = if ($row -and $row.Issues) { ($row.Issues | ForEach-Object { "- $_" }) -join "`r`n" } else { '' }
 })
 
+$ui.GridAnswers.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridAnswers.SelectedItem; if ($row) { Edit-AnswerFile -Path $row.FullName } } })
+
 $ui.BtnAnswerNew.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $name = [Microsoft.VisualBasic.Interaction]::InputBox('Name of the new answer file (letters, digits, dot, dash, underscore):', 'New answer file', 'Win11-Standard')
-    if (-not $name) { return }
-    $path = New-AnswerFileFromSample -ContentRoot $script:root -Name $name.Trim()
-    Update-Answers
-    Edit-AnswerFile $path
+    $existing = @(Get-ChildItem (Join-Path $script:root 'AnswerFiles') -Filter *.xml | ForEach-Object BaseName)
+    $name = 'Win11-Standard'; $i = 2
+    while ($existing -contains $name) { $name = "Win11-Standard-$i"; $i++ }
+    Edit-AnswerFile -NewName $name
 } })
 
 $ui.BtnAnswerImport.Add_Click({ Invoke-Safely {
@@ -220,15 +223,16 @@ $ui.BtnAnswerImport.Add_Click({ Invoke-Safely {
     if (-not $dlg.ShowDialog($window)) { return }
     $result = Import-SmartDeployAnswerFile -ContentRoot $script:root -Path $dlg.FileName
     Update-Answers; Update-Images
-    $text = "Imported as $($result.Name). Passwords are not carried over.`n`nTo finish:`n" + (($result.Notes | ForEach-Object { "- $_" }) -join "`n")
+    $text = "Imported as $($result.Name). Passwords are not carried over: enter them in the editor that opens next.`n`nAlso check:`n" + (($result.Notes | ForEach-Object { "- $_" }) -join "`n")
     [Windows.MessageBox]::Show($window, $text, 'SmartDeploy import', 'OK', 'Information') | Out-Null
     Set-Status "Imported $($result.Name) from $($dlg.FileName)"
+    Edit-AnswerFile -Path $result.Path
 } })
 
 $ui.BtnAnswerEdit.Add_Click({ Invoke-Safely {
     $row = $ui.GridAnswers.SelectedItem
     if (-not $row) { Show-Error 'Select an answer file first.'; return }
-    Edit-AnswerFile $row.FullName
+    Edit-AnswerFile -Path $row.FullName
 } })
 
 $ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
