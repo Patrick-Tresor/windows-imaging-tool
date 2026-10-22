@@ -1,0 +1,15 @@
+{
+  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave 'share' empty for USB-only use.",
+  "share": {
+    "path": "\\\\deploy-server\\Deploy",
+    "user": "DOMAIN\\svc-deploy",
+    "passwordFile": "config\\share.cred"
+  },
+  "defaultImage": "Win11-24H2-Enterprise.wim",
+  "imageIndex": 1,
+  "diskNumber": 0,
+  "computerNamePattern": "PC-{SERIAL}",
+  "unattend": "config\\unattend.xml",
+  "prompt": true,
+  "rebootWhenDone": true
+}
