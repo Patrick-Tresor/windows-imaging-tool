@@ -12,6 +12,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
+| **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -70,8 +71,14 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    Two partitions because UEFI needs FAT32 to boot and a WIM is usually over 4 GB.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
-3. **PXE**: the same `boot.wim` is imported into WDS (or served by iPXE/wimboot);
-   it then behaves like the LAN share mode.
+3. **PXE**: the same `boot.wim` is published to WDS by `Publish-WdsBootImage.ps1`
+   (or served by iPXE/wimboot); it then behaves like the LAN share mode.
+   The script runs its WDS steps on the server (locally, or with `Invoke-Command`
+   after copying the WIM through `ADMIN$`): optionally install the role and
+   `wdsutil /Initialize-Server /Standalone`, then remove any boot image with the
+   same name, `Import-WdsBootImage`, and make it the default `x64uefi` boot image.
+   It reads server state from the WDSServer service, the `REMINST` share and the
+   WDS cmdlets, never from `wdsutil` text, which is localized.
 
 ## Deploy sequence (UEFI/GPT)
 
