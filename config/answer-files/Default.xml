@@ -18,7 +18,8 @@
 
   <disk>
     <number>0</number>
-    <!-- Recreate: wipe the disk and create EFI, MSR, Windows and Recovery partitions. -->
+    <!-- Recreate: wipe the disk and create new partitions. GPT (EFI, MSR, Windows, Recovery) when WinPE
+         booted in UEFI mode, MBR (System, Windows, Recovery) when it booted in legacy BIOS mode. -->
     <option>Recreate</option>
   </disk>
 

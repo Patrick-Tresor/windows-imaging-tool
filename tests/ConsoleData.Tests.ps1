@@ -48,6 +48,15 @@ try {
     $pack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config/driver-catalog.json') -DriverRoot (Join-Path $root 'Drivers') 6>$null
     Assert-Equal ([IO.Path]::GetFileName($pack)) 'ProBook 450 G10' 'deploy matches the imported pack by SKU'
 
+    # Disk layout follows the firmware: GPT + EFI for UEFI, MBR + active System for legacy BIOS.
+    $gpt = New-DiskpartScript -DiskNumber 1 -Firmware UEFI
+    $mbr = New-DiskpartScript -DiskNumber 1 -Firmware BIOS
+    Assert-Equal (($gpt -match 'convert gpt') -and ($gpt -match 'create partition efi') -and ($gpt -notmatch 'active')) $true 'UEFI layout is GPT with an EFI partition'
+    Assert-Equal (($mbr -match 'convert mbr') -and ($mbr -match '(?m)^active') -and ($mbr -match 'set id=27') -and ($mbr -notmatch 'efi|msr|gpt')) $true 'BIOS layout is MBR with an active system partition'
+    foreach ($script in $gpt, $mbr) {
+        Assert-Equal (($script -match 'select disk 1') -and ($script -match 'assign letter=S') -and ($script -match 'assign letter=W')) $true 'both layouts select the disk and use S: and W:'
+    }
+
     # Images: split parts count as one image.
     Set-Content (Join-Path $root 'Images/Win11.wim') 'x'
     Set-Content (Join-Path $root 'Images/Big.swm') 'x'

@@ -5,7 +5,8 @@
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot). Reads an answer file from <content root>\AnswerFiles: image,
     applications, disk, regional settings, naming, domain join, tasks and extra shares.
-    Wipes the target disk. UEFI/GPT only.
+    Wipes the target disk and partitions it to match the firmware WinPE booted with:
+    GPT for UEFI, MBR for legacy BIOS.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
 #>
@@ -74,7 +75,8 @@ try {
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
         $hw.Maker, $hw.Model, $hw.MachineType, $hw.Sku, $hw.Serial, $hw.IsUefi)
-    if (-not $hw.IsUefi) { throw 'This PC booted WinPE in legacy BIOS mode. Switch the firmware to UEFI and boot again.' }
+    # The disk layout and boot files follow how WinPE booted. A UEFI PC booted through CSM deploys as BIOS.
+    $firmware = if ($hw.IsUefi) { 'UEFI' } else { 'BIOS' }
 
     $root = Find-ContentRoot -SettingsPath $SettingsPath
 
@@ -117,6 +119,14 @@ try {
     }
 
     $disk = Get-Disk -Number $answer.DiskNumber
+    if ($firmware -eq 'BIOS') {
+        Write-DeployLog 'Legacy BIOS boot: the disk will be MBR. Boot WinPE in UEFI mode instead if this PC supports it.' -Level WARN
+        if ($disk.Size -gt 2TB) { Write-DeployLog ("Disk is {0:N0} GB; MBR can only use the first 2 TB." -f ($disk.Size / 1GB)) -Level WARN }
+        $build = try { [version](Get-WindowsImage -ImagePath $imagePath -Index $answer.ImageIndex).Version } catch { $null }
+        if ($build -and $build.Build -ge 22000) {
+            Write-DeployLog 'This is a Windows 11 image. It installs on legacy BIOS, but Microsoft does not support it there and Windows Update may withhold feature updates.' -Level WARN
+        }
+    }
     Write-Host ''
     Write-Host "Answer file:  $($answer.Name)"
     Write-Host "Image:        $imagePath (index $($answer.ImageIndex))"
@@ -124,32 +134,16 @@ try {
     Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
     Write-Host "Name:         $ComputerName"
     Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
+    Write-Host "Firmware:     $firmware ($(if ($firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
     Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
     if (-not $NoPrompt) {
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
-    # 1. Partition: EFI, MSR, Windows, Recovery (Microsoft's recommended UEFI layout).
+    # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
     $dp = Join-Path $env:TEMP 'diskpart.txt'
-    @"
-select disk $($answer.DiskNumber)
-clean
-convert gpt
-create partition efi size=260
-format quick fs=fat32 label="System"
-assign letter=S
-create partition msr size=16
-create partition primary
-shrink minimum=1024
-format quick fs=ntfs label="Windows"
-assign letter=W
-create partition primary
-format quick fs=ntfs label="Recovery"
-set id="de94bba4-06d1-4d40-a16a-bfd50179d6ac"
-gpt attributes=0x8000000000000001
-exit
-"@ | Set-Content -Path $dp -Encoding ascii
+    New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
     # 2. Apply the image. Split images (.swm) need /SWMFile.
@@ -182,7 +176,7 @@ exit
 
     # 6. POSTIMAGE tasks, then boot files.
     Invoke-Phase -Phase 'POSTIMAGE' -Answer $answer -Root $root
-    Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', 'UEFI')
+    Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', $firmware)
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'

@@ -87,7 +87,7 @@ function Show-CaptureWizard {
             }
             2 {
                 if ($c.Mode -eq 'VM' -and -not $c.VM) { 'Choose a VM.' }
-                elseif ($c.Mode -eq 'VM' -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation 1 VM. Only generation 2 (UEFI) VMs can be captured." }
+                elseif ($c.Mode -eq 'VM' -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. Only generation 1 and 2 VMs can be captured." }
                 elseif ($c.Mode -eq 'VM' -and $c.VM.State -ne 'Off') { "$($c.VM.Name) is $($c.VM.State). Let sysprep shut it down, then click Refresh." }
                 elseif ($c.Mode -eq 'VM' -and -not $c.Unattended) { 'The Hyper-V option needs "Start without asking and shut down when done" on the previous page.' }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
