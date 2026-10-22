@@ -193,7 +193,7 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
-            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares, like a SmartDeploy answer file. The PC picks one at boot (or uses the default). Passwords go in files under config\secrets, never in the answer file."/>
+            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares. The PC picks one at boot (or uses the default). Passwords go in files under config\secrets, never in the answer file."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>

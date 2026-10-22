@@ -53,9 +53,9 @@ Logs\          one log per deployed PC or capture
 
 ## Answer files
 
-An answer file (`AnswerFiles\<name>.xml`) is one deployment profile, like a
-SmartDeploy answer file. Edit it in the console; the format is documented in the
-commented [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
+An answer file (`AnswerFiles\<name>.xml`) is one deployment profile. Edit it in
+the console; the format is documented in the commented
+[config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
 - **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
   (start after `unattendDelay` seconds unless a key is pressed).
