@@ -8,10 +8,12 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | Piece | Runs on | What it does |
 |---|---|---|
 | **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
-| **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`. |
+| **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
+| **Image versions** (`src/ImageVersions.psm1`, `src/Invoke-ImageVersion.ps1`) | WinPE and the admin workstation | Keeps earlier images, rolls back, and resolves the version an answer file is pinned to. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
-| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
+| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
+| **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -39,6 +41,56 @@ attaches the ISO, sets the DVD as first boot device and starts the VM. It then
 waits for the unattended capture to shut the VM down, ejects the ISO and sets
 the boot order back to the disk. The ISO is kept under `%ProgramData%` because
 Hyper-V cannot mount one from a share without delegation.
+
+## Image versions
+
+`ImageVersions.psm1` (used in WinPE and by the console) treats every folder
+`Images\Previous\<name>_<stamp>\` that holds the image's file as a version. The
+stamp (`yyyyMMdd-HHmm`, `-2` for a second one in the same minute) is the
+version's name. A folder holds the image's parts with their original names, its
+`<name>.updates.json` history when there is one, and `version.json` (reason,
+note). Backups made by the offline updater have no `version.json` and are listed
+as kept by an offline update.
+
+- `Save-ImageVersion` copies the image to a new version, or with `-Move`
+  empties the slot first (recapture, rollback). A failed move is put back. The
+  update history is copied in both cases, so it stays with the image slot.
+- `Restore-ImageVersion` moves the current image to a new version and then
+  *links* the chosen one back (a hard link, or a copy where the volume can't), so
+  answer files pinned to it keep a valid path and a rollback takes no extra space.
+  Only image files are linked; the update history is copied, since it is rewritten
+  in place. Nothing writes an image in place, so the two names can share data.
+  If the link fails, the partial copy is removed and the old current image moved back.
+- Retention: `Invoke-ImageVersionRetention` (in `ImageVersions.psm1`, so WinPE can
+  use it too) keeps the newest N and deletes older versions that no answer file is
+  pinned to, plus anything passed as `-Protect`. N is the image's own limit in
+  `Images\<name>.versions.json` if it has one, else `versionsToKeep` in
+  deploy-settings.json, else 0 (keep all). It runs after a copy, a rollback, and a
+  replacing capture (`Capture-GoldenImage.ps1`, when the content root is known).
+- `Test-ImageHardLinks` tells the rollback whether it can link; the console and
+  `Invoke-ImageVersion.ps1` warn when it can't and the rollback will copy.
+- `Capture-GoldenImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
+  then archives the old image and moves the new one in, so a failed capture
+  leaves the current image alone.
+- `Deploy-Image.ps1` reads `<image><version>`; when it is set it deploys
+  `Get-ImageVersionPath` (the file in the version folder) instead of the current image.
+- Deleting and pruning (`Remove-ImageVersions`, `Get-ImageVersionsToDelete` in
+  `ConsoleData.psm1`) refuse versions an answer file names.
+## Offline image updates
+
+`UpdateImage.ps1` (the console dialog) lists packages from `Updates\` with
+`Get-UpdatePackageRows` and starts `Update-OfflineImage.ps1` through
+`-EncodedCommand`, because `-File` can't pass the package list as an array. The
+script works on a local copy in `%ProgramData%\ImagingConsole\Servicing` (DISM
+mounts must be on a local NTFS volume). Per index: `DISM /Mount-Image`,
+`/Add-Package` for each package in order (exit 0x800F081E, not applicable, is a
+warning), optional `/Cleanup-Image /StartComponentCleanup [/ResetBase]`,
+`/Unmount-Image /Commit`. Then every index is exported to a new WIM to reclaim the
+space of superseded components, and only after the export is verified is the
+original moved to `Images\Previous\` and replaced. Any failure before that
+discards the mount and leaves the original alone. `Add-ImageServicingRecord`
+appends the packages, results and resulting builds to `Images\<name>.updates.json`,
+which the Images tab reads.
 
 ## Why the golden image is hardware-independent
 

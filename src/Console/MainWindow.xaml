@@ -72,10 +72,12 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it. Answer files choose which image a PC gets."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it, or Update image to add the latest Windows updates to an image without capturing it again. Answer files choose which image a PC gets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
+            <Button x:Name="BtnImageUpdate" Content="Update image..."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
@@ -85,7 +87,9 @@
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
               <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
               <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
+              <DataGridTextColumn Header="Earlier versions" Binding="{Binding Versions}" Width="110"/>
               <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
+              <DataGridTextColumn Header="Last updated" Binding="{Binding Updated}" Width="2*"/>
               <DataGridTextColumn Header="Editions (index: name)" Binding="{Binding Indexes}" Width="3*"/>
             </DataGrid.Columns>
           </DataGrid>
@@ -156,6 +160,16 @@
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
           <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
+
+          <Border x:Name="BrdAdk" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,14">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="BtnAdkDownload" Content="Download ADK" Margin="8,0,0,0"/>
+                <Button x:Name="BtnAdkCheck" Content="Check again" Margin="8,0,0,0"/>
+              </StackPanel>
+              <TextBlock x:Name="TxtAdk" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
+          </Border>
 
           <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
@@ -229,6 +243,7 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Grid.RowDefinitions>
                 <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
+                <RowDefinition Height="8"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -238,6 +253,9 @@
               <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
               <Label Grid.Row="6" Content="Default answer file"/>
               <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
+              <Label Grid.Row="8" Content="Versions to keep"/>
+              <TextBox x:Name="TxtVersionsToKeep" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                       ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. 0 keeps all. Versions an answer file is pinned to are never deleted."/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>

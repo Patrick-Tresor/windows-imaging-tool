@@ -14,6 +14,9 @@
   <image>
     <file>Images\Win11-Enterprise.wim</file>
     <index>1</index>
+    <!-- Empty: the current image. A version (e.g. 20261022-1530) pins this answer file to an earlier copy
+         kept in Images\Previous\, which the console's Images > Versions... lists. -->
+    <version></version>
   </image>
 
   <disk>

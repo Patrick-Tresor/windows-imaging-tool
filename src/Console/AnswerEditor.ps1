@@ -134,11 +134,38 @@ function Show-AnswerEditor {
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
 
     $updateIndexes = {
-        # Editions from the selected image, as "index: name"; falls back to typing a number.
+        # Editions from the selected image, as "index: name". A pinned version lists that copy's editions.
+        # Falls back to typing a number.
         $img = $images | Where-Object { "Images\$($_.Name)" -eq $e.CmbImage.Text } | Select-Object -First 1
-        $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
+        $pinned = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
+        if ($img -and $pinned) {
+            $editions = @()
+            try { $editions = Get-ImageEditions -ImagePath (Get-ImageVersionPath -ImagePath (Join-Path (Join-Path $ContentRoot 'Images') $img.Name) -Version $pinned) } catch { }
+            $e.CmbIndex.ItemsSource = $editions
+        } else {
+            $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
+        }
     }
-    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ & $updateIndexes }) | Out-Null })
+    $updateVersions = {
+        # Current plus the versions kept in Images\Previous for an image in the Images folder, with $Want selected.
+        param([string]$Want)
+        $state.VersionsFor = $e.CmbImage.Text
+        $items = @([pscustomobject]@{ Version = ''; Display = 'Current (follows recaptures, updates and rollbacks)' })
+        $img = $images | Where-Object { "Images\$($_.Name)" -eq $e.CmbImage.Text } | Select-Object -First 1
+        if ($img) {
+            $items += @(Get-ImageVersionRows -ContentRoot $ContentRoot -ImageName $img.Name | Where-Object Version | ForEach-Object {
+                [pscustomobject]@{ Version = $_.Version; Display = ('{0}   {1}{2}' -f $_.Version, $_.Reason, $(if ($_.Note) { " - $($_.Note)" })) }
+            })
+        }
+        if ($Want -and -not ($items | Where-Object Version -eq $Want)) {
+            $items += [pscustomobject]@{ Version = $Want; Display = "$Want   (missing from Images\Previous)" }
+        }
+        $e.CmbVersion.ItemsSource = $items
+        $e.CmbVersion.SelectedItem = $items | Where-Object Version -eq $Want | Select-Object -First 1
+        & $updateIndexes
+    }
+    $e.CmbVersion.Add_SelectionChanged({ & $updateIndexes })
+    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ if ($e.CmbImage.Text -ne $state.VersionsFor) { & $updateVersions '' } else { & $updateIndexes } }) | Out-Null })
 
     # --- Load ------------------------------------------------------------------------------------------------
     $e.TxtName.Text = $a.Name
@@ -151,7 +178,7 @@ function Show-AnswerEditor {
     $e.RbStay.IsChecked = -not $a.Shutdown -and -not $a.Reboot
 
     $e.CmbImage.Text = $a.ImageFile
-    & $updateIndexes
+    & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     $e.TxtDisk.Text = $a.DiskNumber
     $e.TxtDrivers.Text = $a.DriverRoot
@@ -271,6 +298,7 @@ function Show-AnswerEditor {
         $a.Shutdown      = [bool]$e.RbShutdown.IsChecked
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
+        $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
         $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
         $a.DriverRoot    = $e.TxtDrivers.Text.Trim()
         $a.Applications  = @($selected)
