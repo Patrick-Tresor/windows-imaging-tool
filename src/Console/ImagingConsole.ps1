@@ -123,6 +123,28 @@ function Update-Settings {
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
 }
 
+function Update-Wds {
+    if (-not (Test-ContentRoot $script:root)) { return }
+    $w = Get-WdsSettings -ContentRoot $script:root
+    $ui.TxtWdsServer.Text       = $w.server
+    $ui.TxtWdsImageName.Text    = $w.imageName
+    $ui.ChkWdsSetup.IsChecked   = $w.setup
+    $ui.TxtWdsRemInst.Text      = $w.remoteInstallPath
+    $ui.ChkWdsDhcp.IsChecked    = $w.dhcpOnServer
+    $ui.ChkWdsNoPrompt.IsChecked = $w.noPrompt
+}
+
+function Save-WdsFromUi {
+    Save-WdsSettings -ContentRoot $script:root -Wds ([pscustomobject]@{
+        server            = $ui.TxtWdsServer.Text
+        imageName         = $ui.TxtWdsImageName.Text
+        setup             = $ui.ChkWdsSetup.IsChecked
+        remoteInstallPath = $ui.TxtWdsRemInst.Text
+        dhcpOnServer      = $ui.ChkWdsDhcp.IsChecked
+        noPrompt          = $ui.ChkWdsNoPrompt.IsChecked
+    })
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-DeploymentLogs -ContentRoot $script:root) } else { $null }
     $ui.TxtLog.Text = ''
@@ -144,7 +166,7 @@ function Update-UsbDisks {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Logs
+    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -312,6 +334,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     } else {
         if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
         $buildArgs += @('-Target', $(if ($ui.RbIso.IsChecked) { 'Iso' } else { 'Pxe' }), '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
+        if ($ui.RbPxe.IsChecked) {
+            # The build reads the WDS settings from the same deploy-settings.json it bakes in.
+            Save-WdsFromUi
+            if ($ui.ChkWdsPublish.IsChecked) {
+                if ($ui.ChkWdsNoPrompt.IsChecked -and -not (Confirm-Action 'Without the F12/Enter prompt, any PC that network boots from this WDS server starts the deploy tool. Continue?')) { return }
+                $buildArgs += '-PublishToWds'
+            }
+        }
     }
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
 
@@ -319,6 +349,22 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $buildArgs = @('-NoExit') + $buildArgs
     Start-Process powershell.exe -ArgumentList $buildArgs
     Set-Status 'Media build started in a separate window'
+} })
+
+$ui.BtnWdsCheck.Add_Click({ Invoke-Safely {
+    $server = $ui.TxtWdsServer.Text.Trim()
+    $window.Cursor = 'Wait'
+    Set-Status "Checking WDS on $(if ($server) { $server } else { 'this PC' })..."
+    try { $st = & "$srcDir\Publish-WdsBootImage.ps1" -Server $server -Status } finally { $window.Cursor = $null }
+    $ui.TxtWdsStatus.Text = @(
+        "Server: $($st.Server)"
+        $(if (-not $st.IsServerOS) { 'Not Windows Server: WDS cannot run here.' }
+          elseif (-not $st.RoleInstalled) { 'WDS role: not installed (tick Set up WDS to install it).' }
+          elseif (-not $st.Configured) { 'WDS role: installed but not configured (tick Set up WDS).' }
+          else { "WDS: configured in $($st.RemoteInstall), service $(if ($st.Running) { 'running' } else { 'stopped' })." })
+        "Boot images: $(if ($st.BootImages) { $st.BootImages -join ', ' } else { 'none' })"
+    ) -join "`r`n"
+    Set-Status 'WDS check done'
 } })
 
 #endregion

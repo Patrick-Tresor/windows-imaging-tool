@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, DeployCommon.psm1, AnswerFile.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -35,7 +35,8 @@ and click **Create folders** the first time. Then:
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
-- **Media**: build a USB stick, ISO or PXE `boot.wim` in one click.
+- **Media**: build a USB stick, ISO or PXE `boot.wim` in one click. For PXE it
+  also publishes `boot.wim` to a WDS server (see [PXE with WDS](#pxe-with-wds)).
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
 - **Deployment Logs**: one log per deployed PC, with result and full text.
@@ -97,12 +98,42 @@ import lists the password files to create, the `.spk` application packs to
 rebuild as folders, and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
 
+## PXE with WDS
+
+On the Media tab, pick **PXE boot.wim**, fill in the **Windows Deployment
+Services** box and click **Build media**. After the build, `boot.wim` is
+published to the WDS server and set as the default UEFI network boot entry.
+Building again replaces it. **Check server** shows whether WDS is installed and
+configured and which boot images it serves. The settings are saved in the
+`wds` section of `config\deploy-settings.json`.
+
+- **WDS server**: empty for this PC, or a server name. A remote server must allow
+  PowerShell remoting (on by default on Windows Server) and you must be an
+  administrator on it; `boot.wim` is copied through its `ADMIN$` share.
+- **Set up WDS if needed** installs the WDS role and configures it in standalone
+  mode (no Active Directory needed) in the **RemoteInstall folder**, then answers
+  all PXE clients. Use a data volume, not `C:`. Without it, a server that isn't set
+  up stops with an error.
+- **DHCP runs on the WDS server too**: WDS then leaves port 67 to DHCP and sets
+  option 60. When DHCP runs elsewhere (another server or a router), add an IP
+  helper for the WDS server on the client VLAN's router. That is the reliable
+  way for UEFI. DHCP options 66 (WDS server) and 67 (`boot\x64\wdsmgfm.efi`) also
+  work on a single subnet.
+- **Boot without pressing F12 or Enter** sets the PXE prompt policy to no prompt.
+  Then any PC set to network boot first starts the deploy tool, so pair it with
+  interactive answer files or a separate VLAN. Unticked, the policy is left as it is.
+
+PXE-booted PCs find the content root through the network share in Deploy Settings,
+the same as an ISO boot. From the command line:
+`.\src\Publish-WdsBootImage.ps1 -BootWim C:\WinPE\boot.wim -Server wds01 -Setup -RemoteInstallPath D:\RemoteInstall`
+publishes an existing `boot.wim`, and `-Status` only reports the server's state.
+
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
-   (or `-Target Iso`, or `-Target Pxe` and import `boot.wim` into WDS).
+   (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
 2. **Build the reference** in a generation 2 Hyper-V VM: install Windows, apps
    and updates, no OEM drivers. Take a checkpoint.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):

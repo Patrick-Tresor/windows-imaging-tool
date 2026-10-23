@@ -8,6 +8,9 @@
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
 .EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
+    Builds boot.wim and publishes it to the WDS server named in the settings' "wds" section.
+.EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Iso -CaptureConfig D:\DeployShare\config\capture.json -BootVM Win11-Ref
     Builds capture media and boots the Hyper-V VM Win11-Ref from it.
 #>
@@ -22,6 +25,7 @@ param(
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
+    [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
@@ -29,6 +33,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
 if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
+if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target Pxe.' }
 if ($BootVM) {
     # Check the VM before spending minutes on the build.
     $vm = Get-VM -Name $BootVM
@@ -77,8 +82,10 @@ Dismount-WindowsImage -Path $mount -Save | Out-Null
 
 switch ($Target) {
     'Pxe' {
-        Copy-Item $bootWim (Join-Path $OutputPath 'boot.wim')
-        Write-Host "boot.wim written to $OutputPath. Import it into WDS (Boot Images > Add Boot Image)."
+        $pxeWim = Join-Path $OutputPath 'boot.wim'
+        Copy-Item $bootWim $pxeWim -Force
+        if ($PublishToWds) { & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List }
+        else { Write-Host "boot.wim written to $OutputPath. Publish it with Publish-WdsBootImage.ps1, or import it into WDS (Boot Images > Add Boot Image)." }
     }
     'Iso' {
         $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
