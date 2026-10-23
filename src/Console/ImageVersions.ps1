@@ -35,7 +35,7 @@ function Show-ImageVersionsDialog {
     }
 
     $v.GridVersions.Add_SelectionChanged({
-        $rows = & $selected
+        $rows = @(& $selected)
         $v.TxtNote.Text = if ($rows.Count -eq 1) { $rows[0].Note } else { '' }
     })
 
@@ -47,7 +47,7 @@ function Show-ImageVersionsDialog {
     } })
 
     $v.BtnRollback.Add_Click({ & $safely {
-        $rows = & $selected
+        $rows = @(& $selected)
         if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version (not Current).' 'Warning'; return }
         $r = $rows[0]
         $text = "Roll $($Image.Name) back to version $($r.Version)?`n`nThe current image is kept as a new version, then version $($r.Version) is copied back as the current image. " +
@@ -58,7 +58,7 @@ function Show-ImageVersionsDialog {
     } })
 
     $v.BtnNote.Add_Click({ & $safely {
-        $rows = & $selected
+        $rows = @(& $selected)
         if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version to add a note to. A note for the current image goes in with Keep a copy.' 'Warning'; return }
         Set-ImageVersionNote -ImagePath $imagePath -Version $rows[0].Version -Note $v.TxtNote.Text.Trim()
         & $load
