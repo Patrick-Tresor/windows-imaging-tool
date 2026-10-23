@@ -1,4 +1,4 @@
-# Answer files: one XML per deployment profile (image, apps, disk, regional settings, naming,
+# Answer files: one XML per deployment profile (image, apps, disk, user data, regional settings, naming,
 # domain join, tasks, shares), modelled on SmartDeploy's deploy wizard answer files.
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
@@ -40,6 +40,15 @@ function Read-AnswerFile {
         DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
         DriverRoot           = Get-XmlText $d 'drivers/root' 'Drivers'
+        MigrateUserData      = ConvertTo-Bool (Get-XmlText $d 'userData/migrate') $false
+        UserDataStore        = Get-XmlText $d 'userData/store' 'Local'
+        UserDataPath         = Get-XmlText $d 'userData/storePath' 'UserState'
+        UserDataRules        = @()
+        UserDataExclude      = @()
+        UserDataLocalAccounts = ConvertTo-Bool (Get-XmlText $d 'userData/createLocalAccounts') $false
+        UserDataEncrypt      = ConvertTo-Bool (Get-XmlText $d 'userData/encrypt') $false
+        UserDataKeyFile      = Get-XmlText $d 'userData/keyFile'
+        UserDataKeepStore    = ConvertTo-Bool (Get-XmlText $d 'userData/keepStore') $false
         AppLocation          = Get-XmlText $d 'applications/@location' 'Applications'
         Applications         = @()
         ProductKey           = Get-XmlText $d 'productKey'
@@ -73,6 +82,9 @@ function Read-AnswerFile {
     $a.Applications = @($d.SelectNodes('applications/application') |
         Sort-Object { [int]$_.GetAttribute('order') } |
         ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
+    $a.UserDataRules = @($d.SelectNodes('userData/rules/rule') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
+    if (-not $d.SelectSingleNode('userData/rules')) { $a.UserDataRules = @('MigDocs.xml', 'MigApp.xml') }
+    $a.UserDataExclude = @($d.SelectNodes('userData/excludeUsers/user') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
     $a.Tasks = @($d.SelectNodes('tasks/task') | ForEach-Object {
         [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Command = "$($_.InnerText)".Trim() }
     })
@@ -106,6 +118,14 @@ function Test-AnswerFile {
     if ($a.Membership -eq 'Domain') {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
         if (-not $a.JoinUser -or -not $a.JoinPasswordFile) { 'Domain membership needs network/joinCredentials username and passwordFile.' }
+    }
+    if ($a.MigrateUserData) {
+        if ($a.UserDataStore -notin 'Local', 'Share') { "userData/store must be Local or Share, not '$($a.UserDataStore)'." }
+        if ($a.UserDataStore -eq 'Share' -and -not $a.UserDataPath) { 'A Share user data store needs userData/storePath.' }
+        if (-not @($a.UserDataRules).Count) { 'User data migration needs at least one rule file (MigDocs.xml, MigApp.xml).' }
+        if ($a.UserDataStore -eq 'Share' -and $a.UserDataEncrypt -and -not $a.UserDataKeyFile) { 'userData/encrypt needs userData/keyFile.' }
+        if ($a.UserDataStore -eq 'Local' -and $a.UserDataEncrypt) { 'A Local (hard-link) user data store can''t be encrypted; it never leaves the PC.' }
+        if ('MigDocs.xml' -in $a.UserDataRules -and 'MigUser.xml' -in $a.UserDataRules) { 'Use MigDocs.xml or MigUser.xml, not both: they collect the same files.' }
     }
     if ($a.EnableAdministrator -and -not $a.AdminPasswordFile) { 'options/enableAdministrator needs options/administratorPasswordFile.' }
     foreach ($t in $a.Tasks) {
@@ -268,12 +288,14 @@ $accounts$logonBlock    </component>
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @())
+    # userState (Copy-UserStateForRestore) is restored after the applications, so their settings apply.
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), $UserState = $null)
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
+        userState            = $UserState
         tasks                = @($Answer.Tasks | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object Command)
     }
 }
@@ -303,6 +325,8 @@ function Export-AnswerFile {
     $b = { param([bool]$v) if ($v) { 'true' } else { 'false' } }
     $i = 0
     $apps = foreach ($n in $a.Applications) { $i++; "    <application order=`"$i`">$(& $x $n)</application>" }
+    $rules = foreach ($r in $a.UserDataRules) { "      <rule>$(& $x $r)</rule>" }
+    $excluded = foreach ($u in $a.UserDataExclude) { "      <user>$(& $x $u)</user>" }
     $tasks = foreach ($t in $a.Tasks) { "    <task phase=`"$($t.Phase)`">$(& $x $t.Command)</task>" }
     $shares = foreach ($s in $a.Shares) {
         @"
@@ -332,6 +356,21 @@ function Export-AnswerFile {
   <drivers>
     <root>$(& $x $a.DriverRoot)</root>
   </drivers>
+  <userData>
+    <migrate>$(& $b $a.MigrateUserData)</migrate>
+    <store>$(& $x $a.UserDataStore)</store>
+    <storePath>$(& $x $a.UserDataPath)</storePath>
+    <rules>
+$($rules -join "`n")
+    </rules>
+    <excludeUsers>
+$($excluded -join "`n")
+    </excludeUsers>
+    <createLocalAccounts>$(& $b $a.UserDataLocalAccounts)</createLocalAccounts>
+    <encrypt>$(& $b $a.UserDataEncrypt)</encrypt>
+    <keyFile>$(& $x $a.UserDataKeyFile)</keyFile>
+    <keepStore>$(& $b $a.UserDataKeepStore)</keepStore>
+  </userData>
   <applications location="$(& $x $a.AppLocation)">
 $($apps -join "`n")
   </applications>
@@ -417,7 +456,7 @@ function ConvertFrom-SmartDeployAnswerFile {
     if ($apps) { $notes.Add("Applications: SmartDeploy .spk packs can't be read. Create a folder with an app.json under Applications\ for each of: $($apps -join ', ').") }
 
     $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
-    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't supported; the disk will be recreated.") }
+    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated. To keep the users' data, turn on User data in the editor.") }
 
     $membership = switch (Get-XmlText $w 'network_identification/membership' '1') { '0' { 'Domain' } '2' { 'Workgroup' } default { 'Workgroup' } }
     if ((Get-XmlText $w 'network_identification/membership') -eq '2') { $notes.Add('Azure AD join isn''t supported; set to Workgroup.') }
@@ -488,6 +527,15 @@ function ConvertFrom-SmartDeployAnswerFile {
         DiskNumber           = 0
         DiskOption           = 'Recreate'
         DriverRoot           = 'Drivers'
+        MigrateUserData      = $false
+        UserDataStore        = 'Local'
+        UserDataPath         = 'UserState'
+        UserDataRules        = @('MigDocs.xml', 'MigApp.xml')
+        UserDataExclude      = @()
+        UserDataLocalAccounts = $false
+        UserDataEncrypt      = $false
+        UserDataKeyFile      = 'config\secrets\usmt.txt'
+        UserDataKeepStore    = $false
         AppLocation          = 'Applications'
         Applications         = $apps
         ProductKey           = Get-XmlText $w 'product_key/product_key'

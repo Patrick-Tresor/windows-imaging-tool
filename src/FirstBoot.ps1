@@ -3,7 +3,8 @@
     Runs once on the deployed PC, as SYSTEM, from SetupComplete.cmd before anyone logs on.
 .DESCRIPTION
     Deploy-Image.ps1 copies this to C:\Deploy with firstboot.json and the answer file's applications.
-    Installs the applications in order, applies options, runs FIRSTBOOT tasks, then removes C:\Deploy.
+    Installs the applications in order, applies options, restores the user data (LoadState), runs FIRSTBOOT
+    tasks, then removes C:\Deploy.
 #>
 $ErrorActionPreference = 'Continue'
 $log = "$env:WINDIR\Temp\FirstBoot.log"
@@ -28,6 +29,25 @@ if ($plan.disableSystemRestore) {
 if ($plan.enableAdministrator) {
     & net.exe user Administrator /active:yes | Out-Null
     Write-Log 'Built-in Administrator enabled'
+}
+
+# User data after the applications, so their settings land on installed applications.
+if ($plan.userState) {
+    $us = $plan.userState
+    Write-Log "Restoring user data from $($us.store)"
+    $loadArgs = @($us.arguments)
+    & $us.loadState @loadArgs | Out-Null
+    $code = $LASTEXITCODE
+    if ($code -in 0, 3) {
+        Write-Log "  user data restored (exit $code$(if ($code -eq 3) { ', some files skipped: see C:\Windows\Temp\LoadState.log' }))"
+        if (-not $us.keepStore) {
+            # Deleting a hard-link store only removes its links; the restored files stay in the profiles.
+            & cmd.exe /c "rd /s /q `"$($us.store)`"" 2>&1 | Out-Null
+            if (Test-Path $us.store) { Write-Log "  couldn't remove all of $($us.store); delete it by hand" }
+        }
+    } else {
+        Write-Log "  user data restore FAILED (exit $code); the store is kept in $($us.store). See C:\Windows\Temp\LoadState.log"
+    }
 }
 
 foreach ($cmd in $plan.tasks) {

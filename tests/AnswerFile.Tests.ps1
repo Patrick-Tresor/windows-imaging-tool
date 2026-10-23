@@ -36,6 +36,24 @@ try {
     $bad.Shares = @(); $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'SmartMigrate'
     Assert-Equal (@(Test-AnswerFile $bad) -join '') "disk/option 'SmartMigrate' is not supported yet; only Recreate (wipe the disk and recreate partitions)." 'unsupported disk option is rejected'
 
+    # User data.
+    Assert-Equal "$($default.MigrateUserData)|$($default.UserDataStore)|$($default.UserDataRules -join ',')" 'False|Local|MigDocs.xml,MigApp.xml' 'sample answer file has user data migration off, with the default rules'
+    $m = $default.PSObject.Copy()
+    $m.MigrateUserData = $true; $m.UserDataEncrypt = $true; $m.UserDataRules = @('MigDocs.xml', 'MigUser.xml')
+    Assert-Equal (@(Test-AnswerFile $m).Count) 2 'a Local store cannot be encrypted, and MigDocs and MigUser are exclusive'
+    $m.UserDataStore = 'Share'; $m.UserDataRules = @(); $m.UserDataKeyFile = $null
+    Assert-Equal (@(Test-AnswerFile $m).Count) 2 'a Share store needs a key file to encrypt, and migration needs a rule'
+    $m.UserDataRules = @('MigDocs.xml', 'config\usmt\Custom.xml'); $m.UserDataKeyFile = 'config\secrets\usmt.txt'
+    $m.UserDataExclude = @('*\Administrator', 'CORP\temp*'); $m.UserDataLocalAccounts = $true; $m.UserDataKeepStore = $true
+    Assert-Equal (@(Test-AnswerFile $m).Count) 0 'a complete Share store is valid'
+    $mx = Join-Path $tmp 'Migrate.xml'
+    Export-AnswerFile -Answer $m -Path $mx
+    $mb = Read-AnswerFile -Path $mx
+    Assert-Equal "$($mb.MigrateUserData)|$($mb.UserDataStore)|$($mb.UserDataPath)|$($mb.UserDataRules -join ',')|$($mb.UserDataExclude -join ',')|$($mb.UserDataLocalAccounts)|$($mb.UserDataEncrypt)|$($mb.UserDataKeyFile)|$($mb.UserDataKeepStore)" `
+        'True|Share|UserState|MigDocs.xml,config\usmt\Custom.xml|*\Administrator,CORP\temp*|True|True|config\secrets\usmt.txt|True' 'user data settings survive export and read'
+    $us = [pscustomobject]@{ loadState = 'C:\Deploy\USMT\loadstate.exe'; arguments = @('C:\UserState'); store = 'C:\UserState'; keepStore = $false }
+    Assert-Equal (New-FirstBootPlan -Answer $m -UserState $us).userState.store 'C:\UserState' 'first boot plan carries the user data restore'
+
     # Naming.
     $n = $default.PSObject.Copy()
     $n.Prefix = 'lab-'

@@ -205,9 +205,22 @@ function Show-AnswerEditor {
     }
     $e.GridShares.ItemsSource = $shares
 
+    $e.ChkMigrate.IsChecked = $a.MigrateUserData
+    $e.RbStoreLocal.IsChecked = $a.UserDataStore -ne 'Share'
+    $e.RbStoreShare.IsChecked = $a.UserDataStore -eq 'Share'
+    $e.TxtStorePath.Text = $a.UserDataPath
+    $e.ChkEncrypt.IsChecked = $a.UserDataEncrypt
+    $e.TxtUsmtKeyState.Text = & $pwState $a.UserDataKeyFile
+    $e.ChkMigDocs.IsChecked = 'MigDocs.xml' -in $a.UserDataRules
+    $e.ChkMigApp.IsChecked = 'MigApp.xml' -in $a.UserDataRules
+    $e.TxtExtraRules.Text = @($a.UserDataRules | Where-Object { $_ -notin 'MigDocs.xml', 'MigApp.xml' }) -join '; '
+    $e.TxtExcludeUsers.Text = @($a.UserDataExclude) -join '; '
+    $e.ChkLocalAccounts.IsChecked = $a.UserDataLocalAccounts
+    $e.ChkKeepStore.IsChecked = $a.UserDataKeepStore
+
     # --- Behaviour -------------------------------------------------------------------------------------------
     $e.LstSections.Add_SelectionChanged({
-        for ($i = 0; $i -lt 8; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
+        for ($i = 0; $i -lt $e.LstSections.Items.Count; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
     })
     $e.LstSections.SelectedIndex = 0
 
@@ -219,9 +232,14 @@ function Show-AnswerEditor {
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
+        $e.GridMigrate.IsEnabled = [bool]$e.ChkMigrate.IsChecked
+        $share = [bool]$e.RbStoreShare.IsChecked
+        $e.TxtStorePath.IsEnabled = $share
+        $e.ChkEncrypt.IsEnabled = $share
+        $e.PwdUsmtKey.IsEnabled = $share -and [bool]$e.ChkEncrypt.IsChecked
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup') { $e[$c].Add_Checked($syncEnabled) }
-    $e.ChkAdmin.Add_Click($syncEnabled)
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup', 'RbStoreLocal', 'RbStoreShare') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'ChkAdmin', 'ChkMigrate', 'ChkEncrypt') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
     # Applications
@@ -299,6 +317,15 @@ function Show-AnswerEditor {
             [pscustomobject]@{ LocalName = "$($_.LocalName)".Trim().ToUpperInvariant(); RemoteName = $_.RemoteName.Trim()
                                Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile }
         })
+        $split = { param($t) @("$t" -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $a.MigrateUserData   = [bool]$e.ChkMigrate.IsChecked
+        $a.UserDataStore     = if ($e.RbStoreShare.IsChecked) { 'Share' } else { 'Local' }
+        $a.UserDataPath      = $e.TxtStorePath.Text.Trim()
+        $a.UserDataEncrypt   = $a.UserDataStore -eq 'Share' -and [bool]$e.ChkEncrypt.IsChecked
+        $a.UserDataRules     = @(@(if ($e.ChkMigDocs.IsChecked) { 'MigDocs.xml' }) + @(if ($e.ChkMigApp.IsChecked) { 'MigApp.xml' }) + (& $split $e.TxtExtraRules.Text))
+        $a.UserDataExclude   = & $split $e.TxtExcludeUsers.Text
+        $a.UserDataLocalAccounts = [bool]$e.ChkLocalAccounts.IsChecked
+        $a.UserDataKeepStore = [bool]$e.ChkKeepStore.IsChecked
     }
 
     $e.BtnNamePreview.Add_Click({
@@ -320,8 +347,11 @@ function Show-AnswerEditor {
             if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile)) {
                 throw 'Enter the Administrator password (Windows settings).'
             }
+            if ($a.MigrateUserData -and $a.UserDataEncrypt -and -not $e.PwdUsmtKey.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile)) {
+                throw 'Enter the encryption key (User data).'
+            }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `
-                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords -IsNew:$isNew | Out-Null
+                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords -UserDataKey $e.PwdUsmtKey.Password -IsNew:$isNew | Out-Null
             $state.Saved = $true
             $win.Close()
         } catch {

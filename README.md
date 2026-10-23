@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1, UserState.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -30,7 +30,7 @@ and click **Create folders** the first time. Then:
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks and Network shares. Passwords are typed into password
+  Domain or workgroup, Tasks, Network shares and User data. Passwords are typed into password
   boxes and saved to their own files.
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
@@ -48,6 +48,7 @@ Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad 
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
+UserState\     user data backups, one folder per PC serial (only with a folder store)
 Logs\          one log per deployed PC or capture
 ```
 
@@ -60,6 +61,7 @@ the console; the format is documented in the commented
 - **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
   (start after `unattendDelay` seconds unless a key is pressed).
 - **image** and index, **disk** number, **drivers** root.
+- **user data**: keep the users' files and settings when redeploying a PC (see below).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
@@ -89,6 +91,27 @@ file or folder, and it suggests the silent command for .msi, .exe, .msix and .ps
 The command runs in the application's folder, as SYSTEM, from
 `SetupComplete.cmd`. (`SetupComplete.cmd` does not run on images activated with
 an OEM product key.) Results go to `C:\Windows\Temp\FirstBoot.log`.
+
+**User data migration** backs up the user profiles of the Windows already on
+the PC with USMT, in WinPE, before the disk is erased, and restores them at first
+boot after the applications. Turn it on in the editor's **User data** section.
+Install the ADK's *User State Migration Tool* feature before building media: the
+media builder copies it into WinPE. Two places to keep the data during the deploy:
+
+- **On the PC's disk** (hard links): fast and nothing is copied, but the disk's
+  partitions are kept and only the Windows partition is emptied. GPT disks
+  without BitLocker encryption only.
+- **In a folder** on the content root or an extra share (`UserState\<serial>` by
+  default): a compressed copy, optionally encrypted with a key saved under
+  `config\secrets`. WinPE needs write access to it. The copy stays as a backup;
+  delete it when you no longer need it.
+
+Choose what to keep (user files with `MigDocs.xml`, application settings with
+`MigApp.xml`, or your own rule files), users to skip (`*\Administrator`), and
+whether to recreate local accounts. A PC with no Windows on the disk is deployed
+without user data. A disk locked by BitLocker stops the deployment before anything
+is erased: unlock it with `manage-bde -unlock` in WinPE or suspend BitLocker first.
+USMT logs: `C:\Windows\Temp\ScanState.log` and `LoadState.log`.
 
 **Importing from SmartDeploy** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
