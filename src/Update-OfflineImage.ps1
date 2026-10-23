@@ -37,9 +37,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
-# Image versions (Save-ImageVersion) come with the image versioning change; until then the old image is moved by hand.
-$versionsModule = Join-Path $PSScriptRoot 'ImageVersions.psm1'
-if (Test-Path $versionsModule) { Import-Module $versionsModule -Force }
+Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -163,16 +161,11 @@ try {
     if (@(Get-WindowsImage -ImagePath $outWim).Count -ne $editions.Count) { throw 'The exported image is missing editions; the original was left unchanged.' }
 
     $swapping = $true
-    if (-not $NoBackup -and (Get-Command Save-ImageVersion -ErrorAction SilentlyContinue)) {
+    if (-not $NoBackup) {
         # Archived as a version (with version.json), so the Versions dialog shows why and with what.
         $kept = Save-ImageVersion -ImagePath $image.FullName -Move -Reason 'Replaced by an offline update' -Note ($packages.Name -join ', ')
         $backup = $kept.Folder
         Write-DeployLog "Moved the previous version to $backup"
-    } elseif (-not $NoBackup) {
-        $backup = Join-Path $imagesDir ("Previous\{0}_{1:yyyyMMdd-HHmm}" -f $name, (Get-Date))
-        New-Item -ItemType Directory -Path $backup -Force | Out-Null
-        Write-DeployLog "Moving the previous version to $backup"
-        $parts | Move-Item -Destination $backup
     } else {
         $parts | Remove-Item -Force
     }

@@ -43,7 +43,7 @@ try {
     Assert-Equal (Test-Path (Join-Path $v2.Folder 'Win11.updates.json')) $true 'the version gets a copy of the update history'
     Set-Content $wim 'v3'
 
-    # A backup made by Update-OfflineImage.ps1 (no version.json) is listed too.
+    # A backup from before version.json existed (no version.json) is listed too.
     $legacy = Join-Path $images 'Previous/Win11_20261020-0800'
     New-Item -ItemType Directory -Path $legacy -Force | Out-Null
     Set-Content (Join-Path $legacy 'Win11.wim') 'v2b'
