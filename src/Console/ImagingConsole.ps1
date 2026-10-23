@@ -145,6 +145,50 @@ function Save-WdsFromUi {
     })
 }
 
+function Update-Multicast {
+    if (-not (Test-ContentRoot $script:root)) { return }
+    $m = Get-MulticastSettings -ContentRoot $script:root
+    $ui.ChkMcEnabled.IsChecked  = $m.enabled
+    $ui.ChkMcFallback.IsChecked = $m.fallback
+    $ui.TxtMcServer.Text        = $m.server
+    $ui.TxtMcNamespace.Text     = $m.namespace
+    $ui.TxtMcContentPath.Text   = $m.contentPath
+    $ui.RbMcAuto.IsChecked      = $m.type -ne 'ScheduledCast'
+    $ui.RbMcScheduled.IsChecked = $m.type -eq 'ScheduledCast'
+    $ui.TxtMcClients.Text       = "$($m.clients)"
+    $ui.TxtMcStartTime.Text     = $m.startTime
+    $ui.RbMcSpeedNone.IsChecked  = $m.speedPolicy -eq 'None'
+    $ui.RbMcSpeedMulti.IsChecked = $m.speedPolicy -eq 'Multistream'
+    $ui.RbMcSpeedDrop.IsChecked  = $m.speedPolicy -eq 'AutoDisconnect'
+    $ui.TxtMcThreshold.Text      = "$($m.thresholdKbps)"
+}
+
+function Get-MulticastFromUi {
+    [pscustomobject]@{
+        enabled       = $ui.ChkMcEnabled.IsChecked
+        server        = $ui.TxtMcServer.Text
+        namespace     = $ui.TxtMcNamespace.Text
+        contentPath   = $ui.TxtMcContentPath.Text
+        type          = $(if ($ui.RbMcScheduled.IsChecked) { 'ScheduledCast' } else { 'AutoCast' })
+        clients       = $ui.TxtMcClients.Text.Trim()
+        startTime     = $ui.TxtMcStartTime.Text
+        speedPolicy   = $(if ($ui.RbMcSpeedMulti.IsChecked) { 'Multistream' } elseif ($ui.RbMcSpeedDrop.IsChecked) { 'AutoDisconnect' } else { 'None' })
+        thresholdKbps = $ui.TxtMcThreshold.Text.Trim()
+        fallback      = $ui.ChkMcFallback.IsChecked
+    }
+}
+
+function Invoke-Multicast([string]$Action) {
+    # Runs Set-WdsMulticast.ps1 with the saved settings and shows its answer in the Server state box.
+    $window.Cursor = 'Wait'
+    Set-Status "Multicast: $Action..."
+    try {
+        $out = & "$srcDir\Set-WdsMulticast.ps1" -Action $Action -SettingsPath (Join-Path $script:root 'config\deploy-settings.json') 6>&1 | Out-String
+    } finally { $window.Cursor = $null }
+    $ui.TxtMcStatus.Text = $out.Trim()
+    Set-Status "Multicast: $Action done"
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-DeploymentLogs -ContentRoot $script:root) } else { $null }
     $ui.TxtLog.Text = ''
@@ -166,7 +210,7 @@ function Update-UsbDisks {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Logs
+    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -365,6 +409,25 @@ $ui.BtnWdsCheck.Add_Click({ Invoke-Safely {
         "Boot images: $(if ($st.BootImages) { $st.BootImages -join ', ' } else { 'none' })"
     ) -join "`r`n"
     Set-Status 'WDS check done'
+} })
+
+#endregion
+
+#region Multicast
+
+$ui.BtnMcSave.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $m = Get-MulticastFromUi
+    Save-MulticastSettings -ContentRoot $script:root -Multicast $m
+    if (-not $m.enabled) { Set-Status 'Multicast settings saved (multicast is off)'; return }
+    if (-not (Confirm-Action "Set up the multicast session '$($m.namespace)' on the WDS server? A session with the same name is replaced, which stops any transfer running in it.")) { return }
+    Invoke-Multicast 'Create'
+} })
+$ui.BtnMcStatus.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Multicast 'Status' } } })
+$ui.BtnMcStart.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Multicast 'Start' } } })
+$ui.BtnMcRemove.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    if (Confirm-Action 'Remove the multicast session? PCs downloading from it stop (with fallback on, they copy from the share instead).') { Invoke-Multicast 'Remove' }
 } })
 
 #endregion

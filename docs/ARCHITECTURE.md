@@ -13,6 +13,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
+| **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -79,6 +80,22 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    same name, `Import-WdsBootImage`, and make it the default `x64uefi` boot image.
    It reads server state from the WDSServer service, the `REMINST` share and the
    WDS cmdlets, never from `wdsutil` text, which is localized.
+
+### Multicast
+
+`Set-WdsMulticast.ps1` creates a WDS namespace with the built-in `WDS` content
+provider whose config string is the content root's local folder on the server
+(`wdsutil /New-Namespace /ContentProvider:WDS /ConfigString:D:\Deploy`), as AutoCast
+or ScheduledCast (client count and/or start time), and sets the transport server's
+slow-client policy (`/Set-TransportServer /MulticastSessionPolicy`). It runs on the
+server like the WDS publisher, and judges `wdsutil` by exit code only.
+
+In WinPE, `Get-MulticastPlan` (DeployCommon) decides per deploy: multicast is on,
+the content came from the share, the image is under the content root and is not
+split. After partitioning, `Receive-MulticastImage` runs
+`wdsmcast /Transfer-File /Namespace:<name> /SourceFile:Images\<image>.wim` with the
+share account into `W:\_Multicast`, DISM applies from there, and the folder is
+deleted. On failure it falls back to applying from the share unless fallback is off.
 
 ## Deploy sequence (UEFI/GPT)
 

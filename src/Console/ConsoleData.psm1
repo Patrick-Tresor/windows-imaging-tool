@@ -459,6 +459,62 @@ function Save-WdsSettings {
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
 }
 
+function Get-MulticastSettings {
+    # The "multicast" section of deploy-settings.json, with defaults. WinPE reads it from the content root,
+    # so turning multicast on or off needs no media rebuild.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $mc = [ordered]@{ enabled = $false; server = ''; namespace = 'ImagingTool'; contentPath = ''; type = 'AutoCast'
+        clients = 0; startTime = ''; speedPolicy = 'None'; thresholdKbps = 1024; fallback = $true }
+    $saved = (Get-DeploySettings -ContentRoot $ContentRoot).multicast
+    if ($saved) { foreach ($p in $saved.PSObject.Properties) { if ($mc.Contains($p.Name)) { $mc[$p.Name] = $p.Value } } }
+    [pscustomobject]$mc
+}
+
+function Get-MulticastIssues {
+    # What is wrong with multicast settings before they are saved or sent to the server; empty when fine.
+    param([Parameter(Mandatory)]$Multicast)
+    $issues = @()
+    if ("$($Multicast.namespace)".Trim() -notmatch '^[A-Za-z0-9][A-Za-z0-9 _.-]*$') { $issues += 'Session name: letters, digits, spaces, dots, dashes and underscores only.' }
+    if ($Multicast.type -notin 'AutoCast', 'ScheduledCast') { $issues += "Session type must be AutoCast or ScheduledCast, not '$($Multicast.type)'." }
+    if ($Multicast.speedPolicy -notin 'None', 'AutoDisconnect', 'Multistream') { $issues += "Slow PC policy must be None, AutoDisconnect or Multistream, not '$($Multicast.speedPolicy)'." }
+    $clients = 0
+    $clientText = "$($Multicast.clients)".Trim()   # empty means 0
+    if ($clientText -and (-not [int]::TryParse($clientText, [ref]$clients) -or $clients -lt 0)) { $issues += 'Number of PCs must be a whole number, 0 or more.' }
+    $start = "$($Multicast.startTime)".Trim()
+    $t = [datetime]::MinValue
+    if ($start -and -not [datetime]::TryParseExact($start, 'yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture, 'None', [ref]$t)) {
+        $issues += "Start time must look like 2026-11-03 08:30, not '$start'."
+    }
+    if ($Multicast.type -eq 'ScheduledCast' -and $clients -le 0 -and -not $start) {
+        $issues += 'A scheduled session needs a number of PCs, a start time, or both.'
+    }
+    $kbps = 0
+    if ($Multicast.speedPolicy -eq 'AutoDisconnect' -and (-not [int]::TryParse("$($Multicast.thresholdKbps)", [ref]$kbps) -or $kbps -le 0)) {
+        $issues += 'Disconnect threshold must be a number of KB/s above 0.'
+    }
+    $issues
+}
+
+function Save-MulticastSettings {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Multicast)
+    $issues = @(Get-MulticastIssues -Multicast $Multicast)
+    if ($issues) { throw ($issues -join "`n") }
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $s | Add-Member -NotePropertyName multicast -NotePropertyValue ([pscustomobject]@{
+        enabled       = [bool]$Multicast.enabled
+        server        = "$($Multicast.server)".Trim()
+        namespace     = "$($Multicast.namespace)".Trim()
+        contentPath   = "$($Multicast.contentPath)".Trim()
+        type          = $Multicast.type
+        clients       = [int]"$($Multicast.clients)".Trim()
+        startTime     = "$($Multicast.startTime)".Trim()
+        speedPolicy   = $Multicast.speedPolicy
+        thresholdKbps = $(if ("$($Multicast.thresholdKbps)".Trim()) { [int]"$($Multicast.thresholdKbps)" } else { 1024 })
+        fallback      = [bool]$Multicast.fallback
+    }) -Force
+    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+}
+
 function Get-DeploymentLogs {
     # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1) or CAPTURE-<name>_... (Capture-GoldenImage.ps1).
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -483,7 +539,8 @@ function Get-DeploymentLogs {
 
 Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
-    Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings, Get-DeploymentLogs,
+    Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
+    Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application
