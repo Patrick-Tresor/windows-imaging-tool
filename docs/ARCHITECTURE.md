@@ -90,7 +90,9 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 7. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
    `firstboot.json`, and write `SetupComplete.cmd` to run it.
 8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
-9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then reboot or shut down.
+9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
+   `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
+   matched), then reboot or shut down.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order, applies the options, runs FIRSTBOOT tasks and removes
@@ -138,6 +140,28 @@ The downloads run in their own PowerShell window (`Get-DriverPacks.ps1
 
 Packs can still be added by hand: extract one to `Drivers\<Maker>\<Model>\`
 and import it from the Driver Library tab.
+
+### Unknown models report
+
+Every deployment writes `Reports\Drivers\<serial>.json` on the content root:
+the PC's maker, model, SKU / machine type, computer name, and the driver
+result from `Find-DriverCatalogMatch` (the same matching as the deploy):
+`Matched`, `InboxOnly` (a catalog entry with no folder), `Fallback` (maker
+fallback), `None`, or `MissingFolder`. One file per PC, so a reimage
+replaces it. Writing it never fails a deployment.
+
+`src/Console/DriverReport.psm1` reads these files and re-checks each PC against
+the current catalog and `Drivers\` folder, so a model leaves the report as soon
+as the library covers it. The rest are grouped by maker, model and SKU / machine
+type, most PCs first. For Dell, HP and Lenovo it looks the model up in the
+vendor catalog (SKU or machine type, then model name). The console's
+**Unknown models...** window ticks every model that has a pack and hands them to
+the same download job as **Download from vendor...**. **Use inbox drivers**
+adds a catalog entry with no folder, keyed on the SKU, machine type or model.
+`Get-DriverPacks.ps1 -UnknownModels [-List]` does the same from the command line.
+
+PCs already deployed keep the drivers they got. Reimage them, or install the
+pack on them by other means, once it is in the library.
 
 ## Not in v1
 

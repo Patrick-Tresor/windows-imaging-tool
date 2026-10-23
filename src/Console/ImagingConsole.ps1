@@ -22,9 +22,11 @@ $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
+. (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -114,6 +116,11 @@ function Update-Drivers {
         }
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
+    # The count on the button is the nudge to open the report.
+    $unknown = 0
+    if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root).Count } catch { } }
+    $ui.BtnDriversUnknown.Content = if ($unknown) { "Unknown models ($unknown)..." } else { 'Unknown models...' }
+    $ui.BtnDriversUnknown.FontWeight = if ($unknown) { 'SemiBold' } else { 'Normal' }
 }
 
 function Update-Settings {
@@ -255,6 +262,14 @@ $ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-DriverDownloader -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
         Set-Status 'Driver pack download started in a separate window. Click Refresh when it finishes.'
+    }
+} })
+
+$ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    if (Show-UnknownModels -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
+        Update-Drivers
+        Set-Status 'Driver library updated. If a download started in a separate window, click Refresh when it finishes.'
     }
 } })
 
