@@ -26,6 +26,7 @@ Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
+. (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -206,6 +207,14 @@ $ui.BtnImageVersions.Add_Click({ Invoke-Safely {
     }
 } })
 $ui.GridImages.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridImages.SelectedItem) { $ui.BtnImageVersions.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) } } })
+$ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
+        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
+    }
+} })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion

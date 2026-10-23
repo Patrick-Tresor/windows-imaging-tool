@@ -32,7 +32,7 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Updates') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
     foreach ($file in 'driver-catalog.json', 'deploy-settings.json') {
@@ -76,6 +76,7 @@ function Get-ImageList {
                     ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" }) -join '; '
             } catch { $indexes = '(could not read image)' }
         }
+        $last = @(Get-ImageServicingHistory -ImagePath $f.FullName) | Select-Object -Last 1
         [pscustomobject]@{
             Name     = $f.Name
             SizeGB   = [Math]::Round((($parts | Measure-Object Length -Sum).Sum) / 1GB, 2)
@@ -83,6 +84,7 @@ function Get-ImageList {
             Modified = $f.LastWriteTime
             Indexes  = $indexes
             Versions = @(Get-ImageVersions -ImagePath $f.FullName).Count
+            Updated  = if ($last) { '{0} ({1})' -f $last.date, ((@($last.packages | Where-Object result -eq 'Installed').package | Select-Object -Unique | ForEach-Object { Get-UpdateKB $_ }) -join ', ') } else { '' }
             FullName = $f.FullName
         }
     }
@@ -518,6 +520,100 @@ function Get-ImageVersionArguments {
 
 #endregion
 
+#region Image updates
+
+function Get-UpdateKB {
+    # KB number from a Microsoft Update Catalog file name, e.g. windows11.0-kb5044284-x64_<hash>.msu -> KB5044284.
+    param([string]$FileName)
+    if ($FileName -match '(?i)kb(\d{6,8})') { "KB$($Matches[1])" } else { '' }
+}
+
+function Get-UpdatePackageRows {
+    # .msu and .cab files from the given files and folders, in a sensible default order:
+    # Windows updates (SSU, cumulative), then .NET (catalog names contain "ndp"), then anything else; oldest KB first in each.
+    # Standalone SSUs can carry a higher KB than the cumulative update they go with, so the console lets the order be changed.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Path)
+    $files = foreach ($p in $Path) {
+        if (Test-Path -LiteralPath $p -PathType Container) { Get-ChildItem -LiteralPath $p -File | Where-Object Extension -in '.msu', '.cab' }
+        elseif (Test-Path -LiteralPath $p) { Get-Item -LiteralPath $p }
+    }
+    $files | Sort-Object FullName -Unique | ForEach-Object {
+        $kb = Get-UpdateKB $_.Name
+        $kind = if ($_.Name -match '(?i)ndp\d|dotnet|\.net') { '.NET' } elseif ($_.Name -match '(?i)^windows\d') { 'Windows' } else { 'Other' }
+        [pscustomobject]@{
+            Name     = $_.Name
+            KB       = $kb
+            Kind     = $kind
+            SizeMB   = [Math]::Round($_.Length / 1MB)
+            FullName = $_.FullName
+            Order    = @{ 'Windows' = 0; '.NET' = 1; 'Other' = 2 }[$kind]
+            KBNumber = if ($kb) { [int]$kb.Substring(2) } else { [int]::MaxValue }
+        }
+    } | Sort-Object Order, KBNumber, Name | Select-Object Name, KB, Kind, SizeMB, FullName
+}
+
+function Get-ImageServicingHistoryPath {
+    # Images\<name>.updates.json, next to the image (split images use the first part's name).
+    param([Parameter(Mandatory)][string]$ImagePath)
+    Join-Path (Split-Path $ImagePath -Parent) ([IO.Path]::GetFileNameWithoutExtension($ImagePath) + '.updates.json')
+}
+
+function Get-ImageServicingHistory {
+    param([Parameter(Mandatory)][string]$ImagePath)
+    $path = Get-ImageServicingHistoryPath -ImagePath $ImagePath
+    if (-not (Test-Path -LiteralPath $path)) { return @() }
+    @((Get-Content -Raw -LiteralPath $path | ConvertFrom-Json).history)
+}
+
+function Add-ImageServicingRecord {
+    # Called by Update-OfflineImage.ps1 after a successful update, so the Images tab shows what each image contains.
+    param(
+        [Parameter(Mandatory)][string]$ImagePath,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+        [string[]]$Builds = @(),
+        [switch]$Cleanup,
+        [switch]$ResetBase,
+        [datetime]$Date = (Get-Date)
+    )
+    $history = @(Get-ImageServicingHistory -ImagePath $ImagePath)
+    $history += [pscustomobject]@{
+        date      = $Date.ToString('yyyy-MM-dd HH:mm')
+        builds    = @($Builds)
+        cleanup   = [bool]$Cleanup
+        resetBase = [bool]$ResetBase
+        packages  = @($Results | ForEach-Object { [pscustomobject]@{ index = $_.index; package = $_.package; result = $_.result } })
+    }
+    [pscustomobject]@{ history = $history } | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath (Get-ImageServicingHistoryPath -ImagePath $ImagePath) -Encoding utf8
+}
+
+function Get-ImageUpdateArguments {
+    # Command line for Update-OfflineImage.ps1, run by the console in its own window.
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ImagePath,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Packages,
+        [int[]]$Index,
+        [switch]$Cleanup,
+        [switch]$ResetBase,
+        [switch]$NoBackup
+    )
+    if (-not $Packages) { throw 'Add at least one update package (.msu or .cab).' }
+    if ($ResetBase -and -not $Cleanup) { throw 'Reset base needs component cleanup turned on.' }
+    $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
+    $cmd = "& $(& $quote $ScriptPath) -ImagePath $(& $quote $ImagePath) -PackagePath " + (($Packages | ForEach-Object { & $quote $_ }) -join ',')
+    if ($Index) { $cmd += " -Index $($Index -join ',')" }
+    if ($Cleanup) { $cmd += ' -Cleanup' }
+    if ($ResetBase) { $cmd += ' -ResetBase' }
+    if ($NoBackup) { $cmd += ' -NoBackup' }
+    $cmd += ' -NoPrompt'   # the console already asked
+    # -File cannot pass an array to a [string[]] parameter, and command-line quoting strips the quotes in -Command,
+    # so the command goes in encoded.
+    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+}
+
+#endregion
+
 #region Settings and logs
 
 function Get-DeploySettings {
@@ -531,7 +627,8 @@ function Save-DeploySettings {
 }
 
 function Get-DeploymentLogs {
-    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1) or CAPTURE-<name>_... (Capture-GoldenImage.ps1).
+    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
+    # or SERVICE-<name>_... (Update-OfflineImage.ps1).
     param([Parameter(Mandatory)][string]$ContentRoot)
     Get-ChildItem -Path (Join-Path $ContentRoot 'Logs') -Filter *.log -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
@@ -559,4 +656,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
-    Get-ImageEditions
+    Get-ImageEditions,
+    Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments
