@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<NewDataSet>
+  <HPClientDriverPackCatalog>
+    <ToolVersion>2.0</ToolVersion>
+    <SoftPaqList>
+      <SoftPaq>
+        <Id>sp150001</Id><Name>HP EliteBook 840 G9 Windows 11 x64 Driver Pack</Name><Version>1.00 A 4</Version>
+        <Category>Manageability - Driver Pack</Category><DateReleased>2026-05-20</DateReleased>
+        <Url>ftp://ftp.hp.com/pub/softpaq/sp150001-150500/sp150001.exe</Url><Size>1288490188</Size>
+        <MD5>22222222222222222222222222222222</MD5><SHA256>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</SHA256>
+      </SoftPaq>
+      <SoftPaq>
+        <Id>sp140001</Id><Name>HP EliteBook 840 G9 Windows 11 x64 Driver Pack</Name><Version>1.00 A 1</Version>
+        <DateReleased>2024-03-01</DateReleased><Url>http://ftp.hp.com/pub/softpaq/sp140001-140500/sp140001.exe</Url><Size>1000000000</Size>
+        <MD5>33333333333333333333333333333333</MD5>
+      </SoftPaq>
+    </SoftPaqList>
+    <ProductOSDriverPackList>
+      <ProductOSDriverPack>
+        <ProductType>Notebook</ProductType><SystemId>8A86, 8A87</SystemId><SystemName>HP EliteBook 840 14 inch G9 Notebook PC</SystemName>
+        <OSName>Windows 11 64-bit, 24H2</OSName><OSId>4400</OSId><SoftPaqId>sp150001</SoftPaqId>
+      </ProductOSDriverPack>
+      <ProductOSDriverPack>
+        <ProductType>Notebook</ProductType><SystemId>8A86, 8A87</SystemId><SystemName>HP EliteBook 840 14 inch G9 Notebook PC</SystemName>
+        <OSName>Windows 11 64-bit, 22H2</OSName><OSId>4243</OSId><SoftPaqId>sp140001</SoftPaqId>
+      </ProductOSDriverPack>
+      <ProductOSDriverPack>
+        <ProductType>Notebook</ProductType><SystemId>8A86</SystemId><SystemName>HP EliteBook 840 14 inch G9 Notebook PC</SystemName>
+        <OSName>Windows 10 64-bit, 22H2</OSName><OSId>4200</OSId><SoftPaqId>sp999999</SoftPaqId>
+      </ProductOSDriverPack>
+    </ProductOSDriverPackList>
+  </HPClientDriverPackCatalog>
+</NewDataSet>

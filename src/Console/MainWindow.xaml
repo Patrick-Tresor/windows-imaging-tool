@@ -135,6 +135,7 @@
             <Button x:Name="BtnDriversRemove" Content="Remove row"/>
             <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
             <Button x:Name="BtnDriversOpen" Content="Open folder"/>
+            <Button x:Name="BtnDriversDownload" Content="Download from vendor..." ToolTip="Pick Dell, HP or Lenovo models and download their driver packs from the vendor catalog"/>
           </StackPanel>
 
           <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
