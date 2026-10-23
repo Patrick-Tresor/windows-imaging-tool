@@ -10,8 +10,8 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
-src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
+                     Update-OfflineImage.ps1, New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
@@ -25,6 +25,8 @@ and click **Create folders** the first time. Then:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
+  **Update image...** adds Windows updates to the selected image (see
+  [Updating an image](#updating-an-image)).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
   and **Import SmartDeploy XML...** to convert an existing SmartDeploy answer file.
   **New** and **Edit** (or double-click) open the answer file editor, where every
@@ -43,7 +45,8 @@ and click **Create folders** the first time. Then:
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
 ```
-Images\        Win11-24H2-Enterprise.wim
+Images\        Win11-24H2-Enterprise.wim (+ .updates.json history), Previous\ (versions before an update)
+Updates\       .msu / .cab packages from the Microsoft Update Catalog
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
@@ -97,6 +100,40 @@ import lists the password files to create, the `.spk` application packs to
 rebuild as folders, and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
 
+## Updating an image
+
+Patch Tuesday does not need a new capture. Download the month's cumulative update
+for the image's Windows version (and the .NET cumulative update) from the
+[Microsoft Update Catalog](https://www.catalog.update.microsoft.com) into the
+content root's `Updates` folder, select the image on the Images tab and click
+**Update image...**. The dialog lists the packages in the order they will be
+applied (Windows first, then .NET, oldest KB first); move a standalone servicing
+stack update to the top if there is one. For Windows 11 24H2 checkpoint updates,
+keep the earlier checkpoint in the same folder: DISM picks it up from there.
+
+It runs `Update-OfflineImage.ps1` in its own window, on this PC. For each edition
+it mounts the image, adds the packages, optionally cleans up the replaced
+components, and commits. It then exports the result to a fresh file (which drops
+the space the old components took), moves the old version to
+`Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
+name, so answer files pick it up without changes. Split images (`.swm`) are joined,
+updated and split again. The Images tab shows when each image was last updated and
+with which KBs, and the log appears on the Deployment Logs tab as `SERVICE-<name>`.
+
+It needs about three times the image size free on the system drive (or pass
+`-WorkDir`). A package that does not apply to the image is logged and skipped; any
+other failure discards the changes and leaves the image as it was. **Reset base**
+makes the image smallest but means those updates can't be uninstalled on deployed
+PCs. Without the console:
+
+```powershell
+.\src\Update-OfflineImage.ps1 -ImagePath D:\DeployShare\Images\Win11-24H2-Enterprise.wim `
+    -PackagePath D:\DeployShare\Updates\windows11.0-kb5044284-x64.msu -Cleanup
+```
+
+This updates Windows itself, not the applications in the image or its recovery
+environment (`winre.wim`); refresh those with a new capture from time to time.
+
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
@@ -122,6 +159,8 @@ platform packs, unsupported system properties).
    enterprise driver pack into `Drivers\<Maker>\<Model>` and add a line to
    `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
+   Each month, add the new cumulative update with **Update image...** instead of
+   capturing again.
 5. **Deploy**: boot the target PC from USB or PXE. The tool detects the model,
    wipes disk 0, applies the image, injects the drivers, and reboots.
 

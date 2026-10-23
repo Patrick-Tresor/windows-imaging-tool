@@ -23,6 +23,7 @@ Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
+. (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -177,6 +178,14 @@ $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
         Set-Status 'Capture started in a separate window. Click Refresh on the Images tab when it finishes.'
+    }
+} })
+$ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
+        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })

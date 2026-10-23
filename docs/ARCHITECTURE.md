@@ -11,6 +11,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
+| **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
@@ -39,6 +40,22 @@ attaches the ISO, sets the DVD as first boot device and starts the VM. It then
 waits for the unattended capture to shut the VM down, ejects the ISO and sets
 the boot order back to the disk. The ISO is kept under `%ProgramData%` because
 Hyper-V cannot mount one from a share without delegation.
+
+## Offline image updates
+
+`UpdateImage.ps1` (the console dialog) lists packages from `Updates\` with
+`Get-UpdatePackageRows` and starts `Update-OfflineImage.ps1` through
+`-EncodedCommand`, because `-File` can't pass the package list as an array. The
+script works on a local copy in `%ProgramData%\ImagingConsole\Servicing` (DISM
+mounts must be on a local NTFS volume). Per index: `DISM /Mount-Image`,
+`/Add-Package` for each package in order (exit 0x800F081E, not applicable, is a
+warning), optional `/Cleanup-Image /StartComponentCleanup [/ResetBase]`,
+`/Unmount-Image /Commit`. Then every index is exported to a new WIM to reclaim the
+space of superseded components, and only after the export is verified is the
+original moved to `Images\Previous\` and replaced. Any failure before that
+discards the mount and leaves the original alone. `Add-ImageServicingRecord`
+appends the packages, results and resulting builds to `Images\<name>.updates.json`,
+which the Images tab reads.
 
 ## Why the golden image is hardware-independent
 
