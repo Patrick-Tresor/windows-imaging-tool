@@ -130,7 +130,9 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 1. Detect hardware and content root; choose the answer file (the default, or a
    menu in interactive mode); map its extra shares.
 2. Check everything before touching the disk: image, driver pack, applications,
-   password files, computer name. Show a summary, then either a countdown
+   password files, computer name, and for a Windows 11 image the hardware
+   requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
+   memory, disk), which stop the deploy in Block mode. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
 3. `diskpart`: wipe the disk, create EFI (260 MB, FAT32), MSR (16 MB), Windows (NTFS), Recovery (1 GB).
 4. `DISM /Apply-Image` the WIM to `W:`.

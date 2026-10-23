@@ -37,6 +37,7 @@ function Read-AnswerFile {
         UnattendDelay        = [int](Get-XmlText $d 'unattendDelay' '10')
         ImageFile            = Get-XmlText $d 'image/file'
         ImageIndex           = [int](Get-XmlText $d 'image/index' '1')
+        Windows11Check       = Get-XmlText $d 'image/windows11Check' 'Block'
         ImageVersion         = Get-XmlText $d 'image/version'
         DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
@@ -100,6 +101,7 @@ function Test-AnswerFile {
     if ($a.Mode -notin 'Interactive', 'Unattended') { "mode must be Interactive or Unattended, not '$($a.Mode)'." }
     if (-not $a.ImageFile) { 'image/file is required.' }
     if ($a.ImageIndex -lt 1) { 'image/index must be 1 or more.' }
+    if ($a.Windows11Check -notin 'Block', 'Warn', 'Off') { "image/windows11Check must be Block, Warn or Off, not '$($a.Windows11Check)'." }
     if ($a.ImageVersion -and $a.ImageVersion -notmatch '^\d{8}-\d{4}(-\d+)?$') { "image/version '$($a.ImageVersion)' must be a version time stamp such as 20261022-1530, or empty for the current image." }
     if ($a.DiskOption -ne 'Recreate') { "disk/option '$($a.DiskOption)' is not supported yet; only Recreate (wipe the disk and recreate partitions)." }
     if ($a.NamingMode -notin 'WMI', 'Custom', 'Prompt') { "identification/naming mode must be WMI, Custom or Prompt, not '$($a.NamingMode)'." }
@@ -326,6 +328,7 @@ function Export-AnswerFile {
   <image>
     <file>$(& $x $a.ImageFile)</file>
     <index>$($a.ImageIndex)</index>
+    <windows11Check>$(& $x $(if ($a.Windows11Check) { $a.Windows11Check } else { 'Block' }))</windows11Check>
     <version>$(& $x $a.ImageVersion)</version>
   </image>
   <disk>
@@ -488,6 +491,7 @@ function ConvertFrom-SmartDeployAnswerFile {
         UnattendDelay        = [int](Get-XmlText $w 'settings/unattend_delay' '10')
         ImageFile            = "Images\$imageLeaf"
         ImageIndex           = 1
+        Windows11Check       = 'Block'
         ImageVersion         = $null
         DiskNumber           = 0
         DiskOption           = 'Recreate'

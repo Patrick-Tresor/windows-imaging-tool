@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     Update-OfflineImage.ps1, New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     Update-OfflineImage.ps1, New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1, Win11Readiness.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -70,6 +70,8 @@ the console; the format is documented in the commented
 - **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
   (start after `unattendDelay` seconds unless a key is pressed).
 - **image** and index, **disk** number, **drivers** root.
+- **Windows 11 check** (`image/windows11Check`): `Block` (default), `Warn` or
+  `Off`. See below.
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
@@ -82,6 +84,25 @@ the console; the format is documented in the commented
   applications), `FIRSTLOGON` (when the first user logs on).
 - extra **shares** to map in WinPE, **options** (disable System Restore, enable
   the built-in Administrator), and reboot or shut down when done.
+
+### Windows 11 readiness check
+
+When the answer file's image is Windows 11 (build 22000 or later, read from
+the WIM), WinPE checks the PC before the disk is erased: TPM 2.0 present and
+on, UEFI boot, Secure Boot, a processor on Microsoft's supported list (Intel
+8th gen Core and later, AMD Ryzen 2000 desktop and later), 2 cores at 1 GHz,
+4 GB of memory and a 64 GB target disk. Each result goes to the deploy log and
+the summary shows `Windows 11: ready` or `NOT READY: TPM 2.0, Processor`.
+
+- **Block**: a failed requirement stops the deploy with nothing erased. Fix it
+  in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10
+  answer file, or run `Deploy-Image.ps1 -IgnoreWindows11Check` to deploy anyway.
+- **Warn**: the problems are logged and shown, and the deploy carries on.
+- **Off**: no check.
+
+Secure Boot turned off, a processor the check cannot match (some Celeron,
+Pentium and Xeon models) and an image whose version cannot be read only warn;
+they never block.
 
 **Passwords never go in the answer file.** Each `passwordFile` names a text file
 under the content root, usually `config\secrets\`. Anyone who can read the share
