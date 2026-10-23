@@ -4,8 +4,8 @@
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot). Reads an answer file from <content root>\AnswerFiles: image,
-    applications, disk, regional settings, naming, domain join, tasks and extra shares.
-    Wipes the target disk. UEFI/GPT only.
+    applications, disk, user data migration, regional settings, naming, domain join, tasks and extra shares.
+    Wipes the target disk (or, when user data is kept on the disk, only its Windows partition). UEFI/GPT only.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
 #>
@@ -20,6 +20,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
+$usmtDir = Join-Path $PSScriptRoot 'USMT'
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -116,6 +118,15 @@ try {
         }
     }
 
+    # User data: find the old Windows and check the backup can be done, still before anything is erased.
+    $migration = $null
+    if ($answer.MigrateUserData) {
+        $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial `
+            -SharePath (Resolve-ContentPath $root $answer.UserDataPath)
+        Write-DeployLog "User data: $($migration.Summary)" -Level $(if ($migration.Mode -eq 'None') { 'WARN' } else { 'INFO' })
+    }
+    $keepPartitions = $migration -and $migration.Store -eq 'Local' -and $migration.Mode -ne 'None'
+
     $disk = Get-Disk -Number $answer.DiskNumber
     Write-Host ''
     Write-Host "Answer file:  $($answer.Name)"
@@ -124,15 +135,27 @@ try {
     Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
     Write-Host "Name:         $ComputerName"
     Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
-    Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
+    if ($migration) { Write-Host "User data:    $($migration.Summary)" }
+    if ($keepPartitions) {
+        Write-Host ("ERASE:        everything on {0} except the user data, disk {1} {2}" -f $migration.Volume.Drive, $disk.Number, $disk.FriendlyName) -ForegroundColor Red
+    } else {
+        Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
+    }
     if (-not $NoPrompt) {
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
-    # 1. Partition: EFI, MSR, Windows, Recovery (Microsoft's recommended UEFI layout).
-    $dp = Join-Path $env:TEMP 'diskpart.txt'
-    @"
+    # 1. Back up the user data, then partition. A failed backup stops here, with the disk untouched.
+    if ($migration -and $migration.Mode -eq 'Backup') { Backup-UserState -Plan $migration -Answer $answer -UsmtDir $usmtDir }
+
+    if ($keepPartitions) {
+        # Hard-link store: keep the partitions and empty the Windows partition around it.
+        Clear-WindowsPartition -Plan $migration -DiskNumber $answer.DiskNumber
+    } else {
+        # EFI, MSR, Windows, Recovery (Microsoft's recommended UEFI layout).
+        $dp = Join-Path $env:TEMP 'diskpart.txt'
+        @"
 select disk $($answer.DiskNumber)
 clean
 convert gpt
@@ -150,7 +173,8 @@ set id="de94bba4-06d1-4d40-a16a-bfd50179d6ac"
 gpt attributes=0x8000000000000001
 exit
 "@ | Set-Content -Path $dp -Encoding ascii
-    Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
+        Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
+    }
 
     # 2. Apply the image. Split images (.swm) need /SWMFile.
     $applyArgs = @('/Apply-Image', "/ImageFile:$imagePath", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
@@ -174,8 +198,10 @@ exit
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
+    # User data is restored by FirstBoot.ps1 after the applications.
+    $userState = if ($migration -and $migration.Mode -ne 'None') { Copy-UserStateForRestore -Plan $migration -Answer $answer -UsmtDir $usmtDir } else { $null }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1') 'W:\Deploy\FirstBoot.ps1'
-    New-FirstBootPlan -Answer $answer -AppDefinitions $apps | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    New-FirstBootPlan -Answer $answer -AppDefinitions $apps -UserState $userState | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
@@ -192,7 +218,7 @@ catch {
 }
 finally {
     # Keep the log on the deployed disk and, when available, on the content root for central review.
-    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log' 'W:\Windows\Temp\Deploy.log' -ErrorAction SilentlyContinue }
+    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log', 'X:\Windows\Temp\ScanState.log' 'W:\Windows\Temp\' -ErrorAction SilentlyContinue }
     if ($root -and $hw -and $status -ne 'CANCELLED') {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null

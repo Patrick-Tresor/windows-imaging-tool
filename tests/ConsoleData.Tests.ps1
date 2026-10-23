@@ -134,6 +134,11 @@ try {
     $ed.Name = 'Broken'; $ed.Domain = ''
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew | Out-Null; '' } catch { $_.Exception.Message }
     Assert-Equal ($msg -like '*needs network/domain*') $true 'editor save reports validation problems'
+    $mig = Get-NewAnswer -Name 'Migrate'
+    $mig.MigrateUserData = $true; $mig.UserDataStore = 'Share'; $mig.UserDataEncrypt = $true
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $mig -UserDataKey 'K3y!' -IsNew
+    $back = Read-AnswerFile -Path $saved
+    Assert-Equal "$($back.MigrateUserData)|$($back.UserDataStore)|$($back.UserDataKeyFile)|$(Get-Content -Raw (Join-Path $root 'config/secrets/Migrate-usmt.txt'))" 'True|Share|config\secrets\Migrate-usmt.txt|K3y!' 'user data encryption key goes to its own file'
     $threw = $false
     try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
     Assert-Equal $threw $true 'password files must stay inside the content root'
