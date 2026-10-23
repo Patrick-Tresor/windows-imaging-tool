@@ -25,6 +25,22 @@ content root's `deploy-settings.json`. `Deploy-Image.ps1` re-reads that file
 from the content root at run time, so settings such as the default image take
 effect without rebuilding media.
 
+## Deploy wizard
+
+`DeployWizard.psm1` is the window the technician sees in WinPE. WinPE-NetFX
+has no WPF, so it uses WinForms. Its pages are: answer file (with a preview and
+any validation problems), computer name, OU and target disk, applications (the
+answer file's ticked, the rest of the library unticked), and a summary with an
+erase confirmation. It holds no deploy logic: `Deploy-Image.ps1` passes it two
+script blocks, one that reads an answer file and one (`Get-DeployPlan`) that
+maps the answer file's shares and finds the image, driver pack, application
+library and suggested name. So a missing image is reported when the answer file
+is picked, before anything is erased. The choices come back as a copy of the
+answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
+replaced, and the deploy continues exactly as for a command-line run.
+`-NoPrompt` and an `Unattended` countdown skip the window; a key pressed during
+the countdown opens it. Without WinForms the console prompts are used instead.
+
 ## Capture wizard
 
 `CaptureWizard.ps1` writes `config\capture.json` (name, description,

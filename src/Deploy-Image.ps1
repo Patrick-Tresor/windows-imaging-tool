@@ -13,37 +13,75 @@
 param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
-    [string]$ComputerName,      # overrides the answer file's naming
-    [switch]$NoPrompt           # no countdown or confirmation, whatever the answer file's mode
+    [string]$ComputerName,      # overrides the answer file's naming (the wizard still lets the operator change it)
+    [switch]$NoPrompt           # no wizard, countdown or confirmation, whatever the answer file's mode
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
     if ([IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $Root $Path }
 }
 
-function Select-AnswerFile([string]$Root, [string]$Default, [bool]$Interactive) {
-    $files = @(Get-ChildItem -Path (Join-Path $Root 'AnswerFiles') -Filter *.xml -File | Sort-Object Name)
-    if (-not $files) { throw "No answer files in $Root\AnswerFiles." }
-    if (-not $Interactive -or $files.Count -eq 1) {
-        if ($Default) { return $Default }
-        return $files[0].BaseName
-    }
+function Get-AnswerFileNames([string]$Root) {
+    $names = @(Get-ChildItem -Path (Join-Path $Root 'AnswerFiles') -Filter *.xml -File | Sort-Object Name | ForEach-Object BaseName)
+    if (-not $names) { throw "No answer files in $Root\AnswerFiles." }
+    $names
+}
+
+function Select-AnswerFile([string[]]$Names, [string]$Default) {
+    # Console fallback when WinPE has no WinForms (media built without WinPE-NetFX).
+    if ($Names.Count -eq 1) { return $Names[0] }
     Write-Host ''
     Write-Host 'Answer files:'
-    for ($i = 0; $i -lt $files.Count; $i++) {
-        $mark = if ($files[$i].BaseName -eq $Default) { ' (default)' } else { '' }
-        Write-Host ("  {0}. {1}{2}" -f ($i + 1), $files[$i].BaseName, $mark)
+    for ($i = 0; $i -lt $Names.Count; $i++) {
+        $mark = if ($Names[$i] -eq $Default) { ' (default)' } else { '' }
+        Write-Host ("  {0}. {1}{2}" -f ($i + 1), $Names[$i], $mark)
     }
     $pick = Read-Host 'Number to deploy (Enter for the default)'
     if (-not $pick -and $Default) { return $Default }
     $n = 0
-    if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $files.Count) { return $files[$n - 1].BaseName }
+    if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $Names.Count) { return $Names[$n - 1] }
     throw "No answer file number '$pick'."
+}
+
+$script:Mounted = @{}
+function Get-DeployPlan($Root, $Answer, $Hardware) {
+    # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked.
+    foreach ($share in $Answer.Shares) {
+        if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
+        $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $Root -RelativePath $share.PasswordFile } else { $null }
+        $user = if ($share.Domain -and $share.Username) { "$($share.Domain)\$($share.Username)" } else { $share.Username }
+        Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
+        $script:Mounted[$share.LocalName] = $share.RemoteName
+    }
+
+    $imagePath = Resolve-ContentPath $Root $Answer.ImageFile
+    if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
+
+    $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
+    $driverPack = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot
+
+    # The wizard offers every application in the library, not only the answer file's.
+    $appRoot = Resolve-ContentPath $Root $Answer.AppLocation
+    $available = @(Get-ChildItem -Path $appRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName 'app.json') } | ForEach-Object Name)
+
+    $wmiValue = try { Get-WmiNamingValue -Query $Answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $Hardware.Serial }
+    if (-not $wmiValue) { $wmiValue = $Hardware.Serial }
+
+    [pscustomobject]@{
+        ImagePath     = $imagePath
+        DriverPack    = $driverPack
+        AppRoot       = $appRoot
+        AvailableApps = $available
+        WmiValue      = $wmiValue
+        DefaultName   = Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial
+    }
 }
 
 function Wait-Countdown([int]$Seconds) {
@@ -82,52 +120,61 @@ try {
     $rootSettings = Join-Path $root 'config\deploy-settings.json'
     $settings = Get-Content -Raw $(if (Test-Path $rootSettings) { $rootSettings } else { $SettingsPath }) | ConvertFrom-Json
 
-    if (-not $AnswerFile) { $AnswerFile = Select-AnswerFile -Root $root -Default $settings.defaultAnswerFile -Interactive (-not $NoPrompt) }
-    $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$AnswerFile.xml")
-    Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode))"
-
-    foreach ($share in $answer.Shares) {
-        $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $share.PasswordFile } else { $null }
-        $user = if ($share.Domain -and $share.Username) { "$($share.Domain)\$($share.Username)" } else { $share.Username }
-        Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
+    $names = Get-AnswerFileNames -Root $root
+    if (-not $AnswerFile) {
+        if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
+        elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
     }
 
-    $imagePath = Resolve-ContentPath $root $answer.ImageFile
-    if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
+    # -NoPrompt and Unattended answer files start without the wizard. A key pressed during the
+    # Unattended countdown opens the wizard instead, so the operator can change anything.
+    $answer = $null; $plan = $null; $confirmed = $false
+    if ($AnswerFile) {
+        $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$AnswerFile.xml")
+        if ($NoPrompt) { $confirmed = $true }
+        elseif ($answer.Mode -eq 'Unattended') {
+            $plan = Get-DeployPlan -Root $root -Answer $answer -Hardware $hw
+            $name = if ($ComputerName) { $ComputerName } else { $plan.DefaultName }
+            Write-Host ''
+            Get-DeploySummary -Answer $answer -Plan $plan -ComputerName $name -Disk (Get-Disk -Number $answer.DiskNumber) -Applications $answer.Applications |
+                ForEach-Object { Write-Host $_ }
+            $confirmed = Wait-Countdown $answer.UnattendDelay
+            if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
+        }
+    }
 
-    $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
-    $driverPack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot
+    if (-not $confirmed -and (Test-DeployWizardAvailable)) {
+        $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
+            -ReadAnswer { param($Name) Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$Name.xml") } `
+            -PreparePlan { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw }
+        if (-not $choice) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+        $answer = $choice.Answer; $plan = $choice.Plan; $ComputerName = $choice.ComputerName
+        $confirmed = $true
+    }
+
+    if (-not $answer) { $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$(Select-AnswerFile -Names $names -Default $settings.defaultAnswerFile).xml") }
+    if (-not $plan) { $plan = Get-DeployPlan -Root $root -Answer $answer -Hardware $hw }
+    if (-not $ComputerName) {
+        $ComputerName = $plan.DefaultName
+        if ($answer.NamingMode -eq 'Prompt' -and -not $confirmed) {
+            $typed = Read-Host "Computer name (Enter for $ComputerName)"
+            if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $plan.WmiValue -Serial $hw.Serial -Typed $typed }
+        }
+    }
+    Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName, disk $($answer.DiskNumber)"
 
     # Applications are checked now, before the disk is wiped.
-    $appRoot = Resolve-ContentPath $root $answer.AppLocation
+    $imagePath = $plan.ImagePath; $driverPack = $plan.DriverPack; $appRoot = $plan.AppRoot
     $apps = @($answer.Applications | ForEach-Object { Get-AppDefinition -AppRoot $appRoot -Name $_ })
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
 
-    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive'
-    if (-not $ComputerName) {
-        $wmiValue = try { Get-WmiNamingValue -Query $answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $hw.Serial }
-        if (-not $wmiValue) { $wmiValue = $hw.Serial }
-        $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $wmiValue -Serial $hw.Serial
-        if ($answer.NamingMode -eq 'Prompt' -and $interactive) {
-            $typed = Read-Host "Computer name (Enter for $ComputerName)"
-            if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $wmiValue -Serial $hw.Serial -Typed $typed }
-        }
-    }
-
-    $disk = Get-Disk -Number $answer.DiskNumber
-    Write-Host ''
-    Write-Host "Answer file:  $($answer.Name)"
-    Write-Host "Image:        $imagePath (index $($answer.ImageIndex))"
-    Write-Host "Drivers:      $(if ($driverPack) { $driverPack } else { 'inbox only' })"
-    Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
-    Write-Host "Name:         $ComputerName"
-    Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
-    Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
-    if (-not $NoPrompt) {
-        $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
-        if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+    if (-not $confirmed) {
+        Write-Host ''
+        Get-DeploySummary -Answer $answer -Plan $plan -ComputerName $ComputerName -Disk (Get-Disk -Number $answer.DiskNumber) -Applications $answer.Applications |
+            ForEach-Object { Write-Host $_ -ForegroundColor $(if ($_ -like 'ERASE*') { 'Red' } else { 'Gray' }) }
+        if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
     # 1. Partition: EFI, MSR, Windows, Recovery (Microsoft's recommended UEFI layout).
