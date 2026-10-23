@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployWizard.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -57,8 +57,9 @@ An answer file (`AnswerFiles\<name>.xml`) is one deployment profile. Edit it in
 the console; the format is documented in the commented
 [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
-- **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
-  (start after `unattendDelay` seconds unless a key is pressed).
+- **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
+  (start after `unattendDelay` seconds; a key pressed during the countdown opens
+  the wizard instead).
 - **image** and index, **disk** number, **drivers** root.
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
@@ -122,8 +123,15 @@ platform packs, unsupported system properties).
    enterprise driver pack into `Drivers\<Maker>\<Model>` and add a line to
    `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
-5. **Deploy**: boot the target PC from USB or PXE. The tool detects the model,
-   wipes disk 0, applies the image, injects the drivers, and reboots.
+5. **Deploy**: boot the target PC from USB or PXE. The deploy wizard opens
+   and shows the detected maker, model and serial. Pick the answer file, check
+   or change the computer name, OU and target disk, tick the applications, then
+   review the summary, tick the erase confirmation and click **Deploy**. The
+   tool applies the image, injects the drivers, and reboots.
+   `Unattended` answer files skip the wizard after their countdown, and
+   `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it entirely. If the
+   WinPE image has no WinForms (built without WinPE-NetFX), the same questions
+   are asked on the console.
 
 ## Status
 
