@@ -31,7 +31,7 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Computers', 'Reimage') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
     foreach ($file in 'driver-catalog.json', 'deploy-settings.json') {

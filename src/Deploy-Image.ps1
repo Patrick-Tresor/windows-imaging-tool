@@ -20,6 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -68,7 +69,7 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
     }
 }
 
-$root = $null; $hw = $null; $answer = $null
+$root = $null; $hw = $null; $answer = $null; $job = $null; $adapters = @()
 $status = 'FAILED'
 try {
     $hw = Get-HardwareIdentity
@@ -81,6 +82,16 @@ try {
     # Settings on the content root (edited in the console) win over the copy baked into the media.
     $rootSettings = Join-Path $root 'config\deploy-settings.json'
     $settings = Get-Content -Raw $(if (Test-Path $rootSettings) { $rootSettings } else { $SettingsPath }) | ConvertFrom-Json
+
+    # A remote reimage from the console queued a job for this PC's MAC: use its answer file without asking.
+    # Taking the job deletes it, so the next network boot of this PC does not reimage it again.
+    $adapters = @(Get-LocalMacAddresses)
+    $job = Receive-ReimageJob -ContentRoot $root -Mac @($adapters | ForEach-Object Mac)
+    if ($job) {
+        Write-DeployLog "Remote reimage requested by $($job.requestedBy) at $($job.requestedAt): answer file $($job.answerFile)"
+        $AnswerFile = $job.answerFile
+        if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
+    }
 
     if (-not $AnswerFile) { $AnswerFile = Select-AnswerFile -Root $root -Default $settings.defaultAnswerFile -Interactive (-not $NoPrompt) }
     $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$AnswerFile.xml")
@@ -105,7 +116,7 @@ try {
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
 
-    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive'
+    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive' -and -not $job
     if (-not $ComputerName) {
         $wmiValue = try { Get-WmiNamingValue -Query $answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $hw.Serial }
         if (-not $wmiValue) { $wmiValue = $hw.Serial }
@@ -126,7 +137,9 @@ try {
     Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
     Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
     if (-not $NoPrompt) {
-        $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
+        # Nobody is at a remotely reimaged PC: count down, so someone who is can still cancel.
+        $go = if ($job) { Wait-Countdown ([Math]::Max([int]$answer.UnattendDelay, 15)) }
+              elseif ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
@@ -197,6 +210,12 @@ finally {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
         Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir ("{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status)) -ErrorAction SilentlyContinue
+        # Remember this PC (MAC, IP, model) so the console can wake and reimage it later.
+        $nic = $adapters | Where-Object IP | Select-Object -First 1
+        if ($nic) {
+            try { Save-DeployedComputer -ContentRoot $root -Adapter $nic -Identity $hw -ComputerName $ComputerName -AnswerFile $AnswerFile -Result $status | Out-Null }
+            catch { Write-DeployLog "Could not update the computer list: $($_.Exception.Message)" -Level WARN }
+        }
     }
 }
 

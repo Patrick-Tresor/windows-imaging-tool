@@ -12,6 +12,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
+| **Remote reimage** (`src/Start-RemoteReimage.ps1` + `src/RemoteReimage.psm1`) | Admin workstation | Queues reimage jobs, wakes PCs with Wake-on-LAN, restarts running PCs into a one-time PXE boot. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -39,6 +40,35 @@ attaches the ISO, sets the DVD as first boot device and starts the VM. It then
 waits for the unattended capture to shut the VM down, ejects the ISO and sets
 the boot order back to the disk. The ISO is kept under `%ProgramData%` because
 Hyper-V cannot mount one from a share without delegation.
+
+## Remote reimage
+
+The pieces meet on the content root, so the admin PC and WinPE never talk directly:
+
+- `Computers\<MAC>.json`: one per PC. Written by the console (manual, CSV, or
+  read over WinRM) and by `Deploy-Image.ps1` at the end of every deploy.
+- `Reimage\<MAC>.json`: a pending job (answer file, name to keep, expiry).
+  `Deploy-Image.ps1` matches it against the MACs of its adapters with an IP
+  (`Win32_NetworkAdapterConfiguration`), then moves it to `Reimage\Started\`. The
+  move is what `Start-RemoteReimage.ps1` waits for, and it means a PC that network
+  boots again later finds no job and gets the normal deploy menu.
+
+Forcing the network boot on a running PC uses the firmware boot manager:
+`bcdedit /enum firmware` lists the firmware's boot entries, the network one is
+picked by its firmware description (PXE, IPv4, Network, NIC...; IPv4 before IPv6),
+and `bcdedit /set {fwbootmgr} bootsequence {id}` makes it the next boot only.
+bcdedit's labels are localized (`identifier` / `identificateur`), so the parser
+only reads GUIDs, dashed separators and the firmware's own descriptions.
+
+A PC that is off gets a Wake-on-LAN magic packet (6 x `FF`, then the MAC 16 times)
+on UDP port 9 (`remote.wakePort`), sent to 255.255.255.255, to its subnet's
+directed broadcast when its IP is known, and from its relay PC over WinRM when it
+has one. A PC whose firmware boots the network first goes straight to WinPE;
+otherwise Windows starts, WinRM answers and it gets the one-time PXE restart.
+
+To skip the F12 prompt only for these PCs, the PC is prestaged in WDS with
+`New-WdsClient -DeviceID <MAC> -PxePromptPolicy NoPrompt` and removed with
+`Remove-WdsClient` when its job is taken or the wait times out.
 
 ## Why the golden image is hardware-independent
 

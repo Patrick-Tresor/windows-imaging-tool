@@ -5,5 +5,10 @@
     "user": "DOMAIN\\svc-deploy",
     "passwordFile": "config\\share.cred"
   },
-  "defaultAnswerFile": "Default"
+  "defaultAnswerFile": "Default",
+  "remote": {
+    "_comment": "Remote reimaging. wakePort: UDP port for Wake-on-LAN magic packets. wdsServer: the WDS server that PCs PXE boot from, for the no-F12 option (empty = the wds.server setting, or this PC).",
+    "wakePort": 9,
+    "wdsServer": ""
+  }
 }

@@ -10,7 +10,8 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, Start-RemoteReimage.ps1, DeployCommon.psm1, AnswerFile.psm1,
+                     RemoteReimage.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -36,6 +37,8 @@ and click **Create folders** the first time. Then:
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
 - **Media**: build a USB stick, ISO or PXE `boot.wim` in one click.
+- **Remote Reimage**: the PCs on the network, by lab or room. Wake them, or
+  reimage a whole lab from here (see [Remote reimage](#remote-reimage)).
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
 - **Deployment Logs**: one log per deployed PC, with result and full text.
@@ -48,7 +51,9 @@ Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad 
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
-Logs\          one log per deployed PC or capture
+Logs\          one log per deployed PC, capture or remote reimage
+Computers\     one .json per PC that can be reimaged remotely (MAC, name, group)
+Reimage\       pending remote reimage jobs, and Started\ for the ones WinPE picked up
 ```
 
 ## Answer files
@@ -96,6 +101,59 @@ options. SmartDeploy encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
 rebuild as folders, and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
+
+## Remote reimage
+
+The **Remote Reimage** tab reimages PCs without anyone walking to them, for
+example a whole lab overnight. It needs PXE (WDS) and the network share in Deploy
+Settings, since the PCs boot WinPE from the network.
+
+**The computer list.** Every PC deployed by this tool is added with its MAC, IP,
+model and last result. Add other PCs with **Save PC** (leave MAC empty to read it
+from a PC that is on), **Import CSV...** (columns `Name`, `MAC`, and optionally
+`Address`, `Group`, `Relay`; commas or semicolons), or select PCs and click
+**Read from PCs**. **Group** is a lab or room, and the list filters by it.
+
+**Reimage...** asks for confirmation, then opens a window that, for each selected PC:
+
+1. Queues a job (`Reimage\<MAC>.json`) with the chosen answer file and, if **Keep
+   each PC's name** is ticked, the PC's current name.
+2. If **Boot without F12** is ticked, prestages the PC in WDS with no PXE prompt,
+   so it boots straight into WinPE. Other PCs keep the server's prompt. The
+   prestage is removed again once the PC's deploy starts.
+3. **PC on:** connects with PowerShell remoting, sets the firmware's next boot (once
+   only) to the network entry with `bcdedit /set {fwbootmgr} bootsequence`, and
+   restarts it after a 60 second warning to anyone logged on.
+   **PC off:** sends Wake-on-LAN. A PC that boots from the network first goes
+   straight to WinPE. One that starts Windows instead is restarted into PXE as soon
+   as it answers.
+4. In WinPE, `Deploy-Image.ps1` finds the job by the PC's MAC, uses its answer file
+   without the menu or the YES prompt (it still counts down at least 15 seconds,
+   so someone at the PC can cancel), and deletes the job so the next network boot
+   does not reimage the PC again. Jobs expire after 12 hours.
+
+The window waits up to 20 minutes and then lists each PC as started or failed,
+with the reason. That summary is saved as a `REIMAGE_...` log on the Deployment
+Logs tab. **Cancel reimage** deletes the selected PCs' jobs (a deploy already running
+is not stopped). **Wake** only sends Wake-on-LAN.
+
+What the PCs need:
+
+- **BIOS:** Wake-on-LAN on, the UEFI network stack (PXE) on, and for Dell "Deep
+  Sleep Control" off, or Wake-on-LAN does not work from shutdown. UEFI only: a
+  legacy BIOS PC can only be reimaged this way if network boot is first in its
+  boot order.
+- **Windows:** PowerShell remoting (WinRM, on by default on domain PCs with the
+  usual GPO) and your account as administrator. The console tells you which PCs
+  answer with **Check online**.
+- **Network:** a Wake-on-LAN packet is a broadcast, and routers drop it unless
+  directed broadcasts are allowed for that subnet. The console sends it both to
+  the local broadcast and to the PC's subnet broadcast. If the lab is on another
+  VLAN that blocks it, set a **Relay**: a PC (or server) in that subnet that is
+  usually on; it sends the packet locally for the others.
+- **WDS** for the no-F12 option: you must be an administrator on the WDS server,
+  set as **WDS server** on the tab (empty = this PC). From the command line:
+  `.\src\Start-RemoteReimage.ps1 -ContentRoot \\server\Deploy -Mac 00155D0A1B2C,00155D0A1B2D -AnswerFile Lab-W11 -KeepNames -SkipPxePrompt`
 
 ## Workflow
 
