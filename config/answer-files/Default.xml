@@ -14,6 +14,9 @@
   <image>
     <file>Images\Win11-Enterprise.wim</file>
     <index>1</index>
+    <!-- Windows 11 images only: check TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the
+         disk is wiped. Block: stop on a PC that fails. Warn: show the problems and carry on. Off: skip. -->
+    <windows11Check>Block</windows11Check>
   </image>
 
   <disk>

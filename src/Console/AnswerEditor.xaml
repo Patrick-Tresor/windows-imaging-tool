@@ -119,7 +119,7 @@
         <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned."/>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Label Content="Image"/>
           <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
           <Label Grid.Row="1" Content="Edition (index)"/>
@@ -132,6 +132,13 @@
           </ComboBox>
           <Label Grid.Row="4" Content="Driver library folder"/>
           <TextBox x:Name="TxtDrivers" Grid.Row="4" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
+          <Label Grid.Row="5" Content="Windows 11 check"/>
+          <ComboBox x:Name="CmbWin11Check" Grid.Row="5" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
+                    ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
+            <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
+            <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>
+            <ComboBoxItem Content="Off: do not check"/>
+          </ComboBox>
         </Grid>
       </StackPanel>
 
