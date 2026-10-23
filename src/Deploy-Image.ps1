@@ -3,8 +3,8 @@
     Deploys a Windows image to this PC from WinPE, driven by an answer file, and injects the matching OEM drivers.
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
-    deploy-settings.json (LAN or PXE boot). Reads an answer file from <content root>\AnswerFiles: image,
-    applications, disk, regional settings, naming, domain join, tasks and extra shares.
+    deploy-settings.json (LAN or PXE boot), where the image can come by WDS multicast. Reads an answer file
+    from <content root>\AnswerFiles: image, applications, disk, regional settings, naming, domain join, tasks and extra shares.
     Wipes the target disk. UEFI/GPT only.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
@@ -152,10 +152,26 @@ exit
 "@ | Set-Content -Path $dp -Encoding ascii
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
-    # 2. Apply the image. Split images (.swm) need /SWMFile.
-    $applyArgs = @('/Apply-Image', "/ImageFile:$imagePath", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
-    if ($imagePath -like '*.swm') { $applyArgs += "/SWMFile:$($imagePath -replace '\.swm$', '*.swm')" }
+    # 2. Apply the image. With multicast on, a room of PCs downloads it together onto the new Windows
+    #    partition first (WDS sends it once for all of them), then applies it from there.
+    $applyFrom = $imagePath
+    $mcPlan = Get-MulticastPlan -Settings $settings -ContentRoot $root -ImagePath $imagePath -IsNetworkRoot ($root -eq 'Z:\')
+    if ($mcPlan) {
+        try {
+            $cred = Get-ShareCredential -SettingsPath $SettingsPath
+            $applyFrom = Receive-MulticastImage -Plan $mcPlan -Destination (Join-Path 'W:\_Multicast' (Split-Path $imagePath -Leaf)) -User $cred.User -Password $cred.Password
+        }
+        catch {
+            if (-not $mcPlan.Fallback) { throw "Multicast download failed: $($_.Exception.Message)" }
+            Write-DeployLog "Multicast download failed, applying from the share instead: $($_.Exception.Message)" -Level WARN
+            Remove-Item 'W:\_Multicast' -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # Split images (.swm) need /SWMFile.
+    $applyArgs = @('/Apply-Image', "/ImageFile:$applyFrom", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
+    if ($applyFrom -like '*.swm') { $applyArgs += "/SWMFile:$($applyFrom -replace '\.swm$', '*.swm')" }
     Invoke-Native -FilePath 'dism.exe' -ArgumentList $applyArgs
+    if ($applyFrom -ne $imagePath) { Remove-Item 'W:\_Multicast' -Recurse -Force }
 
     # 3. Inject the OEM driver pack offline.
     if ($driverPack) {

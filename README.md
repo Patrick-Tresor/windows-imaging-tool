@@ -10,7 +10,8 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
+                     DeployCommon.psm1, AnswerFile.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -127,6 +128,51 @@ PXE-booted PCs find the content root through the network share in Deploy Setting
 the same as an ISO boot. From the command line:
 `.\src\Publish-WdsBootImage.ps1 -BootWim C:\WinPE\boot.wim -Server wds01 -Setup -RemoteInstallPath D:\RemoteInstall`
 publishes an existing `boot.wim`, and `-Status` only reports the server's state.
+
+## Multicast: a room at once
+
+When a whole room deploys from the network, each PC normally copies its own
+copy of the image, so 30 PCs pull it 30 times. With multicast, WDS sends it once
+and every PC in the session receives it together. Set it up on the
+**Multicast** tab and click **Save and set up session**:
+
+- **WDS server**: the transport server PCs ask. Empty uses the WDS box on the
+  Media tab, or else the server in the network share path. WDS must already be
+  set up (publish the boot image once with **Set up WDS if needed**).
+- **Content folder on server**: multicast serves a folder on the WDS server, so
+  the content root must live there. Empty finds it from the network share in
+  Deploy Settings (`\\wds01\Deploy` becomes the folder behind the `Deploy` share).
+  Images are served straight from `Images\`; nothing is imported into WDS.
+- **Session type**: *start as soon as a PC asks* (PCs that join late catch up on
+  what they missed), or *wait for the room*: start when N PCs have joined or at a
+  set time, whichever comes first. **Start now** starts a waiting session early.
+- **Slow PCs**: everyone at the slowest PC's speed, a second slower stream for
+  slow PCs, or drop PCs below a speed (they then copy from the share).
+- **If multicast fails, copy the image from the share**: on by default, so a PC
+  that can't join (no `wdsmcast.exe`, firewall, switch dropping multicast) still
+  deploys, only slower.
+- **Room monitor**: every PC receiving the image, slowest first, with a progress
+  bar, IP and MAC address, how long it has been connected and the session speed,
+  plus a summary line (PCs, average progress, how many are done, the slowest).
+  **Refresh** reads it once; tick **Refresh every 10 seconds** to watch the room.
+  **Disconnect selected PC** drops one PC that holds the room back; with fallback
+  on, it copies the image from the share instead. PCs show their WinPE name
+  (`MININT-...`), so match them by address. **Remove session** stops it all.
+
+A PC booted from PXE, an ISO or a small USB stick (network share mode) partitions
+its disk, downloads the image by multicast onto its new Windows partition with
+`wdsmcast.exe` (part of WinPE), applies it from there and deletes the download.
+USB sticks that carry the images, split `.swm` images and images outside the
+content root are copied as before. WinPE reads these settings from the content
+root, so there is nothing to rebuild. For a room, pair it with an unattended
+answer file so no PC waits at a prompt.
+
+The network must pass multicast between the WDS server and the PCs: same VLAN, or
+multicast routing between them, and IGMP snooping on the switches so the stream
+doesn't flood every port. From the command line:
+`.\src\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream`,
+then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
+`-Action Start`, `-Action Disconnect -ClientId <Id from Monitor>` or `-Action Remove`.
 
 ## Workflow
 

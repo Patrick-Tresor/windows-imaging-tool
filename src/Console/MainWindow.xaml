@@ -226,6 +226,101 @@
         </ScrollViewer>
       </TabItem>
 
+      <!-- Multicast -->
+      <TabItem Header="Multicast">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Multicast: image a room of PCs at once"/>
+            <TextBlock Style="{StaticResource Hint}" Text="WDS sends the image once over the network and every PC in the session receives it together, instead of each PC copying its own. PCs booted from PXE, ISO or a small USB stick (network share mode) use it; USB sticks that carry the images do not. The content root must be on the WDS server. WinPE reads these settings from the content root, so no media rebuild is needed."/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+              </Grid.RowDefinitions>
+
+              <Label Content="Use multicast"/>
+              <StackPanel Grid.Column="1">
+                <CheckBox x:Name="ChkMcEnabled" Content="PCs download the image by multicast" Margin="0,2"/>
+                <CheckBox x:Name="ChkMcFallback" Content="If multicast fails, copy the image from the share instead" Margin="0,2"/>
+              </StackPanel>
+
+              <Label Grid.Row="2" Content="WDS server"/>
+              <TextBox x:Name="TxtMcServer" Grid.Row="2" Grid.Column="1" ToolTip="Empty: the server on the Media tab's WDS box, or else the server in the network share path. PCs need a name here, so set it when the console runs on the WDS server itself."/>
+
+              <Label Grid.Row="4" Content="Session name"/>
+              <TextBox x:Name="TxtMcNamespace" Grid.Row="4" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="The multicast namespace PCs ask WDS for."/>
+
+              <Label Grid.Row="6" Content="Content folder on server"/>
+              <TextBox x:Name="TxtMcContentPath" Grid.Row="6" Grid.Column="1" ToolTip="The content root as a folder on the WDS server, for example D:\Deploy. Empty: the folder behind the network share in Deploy Settings."/>
+
+              <Label Grid.Row="8" Content="Session type"/>
+              <StackPanel Grid.Row="8" Grid.Column="1">
+                <RadioButton x:Name="RbMcAuto" GroupName="McType" Content="Start as soon as a PC asks (PCs that join late catch up)" Margin="0,2"/>
+                <RadioButton x:Name="RbMcScheduled" GroupName="McType" Content="Wait for the room: start when enough PCs have joined or at a set time" Margin="0,2"/>
+              </StackPanel>
+
+              <Label Grid.Row="10" Content="Wait for"/>
+              <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" IsEnabled="{Binding IsChecked, ElementName=RbMcScheduled}">
+                <TextBox x:Name="TxtMcClients" Width="60" ToolTip="0: no PC count, use the start time or Start now."/>
+                <Label Content="PCs, or start at"/>
+                <TextBox x:Name="TxtMcStartTime" Width="140" ToolTip="yyyy-MM-dd HH:mm, server time. Empty: no start time."/>
+                <Label Content="(yyyy-MM-dd HH:mm)"/>
+              </StackPanel>
+
+              <Label Grid.Row="12" Content="Slow PCs"/>
+              <StackPanel Grid.Row="12" Grid.Column="1">
+                <RadioButton x:Name="RbMcSpeedNone" GroupName="McSpeed" Content="Everyone goes at the slowest PC's speed" Margin="0,2"/>
+                <RadioButton x:Name="RbMcSpeedMulti" GroupName="McSpeed" Content="Put slow PCs in a second, slower stream" Margin="0,2"/>
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton x:Name="RbMcSpeedDrop" GroupName="McSpeed" Content="Drop PCs slower than" Margin="0,2" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TxtMcThreshold" Width="70" Margin="6,0" IsEnabled="{Binding IsChecked, ElementName=RbMcSpeedDrop}"/>
+                  <Label Content="KB/s (they copy from the share instead)"/>
+                </StackPanel>
+              </StackPanel>
+
+              <Label Grid.Row="14" Content="Server answer"/>
+              <TextBox x:Name="TxtMcStatus" Grid.Row="14" Grid.Column="1" Height="60" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"
+                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+              <Button x:Name="BtnMcSave" Content="Save and set up session" Style="{StaticResource Primary}"
+                      ToolTip="Saves the settings and creates the session on the WDS server, replacing one with the same name."/>
+              <Button x:Name="BtnMcStart" Content="Start now" ToolTip="Starts a waiting session without waiting for more PCs."/>
+              <Button x:Name="BtnMcRemove" Content="Remove session"/>
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Room monitor" Margin="0,24,0,4"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Every PC receiving the image from the session, slowest first. PCs show their WinPE name (MININT-...); match them by IP or MAC address. Disconnecting a PC stops its multicast download; with fallback on it then copies the image from the share."/>
+            <TextBlock x:Name="TxtMcSummary" FontWeight="SemiBold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <DataGrid x:Name="GridMcClients" Height="220" IsReadOnly="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="PC" Binding="{Binding Name}" Width="140"/>
+                <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="230"/>
+                <DataGridTemplateColumn Header="Progress" Width="200">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid>
+                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="16"/>
+                        <TextBlock Text="{Binding Progress}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                      </Grid>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Image" Binding="{Binding File}" Width="*"/>
+                <DataGridTextColumn Header="Joined" Binding="{Binding Joined}" Width="90"/>
+                <DataGridTextColumn Header="Session speed" Binding="{Binding Speed}" Width="110"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+              <Button x:Name="BtnMcStatus" Content="Refresh" ToolTip="Reads the session and its PCs from the WDS server."/>
+              <Button x:Name="BtnMcDisconnect" Content="Disconnect selected PC"/>
+              <CheckBox x:Name="ChkMcAutoRefresh" Content="Refresh every 10 seconds" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
       <!-- Answer files -->
       <TabItem Header="Answer Files">
         <DockPanel>
