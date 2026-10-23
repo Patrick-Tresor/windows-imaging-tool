@@ -10,8 +10,9 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
-src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
+                     New-DeploymentMedia.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1
+src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, DriverDownloader.ps1, *.xaml,
+                     ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs)
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
@@ -32,9 +33,12 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks and Network shares. Passwords are typed into password
   boxes and saved to their own files.
-- **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
-  model, edit how PCs are matched (SKU, machine type, model, pattern), and see
-  which entries are missing drivers.
+- **Driver Library**: **Download from vendor...** lists every model in the Dell,
+  HP or Lenovo driver pack catalog for Windows 10 or 11; tick the models you
+  deploy and it downloads, checks, extracts and registers their packs, and shows
+  which ones have a newer pack. You can also import a pack you already have
+  (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
+  pattern), and see which entries are missing drivers.
 - **Media**: build a USB stick, ISO or PXE `boot.wim` in one click.
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
@@ -118,9 +122,11 @@ platform packs, unsupported system properties).
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
-4. **Add drivers** in the console's Driver Library tab, or extract each vendor's
-   enterprise driver pack into `Drivers\<Maker>\<Model>` and add a line to
-   `driver-catalog.json` by hand.
+4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
+   or from the command line:
+   `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
+   (drop `-List` to download). You can also extract a pack into
+   `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
 5. **Deploy**: boot the target PC from USB or PXE. The tool detects the model,
    wipes disk 0, applies the image, injects the drivers, and reboots.

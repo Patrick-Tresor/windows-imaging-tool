@@ -107,11 +107,37 @@ by the deploy and the console.
 
 ## Driver packs
 
-Download the official enterprise packs: Dell "Driver Packs for Enterprise Client
-OS Deployment" (CAB), HP "SoftPaq Driver Packs" (EXE extracts to INF), Lenovo
-"SCCM Driver Packs". Extract them to `Drivers\<Maker>\<Model>\`. A later step can
-automate this from each vendor's catalog XML (Dell `DriverPackCatalog.cab`,
-HP `HPClientDriverPackCatalog.cab`, Lenovo `catalogv2.xml`).
+The driver pack builder (`src/Console/DriverPacks.psm1`, the console's
+**Download from vendor...** window, and `src/Get-DriverPacks.ps1`) uses each
+vendor's public catalog of enterprise driver packs:
+
+| Maker | Catalog | Pack | Matched by |
+|---|---|---|---|
+| Dell | `downloads.dell.com/catalog/DriverPackCatalog.cab` | .cab or self-extracting .exe (`/s /e=<dir>`) | system ID = `SystemSKU` |
+| HP | `hpia.hpcloud.hp.com/downloads/driverpackcatalog/HPClientDriverPackCatalog.cab` | SoftPaq .exe (`/s /e /f <dir>`) | platform ID = baseboard product |
+| Lenovo | `download.lenovo.com/cdrt/td/catalogv2.xml` | SCCM pack .exe (`/VERYSILENT /DIR=<dir> /EXTRACT=YES`) | machine type |
+
+Catalogs are cached for a day in `%LOCALAPPDATA%\ImagingConsole\VendorCatalogs`.
+For each model and OS only the newest x64 pack is offered (highest Windows
+release, then newest date; Dell WinPE packs are skipped). Installing a pack:
+
+1. Downloads it with BITS (Invoke-WebRequest as a fallback) to a `.part` file.
+2. Checks the catalog's SHA256 (or MD5 for older Dell and HP entries). Lenovo
+   lists a hash only for some packs; when there is none, only the signature is checked.
+3. Runs a vendor .exe only if it has a valid Authenticode signature from that vendor.
+4. Extracts to `Drivers\<Maker>\<Model>.new`, checks it has .inf files, then
+   replaces the old folder, so a failed update keeps the drivers you had.
+5. Writes `pack.json` (vendor, OS, release, version, URL) in the folder; the
+   window uses it to show what is installed and which models have a newer pack.
+6. Adds catalog entries for every SKU or machine type the pack covers plus its
+   model name, at the top of `driver-catalog.json`, replacing older entries
+   with the same key.
+
+The downloads run in their own PowerShell window (`Get-DriverPacks.ps1
+-JobFile`), like media builds, so the console stays usable.
+
+Packs can still be added by hand: extract one to `Drivers\<Maker>\<Model>\`
+and import it from the Driver Library tab.
 
 ## Not in v1
 

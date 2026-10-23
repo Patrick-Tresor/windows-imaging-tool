@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModelList>
+  <Model name="ThinkPad T14 Gen 4 (Type 21HD, 21HE)">
+    <Types><Type>21HD</Type><Type>21HE</Type></Types>
+    <SCCM os="win11" version="22H2" date="2023-06-27">https://download.lenovo.com/pccbbs/mobiles/tp_t14_mt21hd-21he_w1122h2_202306.exe</SCCM>
+    <SCCM os="win11" version="24H2" date="2026-04-02" crc="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc">https://download.lenovo.com/pccbbs/mobiles/tp_t14_mt21hd-21he_w1124h2_202604.exe</SCCM>
+    <SCCM os="win10" version="22H2" date="2024-01-15">https://download.lenovo.com/pccbbs/mobiles/tp_t14_mt21hd-21he_w1022h2_202401.exe</SCCM>
+    <BIOS image="r2kuj23w">https://download.lenovo.com/pccbbs/mobiles/r2kuj23w.exe</BIOS>
+  </Model>
+  <Model name="ThinkCentre M70q Gen 4 (Type 12E3, 12E4)">
+    <Types><Type>12E3</Type><Type>12E4</Type></Types>
+    <SCCM os="win11" version="23H2" date="2025-09-09">https://download.lenovo.com/pccbbs/thinkcentre_drivers/m70q4_w1123h2_202509.exe</SCCM>
+  </Model>
+</ModelList>
