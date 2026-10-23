@@ -136,6 +136,7 @@
             <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
             <Button x:Name="BtnDriversOpen" Content="Open folder"/>
             <Button x:Name="BtnDriversDownload" Content="Download from vendor..." ToolTip="Pick Dell, HP or Lenovo models and download their driver packs from the vendor catalog"/>
+            <Button x:Name="BtnDriversUnknown" Content="Unknown models..." ToolTip="Deployed PCs that got no driver pack, with the vendor pack for each model"/>
           </StackPanel>
 
           <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
