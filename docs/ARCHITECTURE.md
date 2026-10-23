@@ -87,14 +87,24 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
    cached copy after use, and FirstBoot.ps1 deletes it.
-7. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
-   `firstboot.json`, and write `SetupComplete.cmd` to run it.
+7. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
+   model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
+   and `firstboot.json`, and write `SetupComplete.cmd` to run it.
 8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
 9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then reboot or shut down.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
-applications in order, applies the options, runs FIRSTBOOT tasks and removes
-`C:\Deploy`.
+applications in order through `Invoke-AppInstall` (detect, skip if present, run
+with a timeout, check exit code, detect again), writes the results to
+`C:\Windows\Temp\FirstBoot-apps.json`, applies the options, runs FIRSTBOOT tasks
+and removes `C:\Deploy`.
+
+`AppPack.psm1` holds the application pack format: reading and normalizing
+`app.json`, validation, installer inspection (MSI properties through the Windows
+Installer COM object, MSIX manifests, framework markers in .exe files), silent
+switch suggestions, templates (`config\app-templates.json`), export and import as
+.zip, maker and model requirements, and detection rules. The console's builder is
+`src/Console/AppPackEditor.ps1` + `.xaml`.
 
 The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through

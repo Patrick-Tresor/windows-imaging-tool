@@ -24,86 +24,6 @@ function Get-XamlControls($Xaml, $Window) {
     $map
 }
 
-function Show-NewApplicationDialog {
-    # Small dialog: name, installer (file or folder) and silent install command. Returns the new app name or $null.
-    param([Parameter(Mandatory)]$Owner, [Parameter(Mandatory)][string]$ContentRoot)
-    [xml]$dx = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="New application" Width="620" SizeToContent="Height" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13">
-  <StackPanel Margin="20">
-    <TextBlock TextWrapping="Wrap" Foreground="#5B6170" Margin="0,0,0,12"
-               Text="The installer is copied to the content root's Applications folder. The command must install silently: it runs as SYSTEM with nobody to click through it."/>
-    <Grid>
-      <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-      <Label Content="Name"/>
-      <TextBox x:Name="TxtAppName" Grid.Column="1" Grid.ColumnSpan="2" Padding="4,3"/>
-      <Label Grid.Row="2" Content="Installer"/>
-      <TextBox x:Name="TxtAppSource" Grid.Row="2" Grid.Column="1" Padding="4,3"/>
-      <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal">
-        <Button x:Name="BtnAppFile" Content="File..." Margin="8,0,0,0" Padding="10,3"/>
-        <Button x:Name="BtnAppFolder" Content="Folder..." Margin="8,0,0,0" Padding="10,3"/>
-      </StackPanel>
-      <Label Grid.Row="4" Content="Install command"/>
-      <TextBox x:Name="TxtAppCommand" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Padding="4,3" FontFamily="Consolas"/>
-      <Label Grid.Row="6" Content="Success codes"/>
-      <TextBox x:Name="TxtAppCodes" Grid.Row="6" Grid.Column="1" Text="0, 3010" Width="160" HorizontalAlignment="Left" Padding="4,3"/>
-    </Grid>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-      <Button x:Name="BtnAppOk" Content="Create" Padding="14,5" Margin="0,0,8,0" MinWidth="80" Background="#0F6CBD" Foreground="White"/>
-      <Button x:Name="BtnAppCancel" Content="Cancel" Padding="14,5" MinWidth="80"/>
-    </StackPanel>
-  </StackPanel>
-</Window>
-'@
-    $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($dx))
-    $dlg.Owner = $Owner
-    $d = Get-XamlControls $dx $dlg
-    $created = @{ Name = $null }
-
-    $suggest = {
-        # Fill in the usual silent switches for the installer type; the admin can change them.
-        $leaf = Split-Path $d.TxtAppSource.Text -Leaf
-        if (-not $d.TxtAppName.Text) { $d.TxtAppName.Text = ([IO.Path]::GetFileNameWithoutExtension($leaf) -replace '[^A-Za-z0-9._-]', '-') }
-        if (-not $d.TxtAppCommand.Text) {
-            $d.TxtAppCommand.Text = switch -Wildcard ($leaf) {
-                '*.msi'  { "msiexec /i `"$leaf`" /qn /norestart" }
-                '*.msix' { "powershell -NoProfile -Command Add-AppxProvisionedPackage -Online -PackagePath '$leaf' -SkipLicense" }
-                '*.exe'  { "`"$leaf`" /S" }
-                '*.ps1'  { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$leaf`"" }
-                default  { '' }
-            }
-        }
-    }
-    $d.BtnAppFile.Add_Click({
-        $f = [Microsoft.Win32.OpenFileDialog]::new()
-        $f.Filter = 'Installers (*.msi;*.exe;*.msix;*.ps1;*.cmd;*.bat)|*.msi;*.exe;*.msix;*.ps1;*.cmd;*.bat|All files (*.*)|*.*'
-        if ($f.ShowDialog($dlg)) { $d.TxtAppSource.Text = $f.FileName; & $suggest }
-    })
-    $d.BtnAppFolder.Add_Click({
-        $f = [Windows.Forms.FolderBrowserDialog]::new()
-        $f.Description = 'Folder with the installer and its files'
-        if ($f.ShowDialog() -eq 'OK') { $d.TxtAppSource.Text = $f.SelectedPath; & $suggest }
-    })
-    $d.BtnAppCancel.Add_Click({ $dlg.Close() })
-    $d.BtnAppOk.Add_Click({
-        try {
-            $codes = @($d.TxtAppCodes.Text -split '[,; ]+' | Where-Object { $_ } | ForEach-Object { [int]$_ })
-            if (-not $d.TxtAppCommand.Text.Trim()) { throw 'Enter the silent install command.' }
-            New-Application -ContentRoot $ContentRoot -Name $d.TxtAppName.Text.Trim() -Source $d.TxtAppSource.Text.Trim() `
-                -Command $d.TxtAppCommand.Text.Trim() -SuccessCodes $codes | Out-Null
-            $created.Name = $d.TxtAppName.Text.Trim()
-            $dlg.Close()
-        } catch {
-            [Windows.MessageBox]::Show($dlg, $_.Exception.Message, 'New application', 'OK', 'Warning') | Out-Null
-        }
-    })
-    [void]$dlg.ShowDialog()
-    $created.Name
-}
-
 function Show-AnswerEditor {
     <#
     .SYNOPSIS
@@ -231,8 +151,13 @@ function Show-AnswerEditor {
     $e.BtnAppUp.Add_Click({ $i = $e.LstSelected.SelectedIndex; if ($i -gt 0) { $selected.Move($i, $i - 1); $e.LstSelected.SelectedIndex = $i - 1 } })
     $e.BtnAppDown.Add_Click({ $i = $e.LstSelected.SelectedIndex; if ($i -ge 0 -and $i -lt $selected.Count - 1) { $selected.Move($i, $i + 1); $e.LstSelected.SelectedIndex = $i + 1 } })
     $e.BtnNewApp.Add_Click({
-        $name = Show-NewApplicationDialog -Owner $win -ContentRoot $ContentRoot
-        if ($name) { $selected.Add($name); & $refreshAvailable }
+        # With a missing app selected in the install order (e.g. from a SmartDeploy import), build that one.
+        $sel = $e.LstSelected.SelectedItem
+        $missing = if ($sel -and -not (Test-Path (Join-Path $ContentRoot "Applications\$sel\app.json"))) { $sel }
+        $name = if ($missing) { Show-AppPackEditor -Owner $win -ContentRoot $ContentRoot -SuggestedName $missing }
+                else { Show-AppPackEditor -Owner $win -ContentRoot $ContentRoot }
+        if ($name -and $selected -notcontains $name) { $selected.Add($name) }
+        if ($name) { & $refreshAvailable }
     })
 
     # Tasks

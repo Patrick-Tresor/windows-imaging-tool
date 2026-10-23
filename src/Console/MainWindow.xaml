@@ -219,6 +219,39 @@
         </DockPanel>
       </TabItem>
 
+      <!-- Applications -->
+      <TabItem Header="Applications">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnAppEdit" Content="Edit"/>
+            <Button x:Name="BtnAppTest" Content="Test detection"/>
+            <Button x:Name="BtnAppExport" Content="Export..."/>
+            <Button x:Name="BtnAppImport" Content="Import..."/>
+            <Button x:Name="BtnAppDelete" Content="Delete"/>
+            <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
+            <Button x:Name="BtnAppsOpen" Content="Open folder"/>
+          </StackPanel>
+          <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+          <DataGrid x:Name="GridApps" IsReadOnly="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+              <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="90"/>
+              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
+              <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
+              <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
+              <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
       <!-- Settings -->
       <TabItem Header="Deploy Settings">
         <ScrollViewer VerticalScrollBarVisibility="Auto">

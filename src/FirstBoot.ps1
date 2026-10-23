@@ -13,13 +13,21 @@ $deployDir = $PSScriptRoot
 $plan = Get-Content -Raw (Join-Path $deployDir 'firstboot.json') | ConvertFrom-Json
 Write-Log "First boot for answer file $($plan.answerFile)"
 
-foreach ($app in $plan.applications) {
+# Each app is skipped when its detection rules find it already installed, and checked again after it runs.
+Import-Module (Join-Path $deployDir 'AppPack.psm1') -Force
+$appResults = @()
+foreach ($plain in $plan.applications) {
+    $app = ConvertTo-AppDefinition -Name $plain.name -Json $plain
     $dir = Join-Path $deployDir "Apps\$($app.name)"
-    Write-Log "Installing $($app.name): $($app.command)"
-    $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($app.command)" -WorkingDirectory $dir -Wait -PassThru -WindowStyle Hidden
-    if ($app.successCodes -contains $p.ExitCode) { Write-Log "  $($app.name) OK (exit $($p.ExitCode))" }
-    else { Write-Log "  $($app.name) FAILED (exit $($p.ExitCode))" }
+    Write-Log "Installing $($app.name)"
+    $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -Log { param($m) Write-Log $m } }
+         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+    $level = if ($r.Status -in 'Installed', 'AlreadyInstalled') { 'OK' } else { 'FAILED' }
+    Write-Log "  $($app.name) $level ($($r.Status)): $($r.Message)"
+    $appResults += [pscustomobject]@{ name = $app.name; status = $r.Status; exitCode = $r.ExitCode; rebootNeeded = $r.RebootNeeded; message = $r.Message }
 }
+# Kept after C:\Deploy is removed, for whoever checks the PC (and the deployment dashboard).
+$appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
 if ($plan.disableSystemRestore) {
     Disable-ComputerRestore -Drive "$env:SystemDrive\"
