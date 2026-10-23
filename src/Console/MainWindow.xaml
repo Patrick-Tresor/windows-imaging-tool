@@ -230,6 +230,7 @@
               <Grid.RowDefinitions>
                 <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
                 <RowDefinition Height="20"/><RowDefinition/>
+                <RowDefinition Height="20"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -242,6 +243,22 @@
               <Label Grid.Row="8" Content="Status share (optional)"/>
               <TextBox x:Name="TxtReportPath" Grid.Row="8" Grid.Column="1"
                        ToolTip="Where PCs report progress for the Dashboard. Empty: the content root's Status folder. Set a \\server\share\Status path so USB deployments report to a server too. Rebuild media after changing it."/>
+              <Label Grid.Row="10" Content="Post-deploy checks"/>
+              <CheckBox x:Name="ChkChecksEnabled" Grid.Row="10" Grid.Column="1" VerticalAlignment="Center"
+                        Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and report pass/fail to the Dashboard"/>
+              <Label Grid.Row="12" Content="BitLocker check"/>
+              <ComboBox x:Name="CmbCheckBitLocker" Grid.Row="12" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+                        ToolTip="Auto: required when the answer file turns BitLocker on, otherwise only reported. Report: a warning, never a failure.">
+                <ComboBoxItem Content="Auto"/><ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
+              </ComboBox>
+              <Label Grid.Row="14" Content="Device driver check"/>
+              <ComboBox x:Name="CmbCheckDevices" Grid.Row="14" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+                        ToolTip="Any device with an error in Device Manager (no driver, cannot start). Disabled devices are ignored.">
+                <ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
+              </ComboBox>
+              <Label Grid.Row="16" Content="Ignore devices"/>
+              <TextBox x:Name="TxtCheckIgnore" Grid.Row="16" Grid.Column="1"
+                       ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
@@ -255,7 +272,7 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Checks column shows the result, and the details below show each check. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it."/>
             <UniformGrid Rows="1" Margin="0,0,0,12">
               <UniformGrid.Resources>
                 <Style TargetType="Border">
@@ -320,6 +337,18 @@
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Step" Binding="{Binding Step}" Width="2*"/>
+                <DataGridTextColumn Header="Checks" Binding="{Binding Checks}" Width="1.5*">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="ToolTip" Value="{Binding Checks}"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Failed"><Setter Property="Foreground" Value="#B91C1C"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Warning"><Setter Property="Foreground" Value="#B45309"/></DataTrigger>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Passed"><Setter Property="Foreground" Value="#15803D"/></DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Started" Binding="{Binding Started, StringFormat=MM-dd HH:mm}" Width="85"/>
                 <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70"/>
                 <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="70"/>

@@ -3,7 +3,9 @@
     Runs once on the deployed PC, as SYSTEM, from SetupComplete.cmd before anyone logs on.
 .DESCRIPTION
     Deploy-Image.ps1 copies this to C:\Deploy with firstboot.json and the answer file's applications.
-    Installs the applications in order, applies options, runs FIRSTBOOT tasks, then removes C:\Deploy.
+    Installs the applications in order, applies options, runs FIRSTBOOT tasks, runs the post-deploy checks
+    (PostDeployChecks.psm1), then removes C:\Deploy. The checks and their state stay in C:\ProgramData\ImagingTool,
+    where Test-Deployment.ps1 can run them again later.
     When firstboot.json has a status folder, reports progress to the console's dashboard from 90 to 100 %.
     That folder is a UNC path written as the computer account (SYSTEM), so the share must let Domain Computers
     write to it; if it cannot be reached the deployment still finishes and the dashboard shows it as Stalled.
@@ -32,6 +34,7 @@ function Set-Progress([string]$Step, [int]$Percent, [string]$Warning) {
 Set-Progress 'First boot: starting' 91
 $total = @($plan.applications).Count
 $n = 0
+$appResults = @()
 
 foreach ($app in $plan.applications) {
     $dir = Join-Path $deployDir "Apps\$($app.name)"
@@ -39,6 +42,7 @@ foreach ($app in $plan.applications) {
     Write-Log "Installing $($app.name): $($app.command)"
     Set-Progress "Installing $($app.name) ($n of $total)" (91 + [int](7 * ($n - 1) / [Math]::Max(1, $total)))
     $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($app.command)" -WorkingDirectory $dir -Wait -PassThru -WindowStyle Hidden
+    $appResults += [pscustomobject]@{ name = $app.name; exitCode = $p.ExitCode; ok = $app.successCodes -contains $p.ExitCode }
     if ($app.successCodes -contains $p.ExitCode) { Write-Log "  $($app.name) OK (exit $($p.ExitCode))" }
     else {
         Write-Log "  $($app.name) FAILED (exit $($p.ExitCode))"
@@ -60,6 +64,28 @@ foreach ($cmd in $plan.tasks) {
     Write-Log "FIRSTBOOT task: $cmd"
     $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $cmd" -Wait -PassThru -WindowStyle Hidden
     Write-Log "  exit $($p.ExitCode)"
+}
+
+# Post-deploy checks. Their files move to C:\ProgramData\ImagingTool so Test-Deployment.ps1 can re-run them
+# after C:\Deploy is gone, for example once a missing driver is added.
+if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
+    Set-Progress 'Running post-deploy checks' 99
+    try {
+        $toolDir = "$env:ProgramData\ImagingTool"
+        New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
+        Copy-Item (Join-Path $deployDir 'PostDeployChecks.psm1'), (Join-Path $deployDir 'DeployStatus.psm1'), (Join-Path $deployDir 'Test-Deployment.ps1') $toolDir -Force
+        [pscustomobject]@{
+            checks     = $plan.checks
+            status     = if ($plan.PSObject.Properties['status']) { $plan.status } else { $null }
+            appResults = $appResults
+        } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $toolDir 'checks.json') -Encoding utf8
+
+        Import-Module (Join-Path $toolDir 'PostDeployChecks.psm1') -Force
+        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -ReportPath (Join-Path $toolDir 'last-check.json')
+        foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
+        Write-Log "Post-deploy checks: $($run.Summary.Text)"
+        if ($reporting) { Set-DeployCheckResult -Results $run.Results -Summary $run.Summary -Warning (ConvertTo-CheckWarning $run.Summary) }
+    } catch { Write-Log "Post-deploy checks could not run: $($_.Exception.Message)" }
 }
 
 # Setup already blanked the passwords in the cached unattend.xml; remove it and the installers anyway.

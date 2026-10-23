@@ -280,6 +280,8 @@ function New-FirstBootPlan {
 
 function Get-AppDefinition {
     # Applications\<name>\app.json: { "command": "setup.exe /S", "successCodes": [0, 3010] }
+    # Optional "detect": { "displayName": "Google Chrome*" } or { "path": "%ProgramFiles%\\App\\app.exe" },
+    # which the post-deploy checks use to confirm the app is really installed.
     param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Name)
     $json = Join-Path (Join-Path $AppRoot $Name) 'app.json'
     if (-not (Test-Path $json)) { throw "Application '$Name' has no app.json in $AppRoot\$Name." }
@@ -289,6 +291,7 @@ function Get-AppDefinition {
         name         = $Name
         command      = $def.command
         successCodes = if ($def.successCodes) { @($def.successCodes | ForEach-Object { [int]$_ }) } else { @(0, 3010) }
+        detect       = if ($def.PSObject.Properties['detect']) { $def.detect } else { $null }
     }
 }
 

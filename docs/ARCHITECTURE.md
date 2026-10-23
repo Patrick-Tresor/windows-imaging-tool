@@ -115,6 +115,24 @@ WinPE leaves the record Running at 90 %, and `FirstBoot.ps1` resumes it
 finishes it at 100 %. Application failures are recorded as warnings, so the PC
 ends as Warning instead of Succeeded.
 
+### Post-deploy checks
+
+`PostDeployChecks.psm1` is split so it can be tested off Windows. In WinPE,
+`New-PostDeployCheckPlan` writes what the PC should look like into
+`firstboot.json` (`checks`: name, membership, domain, BitLocker and device error
+modes, applications and their `detect` rules). At the end of `FirstBoot.ps1`,
+`Get-PostDeployFacts` reads the PC (`Win32_ComputerSystem`,
+`Test-ComputerSecureChannel`, `Win32_PnPEntity` with a non-zero
+`ConfigManagerErrorCode`, the Uninstall registry keys, `Get-BitLockerVolume`),
+`Invoke-PostDeployCheck` compares the two and returns Passed, Failed, Warning
+or Skipped per check, and `Set-DeployCheckResult` (in `DeployStatus.psm1`)
+stores them on the status record as `checks`, `checkResult` and `checkSummary`.
+Failed checks are one warning that starts with `Post-deploy checks:`, so a
+re-run replaces it. FirstBoot copies both modules, `Test-Deployment.ps1` and
+`checks.json` (plan, status folder and id, installer exit codes) to
+`C:\ProgramData\ImagingTool`, where `Test-Deployment.ps1` re-runs the checks
+and updates the record; it keeps the original finish time.
+
 The console's Dashboard tab reads the folder every 10 seconds with
 `Get-DeploymentStatus`, which marks a Running record with no update for 45
 minutes as Stalled.

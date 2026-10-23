@@ -123,6 +123,17 @@ function Update-Settings {
     $ui.TxtSharePwFile.Text = $s.share.passwordFile
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
     $ui.TxtReportPath.Text = if ($s.PSObject.Properties['reporting']) { $s.reporting.path } else { '' }
+    $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
+    $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
+    $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
+    Select-ComboText $ui.CmbCheckBitLocker (& $get 'bitLocker' 'Auto')
+    Select-ComboText $ui.CmbCheckDevices (& $get 'deviceErrors' 'Required')
+    $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
+}
+
+function Select-ComboText($Combo, [string]$Text) {
+    $Combo.SelectedItem = @($Combo.Items | Where-Object { "$($_.Content)" -eq $Text })[0]
+    if (-not $Combo.SelectedItem) { $Combo.SelectedIndex = 0 }
 }
 
 function Get-DashboardFolder {
@@ -165,6 +176,11 @@ function Update-DashboardDetail {
     if ($r.Message)  { $parts += "Error: $($r.Message)" }
     if ($r.Warnings) { $parts += "Warnings: $($r.Warnings)" }
     $ui.TxtDashDetail.Text = $parts -join '    '
+    if ($r.CheckResults) {
+        $when = if ($r.Checked) { ' (' + $r.Checked.ToString('yyyy-MM-dd HH:mm') + ')' } else { '' }
+        $lines = foreach ($c in $r.CheckResults) { '  {0,-8} {1}: {2}' -f $c.result, $c.name, $c.detail }
+        $ui.TxtDashDetail.Text += "`nPost-deploy checks$when`n" + ($lines -join "`n")
+    }
     $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }
@@ -379,6 +395,13 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     $s.share.passwordFile = $ui.TxtSharePwFile.Text.Trim()
     if (-not $s.PSObject.Properties['reporting']) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) }
     $s.reporting.path     = $ui.TxtReportPath.Text.Trim()
+    $checks = [pscustomobject]@{
+        enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
+        bitLocker     = "$($ui.CmbCheckBitLocker.SelectedItem.Content)"
+        deviceErrors  = "$($ui.CmbCheckDevices.SelectedItem.Content)"
+        ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
     Update-Answers; Update-Settings; Update-Dashboard
