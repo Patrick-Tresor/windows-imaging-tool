@@ -5,6 +5,8 @@
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot). Reads an answer file from <content root>\AnswerFiles: image,
     applications, disk, regional settings, naming, domain join, tasks and extra shares.
+    If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
+    answer file win over the answer file's naming, the answer file's OU and the default answer file.
     Wipes the target disk. UEFI/GPT only.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
@@ -13,13 +15,14 @@
 param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
-    [string]$ComputerName,      # overrides the answer file's naming
+    [string]$ComputerName,      # overrides the naming list and the answer file's naming
     [switch]$NoPrompt           # no countdown or confirmation, whatever the answer file's mode
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -82,9 +85,26 @@ try {
     $rootSettings = Join-Path $root 'config\deploy-settings.json'
     $settings = Get-Content -Raw $(if (Test-Path $rootSettings) { $rootSettings } else { $SettingsPath }) | ConvertFrom-Json
 
+    # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
+    $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
+    if ($listed) {
+        $problems = @(Test-NamingEntry -Entry $listed)
+        if ($problems) { throw "Naming list entry for serial $($hw.Serial) has problems: $($problems -join ' ')" }
+        Write-DeployLog ("Naming list entry for serial {0}: name '{1}', OU '{2}', answer file '{3}'" -f $hw.Serial, $listed.ComputerName, $listed.OU, $listed.AnswerFile)
+        if (-not $AnswerFile -and $listed.AnswerFile) { $AnswerFile = $listed.AnswerFile }
+    } else {
+        Write-DeployLog "Serial $($hw.Serial) is not in the naming list; using the answer file's naming"
+    }
+
     if (-not $AnswerFile) { $AnswerFile = Select-AnswerFile -Root $root -Default $settings.defaultAnswerFile -Interactive (-not $NoPrompt) }
-    $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$AnswerFile.xml")
+    $answerPath = Join-Path $root "AnswerFiles\$AnswerFile.xml"
+    if (-not (Test-Path $answerPath)) { throw "Answer file $AnswerFile not found in $root\AnswerFiles." }
+    $answer = Read-AnswerFile -Path $answerPath
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode))"
+    if ($listed -and $listed.OU) {
+        if ($answer.Membership -eq 'Domain') { $answer.OrganizationalUnit = $listed.OU }
+        else { Write-DeployLog "Naming list OU $($listed.OU) ignored: answer file $($answer.Name) joins a workgroup" -Level WARN }
+    }
 
     foreach ($share in $answer.Shares) {
         $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $share.PasswordFile } else { $null }
@@ -106,7 +126,13 @@ try {
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
 
     $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive'
+    $nameSource = 'parameter'
+    if (-not $ComputerName -and $listed -and $listed.ComputerName) {
+        $ComputerName = $listed.ComputerName.ToUpperInvariant()
+        $nameSource = 'naming list'
+    }
     if (-not $ComputerName) {
+        $nameSource = "answer file, $($answer.NamingMode)"
         $wmiValue = try { Get-WmiNamingValue -Query $answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $hw.Serial }
         if (-not $wmiValue) { $wmiValue = $hw.Serial }
         $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $wmiValue -Serial $hw.Serial
@@ -122,8 +148,8 @@ try {
     Write-Host "Image:        $imagePath (index $($answer.ImageIndex))"
     Write-Host "Drivers:      $(if ($driverPack) { $driverPack } else { 'inbox only' })"
     Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
-    Write-Host "Name:         $ComputerName"
-    Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
+    Write-Host "Name:         $ComputerName ($nameSource)"
+    Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)$(if ($answer.OrganizationalUnit) { ", $($answer.OrganizationalUnit)" })" } else { "workgroup $($answer.Workgroup)" })"
     Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
     if (-not $NoPrompt) {
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }

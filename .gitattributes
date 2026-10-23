@@ -4,3 +4,4 @@
 *.xml text eol=crlf
 *.json text eol=crlf
 *.xaml text eol=crlf
+*.csv text eol=crlf

@@ -12,7 +12,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, naming list, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
 
@@ -75,8 +75,11 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 
 ## Deploy sequence (UEFI/GPT)
 
-1. Detect hardware and content root; choose the answer file (the default, or a
-   menu in interactive mode); map its extra shares.
+1. Detect hardware and content root; look the BIOS serial up in
+   `config\naming-list.csv`; choose the answer file (the naming list's, else the
+   default, or a menu in interactive mode); map its extra shares.
+   A naming list entry's computer name and OU replace the answer file's naming
+   and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
 2. Check everything before touching the disk: image, driver pack, applications,
    password files, computer name. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
@@ -100,6 +103,14 @@ The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through
 `Save-AnswerFromEditor`, which validates it, writes typed passwords to
 `config\secrets\<answer>-*.txt` and exports the XML.
+
+`NamingList.psm1` reads and writes the naming list CSV (comma or semicolon,
+UTF-8 or ANSI, as Excel saves it; header spellings such as `Serial Number` or
+`Hostname` are accepted), looks a serial up and validates rows. The console's
+Naming List tab edits it through `Get-NamingListRows`, `Merge-NamingList` and
+`Save-NamingListFromConsole`, which refuses to save names over 15 characters,
+duplicate serials or names, OUs that are not distinguished names, and answer
+files that do not exist.
 
 `AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
 SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
