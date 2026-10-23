@@ -20,6 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -100,7 +101,12 @@ try {
 
     # Applications are checked now, before the disk is wiped.
     $appRoot = Resolve-ContentPath $root $answer.AppLocation
-    $apps = @($answer.Applications | ForEach-Object { Get-AppDefinition -AppRoot $appRoot -Name $_ })
+    # Apps limited to other makers or models (Dell Command Update on a Lenovo) are left out.
+    $apps = @($answer.Applications | ForEach-Object { Get-AppDefinition -AppRoot $appRoot -Name $_ } | Where-Object {
+        if (Test-AppRequirement -Definition $_ -Identity $hw) { return $true }
+        Write-DeployLog "Skipping application $($_.name): it is for $((@($_.requirements.makers) + @($_.requirements.models)) -join ', ') only"
+        $false
+    })
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
@@ -175,7 +181,8 @@ exit
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1') 'W:\Deploy\FirstBoot.ps1'
-    New-FirstBootPlan -Answer $answer -AppDefinitions $apps | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    Copy-Item (Join-Path $PSScriptRoot 'AppPack.psm1') 'W:\Deploy\AppPack.psm1'
+    New-FirstBootPlan -Answer $answer -AppDefinitions $apps | ConvertTo-Json -Depth 8 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii

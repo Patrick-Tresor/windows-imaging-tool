@@ -32,6 +32,8 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks and Network shares. Passwords are typed into password
   boxes and saved to their own files.
+- **Applications**: the application pack builder. Build, edit, test, export and
+  import packs (see Applications below).
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
@@ -78,23 +80,52 @@ under the content root, usually `config\secrets\`. Anyone who can read the share
 can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
-**Applications** are folders under `Applications\` with the installer and an
-`app.json`. The editor's **New application...** creates them: pick the installer
-file or folder, and it suggests the silent command for .msi, .exe, .msix and .ps1:
+**Applications** are packs: a folder under `Applications\` with the installer
+(and any files it needs) and an `app.json`. Build them on the **Applications**
+tab, or with **New application...** in the answer file editor:
+
+1. Pick the installer file, or a folder when it needs files next to it.
+   **Inspect** reads its type (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
+   Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
+   code, and fills in the silent command, uninstall command and a detection rule.
+2. Or apply a **template** from `config\app-templates.json`. There are templates
+   for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
+   Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
+   *verify* are best guesses to test on a VM first.
+3. Check the **install command**, success and restart exit codes, and timeout.
+4. Add **detection** rules: MSI product code, program name in Programs and
+   Features (wildcards, optional minimum version), file (with version), registry
+   key or value, MSIX package, or a `.ps1` that exits 0 when installed.
+   **Test on this PC** runs them on the admin PC.
+5. Limit **which PCs** get it by maker and model (Dell Command Update only on
+   Dell, Lenovo System Update only on Lenovo).
 
 ```json
-{ "command": "msiexec /i ZoomInstallerFull.msi /qn", "successCodes": [0, 3010] }
+{
+  "displayName": "VLC media player", "version": "3.0.21", "installer": "vlc-3.0.21-win64.exe",
+  "installerType": "nsis", "command": "\"vlc-3.0.21-win64.exe\" /L=1033 /S",
+  "successCodes": [0, 3010, 1641], "rebootCodes": [3010, 1641], "timeoutMinutes": 15,
+  "requirements": { "makers": [], "models": [] },
+  "detection": { "match": "all", "rules": [ { "type": "file", "target": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" } ] }
+}
 ```
 
-The command runs in the application's folder, as SYSTEM, from
-`SetupComplete.cmd`. (`SetupComplete.cmd` does not run on images activated with
-an OEM product key.) Results go to `C:\Windows\Temp\FirstBoot.log`.
+On the PC, apps for another maker or model are skipped in WinPE and never copied.
+At first boot each app is skipped when its detection already finds it, runs from
+its folder as SYSTEM (from `SetupComplete.cmd`, which does not run on images
+activated with an OEM product key), is stopped after its timeout, and is marked
+failed when it exits 0 but detection still can't find it. Results go to
+`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`.
+Old `app.json` files with only `command` and `successCodes` still work.
+
+**Export...** zips a pack (installer included) to copy it to another content
+root; **Import...** adds it back.
 
 **Importing from SmartDeploy** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
 options. SmartDeploy encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
-rebuild as folders, and anything it can't convert (static IP, client agent,
+rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
 
 ## Workflow

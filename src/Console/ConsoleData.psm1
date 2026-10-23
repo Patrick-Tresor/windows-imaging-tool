@@ -3,6 +3,7 @@
 
 $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -260,7 +261,12 @@ function Get-AnswerFileIssues {
     if ((& $local $a.ImageFile) -and -not (Test-Path (Join-ContentPath $ContentRoot $a.ImageFile))) { "Image $($a.ImageFile) is not in the content root." }
     if (& $local $a.AppLocation) {
         foreach ($app in $a.Applications) {
-            if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json." }
+            $appRoot = Join-ContentPath $ContentRoot $a.AppLocation
+            if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json."; continue }
+            try {
+                $def = Read-AppPack -AppRoot $appRoot -Name $app
+                foreach ($p in Test-AppPack -Definition $def -Folder (Join-Path $appRoot $app) | Where-Object { $_ -notlike 'Warning:*' }) { "Application ${app}: $p" }
+            } catch { "Application ${app}: $($_.Exception.Message)" }
         }
     }
     $secrets = @()
@@ -378,35 +384,78 @@ function Save-AnswerFromEditor {
     $dest
 }
 
+function Get-ApplicationUsage {
+    # Application name -> names of the answer files that install it.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        foreach ($n in $a.Applications) {
+            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
+            $usage[$n] += $f.BaseName
+        }
+    }
+    $usage
+}
+
 function Get-ApplicationList {
-    # Applications\<name>\app.json folders, for the editor's application picker.
+    # Applications\<name>\app.json folders, for the Applications tab and the answer file editor's picker.
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Applications'
+    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
     Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $cmd = $null; $status = 'Ready'
-        try { $cmd = (Get-AppDefinition -AppRoot $root -Name $_.Name).command } catch { $status = $_.Exception.Message }
-        [pscustomobject]@{ Name = $_.Name; Command = $cmd; Status = $status }
+        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'
+                           UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
+                           Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
+        try {
+            $d = Read-AppPack -AppRoot $root -Name $_.Name
+            $row.Definition = $d
+            $row.DisplayName = $d.displayName; $row.Version = $d.version; $row.Type = $d.installerType; $row.Command = $d.command
+            $row.Detection = if ($d.detection.rules) { (@($d.detection.rules | ForEach-Object { "$($_.type) $($_.target)" }) -join " $($d.detection.match) ") } else { 'none' }
+            $for = @($d.requirements.makers) + @($d.requirements.models)
+            if ($for) { $row.For = $for -join ', ' }
+            $row.Issues = @(Test-AppPack -Definition $d -Folder $_.FullName)
+            $errors = @($row.Issues | Where-Object { $_ -notlike 'Warning:*' })
+            $row.Status = if ($errors) { "$($errors.Count) problem(s)" } elseif ($row.Issues) { 'Ready (no detection)' } else { 'Ready' }
+        } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
+        [pscustomobject]$row
     }
 }
 
 function New-Application {
     # Creates Applications\<name>: copies the installer (a file, or a folder's contents) and writes app.json.
+    # The simple form (-Command, -SuccessCodes) or a full -Definition from the application pack builder.
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Source,
-        [Parameter(Mandatory)][string]$Command,
-        [int[]]$SuccessCodes = @(0, 3010)
+        [string]$Command,
+        [int[]]$SuccessCodes = @(0, 3010),
+        $Definition
     )
     if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    if (-not (Test-Path $Source)) { throw "Installer not found: $Source" }
-    $dest = Join-ContentPath $ContentRoot "Applications\$Name"
-    if (Test-Path $dest) { throw "An application named $Name already exists." }
-    New-Item -ItemType Directory -Path $dest -Force | Out-Null
-    if (Test-Path $Source -PathType Container) { Copy-Item -Path (Join-Path $Source '*') -Destination $dest -Recurse -Force }
-    else { Copy-Item -Path $Source -Destination $dest }
-    [pscustomobject]@{ command = $Command; successCodes = $SuccessCodes } | ConvertTo-Json | Set-Content (Join-Path $dest 'app.json') -Encoding utf8
-    $dest
+    if (-not $Definition) {
+        $leaf = if (Test-Path $Source -PathType Leaf) { Split-Path $Source -Leaf } else { '' }
+        $Definition = ConvertTo-AppDefinition -Name $Name -Json ([pscustomobject]@{ command = $Command; successCodes = $SuccessCodes; installer = $leaf })
+    }
+    $Definition.name = $Name
+    Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source
+}
+
+function Save-Application {
+    # Saves an edited definition over Applications\<name>; -Source adds or replaces installer files.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Definition, [string]$Source)
+    Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source -Overwrite
+}
+
+function Remove-Application {
+    # Deletes Applications\<name>. Refuses while an answer file still installs it.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
+    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
+    $dir = Join-Path (Join-Path $ContentRoot 'Applications') $Name
+    if (-not (Test-Path (Join-Path $dir 'app.json'))) { throw "$Name is not an application folder." }
+    Remove-Item $dir -Recurse -Force
 }
 
 function Get-ImageUsage {
@@ -463,4 +512,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application
+    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
+    Get-ApplicationUsage, Save-Application, Remove-Application

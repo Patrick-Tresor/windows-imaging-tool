@@ -1,0 +1,122 @@
+{
+  "_comment": "Starting points for the console's application pack builder. {installer} becomes the installer's file name. Entries with verify=true are best guesses: test them on a VM before deploying.",
+  "templates": [
+    {
+      "name": "Lenovo-System-Update",
+      "aliases": ["LenovoSystemUpdate", "Lenovo System Update"],
+      "match": ["system_update_*.exe"],
+      "displayName": "Lenovo System Update",
+      "publisher": "Lenovo",
+      "installerType": "inno",
+      "command": "\"{installer}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-",
+      "requirements": { "makers": ["Lenovo"] },
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles(x86)%\\Lenovo\\System Update\\tvsu.exe" },
+        { "type": "uninstall", "target": "Lenovo System Update*" }
+      ] },
+      "timeoutMinutes": 20,
+      "verify": false,
+      "notes": "Only installed on Lenovo PCs."
+    },
+    {
+      "name": "Dell-Command-Update",
+      "aliases": ["DellCommandUpdate", "Dell Command Update", "DCU"],
+      "match": ["Dell-Command-Update*.exe"],
+      "displayName": "Dell Command | Update",
+      "publisher": "Dell",
+      "installerType": "exe",
+      "command": "\"{installer}\" /s",
+      "requirements": { "makers": ["Dell"] },
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles%\\Dell\\CommandUpdate\\dcu-cli.exe" },
+        { "type": "uninstall", "target": "Dell Command | Update*" }
+      ] },
+      "timeoutMinutes": 30,
+      "verify": false,
+      "notes": "Dell Update Package (/s is silent). Only installed on Dell PCs. Check Dell's release notes for prerequisites such as the .NET Desktop Runtime."
+    },
+    {
+      "name": "Teams",
+      "aliases": ["MSTeams", "Microsoft Teams", "NewTeams"],
+      "match": ["teamsbootstrapper.exe"],
+      "installer": "teamsbootstrapper.exe",
+      "displayName": "Microsoft Teams",
+      "publisher": "Microsoft",
+      "installerType": "exe",
+      "command": "\"{installer}\" -p -o \"%CD%\\MSTeams-x64.msix\"",
+      "detection": { "match": "all", "rules": [ { "type": "appx", "target": "MSTeams" } ] },
+      "timeoutMinutes": 20,
+      "verify": false,
+      "notes": "Choose the folder with teamsbootstrapper.exe and MSTeams-x64.msix (both from Microsoft's Teams admin download page), so it installs offline for every user."
+    },
+    {
+      "name": "Zoom",
+      "aliases": ["ZoomWorkplace", "Zoom-Latest", "ZoomLatest"],
+      "match": ["ZoomInstallerFull*.msi"],
+      "displayName": "Zoom Workplace",
+      "publisher": "Zoom",
+      "installerType": "msi",
+      "command": "msiexec /i \"{installer}\" /qn /norestart",
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles%\\Zoom\\bin\\Zoom.exe" },
+        { "type": "uninstall", "target": "Zoom Workplace*" }
+      ] },
+      "timeoutMinutes": 20,
+      "verify": false,
+      "notes": "Per-machine MSI. Add MSI properties from Zoom's mass deployment guide (auto-update, SSO domain) after /norestart if you need them."
+    },
+    {
+      "name": "VLC",
+      "aliases": ["VLC media player", "VideoLAN"],
+      "match": ["vlc-*-win64.exe", "vlc-*.exe"],
+      "displayName": "VLC media player",
+      "publisher": "VideoLAN",
+      "installerType": "nsis",
+      "command": "\"{installer}\" /L=1033 /S",
+      "uninstallCommand": "\"%ProgramFiles%\\VideoLAN\\VLC\\uninstall.exe\" /S",
+      "detection": { "match": "all", "rules": [ { "type": "file", "target": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" } ] },
+      "timeoutMinutes": 15,
+      "verify": false,
+      "notes": "NSIS installer. /L=1036 installs it in French."
+    },
+    {
+      "name": "Lansweeper-Agent",
+      "aliases": ["Lansweeper", "LsAgent", "LansweeperAgent"],
+      "match": ["LsAgent-windows*.exe"],
+      "displayName": "Lansweeper LsAgent",
+      "publisher": "Lansweeper",
+      "installerType": "exe",
+      "command": "\"{installer}\" --mode unattended --server REPLACE_SERVER --port 9524",
+      "detection": { "match": "all", "rules": [ { "type": "uninstall", "target": "LsAgent*" } ] },
+      "timeoutMinutes": 15,
+      "verify": true,
+      "notes": "Replace REPLACE_SERVER with your Lansweeper server. For a Cloud Relay setup, add --agentkey with your key. Check the uninstall name on a test PC."
+    },
+    {
+      "name": "MirrorOp",
+      "aliases": ["MirrorOp Sender", "MirrorOpSender"],
+      "match": ["MirrorOp*.exe", "MirrorOp*.msi"],
+      "displayName": "MirrorOp",
+      "publisher": "",
+      "installerType": "",
+      "command": "",
+      "detection": { "match": "all", "rules": [ { "type": "uninstall", "target": "MirrorOp*" } ] },
+      "timeoutMinutes": 15,
+      "verify": true,
+      "notes": "No known silent switches: the builder suggests them from the installer type. Test on a VM and check the uninstall name."
+    },
+    {
+      "name": "SoftPhone",
+      "aliases": ["Softphone"],
+      "match": ["*softphone*.exe", "*softphone*.msi"],
+      "displayName": "SoftPhone",
+      "publisher": "",
+      "installerType": "",
+      "command": "",
+      "detection": { "match": "all", "rules": [ { "type": "uninstall", "target": "*SoftPhone*" } ] },
+      "timeoutMinutes": 15,
+      "verify": true,
+      "notes": "Generic softphone entry: the builder suggests switches from the installer type. Set the detection name to the product's name in Programs and Features."
+    }
+  ]
+}
