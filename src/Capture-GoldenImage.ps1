@@ -105,6 +105,12 @@ try {
         if ($existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
             Write-DeployLog "The new version is $newLeaf but the old one was $(($existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
         }
+        if ($root) {
+            try {
+                $pruned = @(Invoke-ImageVersionRetention -ContentRoot $root -ImagePath (Join-Path $Destination $newLeaf))
+                if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
+            } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
+        }
     }
 
     Write-DeployLog "Captured $source to $Destination"

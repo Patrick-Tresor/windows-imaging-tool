@@ -20,6 +20,7 @@ function Show-ImageVersionsDialog {
     $v.TxtTitle.Text = "Versions of $($Image.Name)"
     $state = @{ Changed = $false }
     $imagePath = Join-Path (Join-Path $ContentRoot 'Images') $Image.Name
+    $v.TxtLimit.Text = "$(Get-ImageVersionLimit -ImagePath $imagePath)"
 
     $say = { param($Text, $Icon = 'Information') [Windows.MessageBox]::Show($win, $Text, 'Image versions', 'OK', $Icon) | Out-Null }
     $ask = { param($Text) [Windows.MessageBox]::Show($win, $Text, 'Image versions', 'YesNo', 'Question') -eq 'Yes' }
@@ -50,8 +51,9 @@ function Show-ImageVersionsDialog {
         $rows = @(& $selected)
         if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version (not Current).' 'Warning'; return }
         $r = $rows[0]
-        $text = "Roll $($Image.Name) back to version $($r.Version)?`n`nThe current image is kept as a new version, then version $($r.Version) is copied back as the current image. " +
+        $text = "Roll $($Image.Name) back to version $($r.Version)?`n`nThe current image is kept as a new version, then version $($r.Version) becomes the current image again. " +
                 "Every answer file without a version deploys it from then on. PCs being deployed right now should finish first."
+        if (-not (Test-ImageHardLinks -Path (Split-Path $imagePath -Parent))) { $text += "`n`nThis folder can't make hard links, so the rollback copies $($r.SizeGB) GB." }
         if (-not (& $ask $text)) { return }
         & $run 'Rollback' $r.Version $null
         & $say 'Rolling back in a separate window. Click Refresh when it finishes.'
@@ -85,6 +87,17 @@ function Show-ImageVersionsDialog {
         & $load
     } })
 
+    $v.BtnLimitSave.Add_Click({ & $safely {
+        $text = $v.TxtLimit.Text.Trim()
+        $keep = $null
+        if ($text) {
+            $n = 0
+            if (-not [int]::TryParse($text, [ref]$n) -or $n -lt 0) { & $say 'Type how many of the newest versions to keep (0 or more), or leave it blank for the default.' 'Warning'; return }
+            $keep = $n
+        }
+        Set-ImageVersionLimit -ImagePath $imagePath -Keep $keep
+        & $say $(if ($null -eq $keep) { 'This image now uses the default from Deploy Settings.' } else { "This image now keeps its newest $keep versions after a copy, rollback or replacing capture." })
+    } })
     $v.BtnRefresh.Add_Click({ & $safely { & $load } })
     $v.BtnClose.Add_Click({ $win.Close() })
 

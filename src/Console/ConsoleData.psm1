@@ -434,20 +434,6 @@ function Get-ImageUsage {
 
 #region Image versions
 
-function Get-ImageVersionUsage {
-    # Version -> answer files deploying it, for one image. '' is the current image.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -ne $ImageName) { continue }
-        $key = "$($a.ImageVersion)"
-        if (-not $usage.ContainsKey($key)) { $usage[$key] = @() }
-        $usage[$key] += $f.BaseName
-    }
-    $usage
-}
-
 function Get-ImageVersionRows {
     # The current image and its archived versions, for the console's Versions dialog and the answer file editor.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
@@ -508,19 +494,6 @@ function Get-ImageEditions {
     # "index: name" for each edition in an image file, e.g. for the editor's list when a version is pinned.
     param([Parameter(Mandatory)][string]$ImagePath)
     @(Get-WindowsImage -ImagePath $ImagePath -ErrorAction Stop | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" })
-}
-
-function Invoke-ImageVersionRetention {
-    # Applies versionsToKeep from deploy-settings.json: older versions beyond the newest N are deleted, except those an
-    # answer file is pinned to. 0 (or no setting) keeps every version. Returns the versions it deleted.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
-    if (-not (Test-Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json'))) { return @() }
-    $settings = Get-DeploySettings -ContentRoot $ContentRoot
-    $keep = if ($settings.PSObject.Properties['versionsToKeep']) { [int]$settings.versionsToKeep } else { 0 }
-    if ($keep -le 0) { return @() }
-    $old = @(Get-ImageVersionsToDelete -ContentRoot $ContentRoot -ImageName $ImageName -Keep $keep)
-    if ($old) { Remove-ImageVersions -ContentRoot $ContentRoot -ImageName $ImageName -Version @($old.Version) }
-    $old
 }
 
 function Get-ImageVersionArguments {
@@ -585,5 +558,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
-    Get-ImageVersionUsage, Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
-    Get-ImageEditions, Invoke-ImageVersionRetention
+    Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
+    Get-ImageEditions

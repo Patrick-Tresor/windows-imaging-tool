@@ -117,13 +117,27 @@ try {
     $settings = Get-Content -Raw $settingsPath | ConvertFrom-Json
     $settings | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue 0
     $settings | ConvertTo-Json | Set-Content $settingsPath
-    Assert-Equal (@(Invoke-ImageVersionRetention -ContentRoot $root -ImageName 'Win11.wim')).Count 0 'retention 0 keeps every version'
+    Assert-Equal (@(Invoke-ImageVersionRetention -ContentRoot $root -ImagePath $wim)).Count 0 'retention 0 keeps every version'
     $settings.versionsToKeep = 1
     $settings | ConvertTo-Json | Set-Content $settingsPath
     Save-ImageVersion -ImagePath $wim -Date ([datetime]'2026-10-23 17:00') | Out-Null
-    $gone = @(Invoke-ImageVersionRetention -ContentRoot $root -ImageName 'Win11.wim')
+    $gone = @(Invoke-ImageVersionRetention -ContentRoot $root -ImagePath $wim)
     Assert-Equal ($gone.Version -join ',') '20261022-1600' 'retention deletes the unpinned version beyond the newest one'
     Assert-Equal ((Get-ImageVersions -ImagePath $wim).Version -join ',') '20261023-1700,20261015-1430' 'retention keeps the newest and the pinned version'
+
+    # A version protected by a rollback survives retention even when it is the oldest unpinned one.
+    $ten = Save-ImageVersion -ImagePath $wim -Date ([datetime]'2026-10-20 10:00')
+    Assert-Equal (@(Invoke-ImageVersionRetention -ContentRoot $root -ImagePath $wim -Keep 1 -Protect $ten.Version)).Count 0 'a protected version is not deleted by retention'
+    Assert-Equal ((Get-ImageVersions -ImagePath $wim).Version -join ',') "20261023-1700,$($ten.Version),20261015-1430" 'the protected version is still listed'
+    Remove-ImageVersion -ImagePath $wim -Version $ten.Version
+
+    # Per-image limit overrides the default, and clearing it goes back to the default.
+    Set-ImageVersionLimit -ImagePath $wim -Keep 5
+    Assert-Equal (Get-VersionsToKeep -ContentRoot $root -ImagePath $wim) 5 'a per-image limit overrides the default'
+    Set-ImageVersionLimit -ImagePath $wim -Keep $null
+    Assert-Equal (Get-VersionsToKeep -ContentRoot $root -ImagePath $wim) 1 'clearing the per-image limit restores the default'
+    Assert-Equal ((Get-ImageList -ContentRoot $root | Where-Object Name -eq 'Win11.wim').Name) 'Win11.wim' 'limit files do not show up as images'
+    Assert-Equal (Test-ImageHardLinks -Path $images) $true 'the hard link check runs on the images folder'
 
     # Command lines the console starts.
     $cmd = Get-ImageVersionArguments -ScriptPath 'C:\Tool\src\Invoke-ImageVersion.ps1' -ContentRoot $root -ImageName 'Win11.wim' -Action Rollback -Version '20261015-1430'

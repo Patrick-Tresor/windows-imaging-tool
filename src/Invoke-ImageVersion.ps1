@@ -26,7 +26,6 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
 
 $name = [IO.Path]::GetFileNameWithoutExtension($ImagePath)
 $imagesDir = Split-Path $ImagePath -Parent
@@ -48,12 +47,13 @@ try {
         if (-not $target) { throw "Version $Version of $(Split-Path $ImagePath -Leaf) was not found in $imagesDir\Previous." }
         Write-DeployLog "Rolling $(Split-Path $ImagePath -Leaf) back to version $Version ($($target.Reason), $($target.SizeGB) GB)"
         if (-not $NoPrompt -and (Read-Host 'Type YES to roll back') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+        if (-not (Test-ImageHardLinks -Path $imagesDir)) { Write-DeployLog "$imagesDir can't make hard links, so the rollback copies $($target.SizeGB) GB." -Level WARN }
         $old = Restore-ImageVersion -ImagePath $ImagePath -Version $Version
         if ($old) { Write-DeployLog "The image that was current is kept as version $($old.Version)" }
         Write-DeployLog "Rolled back. Answer files without a version deploy $Version from now on."
     }
-    $pruned = @(Invoke-ImageVersionRetention -ContentRoot $contentRoot -ImageName (Split-Path $ImagePath -Leaf))
-    if ($pruned) { Write-DeployLog "Deleted older versions beyond versionsToKeep: $(($pruned.Version) -join ', ')" }
+    $pruned = @(Invoke-ImageVersionRetention -ContentRoot $contentRoot -ImagePath $ImagePath -Protect @($Version | Where-Object { $_ }))
+    if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
     $status = 'OK'
 }
 catch {

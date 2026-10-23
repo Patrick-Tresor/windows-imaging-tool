@@ -60,9 +60,14 @@ as kept by an offline update.
   Only image files are linked; the update history is copied, since it is rewritten
   in place. Nothing writes an image in place, so the two names can share data.
   If the link fails, the partial copy is removed and the old current image moved back.
-- Retention: `versionsToKeep` in deploy-settings.json (Deploy Settings tab) keeps
-  the newest N versions and deletes older unpinned ones after a copy or rollback
-  (`Invoke-ImageVersionRetention`). 0 keeps everything, the default.
+- Retention: `Invoke-ImageVersionRetention` (in `ImageVersions.psm1`, so WinPE can
+  use it too) keeps the newest N and deletes older versions that no answer file is
+  pinned to, plus anything passed as `-Protect`. N is the image's own limit in
+  `Images\<name>.versions.json` if it has one, else `versionsToKeep` in
+  deploy-settings.json, else 0 (keep all). It runs after a copy, a rollback, and a
+  replacing capture (`Capture-GoldenImage.ps1`, when the content root is known).
+- `Test-ImageHardLinks` tells the rollback whether it can link; the console and
+  `Invoke-ImageVersion.ps1` warn when it can't and the rollback will copy.
 - `Capture-GoldenImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
   then archives the old image and moves the new one in, so a failed capture
   leaves the current image alone.

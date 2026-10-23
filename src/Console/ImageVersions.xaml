@@ -38,6 +38,11 @@
 
     <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
       <DockPanel Margin="0,0,0,10">
+        <TextBlock Text="Keep newest for this image" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <Button x:Name="BtnLimitSave" DockPanel.Dock="Right" Content="Save limit" Margin="8,0,0,0"/>
+        <TextBox x:Name="TxtLimit" Width="80" HorizontalAlignment="Left" ToolTip="How many of the newest versions of this image to keep after a copy, rollback or replacing capture. Blank uses the default in Deploy Settings. Pinned versions are never deleted."/>
+      </DockPanel>
+      <DockPanel Margin="0,0,0,10">
         <TextBlock Text="Note" VerticalAlignment="Center" Width="50"/>
         <Button x:Name="BtnNote" DockPanel.Dock="Right" Content="Save note" Margin="8,0,0,0"/>
         <TextBox x:Name="TxtNote" ToolTip="What is in this version, e.g. 'Before the October cumulative update' or 'Known good for the lab'."/>

@@ -6,6 +6,8 @@
 # had one, and version.json (archived date, reason, note). Update-OfflineImage.ps1 (offline updates) moves the
 # old image to the same place, so its backups show up as versions too, just without version.json.
 
+Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
+
 $script:StampFormat = 'yyyyMMdd-HHmm'
 $script:VersionPattern = '^\d{8}-\d{4}(-\d+)?$'
 
@@ -74,6 +76,83 @@ function Get-ImageVersions {
         }
     }
     @($versions | Sort-Object Archived, Version -Descending)
+}
+
+function Get-ImageVersionUsage {
+    # Version -> names of the answer files deploying it, for one image. '' is the current image.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -ne $ImageName) { continue }
+        $key = "$($a.ImageVersion)"
+        if (-not $usage.ContainsKey($key)) { $usage[$key] = @() }
+        $usage[$key] += $f.BaseName
+    }
+    $usage
+}
+
+function Get-ImageVersionLimitPath {
+    # Images\<name>.versions.json: the image's own "keep newest N" limit. Not a version, so Get-ImageList ignores it.
+    param([Parameter(Mandatory)][string]$ImagePath)
+    Join-Path (Split-Path $ImagePath -Parent) ([IO.Path]::GetFileNameWithoutExtension($ImagePath) + '.versions.json')
+}
+
+function Get-ImageVersionLimit {
+    # The image's own limit, or $null when it uses the default from deploy-settings.json.
+    param([Parameter(Mandatory)][string]$ImagePath)
+    $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $value = (Get-Content -Raw -LiteralPath $path | ConvertFrom-Json).keep
+    if ($null -eq $value) { return $null }
+    [int]$value
+}
+
+function Set-ImageVersionLimit {
+    # Sets the image's own limit. With -Keep $null the image goes back to the default.
+    param([Parameter(Mandatory)][string]$ImagePath, $Keep)
+    $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
+    if ($null -eq $Keep) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return }
+    if ([int]$Keep -lt 0) { throw 'Keep must be 0 or more.' }
+    [pscustomobject]@{ keep = [int]$Keep } | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8
+}
+
+function Get-VersionsToKeep {
+    # How many versions to keep for an image: its own limit, else versionsToKeep in deploy-settings.json, else 0 (keep all).
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImagePath)
+    $own = Get-ImageVersionLimit -ImagePath $ImagePath
+    if ($null -ne $own) { return $own }
+    $settingsPath = Join-Path (Join-Path $ContentRoot 'config') 'deploy-settings.json'
+    if (-not (Test-Path -LiteralPath $settingsPath)) { return 0 }
+    $settings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+    if ($settings.PSObject.Properties['versionsToKeep']) { [int]$settings.versionsToKeep } else { 0 }
+}
+
+function Invoke-ImageVersionRetention {
+    # Deletes the oldest unpinned versions beyond the newest N (N from Get-VersionsToKeep unless -Keep is given).
+    # Versions an answer file is pinned to, and -Protect (e.g. the version just rolled back to), are never deleted.
+    # Returns the versions deleted.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImagePath, [int]$Keep = -1, [string[]]$Protect = @())
+    if ($Keep -lt 0) { $Keep = Get-VersionsToKeep -ContentRoot $ContentRoot -ImagePath $ImagePath }
+    if ($Keep -le 0) { return @() }
+    $pinned = @((Get-ImageVersionUsage -ContentRoot $ContentRoot -ImageName (Split-Path $ImagePath -Leaf)).Keys) + $Protect
+    $old = @(Get-ImageVersionsToPrune -ImagePath $ImagePath -Keep $Keep -Pinned $pinned)
+    foreach ($v in $old) { Remove-ImageVersion -ImagePath $ImagePath -Version $v.Version }
+    $old
+}
+
+function Test-ImageHardLinks {
+    # True when the folder's volume can make hard links, so a rollback links the image instead of copying it.
+    param([Parameter(Mandatory)][string]$Path)
+    $a = Join-Path $Path ('.linktest-' + [guid]::NewGuid().ToString('N'))
+    $b = "$a-link"
+    try {
+        Set-Content -LiteralPath $a -Value 'x'
+        New-Item -ItemType HardLink -Path $b -Target $a -ErrorAction Stop | Out-Null
+        $true
+    }
+    catch { $false }
+    finally { Remove-Item -LiteralPath $a, $b -Force -ErrorAction SilentlyContinue }
 }
 
 function Get-ImageVersionPath {
@@ -197,4 +276,6 @@ function Get-ImageVersionsToPrune {
 }
 
 Export-ModuleMember -Function Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
-    Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune
+    Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
+    Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
+    Test-ImageHardLinks
