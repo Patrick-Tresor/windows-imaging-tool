@@ -1,0 +1,9 @@
+{
+  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml.",
+  "share": {
+    "path": "\\\\deploy-server\\Deploy",
+    "user": "DOMAIN\\svc-deploy",
+    "passwordFile": "config\\share.cred"
+  },
+  "defaultAnswerFile": "Default"
+}

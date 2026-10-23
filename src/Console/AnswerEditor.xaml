@@ -1,0 +1,310 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Answer File" Width="920" Height="660" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="12,5"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="MinWidth" Value="80"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style TargetType="PasswordBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Margin" Value="0,4,0,8"/>
+    </Style>
+    <Style TargetType="RadioButton">
+      <Setter Property="Margin" Value="0,4,16,8"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="Padding" Value="0,4,8,4"/>
+      <Setter Property="VerticalAlignment" Value="Top"/>
+    </Style>
+    <Style x:Key="Title" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+    <Style x:Key="Hint" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#5B6170"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False"/>
+      <Setter Property="HeadersVisibility" Value="Column"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
+      <Setter Property="RowHeight" Value="26"/>
+      <Setter Property="CanUserAddRows" Value="False"/>
+      <Setter Property="SelectionMode" Value="Single"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- Sections -->
+    <Border DockPanel.Dock="Left" Width="190" Background="#1F2937">
+      <ListBox x:Name="LstSections" Background="Transparent" BorderThickness="0" Foreground="#E5E7EB" Padding="0,12" FontSize="14">
+        <ListBox.ItemContainerStyle>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="18,9"/>
+          </Style>
+        </ListBox.ItemContainerStyle>
+        <ListBoxItem Content="General"/>
+        <ListBoxItem Content="Image and disk"/>
+        <ListBoxItem Content="Applications"/>
+        <ListBoxItem Content="Windows settings"/>
+        <ListBoxItem Content="Computer name"/>
+        <ListBoxItem Content="Domain or workgroup"/>
+        <ListBoxItem Content="Tasks"/>
+        <ListBoxItem Content="Network shares"/>
+      </ListBox>
+    </Border>
+
+    <!-- Problems and buttons -->
+    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
+          <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
+        </StackPanel>
+        <TextBlock x:Name="TxtProblems" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+      </DockPanel>
+    </Border>
+
+    <Grid Margin="24,18">
+      <!-- 0 General -->
+      <StackPanel x:Name="Sec0">
+        <TextBlock Style="{StaticResource Title}" Text="General"/>
+        <TextBlock Style="{StaticResource Hint}" Text="How the deployment starts and ends on the PC."/>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Answer file name"/>
+          <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Shown in the menu on the PC."/>
+          <Label Grid.Row="1" Content="Mode"/>
+          <StackPanel Grid.Row="1" Grid.Column="1">
+            <RadioButton x:Name="RbInteractive" GroupName="Mode" Content="Interactive: the technician picks this answer file and types YES"/>
+            <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a countdown"/>
+          </StackPanel>
+          <Label Grid.Row="2" Content="Countdown (seconds)"/>
+          <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
+          <Label Grid.Row="3" Content="When finished"/>
+          <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+            <RadioButton x:Name="RbReboot" GroupName="Done" Content="Restart"/>
+            <RadioButton x:Name="RbShutdown" GroupName="Done" Content="Shut down"/>
+            <RadioButton x:Name="RbStay" GroupName="Done" Content="Stay in WinPE"/>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+
+      <!-- 1 Image and disk -->
+      <StackPanel x:Name="Sec1" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Image and disk"/>
+        <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned."/>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Image"/>
+          <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
+          <Label Grid.Row="1" Content="Version"/>
+          <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
+                    ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>
+          <Label Grid.Row="2" Content="Edition (index)"/>
+          <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
+          <Label Grid.Row="3" Content="Target disk number"/>
+          <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
+          <Label Grid.Row="4" Content="Disk option"/>
+          <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
+            <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
+          </ComboBox>
+          <Label Grid.Row="5" Content="Driver library folder"/>
+          <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
+        </Grid>
+      </StackPanel>
+
+      <!-- 2 Applications -->
+      <DockPanel x:Name="Sec2" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="Applications"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Installed in this order the first time the PC starts, before anyone logs on. Add installers with New application."/>
+        </StackPanel>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Text="Available" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <Button x:Name="BtnNewApp" DockPanel.Dock="Bottom" Content="New application..." HorizontalAlignment="Left" Margin="0,8,0,0"/>
+            <ListBox x:Name="LstAvailable" DisplayMemberPath="Name"/>
+          </DockPanel>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0">
+            <Button x:Name="BtnAppAdd" Content="Add &gt;" Margin="0,0,0,8"/>
+            <Button x:Name="BtnAppRemove" Content="&lt; Remove" Margin="0"/>
+          </StackPanel>
+          <DockPanel Grid.Column="2">
+            <TextBlock DockPanel.Dock="Top" Text="Install order" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <ListBox x:Name="LstSelected"/>
+          </DockPanel>
+          <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="10,0,0,0">
+            <Button x:Name="BtnAppUp" Content="Up" Margin="0,0,0,8"/>
+            <Button x:Name="BtnAppDown" Content="Down" Margin="0"/>
+          </StackPanel>
+        </Grid>
+      </DockPanel>
+
+      <!-- 3 Windows settings -->
+      <ScrollViewer x:Name="Sec3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Windows settings"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Owner, product key, time zone and languages for the new Windows."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+            </Grid.RowDefinitions>
+            <Label Content="Full name"/>
+            <TextBox x:Name="TxtFullName" Grid.Column="1"/>
+            <Label Grid.Row="1" Content="Organization"/>
+            <TextBox x:Name="TxtOrg" Grid.Row="1" Grid.Column="1"/>
+            <Label Grid.Row="2" Content="Product key"/>
+            <TextBox x:Name="TxtProductKey" Grid.Row="2" Grid.Column="1" ToolTip="Leave empty to keep the image's key or KMS / digital licence activation."/>
+            <Label Grid.Row="3" Content="Time zone"/>
+            <ComboBox x:Name="CmbTimeZone" Grid.Row="3" Grid.Column="1" IsEditable="True"/>
+            <Label Grid.Row="4" Content="Keyboard (input locale)"/>
+            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="5" Content="Formats (user locale)"/>
+            <ComboBox x:Name="CmbUserLocale" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="6" Content="System locale"/>
+            <ComboBox x:Name="CmbSystemLocale" Grid.Row="6" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="7" Content="Display language"/>
+            <ComboBox x:Name="CmbUILanguage" Grid.Row="7" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Must be a language installed in the image."/>
+            <Label Grid.Row="8" Content="Options"/>
+            <CheckBox x:Name="ChkNoRestore" Grid.Row="8" Grid.Column="1" Content="Turn off System Restore"/>
+            <Label Grid.Row="9" Content="Built-in Administrator"/>
+            <CheckBox x:Name="ChkAdmin" Grid.Row="9" Grid.Column="1" Content="Enable it with this password (also skips the local account page in setup)"/>
+            <StackPanel Grid.Row="10" Grid.Column="1">
+              <PasswordBox x:Name="PwdAdmin" Width="260" HorizontalAlignment="Left"/>
+              <TextBlock x:Name="TxtAdminPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 4 Computer name -->
+      <StackPanel x:Name="Sec4" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
+        <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
+        <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number"/>
+        <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom scheme"/>
+        <RadioButton x:Name="RbNamePrompt" GroupName="Naming" Content="Ask the technician (interactive mode; uses the WMI value otherwise)"/>
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Prefix"/>
+          <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left"/>
+          <Label Grid.Row="1" Content="WMI query"/>
+          <ComboBox x:Name="CmbWmi" Grid.Row="1" Grid.Column="1" IsEditable="True">
+            <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
+            <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
+            <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
+            <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
+          </ComboBox>
+          <Label Grid.Row="2" Content="Custom scheme"/>
+          <TextBox x:Name="TxtScheme" Grid.Row="2" Grid.Column="1" ToolTip="# = random digit, {SERIAL} = BIOS serial. Example: LAB-####"/>
+          <Label Grid.Row="3" Content="Example on this PC"/>
+          <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+            <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <Button x:Name="BtnNamePreview" Content="Preview"/>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+
+      <!-- 5 Domain or workgroup -->
+      <StackPanel x:Name="Sec5" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Domain or workgroup"/>
+        <TextBlock Style="{StaticResource Hint}" Text="The password is saved in its own file under config\secrets, not in the answer file. Use an account that can only join computers to the OU."/>
+        <StackPanel Orientation="Horizontal">
+          <RadioButton x:Name="RbDomain" GroupName="Join" Content="Join a domain"/>
+          <RadioButton x:Name="RbWorkgroup" GroupName="Join" Content="Join a workgroup"/>
+        </StackPanel>
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Domain"/>
+          <TextBox x:Name="TxtDomain" Grid.Column="1" ToolTip="corp.example.com"/>
+          <Label Grid.Row="1" Content="Organizational unit"/>
+          <TextBox x:Name="TxtOU" Grid.Row="1" Grid.Column="1" ToolTip="OU=Laptops,DC=corp,DC=example,DC=com. Leave empty for the default Computers container."/>
+          <Label Grid.Row="2" Content="Join account"/>
+          <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+          <Label Grid.Row="3" Content="Account's domain"/>
+          <TextBox x:Name="TxtJoinDomain" Grid.Row="3" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="NetBIOS name such as CORP. Leave empty to use the domain above."/>
+          <Label Grid.Row="4" Content="Password"/>
+          <StackPanel Grid.Row="4" Grid.Column="1">
+            <PasswordBox x:Name="PwdJoin" Width="260" HorizontalAlignment="Left"/>
+            <TextBlock x:Name="TxtJoinPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+          </StackPanel>
+          <Label Grid.Row="5" Content="Workgroup"/>
+          <TextBox x:Name="TxtWorkgroup" Grid.Row="5" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+        </Grid>
+      </StackPanel>
+
+      <!-- 6 Tasks -->
+      <DockPanel x:Name="Sec6" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="Tasks"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Commands to run. POSTIMAGE: in WinPE once the image and drivers are applied (%OSDRIVE% is the new Windows drive, %DEPLOYROOT% the content root). FIRSTBOOT: on the PC as SYSTEM, after the applications. FIRSTLOGON: when the first user logs on."/>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+          <Button x:Name="BtnTaskAdd" Content="Add"/>
+          <Button x:Name="BtnTaskRemove" Content="Remove"/>
+          <Button x:Name="BtnTaskUp" Content="Up"/>
+          <Button x:Name="BtnTaskDown" Content="Down"/>
+        </StackPanel>
+        <DataGrid x:Name="GridTasks">
+          <DataGrid.Columns>
+            <DataGridComboBoxColumn Header="When" SelectedItemBinding="{Binding Phase}" Width="140"/>
+            <DataGridTextColumn Header="Command" Binding="{Binding Command}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <!-- 7 Network shares -->
+      <DockPanel x:Name="Sec7" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="Network shares"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Extra shares mapped in WinPE before the deployment, for images, applications or scripts kept on other servers. Drive letters D: to Y:, except W: and X:."/>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+          <Button x:Name="BtnShareAdd" Content="Add"/>
+          <Button x:Name="BtnShareRemove" Content="Remove"/>
+          <TextBlock Text="Password for the selected share:" VerticalAlignment="Center" Margin="12,0,8,0"/>
+          <PasswordBox x:Name="PwdShare" Width="200" Margin="0" VerticalContentAlignment="Center"/>
+          <TextBlock x:Name="TxtSharePwState" Foreground="#5B6170" VerticalAlignment="Center" Margin="8,0,0,0"/>
+        </StackPanel>
+        <DataGrid x:Name="GridShares">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Drive" Binding="{Binding LocalName}" Width="60"/>
+            <DataGridTextColumn Header="Share (\\server\share)" Binding="{Binding RemoteName}" Width="2*"/>
+            <DataGridTextColumn Header="User" Binding="{Binding Username}" Width="*"/>
+            <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</Window>
