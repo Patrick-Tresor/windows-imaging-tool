@@ -25,6 +25,8 @@ and click **Create folders** the first time. Then:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
+  **Versions...** (or double-click an image) lists its earlier versions (see
+  [Image versions and rollback](#image-versions-and-rollback)).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
   and **Import SmartDeploy XML...** to convert an existing SmartDeploy answer file.
   **New** and **Edit** (or double-click) open the answer file editor, where every
@@ -44,6 +46,7 @@ Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
 ```
 Images\        Win11-24H2-Enterprise.wim
+               Previous\Win11-24H2-Enterprise_20261015-1430\  (earlier versions)
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
@@ -96,6 +99,29 @@ options. SmartDeploy encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
 rebuild as folders, and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
+
+## Image versions and rollback
+
+Earlier copies of an image are kept in `Images\Previous\<name>_<yyyyMMdd-HHmm>\`,
+so a bad capture or update never leaves you without a working image:
+
+- **Recapture** under the same name by ticking *replace it and keep the old one*
+  in the capture wizard. The old image moves to `Previous` only once the new
+  capture has succeeded.
+- **Offline updates** keep the image they replace in the same place.
+- **Keep a copy of current** (Images > Versions...) takes a snapshot, for
+  example before you try something, with a note saying what it is.
+- **Roll back to selected** makes an earlier version current again for every
+  answer file that doesn't name a version. The image you roll away from is kept
+  as a version too, so a rollback can itself be undone.
+- **Pin an answer file** to a version on its *Image and disk* page (the
+  `<image><version>` element). Use it to keep a lab or a pilot group on a
+  known-good build while the current image moves on, or the other way round.
+- **Delete selected** and **Delete older** (keep the newest N) free space. Both
+  refuse versions an answer file is pinned to.
+
+Copies and rollbacks run in their own window (`src\Invoke-ImageVersion.ps1`)
+and write a `VERSION-<name>` log. Each version takes as much space as the image.
 
 ## Workflow
 

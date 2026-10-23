@@ -3,6 +3,7 @@
 
 $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'ImageVersions.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -81,6 +82,7 @@ function Get-ImageList {
             Parts    = $parts.Count
             Modified = $f.LastWriteTime
             Indexes  = $indexes
+            Versions = @(Get-ImageVersions -ImagePath $f.FullName).Count
             FullName = $f.FullName
         }
     }
@@ -194,12 +196,13 @@ function New-CaptureConfig {
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
         [switch]$SplitForFat32,
-        [switch]$Unattended
+        [switch]$Unattended,
+        [switch]$NewVersion   # replace an existing image of this name; the old one is kept as a version
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $images = Join-Path $ContentRoot 'Images'
-    if ((Test-Path (Join-Path $images "$Name.wim")) -or (Test-Path (Join-Path $images "$Name.swm"))) {
-        throw "An image named $Name already exists. Pick another name."
+    if (-not $NewVersion -and ((Test-Path (Join-Path $images "$Name.wim")) -or (Test-Path (Join-Path $images "$Name.swm")))) {
+        throw "An image named $Name already exists. Pick another name, or capture it as a new version."
     }
     $cfg = [ordered]@{
         name             = $Name
@@ -208,6 +211,7 @@ function New-CaptureConfig {
         splitSizeMB      = if ($SplitForFat32) { 3800 } else { 0 }
         noPrompt         = [bool]$Unattended
         shutdownWhenDone = [bool]$Unattended
+        newVersion       = [bool]$NewVersion
     }
     $path = Join-ContentPath $ContentRoot 'config\capture.json'
     [pscustomobject]$cfg | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
@@ -257,7 +261,11 @@ function Get-AnswerFileIssues {
     $a = $Answer
     @(Test-AnswerFile $a)
     $local = { param($p) $p -and -not [IO.Path]::IsPathRooted($p) -and -not $p.StartsWith('\\') -and $p -notmatch '^[A-Za-z]:' }
-    if ((& $local $a.ImageFile) -and -not (Test-Path (Join-ContentPath $ContentRoot $a.ImageFile))) { "Image $($a.ImageFile) is not in the content root." }
+    if ((& $local $a.ImageFile) -and $a.ImageVersion -and (Test-ImageVersionName $a.ImageVersion)) {
+        try { Get-ImageVersionPath -ImagePath (Join-ContentPath $ContentRoot $a.ImageFile) -Version $a.ImageVersion | Out-Null }
+        catch { "Version $($a.ImageVersion) of $($a.ImageFile) is no longer in Images\Previous." }
+    }
+    elseif ((& $local $a.ImageFile) -and -not (Test-Path (Join-ContentPath $ContentRoot $a.ImageFile))) { "Image $($a.ImageFile) is not in the content root." }
     if (& $local $a.AppLocation) {
         foreach ($app in $a.Applications) {
             if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json." }
@@ -282,7 +290,7 @@ function Get-AnswerFileRows {
             $a = Read-AnswerFile -Path $_.FullName -SkipValidation
             $issues = @(Get-AnswerFileIssues -ContentRoot $ContentRoot -Answer $a)
             $row.Mode   = $a.Mode
-            $row.Image  = $a.ImageFile
+            $row.Image  = if ($a.ImageVersion) { "$($a.ImageFile) (version $($a.ImageVersion))" } else { $a.ImageFile }
             $row.Apps   = $a.Applications.Count
             $row.Joins  = if ($a.Membership -eq 'Domain') { $a.Domain } else { "Workgroup $($a.Workgroup)" }
             $row.Issues = $issues
@@ -417,9 +425,103 @@ function Get-ImageUsage {
         try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
         $leaf = Split-Path ($a.ImageFile -replace '\\', '/') -Leaf
         if (-not $usage.ContainsKey($leaf)) { $usage[$leaf] = @() }
-        $usage[$leaf] += $f.BaseName
+        $usage[$leaf] += if ($a.ImageVersion) { "$($f.BaseName) (version $($a.ImageVersion))" } else { $f.BaseName }
     }
     $usage
+}
+
+#endregion
+
+#region Image versions
+
+function Get-ImageVersionUsage {
+    # Version -> answer files deploying it, for one image. '' is the current image.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -ne $ImageName) { continue }
+        $key = "$($a.ImageVersion)"
+        if (-not $usage.ContainsKey($key)) { $usage[$key] = @() }
+        $usage[$key] += $f.BaseName
+    }
+    $usage
+}
+
+function Get-ImageVersionRows {
+    # The current image and its archived versions, for the console's Versions dialog and the answer file editor.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
+    $path = Join-ContentPath $ContentRoot "Images\$ImageName"
+    $usage = Get-ImageVersionUsage -ContentRoot $ContentRoot -ImageName $ImageName
+    $pinnedBy = { param($v) if ($usage.ContainsKey($v)) { $usage[$v] -join ', ' } else { '' } }
+    $parts = @(Get-ImagePartFiles -ImagePath $path)
+    if ($parts) {
+        [pscustomobject]@{
+            Version   = ''
+            Label     = 'Current'
+            Date      = $parts[0].LastWriteTime
+            Reason    = 'In use by answer files without a version'
+            Note      = ''
+            SizeGB    = [Math]::Round((($parts | Measure-Object Length -Sum).Sum) / 1GB, 2)
+            UsedBy    = & $pinnedBy ''
+            ImagePath = $path
+        }
+    }
+    foreach ($v in Get-ImageVersions -ImagePath $path) {
+        [pscustomobject]@{
+            Version   = $v.Version
+            Label     = $v.Version
+            Date      = $v.Archived
+            Reason    = $v.Reason
+            Note      = $v.Note
+            SizeGB    = $v.SizeGB
+            UsedBy    = & $pinnedBy $v.Version
+            ImagePath = $v.ImagePath
+        }
+    }
+}
+
+function Remove-ImageVersions {
+    # Deletes archived versions, refusing any that an answer file is pinned to.
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$ImageName,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Version
+    )
+    $usage = Get-ImageVersionUsage -ContentRoot $ContentRoot -ImageName $ImageName
+    $pinned = @($Version | Where-Object { $_ -and $usage.ContainsKey($_) })
+    if ($pinned) {
+        throw ("Answer files still use {0}: {1}. Change them first." -f ($pinned -join ', '), (($pinned | ForEach-Object { $usage[$_] }) -join ', '))
+    }
+    $path = Join-ContentPath $ContentRoot "Images\$ImageName"
+    foreach ($v in $Version | Where-Object { $_ }) { Remove-ImageVersion -ImagePath $path -Version $v }
+}
+
+function Get-ImageVersionsToDelete {
+    # Versions older than the newest -Keep that no answer file uses, for "Delete older versions".
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName, [Parameter(Mandatory)][int]$Keep)
+    $usage = Get-ImageVersionUsage -ContentRoot $ContentRoot -ImageName $ImageName
+    Get-ImageVersionsToPrune -ImagePath (Join-ContentPath $ContentRoot "Images\$ImageName") -Keep $Keep -Pinned @($usage.Keys)
+}
+
+function Get-ImageVersionArguments {
+    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console in its own window
+    # because copying an image can take minutes.
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$ImageName,
+        [Parameter(Mandatory)][ValidateSet('Keep', 'Rollback')][string]$Action,
+        [string]$Version,
+        [string]$Note
+    )
+    if ($Action -eq 'Rollback' -and -not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
+    $q = { param($v) '"' + ($v -replace '"', "'") + '"' }
+    $cmd = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
+        '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Action', $Action, '-NoPrompt')
+    if ($Version) { $cmd += @('-Version', $Version) }
+    if ($Note) { $cmd += @('-Note', (& $q $Note)) }
+    $cmd
 }
 
 #endregion
@@ -463,4 +565,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application
+    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
+    Get-ImageVersionUsage, Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments

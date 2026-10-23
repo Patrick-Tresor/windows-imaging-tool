@@ -67,6 +67,7 @@ function Show-CaptureWizard {
             Compression = $w.CmbCompression.SelectedItem.Tag
             Split       = [bool]$w.ChkSplit.IsChecked
             Unattended  = [bool]$w.ChkUnattended.IsChecked
+            NewVersion  = [bool]$w.ChkNewVersion.IsChecked
             Mode        = if ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
             VM          = $w.CmbVM.SelectedItem
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
@@ -81,8 +82,8 @@ function Show-CaptureWizard {
             0 { if (-not $w.ChkPrepared.IsChecked) { 'Run the prepare command on the reference machine first, then tick the box.' } }
             1 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
-                elseif (@(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
-                    "An image named $($c.Name) already exists."
+                elseif (-not $c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
+                    "An image named $($c.Name) already exists. Pick another name, or tick the box to capture it as a new version."
                 }
             }
             2 {
@@ -109,6 +110,8 @@ function Show-CaptureWizard {
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
             "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })"
+            $(if ($c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
+                "Existing image: replaced after the capture succeeds; the old one is kept in Images\Previous" })
             ''
             "Media:         $target"
             "Saved to:      $saveTo"
@@ -136,7 +139,7 @@ function Show-CaptureWizard {
             [Windows.MessageBox]::Show($wiz, "Everything on $($c.Usb.Label) will be erased. Continue?", 'Capture Wizard', 'YesNo', 'Warning') -ne 'Yes') { return $false }
 
         $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `
-            -Compression $c.Compression -SplitForFat32:$c.Split -Unattended:$c.Unattended
+            -Compression $c.Compression -SplitForFat32:$c.Split -Unattended:$c.Unattended -NewVersion:$c.NewVersion
         $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', (ConvertTo-Arg (Join-Path $SrcDir 'New-DeploymentMedia.ps1')),
             '-SettingsPath', (ConvertTo-Arg (Join-Path $ContentRoot 'config\deploy-settings.json')),

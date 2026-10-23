@@ -8,7 +8,8 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | Piece | Runs on | What it does |
 |---|---|---|
 | **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
-| **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`. |
+| **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
+| **Image versions** (`src/ImageVersions.psm1`, `src/Invoke-ImageVersion.ps1`) | WinPE and the admin workstation | Keeps earlier images, rolls back, and resolves the version an answer file is pinned to. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. |
@@ -39,6 +40,29 @@ attaches the ISO, sets the DVD as first boot device and starts the VM. It then
 waits for the unattended capture to shut the VM down, ejects the ISO and sets
 the boot order back to the disk. The ISO is kept under `%ProgramData%` because
 Hyper-V cannot mount one from a share without delegation.
+
+## Image versions
+
+`ImageVersions.psm1` (used in WinPE and by the console) treats every folder
+`Images\Previous\<name>_<stamp>\` that holds the image's file as a version. The
+stamp (`yyyyMMdd-HHmm`, `-2` for a second one in the same minute) is the
+version's name. A folder holds the image's parts with their original names, its
+`<name>.updates.json` history when there is one, and `version.json` (reason,
+note). Backups made by the offline updater have no `version.json` and are listed
+as kept by an offline update.
+
+- `Save-ImageVersion` copies the image to a new version, or with `-Move`
+  empties the slot first (recapture, rollback). A failed move is put back.
+- `Restore-ImageVersion` moves the current image to a new version and *copies*
+  the chosen one back, so answer files pinned to it keep a valid path. If the
+  copy fails, the partial copy is removed and the old current image moved back.
+- `Capture-GoldenImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
+  then archives the old image and moves the new one in, so a failed capture
+  leaves the current image alone.
+- `Deploy-Image.ps1` reads `<image><version>`; when it is set it deploys
+  `Get-ImageVersionPath` (the file in the version folder) instead of the current image.
+- Deleting and pruning (`Remove-ImageVersions`, `Get-ImageVersionsToDelete` in
+  `ConsoleData.psm1`) refuse versions an answer file names.
 
 ## Why the golden image is hardware-independent
 

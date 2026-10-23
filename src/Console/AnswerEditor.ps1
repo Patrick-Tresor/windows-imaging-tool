@@ -138,7 +138,24 @@ function Show-AnswerEditor {
         $img = $images | Where-Object { "Images\$($_.Name)" -eq $e.CmbImage.Text } | Select-Object -First 1
         $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
     }
-    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ & $updateIndexes }) | Out-Null })
+    $updateVersions = {
+        # Current plus the versions kept in Images\Previous for an image in the Images folder, with $Want selected.
+        param([string]$Want)
+        $state.VersionsFor = $e.CmbImage.Text
+        $items = @([pscustomobject]@{ Version = ''; Display = 'Current (follows recaptures, updates and rollbacks)' })
+        $img = $images | Where-Object { "Images\$($_.Name)" -eq $e.CmbImage.Text } | Select-Object -First 1
+        if ($img) {
+            $items += @(Get-ImageVersionRows -ContentRoot $ContentRoot -ImageName $img.Name | Where-Object Version | ForEach-Object {
+                [pscustomobject]@{ Version = $_.Version; Display = ('{0}   {1}{2}' -f $_.Version, $_.Reason, $(if ($_.Note) { " - $($_.Note)" })) }
+            })
+        }
+        if ($Want -and -not ($items | Where-Object Version -eq $Want)) {
+            $items += [pscustomobject]@{ Version = $Want; Display = "$Want   (missing from Images\Previous)" }
+        }
+        $e.CmbVersion.ItemsSource = $items
+        $e.CmbVersion.SelectedItem = $items | Where-Object Version -eq $Want | Select-Object -First 1
+    }
+    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ & $updateIndexes; if ($e.CmbImage.Text -ne $state.VersionsFor) { & $updateVersions '' } }) | Out-Null })
 
     # --- Load ------------------------------------------------------------------------------------------------
     $e.TxtName.Text = $a.Name
@@ -152,6 +169,7 @@ function Show-AnswerEditor {
 
     $e.CmbImage.Text = $a.ImageFile
     & $updateIndexes
+    & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     $e.TxtDisk.Text = $a.DiskNumber
     $e.TxtDrivers.Text = $a.DriverRoot
@@ -271,6 +289,7 @@ function Show-AnswerEditor {
         $a.Shutdown      = [bool]$e.RbShutdown.IsChecked
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
+        $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
         $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
         $a.DriverRoot    = $e.TxtDrivers.Text.Trim()
         $a.Applications  = @($selected)

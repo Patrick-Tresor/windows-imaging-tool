@@ -21,8 +21,10 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
+. (Join-Path $PSScriptRoot 'ImageVersions.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -179,6 +181,16 @@ $ui.BtnCapture.Add_Click({ Invoke-Safely {
         Set-Status 'Capture started in a separate window. Click Refresh on the Images tab when it finishes.'
     }
 } })
+$ui.BtnImageVersions.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    if (Show-ImageVersionsDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
+        Update-Images; Update-Answers
+        Set-Status "Versions of $($image.Name) changed. A copy or rollback runs in its own window; click Refresh when it finishes."
+    }
+} })
+$ui.GridImages.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridImages.SelectedItem) { $ui.BtnImageVersions.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) } } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion

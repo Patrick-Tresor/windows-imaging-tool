@@ -2,6 +2,9 @@
 .SYNOPSIS
     Captures a sysprepped reference PC (ideally a Hyper-V VM) to a WIM, from WinPE.
 .DESCRIPTION
+    With -NewVersion, an existing image of the same name is replaced only once the new capture has
+    succeeded, and the old one is kept as a version in Images\Previous\ (see ImageVersions.psm1).
+
     Before running, prepare the reference machine with Prepare-Reference.ps1 (or
     sysprep /generalize /oobe /shutdown), then boot it from capture media.
     Capture media built by the console's capture wizard runs this automatically with
@@ -17,6 +20,7 @@ param(
     [Parameter(ParameterSetName = 'Direct')][string]$Description,
     [Parameter(ParameterSetName = 'Direct')][ValidateSet('fast', 'max')][string]$Compression = 'max',
     [Parameter(ParameterSetName = 'Direct')][int]$SplitSizeMB = 0,   # e.g. 3800 to fit a FAT32 USB; 0 = no split
+    [Parameter(ParameterSetName = 'Direct')][switch]$NewVersion,     # replace an existing image, keeping the old one as a version
     [Parameter(Mandatory, ParameterSetName = 'Config')][string]$ConfigPath,
     [string]$Destination,
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
@@ -26,6 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 
 if ($PSCmdlet.ParameterSetName -eq 'Config') {
     $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
@@ -35,10 +40,13 @@ if ($PSCmdlet.ParameterSetName -eq 'Config') {
     $SplitSizeMB      = [int]$cfg.splitSizeMB
     $NoPrompt         = [switch][bool]$cfg.noPrompt
     $ShutdownWhenDone = [switch][bool]$cfg.shutdownWhenDone
+    $NewVersion       = [switch][bool]$cfg.newVersion
 }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
 
 $root = $null
+$staging = $null
+$swapping = $false
 $status = 'FAILED'
 try {
     # WinPE assigns letters unpredictably: find the volume that holds an offline Windows install.
@@ -59,10 +67,17 @@ try {
         $Destination = Join-Path $root 'Images'
     }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    $wim = Join-Path $Destination "$Name.wim"
-    if ((Test-Path $wim) -or (Test-Path (Join-Path $Destination "$Name.swm"))) {
-        throw "An image named $Name already exists in $Destination. Pick another name."
+    $existing = @((Join-Path $Destination "$Name.wim"), (Join-Path $Destination "$Name.swm")) | Where-Object { Test-Path $_ }
+    if ($existing -and -not $NewVersion) {
+        throw "An image named $Name already exists in $Destination. Pick another name, or capture it as a new version."
     }
+    # A new version is captured to a staging folder first, so a failed capture leaves the current image alone.
+    $staging = if ($existing) { Join-Path $Destination ".capture-$Name" } else { $Destination }
+    if ($existing) {
+        Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    }
+    $wim = Join-Path $staging "$Name.wim"
 
     Write-DeployLog ("Capturing {0} ({1:N0} GB used) to {2}" -f $source, (($windows.Size - $windows.SizeRemaining) / 1GB), $wim)
     if (-not $NoPrompt -and (Read-Host 'Type YES to start the capture') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; return }
@@ -74,8 +89,22 @@ try {
 
     if ($SplitSizeMB -gt 0) {
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
-            '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $Destination "$Name.swm")", "/FileSize:$SplitSizeMB")
+            '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $staging "$Name.swm")", "/FileSize:$SplitSizeMB")
         Remove-Item $wim
+    }
+
+    if ($existing) {
+        $swapping = $true
+        foreach ($old in $existing) {
+            $v = Save-ImageVersion -ImagePath $old -Move -Reason 'Replaced by a new capture'
+            Write-DeployLog "Kept the previous $(Split-Path $old -Leaf) as version $($v.Version)"
+        }
+        Get-ChildItem -LiteralPath $staging -File | Move-Item -Destination $Destination
+        Remove-Item -LiteralPath $staging -Recurse -Force
+        $newLeaf = if ($SplitSizeMB -gt 0) { "$Name.swm" } else { "$Name.wim" }
+        if ($existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
+            Write-DeployLog "The new version is $newLeaf but the old one was $(($existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
+        }
     }
 
     Write-DeployLog "Captured $source to $Destination"
@@ -83,8 +112,11 @@ try {
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
+    if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $Destination\Previous." -Level WARN }
 }
 finally {
+    # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
+    if ($staging -and $staging -ne $Destination -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     if ($root) {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null

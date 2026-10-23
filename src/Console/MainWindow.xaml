@@ -76,6 +76,7 @@
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
@@ -85,6 +86,7 @@
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
               <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
               <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
+              <DataGridTextColumn Header="Earlier versions" Binding="{Binding Versions}" Width="110"/>
               <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
               <DataGridTextColumn Header="Editions (index: name)" Binding="{Binding Indexes}" Width="3*"/>
             </DataGrid.Columns>

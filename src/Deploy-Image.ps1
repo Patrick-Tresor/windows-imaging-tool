@@ -20,6 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -93,6 +94,11 @@ try {
     }
 
     $imagePath = Resolve-ContentPath $root $answer.ImageFile
+    if ($answer.ImageVersion) {
+        # Pinned to an earlier version kept in Images\Previous.
+        $imagePath = Get-ImageVersionPath -ImagePath $imagePath -Version $answer.ImageVersion
+        Write-DeployLog "Image version $($answer.ImageVersion): $imagePath"
+    }
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 
     $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
@@ -119,7 +125,7 @@ try {
     $disk = Get-Disk -Number $answer.DiskNumber
     Write-Host ''
     Write-Host "Answer file:  $($answer.Name)"
-    Write-Host "Image:        $imagePath (index $($answer.ImageIndex))"
+    Write-Host "Image:        $imagePath (index $($answer.ImageIndex)$(if ($answer.ImageVersion) { ", version $($answer.ImageVersion)" }))"
     Write-Host "Drivers:      $(if ($driverPack) { $driverPack } else { 'inbox only' })"
     Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
     Write-Host "Name:         $ComputerName"
