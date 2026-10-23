@@ -119,21 +119,24 @@
         <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned."/>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Label Content="Image"/>
           <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
-          <Label Grid.Row="1" Content="Edition (index)"/>
-          <ComboBox x:Name="CmbIndex" Grid.Row="1" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
-          <Label Grid.Row="2" Content="Target disk number"/>
-          <TextBox x:Name="TxtDisk" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
-          <Label Grid.Row="3" Content="Disk option"/>
-          <ComboBox x:Name="CmbDiskOption" Grid.Row="3" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
+          <Label Grid.Row="1" Content="Version"/>
+          <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
+                    ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>
+          <Label Grid.Row="2" Content="Edition (index)"/>
+          <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
+          <Label Grid.Row="3" Content="Target disk number"/>
+          <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
+          <Label Grid.Row="4" Content="Disk option"/>
+          <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
             <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
           </ComboBox>
-          <Label Grid.Row="4" Content="Driver library folder"/>
-          <TextBox x:Name="TxtDrivers" Grid.Row="4" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
-          <Label Grid.Row="5" Content="Windows 11 check"/>
-          <ComboBox x:Name="CmbWin11Check" Grid.Row="5" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
+          <Label Grid.Row="5" Content="Driver library folder"/>
+          <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
+          <Label Grid.Row="6" Content="Windows 11 check"/>
+          <ComboBox x:Name="CmbWin11Check" Grid.Row="6" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
                     ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
             <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
             <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>

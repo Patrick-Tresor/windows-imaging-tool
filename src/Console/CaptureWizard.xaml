@@ -81,7 +81,7 @@
           <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <Grid.RowDefinitions>
             <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
-            <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+            <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
           </Grid.RowDefinitions>
           <Label Content="Name"/>
           <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Becomes the file name."/>
@@ -96,6 +96,9 @@
                     Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
           <CheckBox x:Name="ChkUnattended" Grid.Row="8" Grid.Column="1" IsChecked="True"
                     Content="Start without asking and shut down when done (needed for the Hyper-V option)"/>
+          <CheckBox x:Name="ChkNewVersion" Grid.Row="10" Grid.Column="1"
+                    Content="If an image with this name exists, replace it and keep the old one as an earlier version"
+                    ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>
         </Grid>
       </StackPanel>
 

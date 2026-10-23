@@ -1,0 +1,77 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Image versions" Width="900" Height="560" MinWidth="760" MinHeight="420"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="MinWidth" Value="90"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False"/>
+      <Setter Property="HeadersVisibility" Value="Column"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="#E5E7EB"/>
+      <Setter Property="BorderBrush" Value="#D1D5DB"/>
+      <Setter Property="RowHeight" Value="28"/>
+      <Setter Property="SelectionMode" Value="Extended"/>
+      <Setter Property="IsReadOnly" Value="True"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel Margin="20">
+    <StackPanel DockPanel.Dock="Top">
+      <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
+      <TextBlock TextWrapping="Wrap" Foreground="#5B6170" Margin="0,0,0,12"
+                 Text="Earlier versions are kept in Images\Previous when you capture over an image, update it offline, keep a copy or roll back. Roll back makes the selected version current again for every answer file without a version; the image you roll away from is kept as a version too. To keep one answer file on a version, pick it in the answer file's Image page."/>
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+      <DockPanel Margin="0,0,0,10">
+        <TextBlock Text="Keep newest for this image" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <Button x:Name="BtnLimitSave" DockPanel.Dock="Right" Content="Save limit" Margin="8,0,0,0"/>
+        <TextBox x:Name="TxtLimit" Width="80" HorizontalAlignment="Left" ToolTip="How many of the newest versions of this image to keep after a copy, rollback or replacing capture. Blank uses the default in Deploy Settings. Pinned versions are never deleted."/>
+      </DockPanel>
+      <DockPanel Margin="0,0,0,10">
+        <TextBlock Text="Note" VerticalAlignment="Center" Width="50"/>
+        <Button x:Name="BtnNote" DockPanel.Dock="Right" Content="Save note" Margin="8,0,0,0"/>
+        <TextBox x:Name="TxtNote" ToolTip="What is in this version, e.g. 'Before the October cumulative update' or 'Known good for the lab'."/>
+      </DockPanel>
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="BtnClose" Content="Close" Margin="0"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <Button x:Name="BtnKeep" Content="Keep a copy of current"/>
+          <Button x:Name="BtnRollback" Content="Roll back to selected" Style="{StaticResource Primary}"/>
+          <Button x:Name="BtnDelete" Content="Delete selected"/>
+          <TextBlock Text="Keep newest" VerticalAlignment="Center" Margin="8,0,6,0"/>
+          <TextBox x:Name="TxtKeep" Width="40" Text="3" HorizontalContentAlignment="Center"/>
+          <Button x:Name="BtnPrune" Content="Delete older" Margin="8,0,8,0" ToolTip="Deletes archived versions beyond the newest ones, except versions an answer file uses."/>
+          <Button x:Name="BtnRefresh" Content="Refresh"/>
+        </StackPanel>
+      </DockPanel>
+    </StackPanel>
+
+    <DataGrid x:Name="GridVersions">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Version" Binding="{Binding Label}" Width="130"/>
+        <DataGridTextColumn Header="Date" Binding="{Binding Date, StringFormat=yyyy-MM-dd HH:mm}" Width="120"/>
+        <DataGridTextColumn Header="How it was kept" Binding="{Binding Reason}" Width="2*"/>
+        <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*"/>
+        <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="80"/>
+        <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</Window>

@@ -21,8 +21,12 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
+. (Join-Path $PSScriptRoot 'ImageVersions.ps1')
+. (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -121,6 +125,7 @@ function Update-Settings {
     $ui.TxtShareUser.Text   = $s.share.user
     $ui.TxtSharePwFile.Text = $s.share.passwordFile
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
+    $ui.TxtVersionsToKeep.Text = if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep } else { 0 }
 }
 
 function Update-Logs {
@@ -140,6 +145,19 @@ function Get-UsbDiskChoices {
 function Update-UsbDisks {
     $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
+}
+
+function Update-AdkStatus {
+    # Shown on the Media tab; media builds and captures need the ADK and the WinPE add-on.
+    $s = Get-AdkStatus
+    $text = $s.Summary
+    if ($s.Warnings) { $text += ' ' + ($s.Warnings -join ' ') }
+    $ui.TxtAdk.Text = $text
+    $ok = $s.Ready -and -not $s.Warnings
+    $ui.BrdAdk.Background = if ($s.Ready) { if ($ok) { '#ECFDF3' } else { '#FFFBEB' } } else { '#FEF2F2' }
+    $ui.BrdAdk.BorderBrush = if ($s.Ready) { if ($ok) { '#A6F4C5' } else { '#FDE68A' } } else { '#FECACA' }
+    $ui.BtnAdkDownload.Visibility = if ($s.Ready) { 'Collapsed' } else { 'Visible' }
+    $s
 }
 
 function Update-All {
@@ -177,6 +195,24 @@ $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
         Set-Status 'Capture started in a separate window. Click Refresh on the Images tab when it finishes.'
+    }
+} })
+$ui.BtnImageVersions.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    if (Show-ImageVersionsDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
+        Update-Images; Update-Answers
+        Set-Status "Versions of $($image.Name) changed. A copy or rollback runs in its own window; click Refresh when it finishes."
+    }
+} })
+$ui.GridImages.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridImages.SelectedItem) { $ui.BtnImageVersions.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) } } })
+$ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
+        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
@@ -295,11 +331,15 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
 #region Media
 
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
+$ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
+$ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
 $ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO or boot.wim'; if ($p) { $ui.TxtOutput.Text = $p } })
 $ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
+    $adk = Update-AdkStatus
+    if (-not $adk.Ready) { Show-Error ("Can't build media on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return }
     $settingsPath = Join-Path $script:root 'config\deploy-settings.json'
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"), '-SettingsPath', (ConvertTo-Arg $settingsPath))
 
@@ -331,6 +371,9 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     $s.share.path         = $ui.TxtSharePath.Text.Trim()
     $s.share.user         = $ui.TxtShareUser.Text.Trim()
     $s.share.passwordFile = $ui.TxtSharePwFile.Text.Trim()
+    $keep = 0
+    if (-not [int]::TryParse($ui.TxtVersionsToKeep.Text.Trim(), [ref]$keep) -or $keep -lt 0) { Show-Error 'Versions to keep must be 0 or more (0 keeps every version).'; return }
+    if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep = $keep } else { $s | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue $keep }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
     Update-Answers; Update-Settings
@@ -351,4 +394,5 @@ $ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

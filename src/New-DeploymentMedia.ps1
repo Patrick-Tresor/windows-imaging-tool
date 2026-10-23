@@ -27,6 +27,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
+
+# Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
+$adkStatus = Get-AdkStatus
+if (-not $adkStatus.Ready) { throw ("Can't build media on this PC yet:`n - " + ($adkStatus.Problems -join "`n - ")) }
+Write-Host $adkStatus.Summary
+foreach ($w in $adkStatus.Warnings) { Write-Warning $w }
+$adk = $adkStatus.Root
+$peRoot = "$adk\Windows Preinstallation Environment"
+
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
 if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
 if ($BootVM) {
@@ -35,10 +45,6 @@ if ($BootVM) {
     if ($vm.Generation -ne 2) { throw "VM $BootVM is generation $($vm.Generation). Only generation 2 (UEFI) VMs are supported." }
     if ($vm.State -ne 'Off') { throw "VM $BootVM is $($vm.State). Let sysprep shut it down first." }
 }
-
-$adk = "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit"
-$peRoot = "$adk\Windows Preinstallation Environment"
-if (-not (Test-Path $peRoot)) { throw 'Windows ADK WinPE add-on not found. Install the ADK and the WinPE add-on first.' }
 
 # copype and MakeWinPEMedia expect the ADK environment variables that DandISetEnv.bat sets.
 $envBat = "$adk\Deployment Tools\DandISetEnv.bat"
@@ -54,8 +60,7 @@ Mount-WindowsImage -ImagePath $bootWim -Index 1 -Path $mount | Out-Null
 try {
     # PowerShell, WMI, and storage cmdlets inside WinPE. Order matters: dependencies first.
     $ocs = "$peRoot\amd64\WinPE_OCs"
-    foreach ($oc in 'WinPE-WMI', 'WinPE-NetFX', 'WinPE-Scripting', 'WinPE-PowerShell',
-                    'WinPE-StorageWMI', 'WinPE-DismCmdlets', 'WinPE-SecureStartup') {
+    foreach ($oc in Get-WinPEComponentNames) {
         Add-WindowsPackage -Path $mount -PackagePath "$ocs\$oc.cab" | Out-Null
         $lang = "$ocs\en-us\$($oc)_en-us.cab"
         if (Test-Path $lang) { Add-WindowsPackage -Path $mount -PackagePath $lang | Out-Null }
