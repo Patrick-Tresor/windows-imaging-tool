@@ -134,9 +134,17 @@ function Show-AnswerEditor {
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
 
     $updateIndexes = {
-        # Editions from the selected image, as "index: name"; falls back to typing a number.
+        # Editions from the selected image, as "index: name". A pinned version lists that copy's editions.
+        # Falls back to typing a number.
         $img = $images | Where-Object { "Images\$($_.Name)" -eq $e.CmbImage.Text } | Select-Object -First 1
-        $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
+        $pinned = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
+        if ($img -and $pinned) {
+            $editions = @()
+            try { $editions = Get-ImageEditions -ImagePath (Get-ImageVersionPath -ImagePath (Join-Path (Join-Path $ContentRoot 'Images') $img.Name) -Version $pinned) } catch { }
+            $e.CmbIndex.ItemsSource = $editions
+        } else {
+            $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
+        }
     }
     $updateVersions = {
         # Current plus the versions kept in Images\Previous for an image in the Images folder, with $Want selected.
@@ -154,8 +162,10 @@ function Show-AnswerEditor {
         }
         $e.CmbVersion.ItemsSource = $items
         $e.CmbVersion.SelectedItem = $items | Where-Object Version -eq $Want | Select-Object -First 1
+        & $updateIndexes
     }
-    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ & $updateIndexes; if ($e.CmbImage.Text -ne $state.VersionsFor) { & $updateVersions '' } }) | Out-Null })
+    $e.CmbVersion.Add_SelectionChanged({ & $updateIndexes })
+    $e.CmbImage.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ if ($e.CmbImage.Text -ne $state.VersionsFor) { & $updateVersions '' } else { & $updateIndexes } }) | Out-Null })
 
     # --- Load ------------------------------------------------------------------------------------------------
     $e.TxtName.Text = $a.Name
@@ -168,7 +178,6 @@ function Show-AnswerEditor {
     $e.RbStay.IsChecked = -not $a.Shutdown -and -not $a.Reboot
 
     $e.CmbImage.Text = $a.ImageFile
-    & $updateIndexes
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     $e.TxtDisk.Text = $a.DiskNumber

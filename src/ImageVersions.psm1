@@ -133,10 +133,19 @@ function Set-ImageVersionNote {
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $v.Folder 'version.json') -Encoding utf8
 }
 
+function Set-ImageFileLink {
+    # Makes Destination the same file as Source when the volume allows a hard link, else a copy. A rollback then takes
+    # no time and no extra space. Nothing writes an image file in place (captures, updates and rollbacks all write new
+    # files), so the two names can share the data safely. Don't add an in-place writer for the current image.
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+    try { New-Item -ItemType HardLink -Path $Destination -Target $Source -ErrorAction Stop | Out-Null }
+    catch { Copy-Item -LiteralPath $Source -Destination $Destination -Force }
+}
+
 function Restore-ImageVersion {
     <#
     .SYNOPSIS
-        Rolls an image back: the current image becomes a new version, then a copy of the chosen version becomes current.
+        Rolls an image back: the current image becomes a new version, then the chosen version becomes current again (linked, not copied).
         The chosen version stays archived, so answer files pinned to it keep working. Returns the version that now
         holds the image that was current.
     #>
@@ -153,7 +162,9 @@ function Restore-ImageVersion {
         Get-ImageSidecarFiles -ImagePath $ImagePath | Remove-Item -Force
     }
     try {
-        foreach ($f in $sourceParts + $sourceSidecars) { Copy-Item -LiteralPath $f.FullName -Destination $dir }
+        # The image files are linked. The update history is copied, because it is rewritten in place after a rollback.
+        foreach ($f in $sourceParts) { Set-ImageFileLink -Source $f.FullName -Destination (Join-Path $dir $f.Name) }
+        foreach ($f in $sourceSidecars) { Copy-Item -LiteralPath $f.FullName -Destination $dir -Force }
     } catch {
         # Undo: drop the partial copy and put the image that was current back.
         foreach ($f in $sourceParts + $sourceSidecars) { Remove-Item -LiteralPath (Join-Path $dir $f.Name) -Force -ErrorAction SilentlyContinue }

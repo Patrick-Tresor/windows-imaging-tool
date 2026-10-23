@@ -241,6 +241,7 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Grid.RowDefinitions>
                 <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
+                <RowDefinition Height="8"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -250,6 +251,9 @@
               <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
               <Label Grid.Row="6" Content="Default answer file"/>
               <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
+              <Label Grid.Row="8" Content="Versions to keep"/>
+              <TextBox x:Name="TxtVersionsToKeep" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                       ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. 0 keeps all. Versions an answer file is pinned to are never deleted."/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>

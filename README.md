@@ -115,8 +115,11 @@ so a bad capture or update never leaves you without a working image:
 - **Keep a copy of current** (Images > Versions...) takes a snapshot, for
   example before you try something, with a note saying what it is.
 - **Roll back to selected** makes an earlier version current again for every
-  answer file that doesn't name a version. The image you roll away from is kept
+  answer file that doesn't name a version. It links the file rather than copying
+  it, so it is quick and uses no extra space. The image you roll away from is kept
   as a version too, so a rollback can itself be undone.
+- **Versions to keep** (Deploy Settings) deletes the oldest unpinned versions
+  after a copy or rollback, keeping the newest N. 0 keeps every version.
 - **Pin an answer file** to a version on its *Image and disk* page (the
   `<image><version>` element). Use it to keep a lab or a pilot group on a
   known-good build while the current image moves on, or the other way round.

@@ -68,6 +68,8 @@ try {
     Assert-Equal $old.Reason 'Replaced by a rollback to 20261001-0900' 'the kept image says why'
     Assert-Equal (Test-Path (Join-Path $v1.Folder 'Win11.wim')) $true 'the restored version stays archived for pinned answer files'
     Assert-Equal ((Get-Content -Raw (Join-Path $images 'Win11.updates.json')).Trim()) '{"history":[{"date":"v1"}]}' 'rollback restores the matching update history'
+    Set-Content (Join-Path $v1.Folder 'Win11.wim') 'v1'
+    Assert-Equal (Get-Content (Join-Path $v1.Folder 'Win11.wim')) 'v1' 'the chosen version is still archived after a rollback'
 
     # Split images move all their parts.
     Set-Content (Join-Path $images 'Big.swm') 'a'; Set-Content (Join-Path $images 'Big2.swm') 'b'
@@ -108,6 +110,19 @@ try {
     Assert-Equal ($prune.Version -join ',') '20261020-0800,20261001-0900' 'pruning keeps the newest and the pinned versions'
     Remove-ImageVersions -ContentRoot $root -ImageName 'Win11.wim' -Version @($prune.Version)
     Assert-Equal ((Get-ImageVersions -ImagePath $wim).Version -join ',') '20261022-1600,20261015-1430' 'pruned versions are gone'
+
+    # Retention: versions beyond versionsToKeep go, pinned ones stay.
+    $settingsPath = Join-Path $root 'config/deploy-settings.json'
+    $settings = Get-Content -Raw $settingsPath | ConvertFrom-Json
+    $settings | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue 0
+    $settings | ConvertTo-Json | Set-Content $settingsPath
+    Assert-Equal (@(Invoke-ImageVersionRetention -ContentRoot $root -ImageName 'Win11.wim')).Count 0 'retention 0 keeps every version'
+    $settings.versionsToKeep = 1
+    $settings | ConvertTo-Json | Set-Content $settingsPath
+    Save-ImageVersion -ImagePath $wim -Date ([datetime]'2026-10-23 17:00') | Out-Null
+    $gone = @(Invoke-ImageVersionRetention -ContentRoot $root -ImageName 'Win11.wim')
+    Assert-Equal ($gone.Version -join ',') '20261022-1600' 'retention deletes the unpinned version beyond the newest one'
+    Assert-Equal ((Get-ImageVersions -ImagePath $wim).Version -join ',') '20261023-1700,20261015-1430' 'retention keeps the newest and the pinned version'
 
     # Command lines the console starts.
     $cmd = Get-ImageVersionArguments -ScriptPath 'C:\Tool\src\Invoke-ImageVersion.ps1' -ContentRoot $root -ImageName 'Win11.wim' -Action Rollback -Version '20261015-1430'

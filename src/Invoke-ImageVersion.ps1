@@ -26,6 +26,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
 
 $name = [IO.Path]::GetFileNameWithoutExtension($ImagePath)
 $imagesDir = Split-Path $ImagePath -Parent
@@ -51,6 +52,8 @@ try {
         if ($old) { Write-DeployLog "The image that was current is kept as version $($old.Version)" }
         Write-DeployLog "Rolled back. Answer files without a version deploy $Version from now on."
     }
+    $pruned = @(Invoke-ImageVersionRetention -ContentRoot $contentRoot -ImageName (Split-Path $ImagePath -Leaf))
+    if ($pruned) { Write-DeployLog "Deleted older versions beyond versionsToKeep: $(($pruned.Version) -join ', ')" }
     $status = 'OK'
 }
 catch {

@@ -124,6 +124,7 @@ function Update-Settings {
     $ui.TxtShareUser.Text   = $s.share.user
     $ui.TxtSharePwFile.Text = $s.share.passwordFile
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
+    $ui.TxtVersionsToKeep.Text = if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep } else { 0 }
 }
 
 function Update-Logs {
@@ -361,6 +362,9 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     $s.share.path         = $ui.TxtSharePath.Text.Trim()
     $s.share.user         = $ui.TxtShareUser.Text.Trim()
     $s.share.passwordFile = $ui.TxtSharePwFile.Text.Trim()
+    $keep = 0
+    if (-not [int]::TryParse($ui.TxtVersionsToKeep.Text.Trim(), [ref]$keep) -or $keep -lt 0) { Show-Error 'Versions to keep must be 0 or more (0 keeps every version).'; return }
+    if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep = $keep } else { $s | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue $keep }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
     Update-Answers; Update-Settings

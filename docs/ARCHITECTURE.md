@@ -53,9 +53,15 @@ as kept by an offline update.
 
 - `Save-ImageVersion` copies the image to a new version, or with `-Move`
   empties the slot first (recapture, rollback). A failed move is put back.
-- `Restore-ImageVersion` moves the current image to a new version and *copies*
-  the chosen one back, so answer files pinned to it keep a valid path. If the
-  copy fails, the partial copy is removed and the old current image moved back.
+- `Restore-ImageVersion` moves the current image to a new version and then
+  *links* the chosen one back (a hard link, or a copy where the volume can't), so
+  answer files pinned to it keep a valid path and a rollback takes no extra space.
+  Only image files are linked; the update history is copied, since it is rewritten
+  in place. Nothing writes an image in place, so the two names can share data.
+  If the link fails, the partial copy is removed and the old current image moved back.
+- Retention: `versionsToKeep` in deploy-settings.json (Deploy Settings tab) keeps
+  the newest N versions and deletes older unpinned ones after a copy or rollback
+  (`Invoke-ImageVersionRetention`). 0 keeps everything, the default.
 - `Capture-GoldenImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
   then archives the old image and moves the new one in, so a failed capture
   leaves the current image alone.
