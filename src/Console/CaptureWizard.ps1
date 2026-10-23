@@ -117,6 +117,8 @@ function Show-CaptureWizard {
             "Saved to:      $saveTo"
         ) -join "`r`n"
         $issues = @(Get-CaptureReadiness -ContentRoot $ContentRoot -Destination $(if ($c.Mode -eq 'Usb') { 'Usb' } else { 'Network' }))
+        # Capture media is built with the ADK on this PC, so check it before Build and start.
+        $issues += @((Get-AdkStatus).Problems)
         $w.TxtIssues.Text = if ($issues) { "Fix before you start:`n" + ($issues -join "`n") } else { '' }
         $w.BtnNext.IsEnabled = -not $issues
     }

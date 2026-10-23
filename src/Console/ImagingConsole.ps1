@@ -22,6 +22,7 @@ $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -142,6 +143,19 @@ function Get-UsbDiskChoices {
 function Update-UsbDisks {
     $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
+}
+
+function Update-AdkStatus {
+    # Shown on the Media tab; media builds and captures need the ADK and the WinPE add-on.
+    $s = Get-AdkStatus
+    $text = $s.Summary
+    if ($s.Warnings) { $text += ' ' + ($s.Warnings -join ' ') }
+    $ui.TxtAdk.Text = $text
+    $ok = $s.Ready -and -not $s.Warnings
+    $ui.BrdAdk.Background = if ($s.Ready) { if ($ok) { '#ECFDF3' } else { '#FFFBEB' } } else { '#FEF2F2' }
+    $ui.BrdAdk.BorderBrush = if ($s.Ready) { if ($ok) { '#A6F4C5' } else { '#FDE68A' } } else { '#FECACA' }
+    $ui.BtnAdkDownload.Visibility = if ($s.Ready) { 'Collapsed' } else { 'Visible' }
+    $s
 }
 
 function Update-All {
@@ -307,11 +321,15 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
 #region Media
 
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
+$ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
+$ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
 $ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO or boot.wim'; if ($p) { $ui.TxtOutput.Text = $p } })
 $ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
+    $adk = Update-AdkStatus
+    if (-not $adk.Ready) { Show-Error ("Can't build media on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return }
     $settingsPath = Join-Path $script:root 'config\deploy-settings.json'
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"), '-SettingsPath', (ConvertTo-Arg $settingsPath))
 
@@ -363,4 +381,5 @@ $ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

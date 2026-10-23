@@ -159,6 +159,16 @@
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
           <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
 
+          <Border x:Name="BrdAdk" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,14">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="BtnAdkDownload" Content="Download ADK" Margin="8,0,0,0"/>
+                <Button x:Name="BtnAdkCheck" Content="Check again" Margin="8,0,0,0"/>
+              </StackPanel>
+              <TextBlock x:Name="TxtAdk" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
+          </Border>
+
           <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
           <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (import into WDS; content comes from the network share)" Margin="0,4"/>

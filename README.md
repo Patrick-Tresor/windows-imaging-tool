@@ -37,7 +37,10 @@ and click **Create folders** the first time. Then:
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
-- **Media**: build a USB stick, ISO or PXE `boot.wim` in one click.
+- **Media**: build a USB stick, ISO or PXE `boot.wim` in one click. The tab shows
+  whether the Windows ADK and its WinPE add-on are installed (and their version),
+  with a **Download ADK** button when they aren't. Media builds and the capture
+  wizard refuse to start until both are there.
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
 - **Deployment Logs**: one log per deployed PC, with result and full text.
