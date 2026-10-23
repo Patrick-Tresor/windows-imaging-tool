@@ -21,6 +21,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 

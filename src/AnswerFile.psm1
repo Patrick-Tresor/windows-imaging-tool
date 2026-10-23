@@ -3,6 +3,9 @@
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
+$script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
+$script:BitLockerProtectors = 'Tpm', 'TpmPin'
+$script:BiosMakers = 'Dell', 'HP', 'Lenovo'
 
 function Get-XmlText {
     # Inner text of the first node matching an XPath, trimmed; $Default when missing or empty.
@@ -17,6 +20,33 @@ function Get-XmlText {
 function ConvertTo-Bool([string]$Value, [bool]$Default) {
     if (-not $Value) { return $Default }
     $Value -in 'true', '1', 'yes'
+}
+
+function Read-BitLockerNode($d) {
+    # <bitlocker>: encrypt the OS drive at first boot. Defaults when the element is missing (BitLocker off).
+    [pscustomobject]@{
+        Enabled           = ConvertTo-Bool (Get-XmlText $d 'bitlocker/enabled') $false
+        EncryptionMethod  = Get-XmlText $d 'bitlocker/encryptionMethod' 'XtsAes256'
+        UsedSpaceOnly     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/usedSpaceOnly') $true
+        Protector         = Get-XmlText $d 'bitlocker/protector' 'Tpm'
+        PinFile           = Get-XmlText $d 'bitlocker/pinFile'
+        BackupToAD        = ConvertTo-Bool (Get-XmlText $d 'bitlocker/backupToAD') $true
+        RecoveryKeyFolder = Get-XmlText $d 'bitlocker/recoveryKeyFolder'
+        RequireBackup     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/requireBackup') $true
+    }
+}
+
+function Read-BiosNode($d) {
+    # <bios>: firmware settings per maker, applied in WinPE before the disk is wiped. Off when missing.
+    [pscustomobject]@{
+        Enabled      = ConvertTo-Bool (Get-XmlText $d 'bios/enabled') $false
+        PasswordFile = Get-XmlText $d 'bios/passwordFile'
+        ToolsRoot    = Get-XmlText $d 'bios/toolsRoot' 'Tools\BIOS'
+        StopOnError  = ConvertTo-Bool (Get-XmlText $d 'bios/stopOnError') $false
+        Settings     = @($d.SelectNodes('bios/setting') | ForEach-Object {
+            [pscustomobject]@{ Maker = $_.GetAttribute('maker'); Name = $_.GetAttribute('name'); Value = "$($_.InnerText)".Trim() }
+        })
+    }
 }
 
 function Read-AnswerFile {
@@ -68,6 +98,8 @@ function Read-AnswerFile {
         Shares               = @()
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
         Shutdown             = ConvertTo-Bool (Get-XmlText $d 'completion/shutdown') $false
+        BitLocker            = Read-BitLockerNode $d
+        Bios                 = Read-BiosNode $d
     }
 
     $a.Applications = @($d.SelectNodes('applications/application') |
@@ -118,6 +150,24 @@ function Test-AnswerFile {
         if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
     if ($a.Prefix -and $a.Prefix.Length -gt 14) { 'identification/naming/prefix is longer than a computer name allows.' }
+    $bl = $a.BitLocker
+    if ($bl -and $bl.Enabled) {
+        if ($bl.EncryptionMethod -notin $script:BitLockerMethods) { "bitlocker/encryptionMethod must be one of $($script:BitLockerMethods -join ', '), not '$($bl.EncryptionMethod)'." }
+        if ($bl.Protector -notin $script:BitLockerProtectors) { "bitlocker/protector must be Tpm or TpmPin, not '$($bl.Protector)'." }
+        if ($bl.Protector -eq 'TpmPin' -and -not $bl.PinFile) { 'A TpmPin protector needs bitlocker/pinFile.' }
+        if ($bl.BackupToAD -and $a.Membership -ne 'Domain') { 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' }
+        if ($bl.RecoveryKeyFolder -and $bl.RecoveryKeyFolder -notmatch '^\\\\[^\\]+\\.+') { "bitlocker/recoveryKeyFolder '$($bl.RecoveryKeyFolder)' must be a \\server\share path." }
+        if ($bl.RequireBackup -and -not $bl.BackupToAD -and -not $bl.RecoveryKeyFolder) { 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' }
+    }
+    $bios = $a.Bios
+    if ($bios -and $bios.Enabled) {
+        if (-not $bios.Settings) { 'bios is enabled but has no settings.' }
+        foreach ($s in $bios.Settings) {
+            if ($s.Maker -notin $script:BiosMakers) { "BIOS setting '$($s.Name)': maker must be Dell, HP or Lenovo, not '$($s.Maker)'." }
+            if (-not $s.Name -or -not $s.Value) { "A $($s.Maker) BIOS setting needs a name and a value." }
+            elseif ($s.Maker -eq 'Lenovo' -and "$($s.Name)$($s.Value)" -match '[,;]') { "Lenovo BIOS setting '$($s.Name)': names and values can't contain , or ;." }
+        }
+    }
 }
 
 function Resolve-ComputerName {
@@ -268,13 +318,26 @@ $accounts$logonBlock    </component>
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @())
+    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [string]$BitLockerPin)
+    $bl = $Answer.BitLocker
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
         tasks                = @($Answer.Tasks | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object Command)
+        bitlocker            = if ($bl -and $bl.Enabled) {
+            [pscustomobject]@{
+                encryptionMethod  = $bl.EncryptionMethod
+                usedSpaceOnly     = $bl.UsedSpaceOnly
+                protector         = $bl.Protector
+                pin               = if ($bl.Protector -eq 'TpmPin') { $BitLockerPin } else { $null }
+                backupToAD        = $bl.BackupToAD
+                recoveryKeyFolder = $bl.RecoveryKeyFolder
+                requireBackup     = $bl.RequireBackup
+            }
+        } else { $null }
     }
 }
 
@@ -315,6 +378,9 @@ function Export-AnswerFile {
     </share>
 "@
     }
+    $bl = if ($a.BitLocker) { $a.BitLocker } else { Read-BitLockerNode ([xml]'<deployment/>').DocumentElement }
+    $bios = if ($a.Bios) { $a.Bios } else { Read-BiosNode ([xml]'<deployment/>').DocumentElement }
+    $biosSettings = foreach ($s in $bios.Settings) { "    <setting maker=`"$(& $x $s.Maker)`" name=`"$(& $x $s.Name)`">$(& $x $s.Value)</setting>" }
     $text = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
@@ -376,6 +442,23 @@ $($tasks -join "`n")
   <shares>
 $($shares -join "`n")
   </shares>
+  <bitlocker>
+    <enabled>$(& $b $bl.Enabled)</enabled>
+    <encryptionMethod>$(& $x $bl.EncryptionMethod)</encryptionMethod>
+    <usedSpaceOnly>$(& $b $bl.UsedSpaceOnly)</usedSpaceOnly>
+    <protector>$(& $x $bl.Protector)</protector>
+    <pinFile>$(& $x $bl.PinFile)</pinFile>
+    <backupToAD>$(& $b $bl.BackupToAD)</backupToAD>
+    <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
+    <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>
+  </bitlocker>
+  <bios>
+    <enabled>$(& $b $bios.Enabled)</enabled>
+    <passwordFile>$(& $x $bios.PasswordFile)</passwordFile>
+    <toolsRoot>$(& $x $bios.ToolsRoot)</toolsRoot>
+    <stopOnError>$(& $b $bios.StopOnError)</stopOnError>
+$($biosSettings -join "`n")
+  </bios>
   <completion>
     <reboot>$(& $b $a.Reboot)</reboot>
     <shutdown>$(& $b $a.Shutdown)</shutdown>
@@ -516,6 +599,8 @@ function ConvertFrom-SmartDeployAnswerFile {
         Shares               = $shares
         Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'
         Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
+        BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
+        Bios                 = Read-BiosNode ([xml]'<deployment/>').DocumentElement
     }
     if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: put its password in config\secrets\admin.txt.') }
     @{ Answer = $answer; Notes = @($notes) }

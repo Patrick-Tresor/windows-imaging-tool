@@ -73,6 +73,8 @@
         <ListBoxItem Content="Domain or workgroup"/>
         <ListBoxItem Content="Tasks"/>
         <ListBoxItem Content="Network shares"/>
+        <ListBoxItem Content="BIOS settings"/>
+        <ListBoxItem Content="BitLocker"/>
       </ListBox>
     </Border>
 
@@ -302,6 +304,75 @@
           </DataGrid.Columns>
         </DataGrid>
       </DockPanel>
+
+      <!-- 8 BIOS settings -->
+      <DockPanel x:Name="Sec8" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="BIOS settings"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Applied in WinPE before the disk is wiped; only the rows for the PC's maker are used. Dell needs Dell Command | Configure's WinPE x64 folder in the tools folder below, under Dell. HP and Lenovo use the firmware's WMI interface. Names and values differ by maker and model: check them on one PC first."/>
+          <CheckBox x:Name="ChkBios" Content="Apply these BIOS settings"/>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Current BIOS password"/>
+            <StackPanel Grid.Column="1">
+              <PasswordBox x:Name="PwdBios" Width="260" HorizontalAlignment="Left" ToolTip="The BIOS admin (setup / supervisor) password the PCs already have. Leave empty if they have none."/>
+              <TextBlock x:Name="TxtBiosPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="1" Content="Tools folder"/>
+            <TextBox x:Name="TxtBiosTools" Grid.Row="1" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="Relative to the content root. Dell's cctk.exe goes in &lt;folder&gt;\Dell."/>
+            <Label Grid.Row="2" Content="If a setting fails"/>
+            <CheckBox x:Name="ChkBiosStop" Grid.Row="2" Grid.Column="1" Content="Stop the deployment (nothing is erased yet)"/>
+          </Grid>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+          <Button x:Name="BtnBiosAdd" Content="Add"/>
+          <Button x:Name="BtnBiosRemove" Content="Remove"/>
+          <TextBlock Text="Add recommended for:" VerticalAlignment="Center" Margin="12,0,8,0"/>
+          <ComboBox x:Name="CmbBiosPreset" Width="100" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+          <Button x:Name="BtnBiosPreset" Content="Add"/>
+        </StackPanel>
+        <DataGrid x:Name="GridBios">
+          <DataGrid.Columns>
+            <DataGridComboBoxColumn Header="Maker" SelectedItemBinding="{Binding Maker}" Width="100"/>
+            <DataGridTextColumn Header="Setting" Binding="{Binding Name}" Width="2*"/>
+            <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <!-- 9 BitLocker -->
+      <ScrollViewer x:Name="Sec9" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="BitLocker"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Turned on at first boot, after the applications and tasks. The recovery password is backed up before anything is encrypted. The PC needs a TPM that is turned on: add the TPM setting under BIOS settings."/>
+          <CheckBox x:Name="ChkBitLocker" Content="Encrypt the Windows drive with BitLocker"/>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Encryption"/>
+            <ComboBox x:Name="CmbBlMethod" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="1" Content="Encrypt"/>
+            <CheckBox x:Name="ChkBlUsedSpace" Grid.Row="1" Grid.Column="1" Content="Used space only (faster; fine for a freshly wiped disk)"/>
+            <Label Grid.Row="2" Content="Unlock at startup"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+              <RadioButton x:Name="RbBlTpm" GroupName="BlProt" Content="TPM only"/>
+              <RadioButton x:Name="RbBlTpmPin" GroupName="BlProt" Content="TPM and a startup PIN"/>
+            </StackPanel>
+            <Label Grid.Row="3" Content="Startup PIN"/>
+            <StackPanel Grid.Row="3" Grid.Column="1">
+              <PasswordBox x:Name="PwdBlPin" Width="260" HorizontalAlignment="Left" ToolTip="6 to 20 digits. Every PC deployed with this answer file gets the same PIN; users can change it later."/>
+              <TextBlock x:Name="TxtBlPinState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="4" Content="Recovery key backup"/>
+            <CheckBox x:Name="ChkBlAD" Grid.Row="4" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>
+            <Label Grid.Row="5" Content="Also save to folder"/>
+            <TextBox x:Name="TxtBlFolder" Grid.Row="5" Grid.Column="1" ToolTip="\\server\share\BitLocker. One text file per PC. Domain Computers need write access; restrict who can read it."/>
+            <Label Grid.Row="6" Content="If no backup worked"/>
+            <CheckBox x:Name="ChkBlRequire" Grid.Row="6" Grid.Column="1" Content="Leave BitLocker off (recommended)"/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
     </Grid>
   </DockPanel>
 </Window>
