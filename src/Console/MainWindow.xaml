@@ -279,16 +279,43 @@
                 </StackPanel>
               </StackPanel>
 
-              <Label Grid.Row="14" Content="Server state"/>
-              <TextBox x:Name="TxtMcStatus" Grid.Row="14" Grid.Column="1" Height="140" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"
+              <Label Grid.Row="14" Content="Server answer"/>
+              <TextBox x:Name="TxtMcStatus" Grid.Row="14" Grid.Column="1" Height="60" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"
                        VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnMcSave" Content="Save and set up session" Style="{StaticResource Primary}"
                       ToolTip="Saves the settings and creates the session on the WDS server, replacing one with the same name."/>
-              <Button x:Name="BtnMcStatus" Content="Show PCs" ToolTip="The session and the PCs connected to it."/>
               <Button x:Name="BtnMcStart" Content="Start now" ToolTip="Starts a waiting session without waiting for more PCs."/>
               <Button x:Name="BtnMcRemove" Content="Remove session"/>
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Room monitor" Margin="0,24,0,4"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Every PC receiving the image from the session, slowest first. PCs show their WinPE name (MININT-...); match them by IP or MAC address. Disconnecting a PC stops its multicast download; with fallback on it then copies the image from the share."/>
+            <TextBlock x:Name="TxtMcSummary" FontWeight="SemiBold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <DataGrid x:Name="GridMcClients" Height="220" IsReadOnly="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="PC" Binding="{Binding Name}" Width="140"/>
+                <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="230"/>
+                <DataGridTemplateColumn Header="Progress" Width="200">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid>
+                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="16"/>
+                        <TextBlock Text="{Binding Progress}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                      </Grid>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Image" Binding="{Binding File}" Width="*"/>
+                <DataGridTextColumn Header="Joined" Binding="{Binding Joined}" Width="90"/>
+                <DataGridTextColumn Header="Session speed" Binding="{Binding Speed}" Width="110"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+              <Button x:Name="BtnMcStatus" Content="Refresh" ToolTip="Reads the session and its PCs from the WDS server."/>
+              <Button x:Name="BtnMcDisconnect" Content="Disconnect selected PC"/>
+              <CheckBox x:Name="ChkMcAutoRefresh" Content="Refresh every 10 seconds" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
           </StackPanel>
         </ScrollViewer>

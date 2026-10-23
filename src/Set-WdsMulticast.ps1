@@ -15,7 +15,9 @@
       ScheduledCast  PCs wait until -Clients PCs have joined or -StartTime comes (whichever is first),
                      or until you start it by hand with -Action Start.
 
-    Actions: Create (default, replaces an existing session of the same name), Status, Start, Remove.
+    Actions: Create (default, replaces an existing session of the same name), Status (wdsutil text), Monitor
+    (one object per connected PC with its progress, from the WDS transport COM API), Start, Remove, and
+    Disconnect -ClientId (that PC stops, then deploys from the share instead when fallback is on).
     Settings not given on the command line come from the "multicast" section of deploy-settings.json.
 .EXAMPLE
     .\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream
@@ -23,10 +25,12 @@
 .EXAMPLE
     .\Set-WdsMulticast.ps1 -Server wds01 -Action Status
     Shows the session and the PCs connected to it.
+.EXAMPLE
+    (.\Set-WdsMulticast.ps1 -Server wds01 -Action Monitor).Clients | Format-Table Name, IpAddress, Percent
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Create', 'Status', 'Start', 'Remove')][string]$Action = 'Create',
+    [ValidateSet('Create', 'Status', 'Monitor', 'Start', 'Remove', 'Disconnect')][string]$Action = 'Create',
     [string]$Server,                 # empty or localhost: this PC
     [string]$Namespace,              # session name the PCs ask for; default ImagingTool
     [string]$ContentPath,            # content root as a local folder on the server; default: behind the share
@@ -35,6 +39,7 @@ param(
     [string]$StartTime,              # ScheduledCast: start at this time, yyyy-MM-dd HH:mm (empty: no time)
     [ValidateSet('None', 'AutoDisconnect', 'Multistream')][string]$SpeedPolicy,
     [int]$ThresholdKbps,             # AutoDisconnect: drop PCs slower than this (they then fall back to the share)
+    [long]$ClientId,                 # Disconnect: the PC's Id from Monitor
     [string]$SettingsPath            # deploy-settings.json with "multicast", "wds" and "share" sections for defaults
 )
 
@@ -77,7 +82,7 @@ if ($Action -eq 'Create' -and $Type -eq 'ScheduledCast') {
 # Everything below runs on the WDS server. It is self-contained so Invoke-Command can send it as is.
 # wdsutil output is localized, so success comes from exit codes; Status passes its text through as is.
 $onServer = {
-    param($Action, $Namespace, $ContentPath, $SharePath, $Type, $Clients, $WdsTime, $SpeedPolicy, $ThresholdKbps)
+    param($Action, $Namespace, $ContentPath, $SharePath, $Type, $Clients, $WdsTime, $SpeedPolicy, $ThresholdKbps, $ClientId)
     $ErrorActionPreference = 'Stop'
 
     function Invoke-WdsUtil {
@@ -99,6 +104,41 @@ $onServer = {
         'Status' {
             if (-not $exists) { return "No multicast session named '$Namespace' on $env:COMPUTERNAME." }
             return (Invoke-WdsUtil /Get-Namespace "/Namespace:$Namespace" /Details:Clients).Text
+        }
+        'Monitor' {
+            # The transport server's COM API gives numbers rather than localized text. One session per image
+            # being sent; a waiting scheduled session has no sessions yet.
+            $result = [pscustomobject]@{ Server = $env:COMPUTERNAME; Namespace = $Namespace; Exists = $exists; Sessions = 0; Clients = @() }
+            if (-not $exists) { return $result }
+            $tpt = (New-Object -ComObject WdsTptMgmt.WdsTransportManager).GetWdsTransportServer($env:COMPUTERNAME)
+            $ns = $tpt.NamespaceManager.RetrieveNamespace($Namespace)
+            $rows = foreach ($content in $ns.RetrieveContents()) {
+                foreach ($session in $content.RetrieveSessions()) {
+                    $result.Sessions++
+                    foreach ($c in $session.RetrieveClients()) {
+                        [pscustomobject]@{
+                            Id            = [long]$c.Id
+                            Name          = "$($c.Name)"
+                            IpAddress     = "$($c.IpAddress)"
+                            MacAddress    = "$($c.MacAddress)"
+                            File          = "$($content.Name)"
+                            Percent       = [int]$c.PercentCompletion
+                            JoinedSeconds = [long]$c.JoinDuration
+                            RateBytes     = [long]$session.TransferRate   # whole session, bytes per second
+                            Cpu           = [int]$c.CpuUtilization
+                            Network       = [int]$c.NetworkUtilization
+                        }
+                    }
+                }
+            }
+            $result.Clients = @($rows)
+            return $result
+        }
+        'Disconnect' {
+            # Fail, not Fallback: wdsmcast then exits with an error and Deploy-Image copies from the share itself.
+            $tpt = (New-Object -ComObject WdsTptMgmt.WdsTransportManager).GetWdsTransportServer($env:COMPUTERNAME)
+            $tpt.DisconnectClient([uint32]$ClientId, 1)
+            return "Disconnected PC $ClientId from '$Namespace'."
         }
         'Start' {
             if (-not $exists) { throw "No multicast session named '$Namespace' on $env:COMPUTERNAME." }
@@ -154,6 +194,7 @@ $onServer = {
     "Multicast session '$Namespace' on $env:COMPUTERNAME serves $ContentPath. Transfers start $when."
 }
 
-$argList = @($Action, $Namespace, $ContentPath, $sharePath, $Type, $Clients, $wdsTime, $SpeedPolicy, $ThresholdKbps)
+if ($Action -eq 'Disconnect' -and -not $PSBoundParameters.ContainsKey('ClientId')) { throw 'Disconnect needs -ClientId (from -Action Monitor).' }
+$argList = @($Action, $Namespace, $ContentPath, $sharePath, $Type, $Clients, $wdsTime, $SpeedPolicy, $ThresholdKbps, $ClientId)
 if ($isLocal) { & $onServer @argList }
 else { Invoke-Command -ComputerName $Server -ScriptBlock $onServer -ArgumentList $argList }

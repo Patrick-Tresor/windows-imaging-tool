@@ -89,6 +89,12 @@ provider whose config string is the content root's local folder on the server
 or ScheduledCast (client count and/or start time), and sets the transport server's
 slow-client policy (`/Set-TransportServer /MulticastSessionPolicy`). It runs on the
 server like the WDS publisher, and judges `wdsutil` by exit code only.
+The room monitor (`-Action Monitor`) reads the WDS transport COM API
+(`WdsTptMgmt.WdsTransportManager`: namespace > contents > sessions > clients) for
+each PC's percent complete, address and join time, so it doesn't parse localized
+text; `ConvertTo-MulticastView` (ConsoleData) turns that into the console's rows and
+summary. `-Action Disconnect` calls `DisconnectClient` with the *fail* type, so
+`wdsmcast` exits with an error and the deploy falls back to the share by itself.
 
 In WinPE, `Get-MulticastPlan` (DeployCommon) decides per deploy: multicast is on,
 the content came from the share, the image is under the content root and is not

@@ -515,6 +515,43 @@ function Save-MulticastSettings {
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
 }
 
+function Format-ByteRate([long]$BytesPerSecond) {
+    if ($BytesPerSecond -ge 1MB) { '{0:N1} MB/s' -f ($BytesPerSecond / 1MB) } else { '{0:N0} KB/s' -f ($BytesPerSecond / 1KB) }
+}
+
+function ConvertTo-MulticastView {
+    # Turns Set-WdsMulticast.ps1 -Action Monitor output into the Multicast tab's summary line and grid rows.
+    param([Parameter(Mandatory)]$Monitor)
+    $clients = @($Monitor.Clients | Where-Object { $_ })
+    $rows = foreach ($c in $clients | Sort-Object Percent, Name) {
+        $joined = [timespan]::FromSeconds([long]$c.JoinedSeconds)
+        [pscustomobject]@{
+            Id       = [long]$c.Id
+            Name     = $c.Name
+            Address  = (@($c.IpAddress, $c.MacAddress) | Where-Object { $_ }) -join '  '
+            File     = Split-Path "$($c.File)" -Leaf
+            Percent  = [int]$c.Percent
+            Progress = "$([int]$c.Percent) %"
+            Joined   = $(if ($joined.TotalHours -ge 1) { '{0} h {1:00} min' -f [int][math]::Floor($joined.TotalHours), $joined.Minutes } else { '{0} min' -f [int][math]::Floor($joined.TotalMinutes) })
+            Speed    = Format-ByteRate $c.RateBytes
+        }
+    }
+    $rows = @($rows)
+    $summary = if (-not $Monitor.Exists) {
+        "No multicast session named '$($Monitor.Namespace)' on $($Monitor.Server). Click Save and set up session."
+    } elseif ($Monitor.Sessions -eq 0) {
+        "Session '$($Monitor.Namespace)' on $($Monitor.Server) has not started sending yet. PCs waiting for a scheduled start show up once it starts."
+    } elseif (-not $rows) {
+        "Session '$($Monitor.Namespace)' on $($Monitor.Server): no PCs connected."
+    } else {
+        $avg = [int][math]::Round(($rows | Measure-Object Percent -Average).Average)
+        $slow = $rows[0]
+        $done = @($rows | Where-Object Percent -ge 100).Count
+        "$($rows.Count) PC$(if ($rows.Count -ne 1) { 's' }) receiving, average $avg %, $done done. Slowest: $($slow.Name) at $($slow.Percent) %."
+    }
+    [pscustomobject]@{ Summary = $summary; Rows = $rows }
+}
+
 function Get-DeploymentLogs {
     # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1) or CAPTURE-<name>_... (Capture-GoldenImage.ps1).
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -540,7 +577,7 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
-    Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, Get-DeploymentLogs,
+    Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, ConvertTo-MulticastView, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application

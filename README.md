@@ -151,8 +151,13 @@ and every PC in the session receives it together. Set it up on the
 - **If multicast fails, copy the image from the share**: on by default, so a PC
   that can't join (no `wdsmcast.exe`, firewall, switch dropping multicast) still
   deploys, only slower.
-- **Show PCs** lists the session and the PCs connected to it (`wdsutil` text, in
-  the server's language). **Remove session** stops it.
+- **Room monitor**: every PC receiving the image, slowest first, with a progress
+  bar, IP and MAC address, how long it has been connected and the session speed,
+  plus a summary line (PCs, average progress, how many are done, the slowest).
+  **Refresh** reads it once; tick **Refresh every 10 seconds** to watch the room.
+  **Disconnect selected PC** drops one PC that holds the room back; with fallback
+  on, it copies the image from the share instead. PCs show their WinPE name
+  (`MININT-...`), so match them by address. **Remove session** stops it all.
 
 A PC booted from PXE, an ISO or a small USB stick (network share mode) partitions
 its disk, downloads the image by multicast onto its new Windows partition with
@@ -166,7 +171,8 @@ The network must pass multicast between the WDS server and the PCs: same VLAN, o
 multicast routing between them, and IGMP snooping on the switches so the stream
 doesn't flood every port. From the command line:
 `.\src\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream`,
-then `-Action Status`, `-Action Start` or `-Action Remove`.
+then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
+`-Action Start`, `-Action Disconnect -ClientId <Id from Monitor>` or `-Action Remove`.
 
 ## Workflow
 

@@ -178,8 +178,22 @@ function Get-MulticastFromUi {
     }
 }
 
+function Update-MulticastMonitor([switch]$Quiet) {
+    # Reads the session's PCs from the server. Quiet (the auto refresh) leaves the status bar and cursor alone.
+    if (-not $Quiet) { $window.Cursor = 'Wait'; Set-Status 'Multicast: reading the session...' }
+    try {
+        $mon = & "$srcDir\Set-WdsMulticast.ps1" -Action Monitor -SettingsPath (Join-Path $script:root 'config\deploy-settings.json')
+    } finally { if (-not $Quiet) { $window.Cursor = $null } }
+    $view = ConvertTo-MulticastView -Monitor $mon
+    $selected = $ui.GridMcClients.SelectedItem
+    $ui.GridMcClients.ItemsSource = $view.Rows
+    if ($selected) { $ui.GridMcClients.SelectedItem = $view.Rows | Where-Object Id -eq $selected.Id | Select-Object -First 1 }
+    $ui.TxtMcSummary.Text = "$($view.Summary)  (as of $(Get-Date -Format 'HH:mm:ss'))"
+    if (-not $Quiet) { Set-Status 'Multicast: session read' }
+}
+
 function Invoke-Multicast([string]$Action) {
-    # Runs Set-WdsMulticast.ps1 with the saved settings and shows its answer in the Server state box.
+    # Runs Set-WdsMulticast.ps1 with the saved settings and shows its answer in the Server answer box.
     $window.Cursor = 'Wait'
     Set-Status "Multicast: $Action..."
     try {
@@ -422,12 +436,30 @@ $ui.BtnMcSave.Add_Click({ Invoke-Safely {
     if (-not $m.enabled) { Set-Status 'Multicast settings saved (multicast is off)'; return }
     if (-not (Confirm-Action "Set up the multicast session '$($m.namespace)' on the WDS server? A session with the same name is replaced, which stops any transfer running in it.")) { return }
     Invoke-Multicast 'Create'
+    Update-MulticastMonitor
 } })
-$ui.BtnMcStatus.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Multicast 'Status' } } })
-$ui.BtnMcStart.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Multicast 'Start' } } })
+$ui.BtnMcStatus.Add_Click({ Invoke-Safely { if (Test-RootReady) { Update-MulticastMonitor } } })
+$ui.BtnMcStart.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Multicast 'Start'; Update-MulticastMonitor } } })
+$ui.BtnMcDisconnect.Add_Click({ Invoke-Safely {
+    $pc = $ui.GridMcClients.SelectedItem
+    if (-not $pc) { Show-Error 'Select a PC in the room monitor first.'; return }
+    if (-not (Confirm-Action "Disconnect $($pc.Name) ($($pc.Address)) from the session? With fallback on, it copies the image from the share instead; otherwise its deploy fails.")) { return }
+    $ui.TxtMcStatus.Text = (& "$srcDir\Set-WdsMulticast.ps1" -Action Disconnect -ClientId $pc.Id -SettingsPath (Join-Path $script:root 'config\deploy-settings.json')) | Out-String
+    Update-MulticastMonitor
+} })
+
+# Auto refresh while the box is ticked. A failed read stops it instead of popping an error every 10 seconds.
+$script:mcTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:mcTimer.Interval = [timespan]::FromSeconds(10)
+$script:mcTimer.Add_Tick({
+    try { Update-MulticastMonitor -Quiet }
+    catch { $ui.ChkMcAutoRefresh.IsChecked = $false; Show-Error "Room monitor stopped: $($_.Exception.Message)" }
+})
+$ui.ChkMcAutoRefresh.Add_Checked({ Invoke-Safely { if (Test-RootReady) { Update-MulticastMonitor; $script:mcTimer.Start() } else { $ui.ChkMcAutoRefresh.IsChecked = $false } } })
+$ui.ChkMcAutoRefresh.Add_Unchecked({ $script:mcTimer.Stop() })
 $ui.BtnMcRemove.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    if (Confirm-Action 'Remove the multicast session? PCs downloading from it stop (with fallback on, they copy from the share instead).') { Invoke-Multicast 'Remove' }
+    if (Confirm-Action 'Remove the multicast session? PCs downloading from it stop (with fallback on, they copy from the share instead).') { Invoke-Multicast 'Remove'; Update-MulticastMonitor }
 } })
 
 #endregion
