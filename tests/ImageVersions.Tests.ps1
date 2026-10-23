@@ -39,7 +39,8 @@ try {
     # Recapture-style replacement: move the current image out, put a new one in.
     $v2 = Save-ImageVersion -ImagePath $wim -Move -Reason 'Replaced by a new capture' -Date ([datetime]'2026-10-15 14:30')
     Assert-Equal (Test-Path $wim) $false 'moving empties the current slot'
-    Assert-Equal (Test-Path (Join-Path $images 'Win11.updates.json')) $false 'moving takes the update history along'
+    Assert-Equal (Test-Path (Join-Path $images 'Win11.updates.json')) $true 'moving keeps the update history with the image slot'
+    Assert-Equal (Test-Path (Join-Path $v2.Folder 'Win11.updates.json')) $true 'the version gets a copy of the update history'
     Set-Content $wim 'v3'
 
     # A backup made by Update-OfflineImage.ps1 (no version.json) is listed too.

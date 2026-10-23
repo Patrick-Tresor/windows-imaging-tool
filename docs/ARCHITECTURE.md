@@ -52,7 +52,8 @@ note). Backups made by the offline updater have no `version.json` and are listed
 as kept by an offline update.
 
 - `Save-ImageVersion` copies the image to a new version, or with `-Move`
-  empties the slot first (recapture, rollback). A failed move is put back.
+  empties the slot first (recapture, rollback). A failed move is put back. The
+  update history is copied in both cases, so it stays with the image slot.
 - `Restore-ImageVersion` moves the current image to a new version and then
   *links* the chosen one back (a hard link, or a copy where the volume can't), so
   answer files pinned to it keep a valid path and a rollback takes no extra space.

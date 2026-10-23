@@ -109,14 +109,17 @@ function Save-ImageVersion {
     $folder = Get-ImageVersionFolder -ImagePath $ImagePath -Version $version
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
 
+    $moved = @()
     try {
-        foreach ($f in $parts + @(Get-ImageSidecarFiles -ImagePath $ImagePath)) {
-            if ($Move) { Move-Item -LiteralPath $f.FullName -Destination $folder }
+        foreach ($f in $parts) {
+            if ($Move) { Move-Item -LiteralPath $f.FullName -Destination $folder; $moved += $f }
             else { Copy-Item -LiteralPath $f.FullName -Destination $folder }
         }
+        # The update history is copied, not moved: it stays with the image slot and the version gets a snapshot.
+        foreach ($f in Get-ImageSidecarFiles -ImagePath $ImagePath) { Copy-Item -LiteralPath $f.FullName -Destination $folder }
     } catch {
-        # Put back whatever was moved, and drop the half-made version.
-        if ($Move) { Get-ChildItem -LiteralPath $folder -File | Move-Item -Destination (Split-Path $ImagePath -Parent) -ErrorAction SilentlyContinue }
+        # Put back the parts that were moved, and drop the half-made version.
+        foreach ($f in $moved) { Move-Item -LiteralPath (Join-Path $folder $f.Name) -Destination (Split-Path $ImagePath -Parent) -ErrorAction SilentlyContinue }
         Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
         throw
     }
@@ -169,7 +172,9 @@ function Restore-ImageVersion {
         # Undo: drop the partial copy and put the image that was current back.
         foreach ($f in $sourceParts + $sourceSidecars) { Remove-Item -LiteralPath (Join-Path $dir $f.Name) -Force -ErrorAction SilentlyContinue }
         if ($archived) {
-            Get-ChildItem -LiteralPath $archived.Folder -File | Where-Object Name -ne 'version.json' | Move-Item -Destination $dir
+            $archivedImage = Join-Path $archived.Folder (Split-Path $ImagePath -Leaf)
+            foreach ($f in Get-ImagePartFiles -ImagePath $archivedImage) { Move-Item -LiteralPath $f.FullName -Destination $dir -Force }
+            foreach ($f in Get-ImageSidecarFiles -ImagePath $archivedImage) { Copy-Item -LiteralPath $f.FullName -Destination $dir -Force }
             Remove-Item -LiteralPath $archived.Folder -Recurse -Force
         }
         throw
