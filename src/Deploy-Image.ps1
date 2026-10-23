@@ -21,6 +21,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -222,13 +223,17 @@ exit
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
-    Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1') 'W:\Deploy\'
+    Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
+        (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1') 'W:\Deploy\'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps
+    # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
+    $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
+    if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     # The new Windows can keep reporting only to a UNC path (as the computer account), not to WinPE's drive letters.
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
-    $plan | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    $plan | ConvertTo-Json -Depth 6 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii

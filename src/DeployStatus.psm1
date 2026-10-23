@@ -128,13 +128,32 @@ function Set-DeployStatus {
     Save-DeployStatus
 }
 
+function Set-DeployCheckResult {
+    # Records post-deploy check results (PostDeployChecks.psm1) on the status. Failed or warned checks become one warning,
+    # replaced on a re-run, so a deployment that finished as Warning only because of its checks goes back to Succeeded once they pass.
+    param([Parameter(Mandatory)][object[]]$Results, [Parameter(Mandatory)]$Summary, [string]$Warning)
+    if (-not $script:Record) { return }
+    $script:Record.warnings = @(@($script:Record.warnings) | Where-Object { $_ -and "$_" -notlike 'Post-deploy checks:*' })
+    if ($Warning) { $script:Record.warnings = @($script:Record.warnings) + $Warning }
+    $fields = @{ checks = @($Results); checkResult = $Summary.Result; checkSummary = $Summary.Text; checked = (Get-Date).ToString('o') }
+    if ($script:Record.state -in 'Succeeded', 'Warning') {
+        foreach ($k in $fields.Keys) { $script:Record[$k] = $fields[$k] }
+        $finished = $script:Record.finished
+        Set-DeployStatus -State Succeeded      # becomes Warning while any warning remains
+        $script:Record.finished = $finished    # a re-run does not change when the deployment finished
+        Save-DeployStatus
+    } else {
+        Set-DeployStatus -Fields $fields
+    }
+}
+
 function Save-DeployStatus {
     if (-not $script:Folder -or -not $script:Record) { return }
     try {
         # Write then rename, so the console never reads a half-written file.
         $path = Join-Path $script:Folder "$($script:Record.id).json"
         $tmp = "$path.tmp"
-        [pscustomobject]$script:Record | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding utf8 -ErrorAction Stop
+        [pscustomobject]$script:Record | ConvertTo-Json -Depth 6 | Set-Content -Path $tmp -Encoding utf8 -ErrorAction Stop
         Move-Item -Path $tmp -Destination $path -Force -ErrorAction Stop
 
         $text = foreach ($log in $script:LogPaths) {
@@ -209,6 +228,10 @@ function Get-DeploymentStatus {
             Percent      = [int]$s.percent
             Message      = $s.message
             Warnings     = (@($s.warnings) | Where-Object { $_ }) -join '; '
+            CheckResult  = if ($s.PSObject.Properties['checkResult']) { $s.checkResult } else { '' }
+            Checks       = if ($s.PSObject.Properties['checkSummary']) { $s.checkSummary } else { '' }
+            CheckResults = if ($s.PSObject.Properties['checks']) { @($s.checks | Where-Object { $_ }) } else { @() }
+            Checked      = if ($s.PSObject.Properties['checked']) { ConvertTo-StatusDate $s.checked } else { $null }
             Started      = $started
             Updated      = $updated
             Duration     = if ($started -and $end) { Format-Duration ($end - $started) } else { '' }
@@ -260,6 +283,6 @@ function Format-Duration([timespan]$Span) {
 
 #endregion
 
-Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus,
+Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
     Remove-DeploymentStatus, Format-Duration
