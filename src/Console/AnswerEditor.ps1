@@ -7,6 +7,12 @@ class TaskRow {
     [string]$Command
 }
 
+class BiosRow {
+    [string]$Maker
+    [string]$Name
+    [string]$Value
+}
+
 class ShareRow {
     [string]$LocalName
     [string]$RemoteName
@@ -132,6 +138,10 @@ function Show-AnswerEditor {
     $cultures = @([Globalization.CultureInfo]::GetCultures('SpecificCultures') | Sort-Object Name | ForEach-Object Name)
     foreach ($c in 'CmbInputLocale', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
+    $e.GridBios.Columns[0].ItemsSource = @('Dell', 'HP', 'Lenovo')
+    $e.CmbBiosPreset.ItemsSource = @('Dell', 'HP', 'Lenovo')
+    $e.CmbBiosPreset.SelectedIndex = 0
+    $e.CmbBlMethod.ItemsSource = @('XtsAes256', 'XtsAes128', 'Aes256', 'Aes128')
 
     $updateIndexes = {
         # Editions from the selected image, as "index: name"; falls back to typing a number.
@@ -205,9 +215,28 @@ function Show-AnswerEditor {
     }
     $e.GridShares.ItemsSource = $shares
 
+    $bios = [Collections.ObjectModel.ObservableCollection[BiosRow]]::new()
+    foreach ($s in $a.Bios.Settings) { $r = [BiosRow]::new(); $r.Maker = $s.Maker; $r.Name = $s.Name; $r.Value = $s.Value; $bios.Add($r) }
+    $e.GridBios.ItemsSource = $bios
+    $e.ChkBios.IsChecked = $a.Bios.Enabled
+    $e.TxtBiosTools.Text = $a.Bios.ToolsRoot
+    $e.ChkBiosStop.IsChecked = $a.Bios.StopOnError
+    $e.TxtBiosPwState.Text = if ($a.Bios.PasswordFile) { & $pwState $a.Bios.PasswordFile } else { 'No password saved: the PCs have none.' }
+
+    $bl = $a.BitLocker
+    $e.ChkBitLocker.IsChecked = $bl.Enabled
+    $e.CmbBlMethod.SelectedItem = $bl.EncryptionMethod
+    $e.ChkBlUsedSpace.IsChecked = $bl.UsedSpaceOnly
+    $e.RbBlTpm.IsChecked = $bl.Protector -ne 'TpmPin'
+    $e.RbBlTpmPin.IsChecked = $bl.Protector -eq 'TpmPin'
+    $e.TxtBlPinState.Text = & $pwState $bl.PinFile
+    $e.ChkBlAD.IsChecked = $bl.BackupToAD
+    $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
+    $e.ChkBlRequire.IsChecked = $bl.RequireBackup
+
     # --- Behaviour -------------------------------------------------------------------------------------------
     $e.LstSections.Add_SelectionChanged({
-        for ($i = 0; $i -lt 8; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
+        for ($i = 0; $i -lt 10; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
     })
     $e.LstSections.SelectedIndex = 0
 
@@ -219,9 +248,17 @@ function Show-AnswerEditor {
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
+        $on = [bool]$e.ChkBios.IsChecked
+        foreach ($c in 'PwdBios', 'TxtBiosTools', 'ChkBiosStop', 'GridBios', 'BtnBiosAdd', 'BtnBiosRemove', 'CmbBiosPreset', 'BtnBiosPreset') { $e[$c].IsEnabled = $on }
+        $on = [bool]$e.ChkBitLocker.IsChecked
+        foreach ($c in 'CmbBlMethod', 'ChkBlUsedSpace', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder', 'ChkBlRequire') { $e[$c].IsEnabled = $on }
+        $e.PwdBlPin.IsEnabled = $on -and $e.RbBlTpmPin.IsChecked
+        # Recovery keys only go to AD from a domain-joined PC.
+        $e.ChkBlAD.IsEnabled = $on -and $dom
+        if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup') { $e[$c].Add_Checked($syncEnabled) }
-    $e.ChkAdmin.Add_Click($syncEnabled)
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'ChkAdmin', 'ChkBios', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
     # Applications
@@ -240,6 +277,22 @@ function Show-AnswerEditor {
     $e.BtnTaskRemove.Add_Click({ $r = $e.GridTasks.SelectedItem; if ($r -is [TaskRow]) { [void]$tasks.Remove($r) } })
     $e.BtnTaskUp.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -gt 0) { $tasks.Move($i, $i - 1) } })
     $e.BtnTaskDown.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -ge 0 -and $i -lt $tasks.Count - 1) { $tasks.Move($i, $i + 1) } })
+
+    # BIOS settings
+    $e.BtnBiosAdd.Add_Click({
+        $r = [BiosRow]::new(); $r.Maker = $e.CmbBiosPreset.SelectedItem
+        $bios.Add($r); $e.GridBios.SelectedItem = $r
+    })
+    $e.BtnBiosRemove.Add_Click({ $r = $e.GridBios.SelectedItem; if ($r -is [BiosRow]) { [void]$bios.Remove($r) } })
+    $e.BtnBiosPreset.Add_Click({
+        # Adds the maker's recommended settings, replacing the value of any row with the same name.
+        foreach ($p in Get-BiosPreset -Maker $e.CmbBiosPreset.SelectedItem) {
+            $row = $bios | Where-Object { $_.Maker -eq $p.Maker -and $_.Name -eq $p.Name } | Select-Object -First 1
+            if (-not $row) { $row = [BiosRow]::new(); $row.Maker = $p.Maker; $row.Name = $p.Name; $bios.Add($row) }
+            $row.Value = $p.Value
+        }
+        $e.GridBios.Items.Refresh()
+    })
 
     # Shares: the password box applies to the selected row and is kept until Save.
     $e.BtnShareAdd.Add_Click({
@@ -263,6 +316,7 @@ function Show-AnswerEditor {
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
         $e.GridShares.CommitEdit('Row', $true) | Out-Null
+        $e.GridBios.CommitEdit('Row', $true) | Out-Null
         $n = 0
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
@@ -299,6 +353,19 @@ function Show-AnswerEditor {
             [pscustomobject]@{ LocalName = "$($_.LocalName)".Trim().ToUpperInvariant(); RemoteName = $_.RemoteName.Trim()
                                Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile }
         })
+        $a.Bios.Enabled     = [bool]$e.ChkBios.IsChecked
+        $a.Bios.ToolsRoot   = $e.TxtBiosTools.Text.Trim()
+        $a.Bios.StopOnError = [bool]$e.ChkBiosStop.IsChecked
+        $a.Bios.Settings    = @($bios | Where-Object { $_.Name } | ForEach-Object {
+            [pscustomobject]@{ Maker = $_.Maker; Name = $_.Name.Trim(); Value = "$($_.Value)".Trim() }
+        })
+        $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
+        $a.BitLocker.EncryptionMethod  = "$($e.CmbBlMethod.SelectedItem)"
+        $a.BitLocker.UsedSpaceOnly     = [bool]$e.ChkBlUsedSpace.IsChecked
+        $a.BitLocker.Protector         = if ($e.RbBlTpmPin.IsChecked) { 'TpmPin' } else { 'Tpm' }
+        $a.BitLocker.BackupToAD        = [bool]$e.ChkBlAD.IsChecked
+        $a.BitLocker.RecoveryKeyFolder = $e.TxtBlFolder.Text.Trim()
+        $a.BitLocker.RequireBackup     = [bool]$e.ChkBlRequire.IsChecked
     }
 
     $e.BtnNamePreview.Add_Click({
@@ -320,8 +387,12 @@ function Show-AnswerEditor {
             if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile)) {
                 throw 'Enter the Administrator password (Windows settings).'
             }
+            if ($a.BitLocker.Enabled -and $a.BitLocker.Protector -eq 'TpmPin' -and -not $e.PwdBlPin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile)) {
+                throw 'Enter the BitLocker startup PIN (BitLocker).'
+            }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `
-                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords -IsNew:$isNew | Out-Null
+                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords `
+                -BiosPassword $e.PwdBios.Password -BitLockerPin $e.PwdBlPin.Password -IsNew:$isNew | Out-Null
             $state.Saved = $true
             $win.Close()
         } catch {
