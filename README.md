@@ -10,9 +10,10 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     New-DeploymentMedia.ps1, DeployCommon.psm1, AnswerFile.psm1, NamingList.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, *.xaml, ConsoleData.psm1
-config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
+config/              default deploy-settings.json, driver-catalog.json, naming-list.csv (header only),
+                     answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 ```
@@ -32,6 +33,10 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks and Network shares. Passwords are typed into password
   boxes and saved to their own files.
+- **Naming List**: one row per PC by BIOS serial, with its computer name, OU
+  and answer file (see below). Edit cells, **Import CSV...** to merge a list
+  from Excel or an inventory export, **Export CSV...**, then **Save**. Each row
+  shows its problems and the result of that PC's last deploy.
 - **Driver Library**: import a vendor pack (folder, .cab or .zip) for a maker and
   model, edit how PCs are matched (SKU, machine type, model, pattern), and see
   which entries are missing drivers.
@@ -47,7 +52,7 @@ Images\        Win11-24H2-Enterprise.wim
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
-config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
+config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (password files)
 Logs\          one log per deployed PC or capture
 ```
 
@@ -96,6 +101,24 @@ options. SmartDeploy encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
 rebuild as folders, and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
+
+## Naming list
+
+`config\naming-list.csv` on the content root names PCs you know in advance,
+by BIOS serial number (Dell service tag, HP or Lenovo serial):
+
+```csv
+Serial,ComputerName,OU,AnswerFile,Notes
+5CG0000ABC,MTL-ACC-014,"OU=Accounting,OU=Workstations,DC=corp,DC=example",W11-Office-FR,Front desk
+PF0XXXXX,MTL-LAB-002,,,
+```
+
+When a PC's serial is listed, the deploy uses its computer name instead of the
+answer file's naming, joins its OU instead of the answer file's OU (domain
+answer files only), and deploys its answer file without asking which one. Empty
+cells fall back to the answer file, and an unlisted PC is named by the answer
+file as before. Edit it in the console or in Excel; comma and semicolon files
+are both read. The deploy log says which entry was used.
 
 ## Workflow
 

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Admin console for the imaging tool: images, driver library, media builder, deploy settings and logs.
+    Admin console for the imaging tool: images, answer files, naming list, driver library, media builder, deploy settings and logs.
 .DESCRIPTION
     Run on a Windows admin PC. Relaunches itself elevated and in STA mode, which WPF and DISM need.
 .EXAMPLE
@@ -21,6 +21,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 
@@ -32,6 +33,16 @@ class DriverRow {
     [string]$MachineType
     [string]$ModelPattern
     [string]$Path
+    [string]$Status
+}
+
+class NamingRow {
+    [string]$Serial
+    [string]$ComputerName
+    [string]$OU
+    [string]$AnswerFile
+    [string]$Notes
+    [string]$LastDeploy
     [string]$Status
 }
 
@@ -47,6 +58,7 @@ foreach ($node in $xaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
 $script:drivers = [Collections.ObjectModel.ObservableCollection[DriverRow]]::new()
+$script:naming = [Collections.ObjectModel.ObservableCollection[NamingRow]]::new()
 
 #region Helpers
 
@@ -114,6 +126,30 @@ function Update-Drivers {
     $ui.GridDrivers.ItemsSource = $script:drivers
 }
 
+function Show-NamingRows($Rows) {
+    $script:naming.Clear()
+    foreach ($r in $Rows) {
+        $row = [NamingRow]::new()
+        foreach ($p in 'Serial', 'ComputerName', 'OU', 'AnswerFile', 'Notes', 'LastDeploy', 'Status') { $row.$p = $r.$p }
+        $script:naming.Add($row)
+    }
+    $ui.GridNaming.ItemsSource = $script:naming
+    $bad = @($script:naming | Where-Object { $_.Status -and $_.Status -ne 'OK' })
+    $ui.TxtNamingIssues.Text = ($bad | ForEach-Object { "- $(if ($_.Serial) { $_.Serial } else { '(no serial)' }): $($_.Status)" }) -join "`r`n"
+}
+
+function Update-Naming {
+    # The answer file column is a drop-down of the content root's answer files; empty means the default.
+    $names = if (Test-ContentRoot $script:root) { @(Get-AnswerFileNames -ContentRoot $script:root | Sort-Object) } else { @() }
+    $ui.GridNaming.Columns[3].ItemsSource = @('') + $names
+    Show-NamingRows $(if (Test-ContentRoot $script:root) { @(Get-NamingListRows -ContentRoot $script:root) } else { @() })
+}
+
+function Get-NamingGridRows {
+    $ui.GridNaming.CommitEdit('Row', $true) | Out-Null
+    @($script:naming)
+}
+
 function Update-Settings {
     if (-not (Test-ContentRoot $script:root)) { return }
     $s = Get-DeploySettings -ContentRoot $script:root
@@ -144,7 +180,7 @@ function Update-UsbDisks {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Logs
+    Update-Answers; Update-Images; Update-Naming; Update-Drivers; Update-Settings; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -195,7 +231,7 @@ function Set-DefaultAnswerFile([string]$Name) {
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
-    if ($saved) { Update-Answers; Update-Images; Set-Status 'Answer file saved' }
+    if ($saved) { Update-Answers; Update-Images; Update-Naming; Set-Status 'Answer file saved' }
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
@@ -241,6 +277,48 @@ $ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
     Set-DefaultAnswerFile $row.Name
     Update-Answers; Update-Settings
     Set-Status "Default answer file is now $($row.Name)"
+} })
+
+#endregion
+
+#region Naming list
+
+$ui.BtnNamingRefresh.Add_Click({ Invoke-Safely { Update-Naming; Set-Status 'Naming list refreshed' } })
+$ui.BtnNamingOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'config') } } })
+
+$ui.BtnNamingRemove.Add_Click({ Invoke-Safely {
+    $row = $ui.GridNaming.SelectedItem
+    if ($row -isnot [NamingRow]) { return }
+    if (Confirm-Action "Remove serial $($row.Serial) ($($row.ComputerName)) from the naming list? Click Save to keep the change.") {
+        [void]$script:naming.Remove($row)
+    }
+} })
+
+$ui.BtnNamingSave.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $count = Save-NamingListFromConsole -ContentRoot $script:root -Rows (Get-NamingGridRows)
+    Update-Naming
+    Set-Status "Saved $count naming list entries to config\naming-list.csv"
+} })
+
+$ui.BtnNamingImport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
+    $dlg.Filter = 'CSV file (*.csv)|*.csv|All files (*.*)|*.*'
+    if (-not $dlg.ShowDialog($window)) { return }
+    $merge = Merge-NamingList -Existing (Get-NamingGridRows) -Incoming @(Read-NamingList -Path $dlg.FileName)
+    Show-NamingRows @(Get-NamingListRows -ContentRoot $script:root -Entries $merge.Rows)
+    Set-Status "Imported $($dlg.FileName): $($merge.Added) added, $($merge.Updated) updated. Click Save to keep them."
+} })
+
+$ui.BtnNamingExport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.SaveFileDialog]::new()
+    $dlg.Filter = 'CSV file (*.csv)|*.csv'
+    $dlg.FileName = 'naming-list.csv'
+    if (-not $dlg.ShowDialog($window)) { return }
+    Save-NamingList -Path $dlg.FileName -Entries (Get-NamingGridRows) -Delimiter ','
+    Set-Status "Exported the naming list to $($dlg.FileName)"
 } })
 
 #endregion
