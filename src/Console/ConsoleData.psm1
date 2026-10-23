@@ -234,14 +234,14 @@ function Get-CaptureReadiness {
 }
 
 function Get-ReferenceVMs {
-    # Hyper-V VMs that can be captured: generation 2 only, since deploys are UEFI.
+    # Hyper-V VMs that can be captured. Capture media boots both generation 2 (UEFI) and generation 1 (BIOS).
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return @() }
     @(Get-VM | ForEach-Object {
         [pscustomobject]@{
             Name       = $_.Name
             State      = "$($_.State)"
             Generation = $_.Generation
-            Usable     = $_.Generation -eq 2
+            Usable     = $_.Generation -in 1, 2
             Label      = '{0}  ({1}, gen {2})' -f $_.Name, $_.State, $_.Generation
         }
     })

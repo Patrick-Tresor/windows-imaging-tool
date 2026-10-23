@@ -2,7 +2,7 @@
 
 Capture one hardware-independent Windows 10/11 image, then deploy it to any
 Dell, HP or Lenovo PC with the right drivers injected automatically. Works from
-an offline USB stick, a LAN share, or PXE. Built on the Windows ADK, WinPE and
+an offline USB stick, a LAN share, or PXE, on UEFI and legacy BIOS PCs. Built on the Windows ADK, WinPE and
 DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Layout
@@ -175,7 +175,7 @@ environment (`winre.wim`); refresh those with a new capture from time to time.
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe` and import `boot.wim` into WDS).
-2. **Build the reference** in a generation 2 Hyper-V VM: install Windows, apps
+2. **Build the reference** in a Hyper-V VM (generation 2 is best; generation 1 works too): install Windows, apps
    and updates, no OEM drivers. Take a checkpoint.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Run the prepare command it shows on the reference machine

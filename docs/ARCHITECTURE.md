@@ -35,9 +35,10 @@ compression, split, unattended) and calls `New-DeploymentMedia.ps1
 `Capture-GoldenImage.ps1 -ConfigPath` when that file exists, and runs the deploy
 otherwise, so capture media and deploy media share one build path.
 
-For a Hyper-V VM (`-BootVM`), the ISO is built with `efisys_noprompt.bin` so
-it boots without a key press. The script checks the VM is generation 2 and off,
-attaches the ISO, sets the DVD as first boot device and starts the VM. It then
+For a Hyper-V VM (`-BootVM`), the ISO is built with `efisys_noprompt.bin` and
+without `boot\bootfix.bin`, so it boots without a key press on UEFI and BIOS.
+The script checks the VM is off, attaches the ISO, puts the DVD first in the boot
+order (boot device on generation 2, startup order on generation 1) and starts the VM. It then
 waits for the unattended capture to shut the VM down, ejects the ISO and sets
 the boot order back to the disk. The ISO is kept under `%ProgramData%` because
 Hyper-V cannot mount one from a share without delegation.
@@ -120,19 +121,26 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 1. **Offline USB**: the boot partition (FAT32) holds WinPE, a second NTFS
    partition labelled `DEPLOY` holds `Images\`, `Drivers\`, `config\`.
    Two partitions because UEFI needs FAT32 to boot and a WIM is usually over 4 GB.
+   The stick is MBR with the FAT32 partition active and `bootsect /nt60 /mbr`
+   boot code, so it also boots legacy BIOS PCs.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
 3. **PXE**: the same `boot.wim` is imported into WDS (or served by iPXE/wimboot);
-   it then behaves like the LAN share mode.
+   it then behaves like the LAN share mode. WDS serves BIOS (`pxeboot.n12`) and
+   UEFI (`wdsmgfw.efi`) clients from the same boot image.
 
-## Deploy sequence (UEFI/GPT)
+Every medium boots both UEFI and legacy BIOS. The ISO carries both
+`etfsboot.com` and `efisys.bin`.
+
+## Deploy sequence
 
 1. Detect hardware and content root; choose the answer file (the default, or a
    menu in interactive mode); map its extra shares.
 2. Check everything before touching the disk: image, driver pack, applications,
    password files, computer name. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
-3. `diskpart`: wipe the disk, create EFI (260 MB, FAT32), MSR (16 MB), Windows (NTFS), Recovery (1 GB).
+3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
+   firmware WinPE booted with (see below).
 4. `DISM /Apply-Image` the WIM to `W:`.
 5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
 6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
@@ -141,8 +149,25 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    cached copy after use, and FirstBoot.ps1 deletes it.
 7. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
    `firstboot.json`, and write `SetupComplete.cmd` to run it.
-8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
+8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
 9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then reboot or shut down.
+
+### UEFI and legacy BIOS
+
+The deploy reads `PEFirmwareType` to see how WinPE booted and partitions to match,
+because a PC can only boot Windows the way its firmware starts it:
+
+| Firmware | Disk | Partitions | Boot files |
+|---|---|---|---|
+| UEFI | GPT | EFI 260 MB FAT32 (S:), MSR 16 MB, Windows (W:), Recovery 1 GB | `bcdboot /f UEFI` |
+| Legacy BIOS | MBR | System 100 MB NTFS, active (S:), Windows (W:), Recovery 1 GB, type 27 | `bcdboot /f BIOS` |
+
+So the firmware mode the operator boots the USB stick or PXE in decides the
+result. A UEFI PC booted through CSM/legacy deploys as MBR; the log warns about
+it. The image is the same either way: a WIM captured on UEFI deploys to BIOS and
+the other way round. On BIOS the log also warns when the disk is over 2 TB (MBR
+only uses the first 2 TB) and when the image is Windows 11, which installs on
+BIOS but is not supported there by Microsoft.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order, applies the options, runs FIRSTBOOT tasks and removes
@@ -168,5 +193,5 @@ HP `HPClientDriverPackCatalog.cab`, Lenovo `catalogv2.xml`).
 ## Not in v1
 
 A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
-legacy BIOS/MBR, user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
+user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
 static IP, display settings, Azure AD join, and a management agent.
