@@ -229,6 +229,7 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Grid.RowDefinitions>
                 <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
+                <RowDefinition Height="20"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -238,12 +239,98 @@
               <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
               <Label Grid.Row="6" Content="Default answer file"/>
               <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
+              <Label Grid.Row="8" Content="Status share (optional)"/>
+              <TextBox x:Name="TxtReportPath" Grid.Row="8" Grid.Column="1"
+                       ToolTip="Where PCs report progress for the Dashboard. Empty: the content root's Status folder. Set a \\server\share\Status path so USB deployments report to a server too. Rebuild media after changing it."/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
             </StackPanel>
           </StackPanel>
         </ScrollViewer>
+      </TabItem>
+
+      <!-- Dashboard -->
+      <TabItem x:Name="TabDashboard" Header="Dashboard">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it."/>
+            <UniformGrid Rows="1" Margin="0,0,0,12">
+              <UniformGrid.Resources>
+                <Style TargetType="Border">
+                  <Setter Property="Background" Value="#F8FAFC"/>
+                  <Setter Property="BorderBrush" Value="#E1E3E8"/>
+                  <Setter Property="BorderThickness" Value="1"/>
+                  <Setter Property="CornerRadius" Value="4"/>
+                  <Setter Property="Padding" Value="12,8"/>
+                  <Setter Property="Margin" Value="0,0,8,0"/>
+                </Style>
+              </UniformGrid.Resources>
+              <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#0F6CBD"/><TextBlock Text="Deploying" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#15803D"/><TextBlock Text="Succeeded" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B45309"/><TextBlock Text="With warnings" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B91C1C"/><TextBlock Text="Failed or stalled" Foreground="#5B6170"/></StackPanel></Border>
+              <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="#5B6170"/></StackPanel></Border>
+            </UniformGrid>
+          </StackPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Button x:Name="BtnDashRefresh" Content="Refresh"/>
+            <CheckBox x:Name="ChkDashAuto" Content="Refresh every 10 s" IsChecked="True" VerticalAlignment="Center" Margin="4,0,16,0"/>
+            <Label Content="Show"/>
+            <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
+              <ComboBoxItem Content="All"/>
+              <ComboBoxItem Content="Deploying"/>
+              <ComboBoxItem Content="Failed or stalled"/>
+              <ComboBoxItem Content="Finished"/>
+            </ComboBox>
+            <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
+            <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
+            <Button x:Name="BtnDashRemove" DockPanel.Dock="Right" Content="Remove" Margin="8,0,0,0"/>
+            <TextBlock/>
+          </DockPanel>
+          <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="220" MinHeight="80"/></Grid.RowDefinitions>
+            <DataGrid x:Name="GridDash" IsReadOnly="True">
+              <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding State}" Value="Failed"><Setter Property="Background" Value="#FEF2F2"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Stalled"><Setter Property="Background" Value="#FEF2F2"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Warning"><Setter Property="Background" Value="#FFFBEB"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Succeeded"><Setter Property="Background" Value="#F0FDF4"/></DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </DataGrid.RowStyle>
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Computer" Binding="{Binding ComputerName}" Width="120"/>
+                <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
+                <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="100"/>
+                <DataGridTextColumn Header="IP" Binding="{Binding IpAddress}" Width="100"/>
+                <DataGridTextColumn Header="Answer file" Binding="{Binding AnswerFile}" Width="110"/>
+                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="80"/>
+                <DataGridTemplateColumn Header="Progress" Width="110">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid Margin="2,4">
+                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100"/>
+                        <TextBlock Text="{Binding Percent, StringFormat={}{0} %}" HorizontalAlignment="Center" FontSize="11"/>
+                      </Grid>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Step" Binding="{Binding Step}" Width="2*"/>
+                <DataGridTextColumn Header="Started" Binding="{Binding Started, StringFormat=MM-dd HH:mm}" Width="85"/>
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70"/>
+                <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="70"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
+            <TextBlock x:Name="TxtDashDetail" Grid.Row="2" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="#374151"/>
+            <TextBox x:Name="TxtDashLog" Grid.Row="3" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
+          </Grid>
+        </DockPanel>
       </TabItem>
 
       <!-- Logs -->
