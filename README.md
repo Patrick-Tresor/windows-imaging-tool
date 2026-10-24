@@ -183,11 +183,12 @@ environment (`winre.wim`); refresh those with a new capture from time to time.
       Store apps that break sysprep, then runs sysprep and shuts down.
    2. Name the image and choose compression.
    3. Choose the reference machine. For a **Hyper-V VM, captured with the VM off**
-      the wizard reads the VM's disk on the admin PC (`src\Capture-VMImage.ps1`), so
-      the VM is never started for the capture and needs no network. For a **Hyper-V
-      VM booted from a capture ISO** the wizard builds the ISO, boots the VM from it,
-      and ejects it when the capture finishes. Use an **ISO** for other VMs, or a
-      **USB stick** for a physical PC.
+      the wizard runs `Prepare-Reference.ps1` in the VM if it is not sysprepped yet
+      (asking once for an administrator password; sysprep shuts the VM down), then
+      reads the VM's disk on the admin PC (`src\Capture-VMImage.ps1`) with the VM
+      off. The VM needs no network. For a **Hyper-V VM booted from a capture ISO**
+      the wizard builds the ISO, boots the VM from it, and ejects it when the capture
+      finishes. Use an **ISO** for other VMs, or a **USB stick** for a physical PC.
    4. Review and click Build and start.
    The image is saved to the share's `Images` folder, or to the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.

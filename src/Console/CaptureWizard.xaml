@@ -108,7 +108,7 @@
 
         <RadioButton x:Name="RbVmDisk" GroupName="Ref" Content="A Hyper-V VM on this PC, captured with the VM off" FontWeight="SemiBold" Margin="0,6,0,4"/>
         <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                   Text="Reads the VM's disk on this PC, so the VM is not started for the capture. Start it once to run Prepare-Reference.ps1; sysprep shuts it down. The VM does not need network access."/>
+                   Text="Runs Prepare-Reference.ps1 in the VM if it is not sysprepped yet (you enter an administrator password once; sysprep shuts the VM down), then reads the VM's disk with the VM off. The VM does not need network access."/>
         <DockPanel Margin="22,0,0,8">
           <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
           <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>

@@ -92,7 +92,7 @@ function Show-CaptureWizard {
             2 {
                 if ($c.Mode -in @('VM', 'VmDisk') -and -not $c.VM) { 'Choose a VM.' }
                 elseif ($c.Mode -in @('VM', 'VmDisk') -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation 1 VM. Only generation 2 (UEFI) VMs can be captured." }
-                elseif ($c.Mode -in @('VM', 'VmDisk') -and $c.VM.State -ne 'Off') { "$($c.VM.Name) is $($c.VM.State). Let sysprep shut it down, then click Refresh." }
+                elseif ($c.Mode -in @('VM', 'VmDisk') -and $c.VM.State -ne 'Off') { "$($c.VM.Name) is $($c.VM.State). Shut it down, then click Refresh." }
                 elseif ($c.Mode -eq 'VM' -and -not $c.Unattended) { 'The Hyper-V option needs "Start without asking and shut down when done" on the previous page.' }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
                 elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
@@ -103,7 +103,7 @@ function Show-CaptureWizard {
     $showSummary = {
         $c = & $getChoice
         $target = switch ($c.Mode) {
-            'VmDisk' { "Hyper-V VM $($c.VM.Name): capture its disk with the VM off, no boot" }
+            'VmDisk' { "Hyper-V VM $($c.VM.Name): run Prepare-Reference.ps1 if needed, then capture its disk with the VM off" }
             'VM'  { "Hyper-V VM $($c.VM.Name): build capture ISO, boot the VM from it, eject when done" }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
