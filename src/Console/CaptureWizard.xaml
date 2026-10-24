@@ -106,13 +106,17 @@
       <StackPanel x:Name="Page2" Visibility="Collapsed">
         <TextBlock Style="{StaticResource Title}" Text="Where is the reference machine?"/>
 
-        <RadioButton x:Name="RbVM" GroupName="Ref" Content="A Hyper-V VM on this PC" FontWeight="SemiBold" Margin="0,6,0,4"/>
+        <RadioButton x:Name="RbVmDisk" GroupName="Ref" Content="A Hyper-V VM on this PC, captured with the VM off" FontWeight="SemiBold" Margin="0,6,0,4"/>
         <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                   Text="Builds a capture ISO, boots the VM from it, and ejects it again when the capture is done. The VM needs network access to the share."/>
-        <DockPanel Margin="22,0,0,12">
+                   Text="Reads the VM's disk on this PC, so the VM is not started for the capture. Start it once to run Prepare-Reference.ps1; sysprep shuts it down. The VM does not need network access."/>
+        <DockPanel Margin="22,0,0,8">
           <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
           <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
         </DockPanel>
+
+        <RadioButton x:Name="RbVM" GroupName="Ref" Content="A Hyper-V VM on this PC, booted from a capture ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
+        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,12"
+                   Text="Builds a capture ISO, boots the VM chosen above from it, and ejects it again when the capture is done. The VM needs network access to the share."/>
 
         <RadioButton x:Name="RbIso" GroupName="Ref" Content="Another VM or a PC that boots from an ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
         <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"

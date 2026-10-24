@@ -612,6 +612,28 @@ function Get-ImageUpdateArguments {
     @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
+function Get-VMCaptureArguments {
+    # Command line for Capture-VMImage.ps1, run by the console in its own window.
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$VMName,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$Description,
+        [ValidateSet('fast', 'max')][string]$Compression = 'max',
+        [switch]$Split,
+        [switch]$NewVersion
+    )
+    if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
+    $cmd = "& $(& $quote $ScriptPath) -VMName $(& $quote $VMName) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
+    if ($Description) { $cmd += " -Description $(& $quote $Description)" }
+    if ($Split) { $cmd += ' -SplitSizeMB 3800' }
+    if ($NewVersion) { $cmd += ' -NewVersion' }
+    $cmd += ' -NoPrompt'   # the console already asked
+    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+}
+
 #endregion
 
 #region Settings and logs
@@ -657,4 +679,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
-    Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments
+    Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
+    Get-VMCaptureArguments
