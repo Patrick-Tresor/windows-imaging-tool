@@ -195,6 +195,15 @@ environment (`winre.wim`); refresh those with a new capture from time to time.
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
+
+   **Other VM software (VMware, VirtualBox, Proxmox, ESXi).** The wizard lists
+   Hyper-V VMs only. Boot the VM once to run `Prepare-Reference.ps1`, shut it down,
+   then run `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot
+   <content root>` on the admin PC. VHD and VHDX files are mounted directly. VMDK,
+   VDI, qcow2 and raw files are first converted to a temporary VHD of the whole disk,
+   using qemu-img or VirtualBox, whichever is installed. The VM, its disk and its
+   snapshots are left alone. There is no hands-free boot or rollback here; that is
+   Hyper-V only. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab, or extract each vendor's
    enterprise driver pack into `Drivers\<Maker>\<Model>` and add a line to
    `driver-catalog.json` by hand.

@@ -1,30 +1,36 @@
 <#
 .SYNOPSIS
-    Captures a Hyper-V reference VM to a WIM on the admin PC, with no manual sysprep and no password.
+    Captures a reference VM's disk to a WIM on the admin PC. Hyper-V can be fully hands-free; other VM software takes a shut-down disk file.
 .DESCRIPTION
-    Runs on the admin PC (elevated, with Hyper-V and DISM).
+    Runs on the admin PC (elevated, with DISM). Two ways to give it the disk:
 
-    If the VM's Windows has not been sysprepped yet, the script:
-      1. takes a checkpoint of the VM, so it can be rolled back afterwards;
-      2. writes a one-time boot command into the VM's disk, offline: Windows Setup runs
-         Prepare-Reference.ps1 as SYSTEM on the next boot, and sysprep shuts the VM down;
-      3. starts the VM and waits for it to shut down;
-      4. removes that boot command and script again, so the image does not carry them.
-    A VM whose Windows is already sysprepped is not started, because booting it would run Windows setup again.
+    -VMName (Hyper-V): if the VM's Windows has not been sysprepped yet, the script takes a checkpoint, writes a
+    one-time boot command into the VM's disk offline (Windows Setup runs Prepare-Reference.ps1 as SYSTEM on the
+    next boot, and sysprep shuts the VM down), starts the VM and waits for it to shut down, removes the boot
+    command again, and captures the disk with the VM off. Afterwards it rolls the VM back to the checkpoint.
+    A VM whose Windows is already sysprepped is not started.
 
-    The script then mounts the VM's virtual disks read-only, captures the Windows partition with DISM, and
-    dismounts them. Finally it rolls the VM back to the checkpoint, so the reference can be used again. The
-    image goes to the Images folder of the content root, as Capture-GoldenImage.ps1 does. With -NewVersion an
-    existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
+    -DiskPath (any VM software): the VM must already be shut down and its Windows already sysprepped. The file
+    can be a VHD or VHDX, which is mounted directly, or a VMDK, VDI, qcow2 or raw disk, which is converted to a
+    temporary VHD first with qemu-img or VirtualBox (whichever is installed). The script does not change the
+    VM, its disk file, or its snapshots. Prepare the VM by hand first: boot it, run Prepare-Reference.ps1, and
+    shut it down.
+
+    The image goes to the Images folder of the content root, as Capture-GoldenImage.ps1 does. With -NewVersion
+    an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
     as a version in Images\Previous\ (see ImageVersions.psm1).
 
-    Untested on Windows: the Setup\CmdLine boot hook, sysprep run that way, and the checkpoint rollback.
+    Untested on Windows: the Setup\CmdLine boot hook and sysprep run that way, the checkpoint rollback, and every
+    -DiskPath conversion.
 .EXAMPLE
     .\src\Capture-VMImage.ps1 -VMName Win11-Ref -Name Win11-24H2-Enterprise -ContentRoot D:\DeployShare
+.EXAMPLE
+    .\src\Capture-VMImage.ps1 -DiskPath 'D:\VMware\Win11-Ref\Win11-Ref.vmdk' -Name Win11-24H2 -ContentRoot D:\DeployShare
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'HyperV')]
 param(
-    [Parameter(Mandatory)][string]$VMName,
+    [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
+    [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
     [Parameter(Mandatory)][string]$Name,
     [Parameter(Mandatory)][string]$ContentRoot,
     [string]$Description,
@@ -45,7 +51,7 @@ Set-Content -Path $logPath -Value $null
 
 function Mount-VMDisks {
     # Mounts the virtual disks and gives their partitions drive letters until the Windows one is found.
-    # Returns the Windows root (e.g. E:\) and what Dismount-VMDisks must undo.
+    # Returns the Windows root (e.g. E:\, or nothing) and what Dismount-VMDisks must undo.
     param([Parameter(Mandatory)][string[]]$Paths, [switch]$ReadWrite)
     $mount = [pscustomobject]@{ Root = $null; Mounted = @(); Assigned = @() }
     try {
@@ -82,6 +88,23 @@ function Test-Generalized {
     param([Parameter(Mandatory)][string]$Root)
     $setupState = Join-Path $Root 'Windows\Setup\State\State.ini'
     (Test-Path $setupState) -and [bool](Select-String -Path $setupState -Pattern 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE' -Quiet)
+}
+
+function Get-DiskForCapture {
+    # The VHD to mount for a disk file. Other formats are converted to a temporary VHD, which the caller deletes.
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Disk file not found: $Path" }
+    $qemu = (Get-Command qemu-img.exe -ErrorAction SilentlyContinue).Source
+    $vbox = (Get-Command VBoxManage.exe -ErrorAction SilentlyContinue).Source
+    if (-not $vbox -and (Test-Path (Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'))) {
+        $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
+    }
+    $temp = Join-Path $env:TEMP ("capture-{0}.vhd" -f [guid]::NewGuid().ToString('N'))
+    $conversion = Get-DiskConversionCommand -SourcePath $Path -DestinationPath $temp -QemuImg $qemu -VBoxManage $vbox
+    if (-not $conversion) { return [pscustomobject]@{ Path = $Path; Temp = $null } }
+    Write-DeployLog "Converting $(Split-Path $Path -Leaf) to a temporary VHD. This copies the whole disk, so it needs free space."
+    Invoke-Native -FilePath $conversion.FilePath -ArgumentList $conversion.ArgumentList
+    [pscustomobject]@{ Path = $temp; Temp = $temp }
 }
 
 function Edit-OfflineSetupKey {
@@ -160,69 +183,86 @@ $logDir = Join-Path $ContentRoot 'Logs'
 $status = 'FAILED'
 $staging = $null
 $swapping = $false
-$checkpoint = $null   # set only when this run changes the VM; rolled back in finally
+$checkpoint = $null   # set only when this run changes a Hyper-V VM; rolled back in finally
+$tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
 
 try {
-    $vm = Get-VM -Name $VMName
-    if ($vm.State -ne 'Off') { throw "VM $VMName is $($vm.State). Shut it down first; this script starts it itself when it needs to." }
-    if ($vm.Generation -ne 2) { throw "VM $VMName is generation $($vm.Generation). Only generation 2 (UEFI) VMs are supported." }
     $existing = @((Join-Path $imagesDir "$Name.wim"), (Join-Path $imagesDir "$Name.swm")) | Where-Object { Test-Path $_ }
     if ($existing -and -not $NewVersion) {
         throw "An image named $Name already exists in $imagesDir. Pick another name, or capture it as a new version."
     }
-    $paths = @(Get-VMHardDiskDrive -VMName $VMName | ForEach-Object { $_.Path })
-    if (-not $paths) { throw "VM $VMName has no virtual disk." }
-    if (-not $NoPrompt -and (Read-Host "Type YES to capture the disk of $VMName") -ne 'YES') {
-        Write-DeployLog 'Cancelled by operator' -Level WARN
-        $status = 'CANCELLED'
-        return
-    }
 
-    # Look at the disk before deciding whether to start the VM: booting a sysprepped Windows runs its setup again.
-    $probe = Mount-VMDisks -Paths $paths
-    try {
-        if (-not $probe.Root) { throw "No Windows install found on the disks of $VMName." }
-        $needsPrep = -not (Test-Generalized -Root $probe.Root)
-    }
-    finally { Dismount-VMDisks $probe }
-
-    if ($needsPrep) {
-        $checkpoint = "Before capture of $Name $(Get-Date -Format 'yyyyMMdd-HHmm')"
-        Checkpoint-VM -Name $VMName -SnapshotName $checkpoint
-        Write-DeployLog "Made checkpoint '$checkpoint'. The VM is rolled back to it after the capture."
-        # Writes now go to a new disk file, so the disk paths have changed.
-        $paths = @(Get-VMHardDiskDrive -VMName $VMName | ForEach-Object { $_.Path })
-
-        $mount = Mount-VMDisks -Paths $paths -ReadWrite
-        try {
-            if (-not $mount.Root) { throw "No Windows install found on the disks of $VMName." }
-            Set-SysprepOnBoot -Root $mount.Root
+    if ($PSCmdlet.ParameterSetName -eq 'Disk') {
+        if (-not $NoPrompt -and (Read-Host "Type YES to capture $(Split-Path $DiskPath -Leaf) (its VM must be shut down)") -ne 'YES') {
+            Write-DeployLog 'Cancelled by operator' -Level WARN
+            $status = 'CANCELLED'
+            return
         }
-        finally { Dismount-VMDisks $mount; $mount = $null }
-
-        Write-DeployLog "Starting $VMName. Windows runs Prepare-Reference.ps1 at boot, and sysprep shuts the VM down when it is done."
-        Start-VM -Name $VMName
-        Wait-VMOff -VMName $VMName -Minutes 60
-        Write-DeployLog "$VMName is off after the boot-time sysprep."
-
-        # The boot-time command must not end up in the image.
-        $mount = Mount-VMDisks -Paths $paths -ReadWrite
-        try {
-            if (-not $mount.Root) { throw "No Windows install found on the disks of $VMName." }
-            Clear-SysprepOnBoot -Root $mount.Root
-        }
-        finally { Dismount-VMDisks $mount; $mount = $null }
+        $disk = Get-DiskForCapture -Path $DiskPath
+        $tempDisk = $disk.Temp
+        $paths = @($disk.Path)
     }
     else {
-        Write-DeployLog "$VMName is already sysprepped, so the VM is not started."
+        $vm = Get-VM -Name $VMName
+        if ($vm.State -ne 'Off') { throw "VM $VMName is $($vm.State). Shut it down first; this script starts it itself when it needs to." }
+        if ($vm.Generation -ne 2) { throw "VM $VMName is generation $($vm.Generation). Only generation 2 (UEFI) VMs are supported." }
+        $paths = @(Get-VMHardDiskDrive -VMName $VMName | ForEach-Object { $_.Path })
+        if (-not $paths) { throw "VM $VMName has no virtual disk." }
+        if (-not $NoPrompt -and (Read-Host "Type YES to capture the disk of $VMName") -ne 'YES') {
+            Write-DeployLog 'Cancelled by operator' -Level WARN
+            $status = 'CANCELLED'
+            return
+        }
+
+        # Look at the disk before deciding whether to start the VM: booting a sysprepped Windows runs its setup again.
+        $probe = Mount-VMDisks -Paths $paths
+        try {
+            if (-not $probe.Root) { throw "No Windows install found on the disks of $VMName." }
+            $needsPrep = -not (Test-Generalized -Root $probe.Root)
+        }
+        finally { Dismount-VMDisks $probe }
+
+        if ($needsPrep) {
+            $checkpoint = "Before capture of $Name $(Get-Date -Format 'yyyyMMdd-HHmm')"
+            Checkpoint-VM -Name $VMName -SnapshotName $checkpoint
+            Write-DeployLog "Made checkpoint '$checkpoint'. The VM is rolled back to it after the capture."
+            # Writes now go to a new disk file, so the disk paths have changed.
+            $paths = @(Get-VMHardDiskDrive -VMName $VMName | ForEach-Object { $_.Path })
+
+            $mount = Mount-VMDisks -Paths $paths -ReadWrite
+            try {
+                if (-not $mount.Root) { throw "No Windows install found on the disks of $VMName." }
+                Set-SysprepOnBoot -Root $mount.Root
+            }
+            finally { Dismount-VMDisks $mount; $mount = $null }
+
+            Write-DeployLog "Starting $VMName. Windows runs Prepare-Reference.ps1 at boot, and sysprep shuts the VM down when it is done."
+            Start-VM -Name $VMName
+            Wait-VMOff -VMName $VMName -Minutes 60
+            Write-DeployLog "$VMName is off after the boot-time sysprep."
+
+            # The boot-time command must not end up in the image.
+            $mount = Mount-VMDisks -Paths $paths -ReadWrite
+            try {
+                if (-not $mount.Root) { throw "No Windows install found on the disks of $VMName." }
+                Clear-SysprepOnBoot -Root $mount.Root
+            }
+            finally { Dismount-VMDisks $mount; $mount = $null }
+        }
+        else {
+            Write-DeployLog "$VMName is already sysprepped, so the VM is not started."
+        }
     }
 
     # The capture reads the disk with the VM off.
     $mount = Mount-VMDisks -Paths $paths
-    if (-not $mount.Root) { throw "No Windows install found on the disks of $VMName." }
+    if (-not $mount.Root) { throw 'No Windows install found on the disk.' }
     $windowsRoot = $mount.Root
     if (-not (Test-Generalized -Root $windowsRoot)) {
+        if ($PSCmdlet.ParameterSetName -eq 'Disk') {
+            throw 'Windows on this disk was not generalized. Boot the VM once, run Prepare-Reference.ps1 in it, shut the VM down, and run this again.'
+        }
         throw "Windows on $VMName was not generalized. Prepare-Reference.ps1 did not run or did not finish; check the VM and run this again."
     }
 
@@ -233,7 +273,7 @@ try {
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     $wim = Join-Path $staging "$Name.wim"
 
-    Write-DeployLog "Capturing the disk of $VMName ($windowsRoot) to $imagesDir."
+    Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir."
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
         "/Compress:$Compression", '/CheckIntegrity', '/Verify')
     if ($Description) { $captureArgs += "/Description:$Description" }
@@ -265,7 +305,7 @@ try {
         } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
     }
 
-    Write-DeployLog "Captured the disk of $VMName to $imagesDir\$newLeaf"
+    Write-DeployLog "Captured the disk to $imagesDir\$newLeaf"
     $status = 'OK'
 }
 catch {
@@ -273,9 +313,10 @@ catch {
     if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
 }
 finally {
-    # Release the disk before the rollback, which needs it free.
+    # Release the disk before the rollback and the temporary copy's deletion, which need it free.
     if ($mount) { Dismount-VMDisks $mount }
     if ($checkpoint) { Restore-PreCaptureCheckpoint -VMName $VMName -Name $checkpoint }
+    if ($tempDisk) { Remove-Item -LiteralPath $tempDisk -Force -ErrorAction SilentlyContinue }
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
     if ($staging -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     if ($status -ne 'CANCELLED') {
