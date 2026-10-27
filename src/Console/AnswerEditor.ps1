@@ -261,9 +261,22 @@ function Show-AnswerEditor {
     $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
     $e.ChkBlRequire.IsChecked = $bl.RequireBackup
 
+    $e.ChkMigrate.IsChecked = $a.MigrateUserData
+    $e.RbStoreLocal.IsChecked = $a.UserDataStore -ne 'Share'
+    $e.RbStoreShare.IsChecked = $a.UserDataStore -eq 'Share'
+    $e.TxtStorePath.Text = $a.UserDataPath
+    $e.ChkEncrypt.IsChecked = $a.UserDataEncrypt
+    $e.TxtUsmtKeyState.Text = & $pwState $a.UserDataKeyFile
+    $e.ChkMigDocs.IsChecked = 'MigDocs.xml' -in $a.UserDataRules
+    $e.ChkMigApp.IsChecked = 'MigApp.xml' -in $a.UserDataRules
+    $e.TxtExtraRules.Text = @($a.UserDataRules | Where-Object { $_ -notin 'MigDocs.xml', 'MigApp.xml' }) -join '; '
+    $e.TxtExcludeUsers.Text = @($a.UserDataExclude) -join '; '
+    $e.ChkLocalAccounts.IsChecked = $a.UserDataLocalAccounts
+    $e.ChkKeepStore.IsChecked = $a.UserDataKeepStore
+
     # --- Behaviour -------------------------------------------------------------------------------------------
     $e.LstSections.Add_SelectionChanged({
-        for ($i = 0; $i -lt 10; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
+        for ($i = 0; $i -lt $e.LstSections.Items.Count; $i++) { $e["Sec$i"].Visibility = if ($i -eq $e.LstSections.SelectedIndex) { 'Visible' } else { 'Collapsed' } }
     })
     $e.LstSections.SelectedIndex = 0
 
@@ -283,9 +296,14 @@ function Show-AnswerEditor {
         # Recovery keys only go to AD from a domain-joined PC.
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
+        $e.GridMigrate.IsEnabled = [bool]$e.ChkMigrate.IsChecked
+        $share = [bool]$e.RbStoreShare.IsChecked
+        $e.TxtStorePath.IsEnabled = $share
+        $e.ChkEncrypt.IsEnabled = $share
+        $e.PwdUsmtKey.IsEnabled = $share -and [bool]$e.ChkEncrypt.IsChecked
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
-    foreach ($c in 'ChkAdmin', 'ChkBios', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin', 'RbStoreLocal', 'RbStoreShare') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'ChkAdmin', 'ChkBios', 'ChkBitLocker', 'ChkMigrate', 'ChkEncrypt') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
     # Applications
@@ -394,6 +412,15 @@ function Show-AnswerEditor {
         $a.BitLocker.BackupToAD        = [bool]$e.ChkBlAD.IsChecked
         $a.BitLocker.RecoveryKeyFolder = $e.TxtBlFolder.Text.Trim()
         $a.BitLocker.RequireBackup     = [bool]$e.ChkBlRequire.IsChecked
+        $split = { param($t) @("$t" -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $a.MigrateUserData   = [bool]$e.ChkMigrate.IsChecked
+        $a.UserDataStore     = if ($e.RbStoreShare.IsChecked) { 'Share' } else { 'Local' }
+        $a.UserDataPath      = $e.TxtStorePath.Text.Trim()
+        $a.UserDataEncrypt   = $a.UserDataStore -eq 'Share' -and [bool]$e.ChkEncrypt.IsChecked
+        $a.UserDataRules     = @(@(if ($e.ChkMigDocs.IsChecked) { 'MigDocs.xml' }) + @(if ($e.ChkMigApp.IsChecked) { 'MigApp.xml' }) + (& $split $e.TxtExtraRules.Text))
+        $a.UserDataExclude   = & $split $e.TxtExcludeUsers.Text
+        $a.UserDataLocalAccounts = [bool]$e.ChkLocalAccounts.IsChecked
+        $a.UserDataKeepStore = [bool]$e.ChkKeepStore.IsChecked
     }
 
     $e.BtnNamePreview.Add_Click({
@@ -418,9 +445,12 @@ function Show-AnswerEditor {
             if ($a.BitLocker.Enabled -and $a.BitLocker.Protector -eq 'TpmPin' -and -not $e.PwdBlPin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile)) {
                 throw 'Enter the BitLocker startup PIN (BitLocker).'
             }
+            if ($a.MigrateUserData -and $a.UserDataEncrypt -and -not $e.PwdUsmtKey.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile)) {
+                throw 'Enter the encryption key (User data).'
+            }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `
                 -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords `
-                -BiosPassword $e.PwdBios.Password -BitLockerPin $e.PwdBlPin.Password -IsNew:$isNew | Out-Null
+                -BiosPassword $e.PwdBios.Password -BitLockerPin $e.PwdBlPin.Password -UserDataKey $e.PwdUsmtKey.Password -IsNew:$isNew | Out-Null
             $state.Saved = $true
             $win.Close()
         } catch {

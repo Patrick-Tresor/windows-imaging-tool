@@ -294,6 +294,43 @@ loads an answer object, shows each section as a form, and saves through
 SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
 
+## User data migration
+
+`UserState.psm1` backs up and restores user profiles with USMT from the Windows
+ADK, when the answer file's `userData/migrate` is on. `New-DeploymentMedia.ps1`
+copies `User State Migration Tool\amd64` from the ADK to `X:\Deploy\USMT`.
+
+1. **Plan, before the summary** (`Get-UserStatePlan`): gives each data partition
+   on the target disk a letter and looks for `Windows\System32\config\SOFTWARE`,
+   or a `UserState\USMT` store from an earlier attempt. It stops the deploy, with
+   nothing erased, when USMT, a rule file or the key file is missing, or when the
+   partition is locked by BitLocker. No Windows on the disk means a new PC: it is
+   deployed without user data.
+2. **Backup, before partitioning** (`Backup-UserState`): `scanstate /offlineWinDir`
+   against the old Windows. A failed ScanState stops the deploy.
+   - **Local store**: `/hardlink /nocompress` into `<old Windows>\UserState`. The
+     disk is not repartitioned: `Clear-WindowsPartition` gives that partition W:
+     and the EFI partition S:, then deletes everything on W: except `UserState`
+     (`rd /s /q`, which doesn't follow junctions, with `takeown`/`icacls` for
+     TrustedInstaller files). GPT only, and the partition must not be encrypted.
+   - **Share store**: compressed (AES-256 with `/keyfile` when encrypted) into
+     `<storePath>\<serial>`, then the disk is recreated as usual. The copy is kept
+     there as a backup; if the deploy fails after the wipe, the next attempt finds
+     it and restores it.
+3. **Staging, after the image** (`Copy-UserStateForRestore`): the store goes to
+   `W:\UserState` (copied from the share for a Share store), USMT and the rule
+   files to `W:\Deploy\USMT`, the key to `W:\Deploy\usmt.key`, and the LoadState
+   command line into `firstboot.json`.
+4. **Restore, at first boot**: `FirstBoot.ps1` runs LoadState as SYSTEM after the
+   applications (so application settings apply to installed applications) and
+   before FIRSTBOOT tasks. On success it deletes `C:\UserState` unless `keepStore`
+   is set; on failure it keeps it and logs to `C:\Windows\Temp\FirstBoot.log`.
+   USMT's own logs are `ScanState.log` and `LoadState.log` in `C:\Windows\Temp`.
+
+The domain join happens in the specialize pass, before LoadState, so domain
+profiles are restored for their accounts. Local accounts are only recreated with
+`createLocalAccounts`, disabled and without a password.
+
 ## Driver packs
 
 The driver pack builder (`src/Console/DriverPacks.psm1`, the console's
@@ -352,6 +389,6 @@ pack on them by other means, once it is in the library.
 
 ## Not in v1
 
-A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
-user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
-static IP, display settings, Azure AD join, and a management agent.
+A deploy-time GUI on the target PC (it uses a console prompt), BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
+migrating user data from one PC to a different PC (only the same PC is supported, see User data migration),
+SmartDeploy's wipe-and-load / SmartMigrate disk options, static IP, display settings, Azure AD join, and a management agent.

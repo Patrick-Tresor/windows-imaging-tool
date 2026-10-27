@@ -3,7 +3,7 @@
     Runs once on the deployed PC, as SYSTEM, from SetupComplete.cmd before anyone logs on.
 .DESCRIPTION
     Deploy-Image.ps1 copies this to C:\Deploy with firstboot.json and the answer file's applications.
-    Installs the applications in order, applies options, runs FIRSTBOOT tasks, turns on BitLocker, runs the post-deploy checks
+    Installs the applications in order, applies options, restores the user data (LoadState), runs FIRSTBOOT tasks, turns on BitLocker, runs the post-deploy checks
     (PostDeployChecks.psm1), then removes C:\Deploy. The checks and their state stay in C:\ProgramData\ImagingTool,
     where Test-Deployment.ps1 can run them again later.
     When firstboot.json has a status folder, reports progress to the console's dashboard from 90 to 100 %.
@@ -113,6 +113,25 @@ function Enable-DeployBitLocker($cfg) {
         Enable-BitLocker @enable -TpmProtector | Out-Null
     }
     Write-Log "BitLocker enabled on $mount ($($cfg.protector), $($cfg.encryptionMethod)); encryption continues in the background"
+}
+
+# User data after the applications, so their settings land on installed applications.
+if ($plan.userState) {
+    $us = $plan.userState
+    Write-Log "Restoring user data from $($us.store)"
+    $loadArgs = @($us.arguments)
+    & $us.loadState @loadArgs | Out-Null
+    $code = $LASTEXITCODE
+    if ($code -in 0, 3) {
+        Write-Log "  user data restored (exit $code$(if ($code -eq 3) { ', some files skipped: see C:\Windows\Temp\LoadState.log' }))"
+        if (-not $us.keepStore) {
+            # Deleting a hard-link store only removes its links; the restored files stay in the profiles.
+            & cmd.exe /c "rd /s /q `"$($us.store)`"" 2>&1 | Out-Null
+            if (Test-Path $us.store) { Write-Log "  couldn't remove all of $($us.store); delete it by hand" }
+        }
+    } else {
+        Write-Log "  user data restore FAILED (exit $code); the store is kept in $($us.store). See C:\Windows\Temp\LoadState.log"
+    }
 }
 
 if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }

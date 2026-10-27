@@ -335,6 +335,7 @@ function Get-NewAnswer {
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
     $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
     $a.Bios.PasswordFile = $null
+    $a.UserDataKeyFile = "config\secrets\$Name-usmt.txt"
     $a
 }
 
@@ -366,6 +367,7 @@ function Save-AnswerFromEditor {
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
         [string]$BiosPassword,
         [string]$BitLockerPin,
+        [string]$UserDataKey,               # encryption key for a Share user data store
         [switch]$IsNew
     )
     $a = $Answer
@@ -378,6 +380,7 @@ function Save-AnswerFromEditor {
     if ($BiosPassword -and -not $a.Bios.PasswordFile) { $a.Bios.PasswordFile = "config\secrets\$($a.Name)-bios.txt" }
     if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
     if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
+    if (-not $a.UserDataKeyFile) { $a.UserDataKeyFile = "config\secrets\$($a.Name)-usmt.txt" }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -389,6 +392,7 @@ function Save-AnswerFromEditor {
     if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
     if ($BiosPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.Bios.PasswordFile -Value $BiosPassword }
     if ($BitLockerPin) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Value $BitLockerPin }
+    if ($UserDataKey) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile -Value $UserDataKey }
     foreach ($sh in $a.Shares) {
         $pw = $SharePasswords[$sh.LocalName]
         if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }

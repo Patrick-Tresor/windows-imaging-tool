@@ -77,6 +77,10 @@ try {
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
+    # USMT for answer files that migrate user data (ScanState runs in WinPE, LoadState on the deployed PC).
+    $usmt = "$adk\User State Migration Tool\amd64"
+    if (Test-Path "$usmt\scanstate.exe") { Copy-Item $usmt "$deployDir\USMT" -Recurse }
+    elseif (-not $CaptureConfig) { Write-Warning 'USMT is not installed (ADK feature User State Migration Tool). Answer files that migrate user data will stop before erasing anything.' }
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
 }
 catch {

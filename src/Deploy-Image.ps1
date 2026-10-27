@@ -4,10 +4,10 @@
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot), where the image can come by WDS multicast. Reads an answer file
-    from <content root>\AnswerFiles: image, applications, disk, regional settings, naming, domain join, tasks, extra shares,
-    BIOS settings and BitLocker.
-    Wipes the target disk and partitions it to match the firmware WinPE booted with:
-    GPT for UEFI, MBR for legacy BIOS.
+    from <content root>\AnswerFiles: image, applications, disk, user data migration, regional settings, naming,
+    domain join, tasks, extra shares, BIOS settings and BitLocker.
+    Wipes the target disk (or, when user data is kept on the disk, only its Windows partition) and partitions it
+    to match the firmware WinPE booted with: GPT for UEFI, MBR for legacy BIOS.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
 #>
@@ -26,6 +26,8 @@ Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BiosSettings.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
+$usmtDir = Join-Path $PSScriptRoot 'USMT'
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -170,6 +172,18 @@ try {
     }
 
     Set-DeployStatus -Fields @{ computerName = $ComputerName }
+    # User data: find the old Windows and check the backup can be done, still before anything is erased.
+    $migration = $null
+    if ($answer.MigrateUserData) {
+        $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial `
+            -SharePath (Resolve-ContentPath $root $answer.UserDataPath)
+        Write-DeployLog "User data: $($migration.Summary)" -Level $(if ($migration.Mode -eq 'None') { 'WARN' } else { 'INFO' })
+    }
+    $keepPartitions = $migration -and $migration.Store -eq 'Local' -and $migration.Mode -ne 'None'
+    if ($keepPartitions -and $firmware -ne 'UEFI') {
+        throw 'Keeping user data on the disk keeps its GPT partitions, which only boot in UEFI mode, but WinPE booted in legacy BIOS mode. Boot WinPE in UEFI mode, or store the user data on a share.'
+    }
+
     $disk = Get-Disk -Number $answer.DiskNumber
     if ($firmware -eq 'BIOS') {
         Write-DeployLog 'Legacy BIOS boot: the disk will be MBR. Boot WinPE in UEFI mode instead if this PC supports it.' -Level WARN
@@ -190,7 +204,12 @@ try {
     $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
     Write-Host "BIOS:         $(if ($bios.Enabled -and $biosCount) { "$biosCount setting(s) for $($hw.Maker)" } else { 'unchanged' })"
     Write-Host "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
-    Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
+    if ($migration) { Write-Host "User data:    $($migration.Summary)" }
+    if ($keepPartitions) {
+        Write-Host ("ERASE:        everything on {0} except the user data, disk {1} {2}" -f $migration.Volume.Drive, $disk.Number, $disk.FriendlyName) -ForegroundColor Red
+    } else {
+        Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
+    }
     if (-not $NoPrompt) {
         Set-DeployStatus -Step $(if ($answer.Mode -eq 'Unattended') { 'Counting down' } else { 'Waiting for the operator' }) -Percent 5
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
@@ -206,11 +225,22 @@ try {
         if ($biosFailed -and $bios.StopOnError) { throw "$biosFailed BIOS setting(s) failed and the answer file says to stop (bios/stopOnError)." }
     }
 
-    # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
-    $dp = Join-Path $env:TEMP 'diskpart.txt'
-    New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
+    # 1. Back up the user data, then partition. A failed backup stops here, with the disk untouched.
+    if ($migration -and $migration.Mode -eq 'Backup') {
+        Set-DeployStatus -Step 'Backing up user data' -Percent 7
+        Backup-UserState -Plan $migration -Answer $answer -UsmtDir $usmtDir
+    }
+
     Set-DeployStatus -Step 'Partitioning the disk' -Percent 8
-    Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
+    if ($keepPartitions) {
+        # Hard-link store: keep the partitions and empty the Windows partition around it.
+        Clear-WindowsPartition -Plan $migration -DiskNumber $answer.DiskNumber
+    } else {
+        # EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
+        $dp = Join-Path $env:TEMP 'diskpart.txt'
+        New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
+        Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
+    }
 
     # 2. Apply the image. With multicast on, a room of PCs downloads it together onto the new Windows
     #    partition first (WDS sends it once for all of them), then applies it from there.
@@ -261,9 +291,11 @@ try {
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
+    # User data is restored by FirstBoot.ps1 after the applications.
+    $userState = if ($migration -and $migration.Mode -ne 'None') { Copy-UserStateForRestore -Plan $migration -Answer $answer -UsmtDir $usmtDir } else { $null }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1') 'W:\Deploy\'
-    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -UserState $userState -BitLockerPin $bitLockerPin
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
@@ -291,7 +323,7 @@ catch {
 }
 finally {
     # Keep the log on the deployed disk and, when available, on the content root for central review.
-    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log' 'W:\Windows\Temp\Deploy.log' -ErrorAction SilentlyContinue }
+    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log', 'X:\Windows\Temp\ScanState.log' 'W:\Windows\Temp\' -ErrorAction SilentlyContinue }
     if ($root -and $hw -and $status -ne 'CANCELLED') {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
