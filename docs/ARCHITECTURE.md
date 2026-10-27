@@ -14,6 +14,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
+| **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -125,9 +126,16 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    boot code, so it also boots legacy BIOS PCs.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
-3. **PXE**: the same `boot.wim` is imported into WDS (or served by iPXE/wimboot);
-   it then behaves like the LAN share mode. WDS serves BIOS (`pxeboot.n12`) and
-   UEFI (`wdsmgfw.efi`) clients from the same boot image.
+3. **PXE**: the same `boot.wim` is published to WDS by `Publish-WdsBootImage.ps1`
+   (or served by iPXE/wimboot); it then behaves like the LAN share mode.
+   WDS serves BIOS (`pxeboot.n12`) and UEFI (`wdsmgfw.efi`) clients from the
+   same boot image.
+   The script runs its WDS steps on the server (locally, or with `Invoke-Command`
+   after copying the WIM through `ADMIN$`): optionally install the role and
+   `wdsutil /Initialize-Server /Standalone`, then remove any boot image with the
+   same name, `Import-WdsBootImage`, and make it the default `x64uefi` boot image.
+   It reads server state from the WDSServer service, the `REMINST` share and the
+   WDS cmdlets, never from `wdsutil` text, which is localized.
 
 Every medium boots both UEFI and legacy BIOS. The ISO carries both
 `etfsboot.com` and `efisys.bin`.

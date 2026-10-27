@@ -157,6 +157,7 @@
 
       <!-- Media -->
       <TabItem Header="Media">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
           <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
@@ -173,7 +174,7 @@
 
           <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
-          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (import into WDS; content comes from the network share)" Margin="0,4"/>
+          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (publish to a WDS server; content comes from the network share)" Margin="0,4"/>
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -196,10 +197,47 @@
             <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
           </Grid>
 
+          <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Hint}" Text="After the build, boot.wim is published to the WDS server and becomes the default UEFI network boot entry. Publishing again replaces it. Leave the server empty to use this PC. A remote server must allow PowerShell remoting and you must be an administrator on it."/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+
+                <Label Content="Publish to WDS"/>
+                <CheckBox x:Name="ChkWdsPublish" Grid.Column="1" IsChecked="True" VerticalAlignment="Center" Content="Publish boot.wim to the WDS server after building"/>
+
+                <Label Grid.Row="2" Content="WDS server"/>
+                <TextBox x:Name="TxtWdsServer" Grid.Row="2" Grid.Column="1" ToolTip="Server name, for example wds01. Empty: this PC."/>
+                <Button x:Name="BtnWdsCheck" Grid.Row="2" Grid.Column="2" Content="Check server" Margin="8,0,0,0"/>
+
+                <Label Grid.Row="4" Content="Boot menu name"/>
+                <TextBox x:Name="TxtWdsImageName" Grid.Row="4" Grid.Column="1" ToolTip="Shown in the PXE boot menu. An image with this name is replaced."/>
+
+                <Label Grid.Row="6" Content="Set up WDS"/>
+                <CheckBox x:Name="ChkWdsSetup" Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
+                          Content="Install and configure WDS if needed (standalone, answers all PXE clients)"/>
+
+                <Label Grid.Row="8" Content="RemoteInstall folder"/>
+                <TextBox x:Name="TxtWdsRemInst" Grid.Row="8" Grid.Column="1" IsEnabled="{Binding IsChecked, ElementName=ChkWdsSetup}"
+                         ToolTip="On the WDS server. Used only when WDS is configured for the first time. Not the system drive."/>
+
+                <Label Grid.Row="10" Content="Options"/>
+                <StackPanel Grid.Row="10" Grid.Column="1">
+                  <CheckBox x:Name="ChkWdsDhcp" Content="DHCP runs on the WDS server too" Margin="0,2"/>
+                  <CheckBox x:Name="ChkWdsNoPrompt" Content="Boot without pressing F12 or Enter (any PC set to network boot starts the deploy)" Margin="0,2"/>
+                </StackPanel>
+              </Grid>
+              <TextBox x:Name="TxtWdsStatus" Height="80" Margin="0,10,0,0" IsReadOnly="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+            </StackPanel>
+          </GroupBox>
+
           <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
           </StackPanel>
         </StackPanel>
+        </ScrollViewer>
       </TabItem>
 
       <!-- Answer files -->

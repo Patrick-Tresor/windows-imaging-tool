@@ -626,6 +626,29 @@ function Save-DeploySettings {
     $Settings | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -Encoding utf8
 }
 
+function Get-WdsSettings {
+    # The "wds" section of deploy-settings.json, with defaults for content roots made before it existed.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $wds = [ordered]@{ server = ''; imageName = 'Imaging Tool (x64)'; setup = $false; remoteInstallPath = 'D:\RemoteInstall'; dhcpOnServer = $false; noPrompt = $false }
+    $saved = (Get-DeploySettings -ContentRoot $ContentRoot).wds
+    if ($saved) { foreach ($p in $saved.PSObject.Properties) { if ($wds.Contains($p.Name)) { $wds[$p.Name] = $p.Value } } }
+    [pscustomobject]$wds
+}
+
+function Save-WdsSettings {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Wds)
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $s | Add-Member -NotePropertyName wds -NotePropertyValue ([pscustomobject]@{
+        server            = "$($Wds.server)".Trim()
+        imageName         = $(if ("$($Wds.imageName)".Trim()) { "$($Wds.imageName)".Trim() } else { 'Imaging Tool (x64)' })
+        setup             = [bool]$Wds.setup
+        remoteInstallPath = "$($Wds.remoteInstallPath)".Trim()
+        dhcpOnServer      = [bool]$Wds.dhcpOnServer
+        noPrompt          = [bool]$Wds.noPrompt
+    }) -Force
+    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+}
+
 function Get-DeploymentLogs {
     # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
     # or SERVICE-<name>_... (Update-OfflineImage.ps1).
@@ -651,7 +674,7 @@ function Get-DeploymentLogs {
 
 Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
-    Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
+    Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
