@@ -91,7 +91,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $apps 'Zoom') -Force | Out-Null
     '{ "command": "msiexec /i zoom.msi /qn" }' | Set-Content (Join-Path $apps 'Zoom/app.json')
     $def = Get-AppDefinition -AppRoot $apps -Name 'Zoom'
-    Assert-Equal "$($def.command)|$($def.successCodes -join ',')" 'msiexec /i zoom.msi /qn|0,3010' 'app.json is read with default success codes'
+    Assert-Equal "$($def.command)|$($def.successCodes -join ',')" 'msiexec /i zoom.msi /qn|0,3010,1641' 'app.json is read with default success codes'
     Assert-Throws { Get-AppDefinition -AppRoot $apps -Name 'Missing' } '*no app.json*' 'missing application is reported before the disk is wiped'
 
     # Round trip.

@@ -180,8 +180,9 @@ deleted. On failure it falls back to applying from the share unless fallback is 
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
    cached copy after use, and FirstBoot.ps1 deletes it.
-8. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
-   `firstboot.json`, and write `SetupComplete.cmd` to run it.
+8. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
+   model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
+   and `firstboot.json`, and write `SetupComplete.cmd` to run it.
 9. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
 10. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
     `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
@@ -205,8 +206,18 @@ only uses the first 2 TB) and when the image is Windows 11, which installs on
 BIOS but is not supported there by Microsoft.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
-applications in order, applies the options, runs FIRSTBOOT tasks, turns on
-BitLocker if the answer file asks for it, and removes `C:\Deploy`.
+applications in order through `Invoke-AppInstall` (detect, skip if present, run
+with a timeout, check exit code, detect again), writes the results to
+`C:\Windows\Temp\FirstBoot-apps.json`, applies the options, restores user data,
+runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
+post-deploy checks and removes `C:\Deploy`.
+
+`AppPack.psm1` holds the application pack format: reading and normalizing
+`app.json`, validation, installer inspection (MSI properties through the Windows
+Installer COM object, MSIX manifests, framework markers in .exe files), silent
+switch suggestions, templates (`config\app-templates.json`), export and import as
+.zip, maker and model requirements, and detection rules. The console's builder is
+`src/Console/AppPackEditor.ps1` + `.xaml`.
 
 ## BIOS settings and BitLocker
 
@@ -268,7 +279,7 @@ ends as Warning instead of Succeeded.
 `PostDeployChecks.psm1` is split so it can be tested off Windows. In WinPE,
 `New-PostDeployCheckPlan` writes what the PC should look like into
 `firstboot.json` (`checks`: name, membership, domain, BitLocker and device error
-modes, applications and their `detect` rules). At the end of `FirstBoot.ps1`,
+modes, applications and any legacy `detect` rule). At the end of `FirstBoot.ps1`,
 `Get-PostDeployFacts` reads the PC (`Win32_ComputerSystem`,
 `Test-ComputerSecureChannel`, `Win32_PnPEntity` with a non-zero
 `ConfigManagerErrorCode`, the Uninstall registry keys, `Get-BitLockerVolume`),
@@ -277,7 +288,7 @@ or Skipped per check, and `Set-DeployCheckResult` (in `DeployStatus.psm1`)
 stores them on the status record as `checks`, `checkResult` and `checkSummary`.
 Failed checks are one warning that starts with `Post-deploy checks:`, so a
 re-run replaces it. FirstBoot copies both modules, `Test-Deployment.ps1` and
-`checks.json` (plan, status folder and id, installer exit codes) to
+`checks.json` (plan, status folder and id, each app pack's install and detection result) to
 `C:\ProgramData\ImagingTool`, where `Test-Deployment.ps1` re-runs the checks
 and updates the record; it keeps the original finish time.
 

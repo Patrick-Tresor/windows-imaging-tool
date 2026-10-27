@@ -6,6 +6,7 @@ $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
 $script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
 $script:BitLockerProtectors = 'Tpm', 'TpmPin'
 $script:BiosMakers = 'Dell', 'HP', 'Lenovo'
+Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1')
 
 function Get-XmlText {
     # Inner text of the first node matching an XPath, trimmed; $Default when missing or empty.
@@ -366,20 +367,9 @@ function New-FirstBootPlan {
 }
 
 function Get-AppDefinition {
-    # Applications\<name>\app.json: { "command": "setup.exe /S", "successCodes": [0, 3010] }
-    # Optional "detect": { "displayName": "Google Chrome*" } or { "path": "%ProgramFiles%\\App\\app.exe" },
-    # which the post-deploy checks use to confirm the app is really installed.
+    # Applications\<name>\app.json, normalized by AppPack.psm1 (silent command, codes, requirements, detection).
     param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Name)
-    $json = Join-Path (Join-Path $AppRoot $Name) 'app.json'
-    if (-not (Test-Path $json)) { throw "Application '$Name' has no app.json in $AppRoot\$Name." }
-    $def = Get-Content -Raw $json | ConvertFrom-Json
-    if (-not $def.command) { throw "Application '$Name': app.json has no command." }
-    [pscustomobject]@{
-        name         = $Name
-        command      = $def.command
-        successCodes = if ($def.successCodes) { @($def.successCodes | ForEach-Object { [int]$_ }) } else { @(0, 3010) }
-        detect       = if ($def.PSObject.Properties['detect']) { $def.detect } else { $null }
-    }
+    Read-AppPack -AppRoot $AppRoot -Name $Name
 }
 
 function Export-AnswerFile {
@@ -542,7 +532,11 @@ function ConvertFrom-SmartDeployAnswerFile {
     $apps = @($w.SelectNodes('application_packs/application_pack') |
         Sort-Object { [int]$_.GetAttribute('installation_order') } |
         ForEach-Object { [IO.Path]::GetFileNameWithoutExtension("$($_.InnerText)".Trim()) })
-    if ($apps) { $notes.Add("Applications: SmartDeploy .spk packs can't be read. Create a folder with an app.json under Applications\ for each of: $($apps -join ', ').") }
+    if ($apps) {
+        $known = @($apps | Where-Object { Find-AppTemplate -Name $_ })
+        $tip = if ($known) { " The builder has templates for $($known -join ', ')." } else { '' }
+        $notes.Add("Applications: SmartDeploy .spk packs can't be read. Rebuild each one on the Applications tab (New..., keeping the same name): $($apps -join ', ').$tip")
+    }
 
     $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
     if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated. To keep the users' data, turn on User data in the editor.") }

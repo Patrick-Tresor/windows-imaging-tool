@@ -27,12 +27,14 @@ Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
+Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
 . (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 . (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
 . (Join-Path $PSScriptRoot 'UnknownModels.ps1')
+. (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -280,6 +282,11 @@ function Update-DashboardDetail {
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }
 
+function Update-Apps {
+    $ui.GridApps.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-ApplicationList -ContentRoot $script:root) } else { $null }
+    $ui.TxtAppIssues.Text = ''
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-DeploymentLogs -ContentRoot $script:root) } else { $null }
     $ui.TxtLog.Text = ''
@@ -314,7 +321,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs
+    Update-Answers; Update-Images; Update-Apps; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -383,7 +390,7 @@ function Set-DefaultAnswerFile([string]$Name) {
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
-    if ($saved) { Update-Answers; Update-Images; Set-Status 'Answer file saved' }
+    if ($saved) { Update-Answers; Update-Images; Update-Apps; Set-Status 'Answer file saved' }
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
@@ -429,6 +436,81 @@ $ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
     Set-DefaultAnswerFile $row.Name
     Update-Answers; Update-Settings
     Set-Status "Default answer file is now $($row.Name)"
+} })
+
+#endregion
+
+#region Applications
+
+function Get-SelectedApp {
+    $row = $ui.GridApps.SelectedItem
+    if (-not $row) { Show-Error 'Select an application first.' }
+    $row
+}
+
+function Edit-App([string]$Name) {
+    $saved = if ($Name) { Show-AppPackEditor -Owner $window -ContentRoot $script:root -Name $Name }
+             else { Show-AppPackEditor -Owner $window -ContentRoot $script:root }
+    if ($saved) { Update-Apps; Update-Answers; Set-Status "Application $saved saved" }
+}
+
+$ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
+$ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
+$ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+$ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
+$ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
+
+$ui.GridApps.Add_SelectionChanged({
+    $row = $ui.GridApps.SelectedItem
+    $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
+        $lines = @("Install: $($row.Command)")
+        if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
+        $lines += @($row.Issues | ForEach-Object { "- $_" })
+        $lines -join "`r`n"
+    }
+})
+
+$ui.BtnAppTest.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedApp
+    if (-not $row -or -not $row.Definition) { return }
+    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
+    $ui.TxtAppIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
+        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
+        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
+    }
+    Set-Status "Detection tested for $($row.Name)"
+} })
+
+$ui.BtnAppExport.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedApp
+    if (-not $row) { return }
+    $dlg = [Microsoft.Win32.SaveFileDialog]::new()
+    $dlg.Filter = 'Application pack (*.zip)|*.zip'
+    $dlg.FileName = "$($row.Name).zip"
+    if (-not $dlg.ShowDialog($window)) { return }
+    $window.Cursor = 'Wait'
+    try { Export-AppPack -AppRoot (Join-Path $script:root 'Applications') -Name $row.Name -Path $dlg.FileName | Out-Null } finally { $window.Cursor = $null }
+    Set-Status "Exported $($row.Name) to $($dlg.FileName)"
+} })
+
+$ui.BtnAppImport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
+    $dlg.Filter = 'Application pack (*.zip)|*.zip'
+    if (-not $dlg.ShowDialog($window)) { return }
+    $window.Cursor = 'Wait'
+    try { $dest = Import-AppPack -AppRoot (Join-Path $script:root 'Applications') -Path $dlg.FileName } finally { $window.Cursor = $null }
+    Update-Apps
+    Set-Status "Imported $(Split-Path $dest -Leaf)"
+} })
+
+$ui.BtnAppDelete.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedApp
+    if (-not $row) { return }
+    if (-not (Confirm-Action "Delete Applications\$($row.Name) and its installer files?")) { return }
+    Remove-Application -ContentRoot $script:root -Name $row.Name
+    Update-Apps
+    Set-Status "Deleted $($row.Name)"
 } })
 
 #endregion

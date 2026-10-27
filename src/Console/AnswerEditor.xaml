@@ -145,7 +145,7 @@
       <DockPanel x:Name="Sec2" Visibility="Collapsed">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Style="{StaticResource Title}" Text="Applications"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Installed in this order the first time the PC starts, before anyone logs on. Add installers with New application."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Installed in this order the first time the PC starts, before anyone logs on. Apps limited to other makers or models are skipped on that PC. New application opens the application pack builder; manage packs on the Applications tab."/>
         </StackPanel>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

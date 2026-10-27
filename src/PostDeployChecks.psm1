@@ -148,7 +148,11 @@ function Invoke-PostDeployCheck {
     foreach ($app in @($Plan.applications)) {
         $name = "App: $($app.name)"
         $run = @($AppResults | Where-Object name -eq $app.name) | Select-Object -Last 1
-        if ($run -and -not $run.ok) { & $add $name 'Failed' "Installer exit code $($run.exitCode)"; continue }
+        if ($run -and -not $run.ok) {
+            # FirstBoot.ps1 reports the app pack's result (install and detection) with a message.
+            $why = if ($run.PSObject.Properties['message'] -and $run.message) { "$($run.status): $($run.message)" } else { "Installer exit code $($run.exitCode)" }
+            & $add $name 'Failed' $why; continue
+        }
         $detect = $app.detect
         if ($detect -and $detect.PSObject.Properties['displayName'] -and $detect.displayName) {
             $hit = @($Facts.InstalledPrograms | Where-Object { $_ -like $detect.displayName }) | Select-Object -First 1

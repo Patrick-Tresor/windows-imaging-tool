@@ -39,6 +39,8 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks, Network shares, BIOS settings, BitLocker and User data. Passwords are typed into password
   boxes and saved to their own files.
+- **Applications**: the application pack builder. Build, edit, test, export and
+  import packs (see Applications below).
 - **Driver Library**: **Download from vendor...** lists every model in the Dell,
   HP or Lenovo driver pack catalog for Windows 10 or 11; tick the models you
   deploy and it downloads, checks, extracts and registers their packs, and shows
@@ -128,17 +130,46 @@ under the content root, usually `config\secrets\`. Anyone who can read the share
 can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
-**Applications** are folders under `Applications\` with the installer and an
-`app.json`. The editor's **New application...** creates them: pick the installer
-file or folder, and it suggests the silent command for .msi, .exe, .msix and .ps1:
+**Applications** are packs: a folder under `Applications\` with the installer
+(and any files it needs) and an `app.json`. Build them on the **Applications**
+tab, or with **New application...** in the answer file editor:
+
+1. Pick the installer file, or a folder when it needs files next to it.
+   **Inspect** reads its type (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
+   Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
+   code, and fills in the silent command, uninstall command and a detection rule.
+2. Or apply a **template** from `config\app-templates.json`. There are templates
+   for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
+   Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
+   *verify* are best guesses to test on a VM first.
+3. Check the **install command**, success and restart exit codes, and timeout.
+4. Add **detection** rules: MSI product code, program name in Programs and
+   Features (wildcards, optional minimum version), file (with version), registry
+   key or value, MSIX package, or a `.ps1` that exits 0 when installed.
+   **Test on this PC** runs them on the admin PC.
+5. Limit **which PCs** get it by maker and model (Dell Command Update only on
+   Dell, Lenovo System Update only on Lenovo).
 
 ```json
-{ "command": "msiexec /i ZoomInstallerFull.msi /qn", "successCodes": [0, 3010] }
+{
+  "displayName": "VLC media player", "version": "3.0.21", "installer": "vlc-3.0.21-win64.exe",
+  "installerType": "nsis", "command": "\"vlc-3.0.21-win64.exe\" /L=1033 /S",
+  "successCodes": [0, 3010, 1641], "rebootCodes": [3010, 1641], "timeoutMinutes": 15,
+  "requirements": { "makers": [], "models": [] },
+  "detection": { "match": "all", "rules": [ { "type": "file", "target": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" } ] }
+}
 ```
 
-The command runs in the application's folder, as SYSTEM, from
-`SetupComplete.cmd`. (`SetupComplete.cmd` does not run on images activated with
-an OEM product key.) Results go to `C:\Windows\Temp\FirstBoot.log`.
+On the PC, apps for another maker or model are skipped in WinPE and never copied.
+At first boot each app is skipped when its detection already finds it, runs from
+its folder as SYSTEM (from `SetupComplete.cmd`, which does not run on images
+activated with an OEM product key), is stopped after its timeout, and is marked
+failed when it exits 0 but detection still can't find it. Results go to
+`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`.
+Old `app.json` files with only `command` and `successCodes` still work.
+
+**Export...** zips a pack (installer included) to copy it to another content
+root; **Import...** adds it back.
 
 **User data migration** backs up the user profiles of the Windows already on
 the PC with USMT, in WinPE, before the disk is erased, and restores them at first
@@ -165,7 +196,7 @@ USMT logs: `C:\Windows\Temp\ScanState.log` and `LoadState.log`.
 order, regional settings, naming, domain join, tasks, shares and completion
 options. SmartDeploy encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
-rebuild as folders, and anything it can't convert (static IP, client agent,
+rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
 
 ## Image versions and rollback
@@ -343,7 +374,7 @@ with every check listed under the PC's details):
 | Computer name | Windows has the name the answer file gave it. |
 | Domain join | The PC is in the answer file's domain and a domain controller answers (secure channel). Workgroup answer files check the PC stayed in a workgroup. |
 | Device drivers | No device in Device Manager has an error (no driver, cannot start). Disabled devices are ignored. |
-| App: *name* | The installer's exit code was a success code and, when its `app.json` has a `detect` rule, the app is really there. |
+| App: *name* | The app pack installed (or was already there): a success exit code and, when the pack has detection rules, the app is really there. |
 | BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
 
 Any failed check turns the deployment into Warning, with the failed checks
@@ -353,16 +384,9 @@ in `deploy-settings.json`: turn them off, make BitLocker **Required**,
 requires it when the answer file turns BitLocker on), do the same for device
 errors, and list devices to ignore (wildcards, for example `*Smart Card*`).
 
-A detection rule in an application's `app.json` catches installers that exit 0
-without installing anything:
-
-```json
-{ "command": "setup.exe /S", "successCodes": [0, 3010],
-  "detect": { "displayName": "Google Chrome*" } }
-```
-
-`displayName` is matched against installed programs; use
-`"path": "%ProgramFiles%\\App\\app.exe"` for apps that don't register one.
+The application pack's detection rules (set in the Applications tab) catch
+installers that exit 0 without installing anything: first boot checks them after
+each install, and the check reports what it found.
 
 The checks stay on the PC in `C:\ProgramData\ImagingTool`. After fixing
 something (adding a missing driver, re-joining the domain) or once BitLocker

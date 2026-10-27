@@ -32,23 +32,30 @@ function Set-Progress([string]$Step, [int]$Percent, [string]$Warning) {
     if ($reporting) { Set-DeployStatus -Step $Step -Percent $Percent -Phase 'FirstBoot' -Warning $Warning -Fields @{ computerName = $env:COMPUTERNAME } }
 }
 Set-Progress 'First boot: starting' 91
+# Each app is skipped when its detection rules find it already installed, and checked again after it runs.
+Import-Module (Join-Path $deployDir 'AppPack.psm1') -Force
 $total = @($plan.applications).Count
 $n = 0
 $appResults = @()
 
-foreach ($app in $plan.applications) {
+foreach ($plain in $plan.applications) {
+    $app = ConvertTo-AppDefinition -Name $plain.name -Json $plain
     $dir = Join-Path $deployDir "Apps\$($app.name)"
     $n++
-    Write-Log "Installing $($app.name): $($app.command)"
+    Write-Log "Installing $($app.name)"
     Set-Progress "Installing $($app.name) ($n of $total)" (91 + [int](7 * ($n - 1) / [Math]::Max(1, $total)))
-    $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($app.command)" -WorkingDirectory $dir -Wait -PassThru -WindowStyle Hidden
-    $appResults += [pscustomobject]@{ name = $app.name; exitCode = $p.ExitCode; ok = $app.successCodes -contains $p.ExitCode }
-    if ($app.successCodes -contains $p.ExitCode) { Write-Log "  $($app.name) OK (exit $($p.ExitCode))" }
-    else {
-        Write-Log "  $($app.name) FAILED (exit $($p.ExitCode))"
-        Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed (exit $($p.ExitCode))"
+    $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -Log { param($m) Write-Log $m } }
+         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+    $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
+    Write-Log "  $($app.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+    # ok and exitCode are what the post-deploy checks read.
+    $appResults += [pscustomobject]@{ name = $app.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; rebootNeeded = $r.RebootNeeded; message = $r.Message }
+    if (-not $ok) {
+        Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed ($($r.Status))"
     }
 }
+# Kept after C:\Deploy is removed, for whoever checks the PC (and the deployment dashboard).
+$appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
 if ($plan.disableSystemRestore) {
     Disable-ComputerRestore -Drive "$env:SystemDrive\"
