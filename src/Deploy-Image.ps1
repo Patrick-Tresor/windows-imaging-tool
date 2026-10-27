@@ -18,12 +18,14 @@ param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
     [string]$ComputerName,      # overrides the naming list and the answer file's naming
-    [switch]$NoPrompt           # no countdown or confirmation, whatever the answer file's mode
+    [switch]$NoPrompt,          # no countdown or confirmation, whatever the answer file's mode
+    [switch]$IgnoreWindows11Check   # deploy even when a Windows 11 requirement fails in Block mode
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Win11Readiness.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
@@ -57,6 +59,26 @@ function Select-AnswerFile([string]$Root, [string]$Default, [bool]$Interactive) 
     $n = 0
     if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $files.Count) { return $files[$n - 1].BaseName }
     throw "No answer file number '$pick'."
+}
+
+function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Override) {
+    # Logs each requirement and throws when the answer file blocks unsupported PCs. Returns the summary line.
+    if ($Answer.Windows11Check -eq 'Off') { return 'not checked (off in the answer file)' }
+    $isWin11 = Test-Win11Image -ImagePath $ImagePath -Index $Answer.ImageIndex
+    if ($isWin11 -eq $false) { return 'not needed (Windows 10 image)' }
+    $results = @(Test-Win11Readiness -Facts (Get-Win11ReadinessFacts -DiskNumber $Answer.DiskNumber -IsUefi $Hardware.IsUefi))
+    foreach ($r in $results) {
+        $level = @{ Pass = 'INFO'; Warn = 'WARN'; Fail = 'ERROR' }[$r.Result]
+        Write-DeployLog ("Windows 11 {0}: {1} ({2})" -f $r.Check, $r.Result.ToUpperInvariant(), $r.Detail) -Level $level
+    }
+    $decision = Get-Win11ReadinessDecision -Mode $Answer.Windows11Check -IsWin11 $isWin11 -Results $results -Override:$Override
+    if ($null -eq $isWin11) { Write-DeployLog 'Could not tell whether the image is Windows 11; requirements are shown but never block.' -Level WARN }
+    if ($decision.Action -eq 'Block') {
+        throw "This PC does not meet the Windows 11 requirements ($($decision.Summary -replace '^NOT READY: ')). Nothing was erased. " +
+              'Fix it in the firmware settings, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.'
+    }
+    if ($decision.Failed -and $Override) { Write-DeployLog 'Deploying anyway: -IgnoreWindows11Check' -Level WARN }
+    $decision.Summary
 }
 
 function Wait-Countdown([int]$Seconds) {
@@ -175,6 +197,9 @@ try {
     }
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 
+    # Windows 11 hardware requirements are checked now, before the disk is wiped.
+    $win11 = Invoke-Windows11Check -Answer $answer -ImagePath $imagePath -Hardware $hw -Override $IgnoreWindows11Check.IsPresent
+
     $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
     $driverMatch = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
     $driverPack = $driverMatch.FullPath
@@ -241,6 +266,7 @@ try {
     Write-Host "Answer file:  $($answer.Name)"
     Write-Host "Image:        $imagePath (index $($answer.ImageIndex)$(if ($answer.ImageVersion) { ", version $($answer.ImageVersion)" }))"
     Write-Host "Drivers:      $(if ($driverPack) { $driverPack } else { 'inbox only' })"
+    Write-Host "Windows 11:   $win11" -ForegroundColor $(if ($win11 -like 'NOT READY*') { 'Yellow' } else { 'Gray' })
     Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
     Write-Host "Name:         $ComputerName ($nameSource)"
     Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)$(if ($answer.OrganizationalUnit) { ", $($answer.OrganizationalUnit)" })" } else { "workgroup $($answer.Workgroup)" })"

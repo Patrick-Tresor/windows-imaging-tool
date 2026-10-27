@@ -111,6 +111,7 @@ function Show-AnswerEditor {
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     $e.TxtDisk.Text = $a.DiskNumber
+    $e.CmbWin11Check.SelectedIndex = [math]::Max(0, [array]::IndexOf(@('Block', 'Warn', 'Off'), "$($a.Windows11Check)"))
     $e.TxtDrivers.Text = $a.DriverRoot
 
     $selected = [Collections.ObjectModel.ObservableCollection[string]]::new()
@@ -297,6 +298,7 @@ function Show-AnswerEditor {
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
         $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
+        $a.Windows11Check = @('Block', 'Warn', 'Off')[[math]::Max(0, $e.CmbWin11Check.SelectedIndex)]
         $a.DriverRoot    = $e.TxtDrivers.Text.Trim()
         $a.Applications  = @($selected)
         $a.FullName      = $e.TxtFullName.Text.Trim()

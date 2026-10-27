@@ -202,7 +202,9 @@ deleted. On failure it falls back to applying from the share unless fallback is 
    A naming list entry's computer name and OU replace the answer file's naming
    and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
 2. Check everything before touching the disk: image, driver pack, applications,
-   password files, computer name. Show a summary, then either a countdown
+   password files, computer name, and for a Windows 11 image the hardware
+   requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
+   memory, disk), which stop the deploy in Block mode. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
 3. Apply the answer file's BIOS settings for this maker (see below). Nothing is
    erased yet, so `bios/stopOnError` can still stop the deployment safely.
