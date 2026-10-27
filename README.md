@@ -37,7 +37,7 @@ and click **Create folders** the first time. Then:
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks and Network shares. Passwords are typed into password
+  Domain or workgroup, Tasks, Network shares, BIOS settings and BitLocker. Passwords are typed into password
   boxes and saved to their own files.
 - **Driver Library**: **Download from vendor...** lists every model in the Dell,
   HP or Lenovo driver pack catalog for Windows 10 or 11; tick the models you
@@ -101,6 +101,25 @@ the console; the format is documented in the commented
   applications), `FIRSTLOGON` (when the first user logs on).
 - extra **shares** to map in WinPE, **options** (disable System Restore, enable
   the built-in Administrator), and reboot or shut down when done.
+- **BIOS settings** for Dell, HP and Lenovo, applied in WinPE before the disk is
+  wiped (see below).
+- **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
+  the recovery key backed up to AD and/or a share first.
+
+**BIOS settings** are name and value rows per maker; only the rows for the PC's
+maker are used. HP and Lenovo need no tool (the firmware's WMI interface). For
+Dell, copy the WinPE x64 folder of Dell Command | Configure to
+`Tools\BIOS\Dell` on the content root. If the PCs already have a BIOS admin
+password, type it in the editor; it is saved in `config\secrets` like the other
+passwords. Turn on the TPM here if BitLocker needs it.
+
+**BitLocker** needs a TPM that is on and ready, or it is skipped (see
+`C:\Windows\Temp\FirstBoot.log`). Backing the recovery key up to Active
+Directory needs a domain join; on most domains the computer can write its own
+key without extra setup. A recovery key folder (`\\server\share\BitLocker`)
+needs write access for Domain Computers and tight read access. With **leave
+BitLocker off if no backup worked** (the default), no PC is encrypted without a
+saved key. A startup PIN is the same for every PC deployed with that answer file.
 
 **Passwords never go in the answer file.** Each `passwordFile` names a text file
 under the content root, usually `config\secrets\`. Anyone who can read the share
@@ -367,10 +386,12 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    Each month, add the new cumulative update with **Update image...** instead of
    capturing again.
 5. **Deploy**: boot the target PC from USB or PXE. The tool detects the model,
-   wipes disk 0, applies the image, injects the drivers, and reboots.
+   applies the BIOS settings, wipes disk 0, applies the image, injects the
+   drivers, and reboots. BitLocker, if set, starts at first boot.
 
 ## Status
 
 Untested first draft. It has not yet been run on real hardware or in a VM.
-The console's data layer and the driver matching have automated tests; the
+The console's data layer, the driver matching and the BIOS command building
+(with the firmware interfaces faked) have automated tests; the
 WPF window itself has only been checked for syntax and XAML validity.

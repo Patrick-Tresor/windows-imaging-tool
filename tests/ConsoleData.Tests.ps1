@@ -196,6 +196,15 @@ try {
     $ed.Name = 'Broken'; $ed.Domain = ''
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew | Out-Null; '' } catch { $_.Exception.Message }
     Assert-Equal ($msg -like '*needs network/domain*') $true 'editor save reports validation problems'
+    $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
+    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null; $ed.Bios.Enabled = $true
+    $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal $msg 'The BitLocker startup PIN must be 6 to 20 digits.' 'editor save rejects a PIN that is not digits'
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -BiosPassword 'B10s' -IsNew
+    $back = Read-AnswerFile -Path $saved
+    Assert-Equal "$($back.BitLocker.PinFile)|$($back.Bios.PasswordFile)" 'config\secrets\Secure-bitlocker-pin.txt|config\secrets\Secure-bios.txt' 'editor save names the PIN and BIOS password files'
+    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))|$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bios.txt'))" '246810|B10s' 'PIN and BIOS password go to their own files'
+    Assert-Equal ((Get-Content -Raw $saved) -match '246810|B10s') $false 'PIN and BIOS password are not in the answer file'
     $threw = $false
     try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
     Assert-Equal $threw $true 'password files must stay inside the content root'

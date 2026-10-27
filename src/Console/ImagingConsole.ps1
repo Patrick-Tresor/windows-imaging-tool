@@ -26,6 +26,7 @@ Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
+Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')

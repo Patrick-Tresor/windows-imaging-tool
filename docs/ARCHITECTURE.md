@@ -170,20 +170,22 @@ deleted. On failure it falls back to applying from the share unless fallback is 
 2. Check everything before touching the disk: image, driver pack, applications,
    password files, computer name. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
-3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
+3. Apply the answer file's BIOS settings for this maker (see below). Nothing is
+   erased yet, so `bios/stopOnError` can still stop the deployment safely.
+4. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
    firmware WinPE booted with (see below).
-4. `DISM /Apply-Image` the WIM to `W:`.
-5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
-6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
+5. `DISM /Apply-Image` the WIM to `W:`.
+6. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
+7. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
    cached copy after use, and FirstBoot.ps1 deletes it.
-7. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
+8. Stage the applications in `W:\Deploy\Apps`, plus `FirstBoot.ps1` and
    `firstboot.json`, and write `SetupComplete.cmd` to run it.
-8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
-9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
-   `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
-   matched), then reboot or shut down.
+9. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
+10. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
+    `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
+    matched), then reboot or shut down.
 
 ### UEFI and legacy BIOS
 
@@ -203,8 +205,44 @@ only uses the first 2 TB) and when the image is Windows 11, which installs on
 BIOS but is not supported there by Microsoft.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
-applications in order, applies the options, runs FIRSTBOOT tasks and removes
-`C:\Deploy`.
+applications in order, applies the options, runs FIRSTBOOT tasks, turns on
+BitLocker if the answer file asks for it, and removes `C:\Deploy`.
+
+## BIOS settings and BitLocker
+
+`BiosSettings.psm1` applies firmware settings in WinPE, before the disk is
+wiped, so changes such as turning on the TPM are live after the reboot into
+Windows, when BitLocker needs them. Only the rows for the detected maker run:
+
+| Maker  | How | Password |
+|--------|-----|----------|
+| Dell   | Dell Command \| Configure `cctk.exe --Name=Value ...` from `<toolsRoot>\Dell` (its WinPE x64 folder; the HAPI driver is loaded first) | `--ValSetupPwd` |
+| HP     | WMI `root\HP\InstrumentedBIOS` `HP_BIOSSettingInterface.SetBIOSSetting` | `<utf-16/>password` |
+| Lenovo | WMI `root\wmi` `Lenovo_SetBiosSetting` for each setting, then `Lenovo_SaveBiosSettings` once | `,password,ascii,us` |
+
+Setting names differ by maker and model; the editor's **Add recommended** fills
+in Secure Boot, TPM and virtualization for each maker. Passwords are masked in
+the log. Lenovo PCs set to certificate-based ("secure WMI") BIOS management and
+HP Sure Admin are not supported.
+
+BitLocker is turned on by `FirstBoot.ps1` as SYSTEM, after the domain join
+(specialize pass) and the FIRSTBOOT tasks:
+
+1. Skip if the drive is not fully decrypted, or if there is no ready TPM (logged).
+2. For TPM + PIN, write the "require additional authentication at startup"
+   policy values under `HKLM\SOFTWARE\Policies\Microsoft\FVE`.
+3. Add a recovery password protector and back it up: `Backup-BitLockerKeyProtector`
+   to the computer object in AD (four tries, 15 s apart, in case the network is
+   still coming up), and/or a text file in `recoveryKeyFolder` written with the
+   computer account.
+4. With `requireBackup`, if no backup worked, remove the protector and leave
+   BitLocker off.
+5. `Enable-BitLocker -TpmProtector` (or `-TpmAndPinProtector`) with the chosen
+   method, used space only by default, skipping the hardware test so encryption
+   starts at once.
+
+The startup PIN travels in `firstboot.json`, which is deleted with `C:\Deploy`.
+Microsoft Entra key backup is not done: the PC is not Entra joined at first boot.
 
 ### Status reporting
 
@@ -314,6 +352,6 @@ pack on them by other means, once it is in the library.
 
 ## Not in v1
 
-A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning, BIOS-to-UEFI conversion,
+A deploy-time GUI on the target PC (it uses a console prompt), multicast, BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
 user state migration (USMT) and SmartDeploy's wipe-and-load / SmartMigrate disk options,
 static IP, display settings, Azure AD join, and a management agent.

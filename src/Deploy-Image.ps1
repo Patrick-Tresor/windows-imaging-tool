@@ -4,7 +4,8 @@
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot), where the image can come by WDS multicast. Reads an answer file
-    from <content root>\AnswerFiles: image, applications, disk, regional settings, naming, domain join, tasks and extra shares.
+    from <content root>\AnswerFiles: image, applications, disk, regional settings, naming, domain join, tasks, extra shares,
+    BIOS settings and BitLocker.
     Wipes the target disk and partitions it to match the firmware WinPE booted with:
     GPT for UEFI, MBR for legacy BIOS.
 .EXAMPLE
@@ -24,6 +25,7 @@ Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'BiosSettings.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -150,6 +152,11 @@ try {
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
+    $bl = $answer.BitLocker
+    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Read-SecretFile -ContentRoot $root -RelativePath $bl.PinFile } else { $null }
+    $bios = $answer.Bios
+    # No password file means the BIOS has no admin password yet.
+    $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $bios.PasswordFile } else { $null }
 
     $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive'
     if (-not $ComputerName) {
@@ -180,11 +187,23 @@ try {
     Write-Host "Name:         $ComputerName"
     Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)" } else { "workgroup $($answer.Workgroup)" })"
     Write-Host "Firmware:     $firmware ($(if ($firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
+    $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
+    Write-Host "BIOS:         $(if ($bios.Enabled -and $biosCount) { "$biosCount setting(s) for $($hw.Maker)" } else { 'unchanged' })"
+    Write-Host "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
     Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
     if (-not $NoPrompt) {
         Set-DeployStatus -Step $(if ($answer.Mode -eq 'Unattended') { 'Counting down' } else { 'Waiting for the operator' }) -Percent 5
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+    }
+
+    # 0. BIOS settings, before anything is erased. They take effect on the reboot into Windows.
+    if ($bios.Enabled -and $biosCount) {
+        $biosFailed = try {
+            @(Set-BiosSettings -Maker $hw.Maker -Settings $bios.Settings -Password $biosPassword -ToolsDir (Resolve-ContentPath $root $bios.ToolsRoot) |
+                Where-Object { -not $_.Ok }).Count
+        } catch { Write-DeployLog "BIOS settings not applied: $($_.Exception.Message)" -Level WARN; $biosCount }
+        if ($biosFailed -and $bios.StopOnError) { throw "$biosFailed BIOS setting(s) failed and the answer file says to stop (bios/stopOnError)." }
     }
 
     # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
@@ -244,7 +263,7 @@ try {
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1') 'W:\Deploy\'
-    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
