@@ -1,5 +1,5 @@
 # Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg,
-# Get-UsbDiskChoices and the ConsoleData module.
+# Get-UsbDiskChoices and the ConsoleData and VMwareVM modules.
 
 function Show-CaptureWizard {
     param(
@@ -25,22 +25,26 @@ function Show-CaptureWizard {
         [Windows.MessageBox]::Show($wiz, $Text, 'Capture Wizard', 'OK', 'Warning') | Out-Null
     }
 
-    # Page 2 (manual sysprep, not shown for the hands-free Hyper-V capture): the command to run on the
-    # reference machine, from the share when there is one.
+    # Page 2 (manual sysprep, not shown for the hands-free captures): the command to run on the reference
+    # machine, from the share when there is one. Page 1 shows the VMware capture agent's install command the same way.
     Update-ContentTools -ContentRoot $ContentRoot
-    $toolsPath = if ($settings.share.path) { Join-Path $settings.share.path 'Tools\Prepare-Reference.ps1' } else { Join-Path $ContentRoot 'Tools\Prepare-Reference.ps1' }
-    $w.TxtPrepCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$toolsPath`""
-    $w.BtnCopyCmd.Add_Click({
+    $toolsDir = if ($settings.share.path) { Join-Path $settings.share.path 'Tools' } else { Join-Path $ContentRoot 'Tools' }
+    $w.TxtPrepCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$(Join-Path $toolsDir 'Prepare-Reference.ps1')`""
+    $w.TxtAgentCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$(Join-Path $toolsDir 'VMwareCaptureAgent.ps1')`" -Install"
+    $copyCommand = {
+        param($box)
         # Another program (clipboard history, remote desktop) can hold the clipboard for a moment, so retry
         # and never let a failed copy close the wizard.
         try {
-            [Windows.Forms.Clipboard]::SetDataObject($w.TxtPrepCmd.Text, $true, 10, 100)
+            [Windows.Forms.Clipboard]::SetDataObject($box.Text, $true, 10, 100)
         } catch {
-            $w.TxtPrepCmd.Focus() | Out-Null
-            $w.TxtPrepCmd.SelectAll()
+            $box.Focus() | Out-Null
+            $box.SelectAll()
             Show-WizardError "Could not copy: another program is using the clipboard. The command is selected; press Ctrl+C to copy it."
         }
-    })
+    }
+    $w.BtnCopyCmd.Add_Click({ & $copyCommand $w.TxtPrepCmd })
+    $w.BtnCopyAgentCmd.Add_Click({ & $copyCommand $w.TxtAgentCmd })
 
     # Page 3 defaults.
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
@@ -74,8 +78,30 @@ function Show-CaptureWizard {
         $w.CmbUsb.ItemsSource = $disks
         if ($disks) { $w.CmbUsb.SelectedIndex = 0 }
     }
-    & $loadVMs; & $loadUsb
-    if ($w.RbVmDisk.IsEnabled) { $w.RbVmDisk.IsChecked = $true } else { $w.RbIso.IsChecked = $true }
+    # VMware Workstation VMs: the ones in its library, or any .vmx the user browses to.
+    $loadVmware = {
+        $missing = @(
+            if (-not (Find-Vmrun)) { 'VMware Workstation Pro (vmrun.exe) is not installed on this PC' }
+            if (-not (Find-QemuImg)) { 'qemu-img.exe is missing: install QEMU for Windows and add its folder to PATH' }
+        )
+        $w.TxtVmwareStatus.Text = if ($missing) { "Not available: $($missing -join '; ')." } else { '' }
+        $w.TxtVmwareStatus.Visibility = if ($missing) { 'Visible' } else { 'Collapsed' }
+        $w.RbVmware.IsEnabled = -not $missing
+        $vmx = @(try { Get-VMwareInventory } catch { })
+        $w.CmbVmx.ItemsSource = $vmx
+        if ($vmx -and -not $w.CmbVmx.Text) { $w.CmbVmx.Text = $vmx[0] }
+        if ($missing -and $w.RbVmware.IsChecked) { $w.RbIso.IsChecked = $true }
+    }
+    $w.BtnVmxBrowse.Add_Click({
+        $dlg = [Windows.Forms.OpenFileDialog]::new()
+        $dlg.Filter = 'VMware VM (*.vmx)|*.vmx'
+        if ($dlg.ShowDialog() -eq 'OK') { $w.CmbVmx.Text = $dlg.FileName }
+    })
+
+    & $loadVMs; & $loadUsb; & $loadVmware
+    if ($w.RbVmDisk.IsEnabled) { $w.RbVmDisk.IsChecked = $true }
+    elseif ($w.RbVmware.IsEnabled) { $w.RbVmware.IsChecked = $true }
+    else { $w.RbIso.IsChecked = $true }
     $w.BtnVMRefresh.Add_Click($loadVMs)
     $w.BtnUsbRefresh.Add_Click($loadUsb)
     $w.TxtIsoFolder.Text = [Environment]::GetFolderPath('Desktop')
@@ -92,15 +118,34 @@ function Show-CaptureWizard {
             Split       = [bool]$w.ChkSplit.IsChecked
             Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
-            Mode        = if ($w.RbVmDisk.IsChecked) { 'VmDisk' } elseif ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
+            Mode        = if ($w.RbVmDisk.IsChecked) { 'VmDisk' } elseif ($w.RbVmware.IsChecked) { 'Vmware' } elseif ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
             VM          = $w.CmbVM.SelectedItem
+            Vmx         = $w.CmbVmx.Text.Trim().Trim('"')
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
             Usb         = $w.CmbUsb.SelectedItem
         }
     }
 
-    # The hands-free Hyper-V capture runs sysprep itself, so it skips the manual sysprep page.
-    $skipsPrep = { $w.RbVmDisk.IsChecked -eq $true }
+    # The hands-free Hyper-V and VMware captures run sysprep themselves, so they skip the manual sysprep page.
+    $skipsPrep = { $w.RbVmDisk.IsChecked -eq $true -or $w.RbVmware.IsChecked -eq $true }
+    $handsFree = @('VmDisk', 'Vmware')
+
+    # Offers to shut down a running VMware VM; vmrun asks Windows in it to shut down (needs VMware Tools).
+    $offerVmwareShutdown = {
+        param([string]$Vmx)
+        $vmrun = Find-Vmrun
+        $running = ConvertFrom-VmrunList @(& $vmrun @(New-VmrunArguments -Command list) 2>$null)
+        if (-not (Test-VmxInList -VmxPath $Vmx -RunningPaths $running)) { return $true }
+        $answer = [Windows.MessageBox]::Show($wiz,
+            "$([IO.Path]::GetFileNameWithoutExtension($Vmx)) is running. Shut down Windows in the VM now? Unsaved work in the VM is lost.",
+            'Capture Wizard', 'YesNo', 'Question')
+        if ($answer -ne 'Yes') { return $false }
+        $wiz.Cursor = [Windows.Input.Cursors]::Wait
+        try { & $vmrun @(New-VmrunArguments -Command stop -VmxPath $Vmx -Arguments 'soft') 2>&1 | Out-Null }
+        finally { $wiz.Cursor = $null }
+        $running = ConvertFrom-VmrunList @(& $vmrun @(New-VmrunArguments -Command list) 2>$null)
+        -not (Test-VmxInList -VmxPath $Vmx -RunningPaths $running)
+    }
 
     # Offers to shut down a running VM for the hands-free capture. True when the VM is off afterwards.
     $offerShutdown = {
@@ -127,6 +172,8 @@ function Show-CaptureWizard {
                 elseif ($c.Mode -in @('VM', 'VmDisk') -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. Only generation 1 and 2 VMs can be captured." }
                 elseif ($c.Mode -eq 'VmDisk' -and $c.VM.Generation -ne 2) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. The hands-free capture needs generation 2 (UEFI); boot it from a capture ISO instead." }
                 elseif ($c.Mode -eq 'VmDisk' -and $c.VM.State -ne 'Off' -and -not (& $offerShutdown $c.VM)) { "$($c.VM.Name) is $($c.VM.State). Shut it down, then click Refresh." }
+                elseif ($c.Mode -eq 'Vmware' -and ($c.Vmx -notmatch '\.vmx$' -or -not (Test-Path -LiteralPath $c.Vmx -PathType Leaf))) { 'Choose the VM''s .vmx file.' }
+                elseif ($c.Mode -eq 'Vmware' -and -not (& $offerVmwareShutdown $c.Vmx)) { "$([IO.Path]::GetFileNameWithoutExtension($c.Vmx)) is still running. Shut it down first." }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
                 elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
             }
@@ -148,20 +195,21 @@ function Show-CaptureWizard {
         $c = & $getChoice
         $target = switch ($c.Mode) {
             'VmDisk' { "Hyper-V VM $($c.VM.Name), hands-free: sysprep at boot if needed, capture its disk with the VM off, then roll back to a checkpoint" }
+            'Vmware' { "VMware VM $($c.Vmx), hands-free: snapshot, the capture agent runs sysprep, capture its disk with the VM off, then revert to the snapshot" }
             'VM'  { "Hyper-V VM $($c.VM.Name): build capture ISO, boot the VM from it, eject when done" }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
         }
         $saveTo = switch ($c.Mode) {
             'Usb'    { 'The USB stick''s DEPLOY partition' }
-            'VmDisk' { "$ContentRoot\Images" }
+            { $_ -in $handsFree } { "$ContentRoot\Images" }
             default  { "$($settings.share.path)\Images" }
         }
         $w.TxtSummary.Text = @(
             "Image name:    $($c.Name).$(if ($c.Split) { 'swm (split)' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
-            $(if ($c.Mode -ne 'VmDisk') { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
+            $(if ($c.Mode -notin $handsFree) { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
             $(if ($c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
                 "Existing image: replaced after the capture succeeds; the old one is kept in Images\Previous" })
             ''
@@ -170,13 +218,15 @@ function Show-CaptureWizard {
         ) -join "`r`n"
         # The hands-free capture runs DISM on this PC and saves to the content root: no share, no ADK, no media.
         $issues = @()
-        if ($c.Mode -ne 'VmDisk') {
+        if ($c.Mode -notin $handsFree) {
             $issues += @(Get-CaptureReadiness -ContentRoot $ContentRoot -Destination $(if ($c.Mode -eq 'Usb') { 'Usb' } else { 'Network' }))
             # Capture media is built with the ADK on this PC, so check it before Build and start.
             $issues += @((Get-AdkStatus).Problems)
         }
         $w.TxtSummaryIntro.Text = if ($c.Mode -eq 'VmDisk') {
             'Clicking Start opens a window that runs the capture on this PC. It starts the VM only if sysprep has not run yet, and takes a while. The new image appears on the Images tab when it finishes.'
+        } elseif ($c.Mode -eq 'Vmware') {
+            'Clicking Start opens a window that runs the capture on this PC: it starts the VM, waits for sysprep to shut it down, copies the disk and captures it. This takes a while and needs free space on this PC for a copy of the whole VM disk. The new image appears on the Images tab when it finishes.'
         } else {
             'Clicking Build and start opens a window that builds the capture media (a few minutes) and, for a Hyper-V VM, starts the capture. The new image appears on the Images tab when it finishes.'
         }
@@ -212,6 +262,12 @@ function Show-CaptureWizard {
                 -Split:$c.Split -NewVersion:$c.NewVersion)
             return $true
         }
+        if ($c.Mode -eq 'Vmware') {
+            Start-Process powershell.exe -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+                -ContentRoot $ContentRoot -VmxPath $c.Vmx -Name $c.Name -Description $c.Description -Compression $c.Compression `
+                -Split:$c.Split -NewVersion:$c.NewVersion)
+            return $true
+        }
 
         $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `
             -Compression $c.Compression -SplitForFat32:$c.Split -Unattended:$c.Unattended -NewVersion:$c.NewVersion
@@ -236,6 +292,8 @@ function Show-CaptureWizard {
     # Renumber the step list when the choice adds or drops the manual sysprep page.
     $w.RbVmDisk.Add_Checked({ & $showPage })
     $w.RbVmDisk.Add_Unchecked({ & $showPage })
+    $w.RbVmware.Add_Checked({ & $showPage })
+    $w.RbVmware.Add_Unchecked({ & $showPage })
     $w.BtnBack.Add_Click({
         if ($state.Page -gt 0) { $state.Page-- }
         if ($state.Page -eq 1 -and (& $skipsPrep)) { $state.Page = 0 }

@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
-                     Prepare-Reference.ps1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
+                     Prepare-Reference.ps1, VMwareCaptureAgent.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Start-RemoteReimage.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, UserState.psm1, NamingList.psm1,
                      RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1
@@ -513,7 +513,7 @@ What the PCs need:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
 2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
-   from a capture ISO): install Windows, apps and updates, no OEM drivers.
+   from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference machine. **A Hyper-V VM on this PC** is the default and is
       hands-free: you do not run sysprep. The wizard offers to shut the VM down if it is
@@ -521,7 +521,8 @@ What the PCs need:
       VM is not sysprepped yet (sysprep shuts it down), reads the VM's disk on the admin
       PC (`src\Capture-VMImage.ps1`) with the VM off, and then rolls the VM back to the
       checkpoint. No password is needed, and the VM needs no network (generation 2 VMs
-      only). The other choices are a **Hyper-V VM booted from a capture ISO** (the wizard
+      only). **A VMware Workstation VM on this PC** is hands-free too (see below). The
+      other choices are a **Hyper-V VM booted from a capture ISO** (the wizard
       builds the ISO, boots the VM from it, and ejects it when the capture finishes), an
       **ISO** for other VMs, or a **USB stick** for a physical PC.
    2. For those other choices only, run the prepare command the wizard shows on the
@@ -535,14 +536,32 @@ What the PCs need:
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 
-   **Other VM software (VMware, VirtualBox, Proxmox, ESXi).** The wizard lists
-   Hyper-V VMs only. Boot the VM once to run `Prepare-Reference.ps1`, shut it down,
+   **VMware Workstation, hands-free.** No sysprep by hand and no capture ISO. On the
+   admin PC you need VMware Workstation Pro 17 or later (for `vmrun.exe`) and
+   `qemu-img.exe` from QEMU for Windows, on the PATH or in `C:\Program Files\qemu`
+   (it reads the VMware disk, snapshots included). In the VM you need VMware Tools and,
+   once per VM, the capture agent: boot the VM, run the command the wizard shows
+   (`Tools\VMwareCaptureAgent.ps1 -Install`) in an elevated PowerShell window, and shut
+   it down. The agent is a startup task that does nothing unless the admin PC asks for
+   a capture. Then pick the VM's `.vmx` in the wizard. `src\Capture-VMImage.ps1 -VmxPath`
+   takes a snapshot, starts the VM, asks the agent (through a VMware guest variable)
+   to run `Prepare-Reference.ps1 -RemoveUserApps`, waits for sysprep to shut the VM
+   down, copies the VM's disk to a temporary VHD on the admin PC (it needs free space
+   for the whole disk), removes the agent's leftovers from that copy, captures it,
+   and reverts the VM to the snapshot. If sysprep fails, the VM shuts down anyway and
+   the capture log shows the agent's log and the last sysprep error. The VM must not
+   be sysprepped already (capture a sysprepped VM with `-DiskPath` instead). A VM
+   whose encryption covers only its TPM works; a fully encrypted VM does not.
+   Untested on Windows and VMware so far.
+
+   **Other VM software (VirtualBox, Proxmox, ESXi).** The wizard lists
+   Hyper-V and VMware Workstation VMs only. Boot the VM once to run `Prepare-Reference.ps1`, shut it down,
    then run `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot
    <content root>` on the admin PC. VHD and VHDX files are mounted directly. VMDK,
    VDI, qcow2 and raw files are first converted to a temporary VHD of the whole disk,
    using qemu-img or VirtualBox, whichever is installed. The VM, its disk and its
    snapshots are left alone. There is no hands-free boot or rollback here; that is
-   Hyper-V only. Untested on Windows, including every conversion.
+   Hyper-V and VMware Workstation only. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
    or from the command line:
    `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
