@@ -88,6 +88,49 @@ try {
     Assert-Equal "$($w.server)|$($w.imageName)|$($w.setup)|$($w.remoteInstallPath)|$($w.dhcpOnServer)|$($w.noPrompt)" 'wds01|Imaging Tool (x64)|True|E:\RemoteInstall|True|False' 'WDS settings round-trip'
     Assert-Equal (Get-DeploySettings -ContentRoot $root).share.path $s.share.path 'saving WDS settings keeps the share'
 
+    # Multicast settings: defaults, validation, round-trip, and the other sections are kept.
+    $m = Get-MulticastSettings -ContentRoot $root
+    Assert-Equal "$($m.enabled)|$($m.namespace)|$($m.type)|$($m.speedPolicy)|$($m.fallback)" 'False|ImagingTool|AutoCast|None|True' 'multicast settings default to off'
+    $bad = [pscustomobject]@{ enabled = $true; namespace = 'Room 12'; type = 'ScheduledCast'; clients = ''; startTime = '03/11/2026 8h30'; speedPolicy = 'AutoDisconnect'; thresholdKbps = '0' }
+    Assert-Equal (@(Get-MulticastIssues -Multicast $bad).Count) 2 'bad start time and threshold are reported'
+    $bad.startTime = ''
+    Assert-Equal ((@(Get-MulticastIssues -Multicast $bad)) -match 'needs a number of PCs').Count 1 'a scheduled session needs a trigger'
+    $threw = $false; try { Save-MulticastSettings -ContentRoot $root -Multicast $bad } catch { $threw = $true }
+    Assert-Equal $threw $true 'invalid multicast settings are not saved'
+    Save-MulticastSettings -ContentRoot $root -Multicast ([pscustomobject]@{ enabled = $true; server = ' wds01 '; namespace = 'Room 12'; contentPath = 'D:\Deploy'
+        type = 'ScheduledCast'; clients = '24'; startTime = '2026-11-03 08:30'; speedPolicy = 'Multistream'; thresholdKbps = ''; fallback = $false })
+    $m = Get-MulticastSettings -ContentRoot $root
+    Assert-Equal "$($m.enabled)|$($m.server)|$($m.namespace)|$($m.type)|$($m.clients)|$($m.startTime)|$($m.speedPolicy)|$($m.thresholdKbps)|$($m.fallback)" 'True|wds01|Room 12|ScheduledCast|24|2026-11-03 08:30|Multistream|1024|False' 'multicast settings round-trip'
+    Assert-Equal (Get-WdsSettings -ContentRoot $root).server 'wds01' 'saving multicast settings keeps the WDS settings'
+
+    # Multicast room monitor: summary line and rows, slowest PC first.
+    $mon = [pscustomobject]@{ Server = 'WDS01'; Namespace = 'Room 12'; Exists = $true; Sessions = 1; Clients = @(
+        [pscustomobject]@{ Id = 7; Name = 'MININT-A'; IpAddress = '10.0.12.21'; MacAddress = '00-15-5D-01-02-03'; File = 'Images\W11.wim'; Percent = 80; JoinedSeconds = 300; RateBytes = 40MB }
+        [pscustomobject]@{ Id = 9; Name = 'MININT-B'; IpAddress = '10.0.12.22'; MacAddress = ''; File = 'Images\W11.wim'; Percent = 20; JoinedSeconds = 3900; RateBytes = 512KB }
+        [pscustomobject]@{ Id = 4; Name = 'MININT-C'; IpAddress = '10.0.12.23'; MacAddress = ''; File = 'Images\W11.wim'; Percent = 100; JoinedSeconds = 60; RateBytes = 40MB }) }
+    $view = ConvertTo-MulticastView -Monitor $mon
+    Assert-Equal $view.Summary '3 PCs receiving, average 67 %, 1 done. Slowest: MININT-B at 20 %.' 'multicast monitor summary'
+    Assert-Equal "$($view.Rows[0].Id)|$($view.Rows[0].Address)|$($view.Rows[0].File)|$($view.Rows[0].Joined)|$($view.Rows[0].Speed)" '9|10.0.12.22|W11.wim|1 h 05 min|512 KB/s' 'multicast monitor row, slowest first'
+    Assert-Equal "$($view.Rows[1].Address)|$($view.Rows[1].Joined)|$($view.Rows[1].Speed)" '10.0.12.21  00-15-5D-01-02-03|5 min|40.0 MB/s' 'multicast monitor row details'
+    $mon.Sessions = 0; $mon.Clients = @()
+    Assert-Equal ((ConvertTo-MulticastView -Monitor $mon).Summary -like '*has not started sending yet*') $true 'waiting session summary'
+    $mon.Exists = $false
+    Assert-Equal (@((ConvertTo-MulticastView -Monitor $mon).Rows).Count) 0 'missing session has no rows'
+
+    # Multicast plan in WinPE: which server, namespace and file, and when to stay unicast.
+    $ds = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\files01\Deploy' }; wds = [pscustomobject]@{ server = '' }
+        multicast = [pscustomobject]@{ enabled = $true; server = ''; namespace = ''; fallback = $null } }
+    $plan = Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11-23H2.wim'
+    Assert-Equal "$($plan.Server)|$($plan.Namespace)|$($plan.SourceFile)|$($plan.Fallback)" 'files01|ImagingTool|Images\W11-23H2.wim|True' 'multicast plan defaults to the share server'
+    $ds.wds.server = 'wds01'; $ds.multicast.namespace = 'Room 12'; $ds.multicast.fallback = $false
+    $plan = Get-MulticastPlan -Settings $ds -ContentRoot 'Z:' -ImagePath 'z:\Images\Sub\W10.wim'
+    Assert-Equal "$($plan.Server)|$($plan.Namespace)|$($plan.SourceFile)|$($plan.Fallback)" 'wds01|Room 12|Images\Sub\W10.wim|False' 'multicast plan prefers the WDS server'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'D:\' -ImagePath 'D:\Images\W11.wim' -IsNetworkRoot $false)) $true 'USB content stays unicast'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Y:\Other\W11.wim')) $true 'images outside the content root stay unicast'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11.swm')) $true 'split images stay unicast'
+    $ds.multicast.enabled = $false
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11.wim')) $true 'multicast off stays unicast'
+
     # Answer files.
     $rows = @(Get-AnswerFileRows -ContentRoot $root)
     Assert-Equal "$($rows.Name)|$($rows.IsDefault)" 'Default|Yes' 'content root is seeded with the default answer file'

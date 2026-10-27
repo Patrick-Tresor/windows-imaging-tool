@@ -15,6 +15,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
+| **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
 
 ## Admin console
@@ -139,6 +140,28 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 
 Every medium boots both UEFI and legacy BIOS. The ISO carries both
 `etfsboot.com` and `efisys.bin`.
+
+### Multicast
+
+`Set-WdsMulticast.ps1` creates a WDS namespace with the built-in `WDS` content
+provider whose config string is the content root's local folder on the server
+(`wdsutil /New-Namespace /ContentProvider:WDS /ConfigString:D:\Deploy`), as AutoCast
+or ScheduledCast (client count and/or start time), and sets the transport server's
+slow-client policy (`/Set-TransportServer /MulticastSessionPolicy`). It runs on the
+server like the WDS publisher, and judges `wdsutil` by exit code only.
+The room monitor (`-Action Monitor`) reads the WDS transport COM API
+(`WdsTptMgmt.WdsTransportManager`: namespace > contents > sessions > clients) for
+each PC's percent complete, address and join time, so it doesn't parse localized
+text; `ConvertTo-MulticastView` (ConsoleData) turns that into the console's rows and
+summary. `-Action Disconnect` calls `DisconnectClient` with the *fail* type, so
+`wdsmcast` exits with an error and the deploy falls back to the share by itself.
+
+In WinPE, `Get-MulticastPlan` (DeployCommon) decides per deploy: multicast is on,
+the content came from the share, the image is under the content root and is not
+split. After partitioning, `Receive-MulticastImage` runs
+`wdsmcast /Transfer-File /Namespace:<name> /SourceFile:Images\<image>.wim` with the
+share account into `W:\_Multicast`, DISM applies from there, and the folder is
+deleted. On failure it falls back to applying from the share unless fallback is off.
 
 ## Deploy sequence
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml. The wds section is read only by the console and Publish-WdsBootImage.ps1.",
+  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml. The wds section is read only by the console and Publish-WdsBootImage.ps1. The multicast section is read by Deploy-Image.ps1 (from the content root copy) and Set-WdsMulticast.ps1.",
   "share": {
     "path": "\\\\deploy-server\\Deploy",
     "user": "DOMAIN\\svc-deploy",
@@ -13,5 +13,17 @@
     "remoteInstallPath": "D:\\RemoteInstall",
     "dhcpOnServer": false,
     "noPrompt": false
+  },
+  "multicast": {
+    "enabled": false,
+    "server": "",
+    "namespace": "ImagingTool",
+    "contentPath": "",
+    "type": "AutoCast",
+    "clients": 0,
+    "startTime": "",
+    "speedPolicy": "None",
+    "thresholdKbps": 1024,
+    "fallback": true
   }
 }
