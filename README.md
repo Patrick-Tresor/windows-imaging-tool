@@ -552,6 +552,12 @@ What the PCs need:
    the capture log shows the agent's log and the last sysprep error. The VM must not
    be sysprepped already (capture a sysprepped VM with `-DiskPath` instead). A VM
    whose encryption covers only its TPM works; a fully encrypted VM does not.
+   Windows 11 VMs are encrypted for their virtual TPM, and `vmrun` opens them only
+   with the VM's encryption password: the capture window asks for it (or pass
+   `-VmxPassword`) and checks it before taking the snapshot. It is the password typed
+   when the VM was created or its TPM was added. If Workstation never asked for one,
+   it generated one itself and keeps it in Windows; try setting one you know with
+   Change Password under VM > Settings > Options > Access Control (untested).
    Untested on Windows and VMware so far.
 
    **Other VM software (VirtualBox, Proxmox, ESXi).** The wizard lists

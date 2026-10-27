@@ -32,9 +32,12 @@ function Find-QemuImg {
 }
 
 function New-VmrunArguments {
-    # Arguments for vmrun.exe: vmrun -T ws <command> [<vmx>] [<more>...].
-    param([Parameter(Mandatory)][string]$Command, [string]$VmxPath, [string[]]$Arguments = @())
-    $list = @('-T', 'ws', $Command)
+    # Arguments for vmrun.exe: vmrun -T ws [-vp <password>] <command> [<vmx>] [<more>...]. An encrypted VM (every
+    # VM with a virtual TPM, as Windows 11 needs) only opens with its encryption password.
+    param([Parameter(Mandatory)][string]$Command, [string]$VmxPath, [string[]]$Arguments = @(), [string]$Password)
+    $list = @('-T', 'ws')
+    if ($Password) { $list += @('-vp', $Password) }
+    $list += $Command
     if ($VmxPath) { $list += $VmxPath }
     $list + @($Arguments)
 }
@@ -62,13 +65,26 @@ function Read-VmxSettings {
     $settings
 }
 
+function Test-VmxEncrypted {
+    # True when the .vmx is encrypted, so vmrun needs the VM's encryption password to open it.
+    param([Parameter(Mandatory)][string]$VmxPath)
+    $settings = Read-VmxSettings -Path $VmxPath
+    $settings.Contains('encryption.keysafe') -or $settings.Contains('encryption.data')
+}
+
+function Test-VmrunWrongPassword {
+    # True when vmrun's output says the VM's encryption password was missing or wrong.
+    param([AllowEmptyCollection()][string[]]$Output = @())
+    [bool]($Output -match 'Incorrect password|password is required|requires a password|encrypted')
+}
+
 function Get-VmxDiskPaths {
     # The virtual hard disks a .vmx uses, in controller order, as full paths. A snapshot moves a disk to its newest
     # delta file (Name-000001.vmdk), and the .vmx names that one. Returns $null when the .vmx is encrypted, as it is
     # for a VM with a virtual TPM; Get-VmdkLeafPaths finds the disks then.
     param([Parameter(Mandatory)][string]$VmxPath)
+    if (Test-VmxEncrypted -VmxPath $VmxPath) { return $null }
     $settings = Read-VmxSettings -Path $VmxPath
-    if ($settings.Contains('encryption.keysafe') -or $settings.Contains('encryption.data')) { return $null }
     $folder = Split-Path -Parent ([IO.Path]::GetFullPath($VmxPath))
     $order = @{ nvme = 0; scsi = 1; sata = 2; ide = 3 }
     $disks = foreach ($key in $settings.Keys) {
@@ -134,4 +150,4 @@ function Get-VMwareInventory {
 }
 
 Export-ModuleMember -Function Get-VMwareCaptureVariables, Find-Vmrun, Find-QemuImg, New-VmrunArguments, ConvertFrom-VmrunList, Test-VmxInList,
-    Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkLeafPaths, Get-VMwareInventory
+    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkLeafPaths, Get-VMwareInventory

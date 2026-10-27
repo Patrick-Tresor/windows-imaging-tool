@@ -195,7 +195,10 @@ function Show-CaptureWizard {
         $c = & $getChoice
         $target = switch ($c.Mode) {
             'VmDisk' { "Hyper-V VM $($c.VM.Name), hands-free: sysprep at boot if needed, capture its disk with the VM off, then roll back to a checkpoint" }
-            'Vmware' { "VMware VM $($c.Vmx), hands-free: snapshot, the capture agent runs sysprep, capture its disk with the VM off, then revert to the snapshot" }
+            'Vmware' {
+                "VMware VM $($c.Vmx), hands-free: snapshot, the capture agent runs sysprep, capture its disk with the VM off, then revert to the snapshot" +
+                $(if (Test-VmxEncrypted -VmxPath $c.Vmx) { "`r`n               The VM is encrypted (virtual TPM): the capture window asks for its encryption password first." })
+            }
             'VM'  { "Hyper-V VM $($c.VM.Name): build capture ISO, boot the VM from it, eject when done" }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
