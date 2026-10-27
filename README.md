@@ -9,8 +9,8 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
-                     Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
+src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
+                     Prepare-Reference.ps1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Start-RemoteReimage.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, UserState.psm1, NamingList.psm1,
                      RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1
@@ -519,14 +519,29 @@ What the PCs need:
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
       Store apps that break sysprep, then runs sysprep and shuts down.
    2. Name the image and choose compression.
-   3. Choose the reference machine. For a **Hyper-V VM** the wizard builds a capture
-      ISO, boots the VM from it, and ejects it when the capture finishes. Use an
-      **ISO** for other VMs, or a **USB stick** for a physical PC.
+   3. Choose the reference machine. For a **Hyper-V VM, captured with the VM off**
+      the wizard takes a checkpoint, has Windows run `Prepare-Reference.ps1` at boot
+      if the VM is not sysprepped yet (sysprep shuts it down), reads the VM's disk on
+      the admin PC (`src\Capture-VMImage.ps1`) with the VM off, and then rolls the VM
+      back to the checkpoint. No password is needed, and the VM needs no network
+      (generation 2 VMs only; a generation 1 VM is booted from a capture ISO). For
+      a **Hyper-V VM booted from a capture ISO** the wizard builds the ISO, boots the
+      VM from it, and ejects it when the capture finishes. Use an **ISO** for other
+      VMs, or a **USB stick** for a physical PC.
    4. Review and click Build and start.
    The image is saved to the share's `Images` folder, or to the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
+
+   **Other VM software (VMware, VirtualBox, Proxmox, ESXi).** The wizard lists
+   Hyper-V VMs only. Boot the VM once to run `Prepare-Reference.ps1`, shut it down,
+   then run `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot
+   <content root>` on the admin PC. VHD and VHDX files are mounted directly. VMDK,
+   VDI, qcow2 and raw files are first converted to a temporary VHD of the whole disk,
+   using qemu-img or VirtualBox, whichever is installed. The VM, its disk and its
+   snapshots are left alone. There is no hands-free boot or rollback here; that is
+   Hyper-V only. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
    or from the command line:
    `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`

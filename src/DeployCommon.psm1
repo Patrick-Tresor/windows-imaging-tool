@@ -334,5 +334,23 @@ function Receive-MulticastImage {
     $Destination
 }
 
+function Get-DiskConversionCommand {
+    # The command that converts a VM disk file to a VHD Windows can mount, or $null when it is a VHD or VHDX already.
+    # qemu-img converts qcow2, raw, vmdk and vdi. VirtualBox's VBoxManage converts vmdk and vdi.
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [string]$QemuImg,
+        [string]$VBoxManage
+    )
+    $ext = [IO.Path]::GetExtension($SourcePath).ToLowerInvariant()
+    if ($ext -in '.vhd', '.vhdx') { return $null }
+    if ($QemuImg) { return @{ FilePath = $QemuImg; ArgumentList = @('convert', '-p', '-O', 'vpc', $SourcePath, $DestinationPath) } }
+    if ($VBoxManage -and $ext -in '.vmdk', '.vdi') {
+        return @{ FilePath = $VBoxManage; ArgumentList = @('clonemedium', 'disk', $SourcePath, $DestinationPath, '--format', 'VHD') }
+    }
+    throw "Cannot convert $(Split-Path $SourcePath -Leaf) to VHD. Install qemu-img (for qcow2, raw, vmdk and vdi) or VirtualBox (for vmdk and vdi)."
+}
+
 Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
-    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage
+    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand

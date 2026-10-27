@@ -39,10 +39,13 @@ function Show-CaptureWizard {
         $w.CmbVM.ItemsSource = $vms
         if ($vms) {
             $w.CmbVM.SelectedItem = $vms | Where-Object Usable | Select-Object -First 1
+            $w.RbVmDisk.IsEnabled = $true
             $w.RbVM.IsEnabled = $true
         } else {
+            $w.RbVmDisk.IsEnabled = $false
             $w.RbVM.IsEnabled = $false
-            $w.RbVM.Content = 'A Hyper-V VM on this PC (Hyper-V is not available here)'
+            $w.RbVmDisk.Content = 'A Hyper-V VM on this PC, captured with the VM off (Hyper-V is not available here)'
+            $w.RbVM.Content = 'A Hyper-V VM on this PC, booted from a capture ISO (Hyper-V is not available here)'
         }
     }
     $loadUsb = {
@@ -51,7 +54,7 @@ function Show-CaptureWizard {
         if ($disks) { $w.CmbUsb.SelectedIndex = 0 }
     }
     & $loadVMs; & $loadUsb
-    if ($w.RbVM.IsEnabled) { $w.RbVM.IsChecked = $true } else { $w.RbIso.IsChecked = $true }
+    if ($w.RbVmDisk.IsEnabled) { $w.RbVmDisk.IsChecked = $true } else { $w.RbIso.IsChecked = $true }
     $w.BtnVMRefresh.Add_Click($loadVMs)
     $w.BtnUsbRefresh.Add_Click($loadUsb)
     $w.TxtIsoFolder.Text = [Environment]::GetFolderPath('Desktop')
@@ -68,7 +71,7 @@ function Show-CaptureWizard {
             Split       = [bool]$w.ChkSplit.IsChecked
             Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
-            Mode        = if ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
+            Mode        = if ($w.RbVmDisk.IsChecked) { 'VmDisk' } elseif ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
             VM          = $w.CmbVM.SelectedItem
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
             Usb         = $w.CmbUsb.SelectedItem
@@ -87,9 +90,11 @@ function Show-CaptureWizard {
                 }
             }
             2 {
-                if ($c.Mode -eq 'VM' -and -not $c.VM) { 'Choose a VM.' }
-                elseif ($c.Mode -eq 'VM' -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. Only generation 1 and 2 VMs can be captured." }
+                if ($c.Mode -in @('VM', 'VmDisk') -and -not $c.VM) { 'Choose a VM.' }
+                elseif ($c.Mode -in @('VM', 'VmDisk') -and -not $c.VM.Usable) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. Only generation 1 and 2 VMs can be captured." }
+                elseif ($c.Mode -eq 'VmDisk' -and $c.VM.Generation -ne 2) { "$($c.VM.Name) is a generation $($c.VM.Generation) VM. Capturing its disk with the VM off needs generation 2 (UEFI); boot it from a capture ISO instead." }
                 elseif ($c.Mode -eq 'VM' -and $c.VM.State -ne 'Off') { "$($c.VM.Name) is $($c.VM.State). Let sysprep shut it down, then click Refresh." }
+                elseif ($c.Mode -eq 'VmDisk' -and $c.VM.State -ne 'Off') { "$($c.VM.Name) is $($c.VM.State). Shut it down, then click Refresh." }
                 elseif ($c.Mode -eq 'VM' -and -not $c.Unattended) { 'The Hyper-V option needs "Start without asking and shut down when done" on the previous page.' }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
                 elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
@@ -100,11 +105,16 @@ function Show-CaptureWizard {
     $showSummary = {
         $c = & $getChoice
         $target = switch ($c.Mode) {
+            'VmDisk' { "Hyper-V VM $($c.VM.Name): prepare at boot if needed, capture its disk with the VM off, then roll back to a checkpoint" }
             'VM'  { "Hyper-V VM $($c.VM.Name): build capture ISO, boot the VM from it, eject when done" }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
         }
-        $saveTo = if ($c.Mode -eq 'Usb') { 'The USB stick''s DEPLOY partition' } else { "$($settings.share.path)\Images" }
+        $saveTo = switch ($c.Mode) {
+            'Usb'    { 'The USB stick''s DEPLOY partition' }
+            'VmDisk' { "$ContentRoot\Images" }
+            default  { "$($settings.share.path)\Images" }
+        }
         $w.TxtSummary.Text = @(
             "Image name:    $($c.Name).$(if ($c.Split) { 'swm (split)' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
@@ -139,6 +149,14 @@ function Show-CaptureWizard {
         $c = & $getChoice
         if ($c.Mode -eq 'Usb' -and
             [Windows.MessageBox]::Show($wiz, "Everything on $($c.Usb.Label) will be erased. Continue?", 'Capture Wizard', 'YesNo', 'Warning') -ne 'Yes') { return $false }
+
+        if ($c.Mode -eq 'VmDisk') {
+            # Reads the VM's disk on this PC; no capture media is built and the VM is not started.
+            Start-Process powershell.exe -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+                -ContentRoot $ContentRoot -VMName $c.VM.Name -Name $c.Name -Description $c.Description -Compression $c.Compression `
+                -Split:$c.Split -NewVersion:$c.NewVersion)
+            return $true
+        }
 
         $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `
             -Compression $c.Compression -SplitForFat32:$c.Split -Unattended:$c.Unattended -NewVersion:$c.NewVersion
