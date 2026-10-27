@@ -70,8 +70,9 @@ description             UEFI: PXE IPv4 Intel(R) Ethernet Connection I219-LM
 '@
 Assert-Equal (Select-PxeBootEntry $bcdEnglish) '{5c1b2a12-1111-11ee-9a6e-806e6f6e6963}' 'the IPv4 PXE entry is chosen over IPv6 and USB'
 
+# Accented letters are built with [char] so this file stays ASCII (Windows PowerShell 5.1 reads it as ANSI).
 $bcdFrench = @'
-Gestionnaire de démarrage du microprogramme
+Gestionnaire de demarrage du microprogramme
 -------------------------------------------
 identificateur          {fwbootmgr}
 displayorder            {bootmgr}
@@ -87,8 +88,9 @@ Application du microprogramme (101fffff)
 ----------------------------------------
 identificateur          {7a7e0c02-2222-11ee-9a6e-806e6f6e6963}
 description             Onboard NIC(IPV4)
-'@
+'@ -replace 'demarrage', "d$([char]0xE9)marrage"
 Assert-Equal (Select-PxeBootEntry $bcdFrench) '{7a7e0c02-2222-11ee-9a6e-806e6f6e6963}' 'French bcdedit output: the Dell onboard NIC entry is found'
+Assert-Equal (Select-PxeBootEntry ($bcdFrench -replace 'Onboard NIC\(IPV4\)', "Carte r$([char]0xE9)seau")) '{7a7e0c02-2222-11ee-9a6e-806e6f6e6963}' 'a French "reseau" description is a network entry'
 Assert-Equal ($null -eq (Select-PxeBootEntry ($bcdEnglish -replace 'PXE IPv[46] Intel\(R\) Ethernet Connection I219-LM', 'Hard Drive'))) $true 'no network entry gives nothing'
 Assert-Equal ($null -eq (Select-PxeBootEntry '')) $true 'empty output gives nothing'
 

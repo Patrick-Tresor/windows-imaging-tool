@@ -37,13 +37,15 @@ function ConvertTo-AppDefinition {
         installer        = & $get 'installer' ''
         installerType    = & $get 'installerType' ''
         command          = & $get 'command' ''
-        successCodes     = if ($Json.PSObject.Properties['successCodes'] -and @($Json.successCodes).Count) { & $ints $Json.successCodes } else { @(0, 3010, 1641) }
-        rebootCodes      = if ($Json.PSObject.Properties['rebootCodes'] -and $null -ne $Json.rebootCodes) { & $ints $Json.rebootCodes } else { @(3010, 1641) }
+        # Lists are wrapped in @() so an empty one stays []: Windows PowerShell 5.1 writes an if statement's
+        # empty output as {} in JSON, and {} reads back as one blank maker or model.
+        successCodes     = @(if ($Json.PSObject.Properties['successCodes'] -and @($Json.successCodes).Count) { & $ints $Json.successCodes } else { 0, 3010, 1641 })
+        rebootCodes      = @(if ($Json.PSObject.Properties['rebootCodes'] -and $null -ne $Json.rebootCodes) { & $ints $Json.rebootCodes } else { 3010, 1641 })
         timeoutMinutes   = [int](& $get 'timeoutMinutes' 60)
         uninstallCommand = & $get 'uninstallCommand' ''
         requirements     = [pscustomobject][ordered]@{
-            makers = if ($req -and $req.PSObject.Properties['makers']) { @($req.makers | Where-Object { $_ }) } else { @() }
-            models = if ($req -and $req.PSObject.Properties['models']) { @($req.models | Where-Object { $_ }) } else { @() }
+            makers = @(if ($req -and $req.PSObject.Properties['makers']) { $req.makers | ForEach-Object { "$_" } | Where-Object { $_ } })
+            models = @(if ($req -and $req.PSObject.Properties['models']) { $req.models | ForEach-Object { "$_" } | Where-Object { $_ } })
         }
         detection        = [pscustomobject][ordered]@{
             match = if ($det -and $det -isnot [array] -and $det.PSObject.Properties['match'] -and $det.match -eq 'any') { 'any' } else { 'all' }

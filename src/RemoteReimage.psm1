@@ -113,7 +113,8 @@ function Select-PxeBootEntry {
         # Only the first line holds the entry's own identifier; the boot manager block lists others in displayorder.
         $firstLine = ($b.Trim() -split "`r?`n")[0]
         if ($firstLine -notmatch [regex]::Escape($guid.Value)) { continue }
-        if ($b -notmatch '(?i)\b(PXE|IPv4|IPv6|Network|NIC|LAN|Ethernet|R[ée]seau)\b') { continue }
+        # \u00e9 (e acute) is escaped to keep this file ASCII: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
+        if ($b -notmatch '(?i)\b(PXE|IPv4|IPv6|Network|NIC|LAN|Ethernet|R[\u00e9e]seau)\b') { continue }
         $rank = if ($b -match '(?i)IPv6') { 2 } else { 1 }
         [pscustomobject]@{ Id = $guid.Value; Rank = $rank }
     }

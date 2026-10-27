@@ -14,6 +14,7 @@ function Assert-Equal($Actual, $Expected, $Name) {
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("naming-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
+$e = [char]0xE9   # e acute, built here so this file stays ASCII (Windows PowerShell 5.1 reads it as ANSI)
 try {
     # The shipped list is a header only.
     Assert-Equal @(Read-NamingList -Path (Join-Path $repo 'config/naming-list.csv')).Count 0 'shipped naming list is empty'
@@ -21,24 +22,24 @@ try {
 
     # Comma CSV, UTF-8 with BOM, quoted OU with commas, blank line.
     $csv = Join-Path $tmp 'list.csv'
-    $text = "Serial,ComputerName,OU,AnswerFile,Notes`r`nTEST0001,PC-TEST-01,`"OU=Québec,OU=Laptops,DC=corp,DC=example`",W11-Test,`r`n`r`n test0002 ,pc-test-02,,,Spare`r`n"
+    $text = "Serial,ComputerName,OU,AnswerFile,Notes`r`nTEST0001,PC-TEST-01,`"OU=Qu$($e)bec,OU=Laptops,DC=corp,DC=example`",W11-Test,`r`n`r`n test0002 ,pc-test-02,,,Spare`r`n"
     [IO.File]::WriteAllText($csv, $text, [Text.UTF8Encoding]::new($true))
     $list = @(Read-NamingList -Path $csv)
     Assert-Equal $list.Count 2 'rows are read and blank lines skipped'
-    Assert-Equal $list[0].OU 'OU=Québec,OU=Laptops,DC=corp,DC=example' 'quoted OU keeps its commas and accents'
+    Assert-Equal $list[0].OU "OU=Qu$($e)bec,OU=Laptops,DC=corp,DC=example" 'quoted OU keeps its commas and accents'
     Assert-Equal (Find-NamingEntry -Entries $list -Serial 'TEST0002').ComputerName 'pc-test-02' 'lookup trims and ignores case'
     Assert-Equal ($null -eq (Find-NamingEntry -Entries $list -Serial 'NOPE')) $true 'an unlisted serial finds nothing'
     Assert-Equal ($null -eq (Find-NamingEntry -Entries $list -Serial '')) $true 'an empty serial finds nothing'
 
     # Semicolon CSV saved by French Excel (ANSI), with other header spellings.
     $semi = Join-Path $tmp 'semi.csv'
-    [IO.File]::WriteAllBytes($semi, [Text.Encoding]::GetEncoding(28591).GetBytes("Serial Number;Name;Organizational Unit;Profile;Description`r`nTEST0003;PC-TEST-03;OU=Montréal,DC=corp,DC=example;W11-Test;Réception`r`n"))
+    [IO.File]::WriteAllBytes($semi, [Text.Encoding]::GetEncoding(28591).GetBytes("Serial Number;Name;Organizational Unit;Profile;Description`r`nTEST0003;PC-TEST-03;OU=Montr$($e)al,DC=corp,DC=example;W11-Test;R$($e)ception`r`n"))
     $s = @(Read-NamingList -Path $semi)[0]
-    Assert-Equal "$($s.Serial)|$($s.ComputerName)|$($s.OU)|$($s.AnswerFile)|$($s.Notes)" 'TEST0003|PC-TEST-03|OU=Montréal,DC=corp,DC=example|W11-Test|Réception' 'semicolon ANSI file with aliased headers'
+    Assert-Equal "$($s.Serial)|$($s.ComputerName)|$($s.OU)|$($s.AnswerFile)|$($s.Notes)" "TEST0003|PC-TEST-03|OU=Montr$($e)al,DC=corp,DC=example|W11-Test|R$($e)ception" 'semicolon ANSI file with aliased headers'
 
     # Saving keeps the file's delimiter and round-trips.
     Save-NamingList -Path $semi -Entries @($s, [pscustomobject]@{ Serial = 'TEST0004'; ComputerName = 'PC-TEST-04' })
-    Assert-Equal ((Get-Content $semi -First 1) -replace '^\xEF\xBB\xBF|^﻿', '') '"Serial";"ComputerName";"OU";"AnswerFile";"Notes"' 'save keeps semicolons'
+    Assert-Equal ((Get-Content $semi -First 1) -replace '^\xEF\xBB\xBF|^\uFEFF', '') '"Serial";"ComputerName";"OU";"AnswerFile";"Notes"' 'save keeps semicolons'
     Assert-Equal (@(Read-NamingList -Path $semi) | ForEach-Object Serial) 'TEST0003 TEST0004' 'saved list reads back'
 
     $noSerial = Join-Path $tmp 'noserial.csv'

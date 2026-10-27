@@ -18,6 +18,11 @@ jobs:
         shell: powershell
         run: |
           $bad = 0
+          # Windows PowerShell 5.1 (WinPE, the console) reads a file without a BOM as ANSI, so accented letters change.
+          foreach ($f in Get-ChildItem src, tests -Recurse -Include *.ps1, *.psm1, *.xaml) {
+              $raw = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($f.FullName))
+              if ($raw -match '[^\x00-\x7F]' -and $raw -notmatch '^\xEF\xBB\xBF') { $bad++; Write-Host "$($f.Name): non-ASCII characters in a file without a BOM" }
+          }
           foreach ($f in Get-ChildItem src, tests -Recurse -Include *.ps1, *.psm1) {
               $errors = $null
               [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
