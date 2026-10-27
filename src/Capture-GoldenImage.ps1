@@ -50,16 +50,28 @@ $swapping = $false
 $status = 'FAILED'
 try {
     # WinPE assigns letters unpredictably: find the volume that holds an offline Windows install.
-    $windows = Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveLetter -ne 'X' } |
-        Where-Object { Test-Path "$($_.DriveLetter):\Windows\System32\config\SYSTEM" } |
-        Select-Object -First 1
-    if (-not $windows) { throw 'No offline Windows installation found on this machine.' }
+    # A VM with a second Windows disk attached has two; capture the generalized one.
+    $found = @(Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveLetter -ne 'X' } |
+        Where-Object { Test-Path "$($_.DriveLetter):\Windows\System32\config\SYSTEM" } | Sort-Object DriveLetter |
+        ForEach-Object { [pscustomobject]@{ Volume = $_; State = Get-OfflineImageState -Root "$($_.DriveLetter):\" } })
+    if (-not $found) { throw 'No offline Windows installation found on this machine.' }
+    foreach ($f in $found) {
+        $shown = if ($null -eq $f.State.ImageState) { 'no Setup\State\State.ini' } else { "ImageState=$($f.State.ImageState)" }
+        Write-DeployLog "Found Windows on $($f.Volume.DriveLetter):\ ($shown)"
+    }
+    $pick = @($found | Where-Object { $_.State.Generalized })[0]
+    if (-not $pick) { $pick = $found[0] }
+    $windows = $pick.Volume
     $source = "$($windows.DriveLetter):\"
 
     # Refuse to capture an image that skipped sysprep, since it would not be hardware-independent.
-    $setupState = "$source\Windows\Setup\State\State.ini"
-    if ((Test-Path $setupState) -and -not (Select-String -Path $setupState -Pattern 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE' -Quiet)) {
-        throw "Windows on $source was not generalized. Run Prepare-Reference.ps1 (or sysprep /generalize /oobe /shutdown) on it first."
+    if (-not $pick.State.Generalized) {
+        $why = "ImageState is $($pick.State.ImageState), so sysprep /generalize did not run or did not finish."
+        if ($pick.State.LastError) { $why += " Last sysprep error: $($pick.State.LastError)" }
+        throw "Windows on $source was not generalized. $why Boot it, run Prepare-Reference.ps1 (or sysprep /generalize /oobe /shutdown), let it shut down by itself, then boot the capture media."
+    }
+    if ($null -eq $pick.State.ImageState) {
+        Write-DeployLog "$source has no Setup\State\State.ini, so it cannot be checked for sysprep. Capturing anyway." -Level WARN
     }
 
     if (-not $Destination) {
