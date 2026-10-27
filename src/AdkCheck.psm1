@@ -61,6 +61,8 @@ function Get-AdkStatus {
     $checks = @(
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'DandISetEnv.bat'; Ok = & $has $deploy 'DandISetEnv.bat' }
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\oscdimg.exe'; Ok = & $has $deploy 'amd64\Oscdimg\oscdimg.exe' }
+        [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\etfsboot.com'; Ok = & $has $deploy 'amd64\Oscdimg\etfsboot.com' }
+        [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\efisys.bin'; Ok = & $has $deploy 'amd64\Oscdimg\efisys.bin' }
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\efisys_noprompt.bin'; Ok = & $has $deploy 'amd64\Oscdimg\efisys_noprompt.bin' }
         [pscustomobject]@{ Part = 'WinPE add-on'; Path = 'copype.cmd'; Ok = & $has $pe 'copype.cmd' }
         [pscustomobject]@{ Part = 'WinPE add-on'; Path = 'MakeWinPEMedia.cmd'; Ok = & $has $pe 'MakeWinPEMedia.cmd' }
@@ -107,4 +109,33 @@ function Get-AdkStatus {
     }
 }
 
-Export-ModuleMember -Function Get-AdkDownloadUrl, Get-WinPEComponentNames, Get-AdkRoot, Get-AdkInstalledVersions, Get-AdkStatus
+function Get-IsoBootFiles {
+    <#
+    .SYNOPSIS
+        Finds the BIOS (etfsboot.com) and UEFI (efisys.bin) boot sector files oscdimg needs for a WinPE ISO.
+    .DESCRIPTION
+        Looks in the ADK's Deployment Tools\<arch>\Oscdimg folder first. Older copype versions also copied the
+        files to <WorkDir>\fwfiles; newer ones (ADK 10.1.26100 and later) don't, so that folder is only a fallback.
+        Throws a message naming every folder it looked in when a file is missing.
+    .PARAMETER NoPrompt
+        Use efisys_noprompt.bin, which boots UEFI without "Press any key to boot from CD".
+    #>
+    param([Parameter(Mandatory)][string]$AdkRoot, [string]$WorkDir, [switch]$NoPrompt, [string]$Arch = 'amd64')
+    $folders = @(Join-Path (Join-Path (Join-Path $AdkRoot 'Deployment Tools') $Arch) 'Oscdimg')
+    if ($WorkDir) { $folders += Join-Path $WorkDir 'fwfiles' }
+    $efiName = if ($NoPrompt) { 'efisys_noprompt.bin' } else { 'efisys.bin' }
+
+    $found = [ordered]@{}
+    $missing = @()
+    foreach ($name in 'etfsboot.com', $efiName) {
+        $path = $folders | ForEach-Object { Join-Path $_ $name } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if ($path) { $found[$name] = $path } else { $missing += $name }
+    }
+    if ($missing) {
+        throw ("Can't build the ISO: the boot file(s) $($missing -join ', ') were not found. Looked in: $($folders -join '; '). " +
+            'Run the ADK installer again and tick Deployment Tools.')
+    }
+    [pscustomobject]@{ BiosBoot = $found['etfsboot.com']; UefiBoot = $found[$efiName] }
+}
+
+Export-ModuleMember -Function Get-AdkDownloadUrl, Get-WinPEComponentNames, Get-AdkRoot, Get-AdkInstalledVersions, Get-AdkStatus, Get-IsoBootFiles

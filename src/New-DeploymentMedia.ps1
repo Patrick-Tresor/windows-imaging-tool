@@ -101,11 +101,16 @@ switch ($Target) {
         if (Test-Path $iso) { Remove-Item $iso }
         # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
         # UEFI: the no-prompt EFI boot image. BIOS: etfsboot.com only prompts when boot\bootfix.bin exists.
-        $efi = if ($CaptureConfig) { "$adk\Deployment Tools\amd64\Oscdimg\efisys_noprompt.bin" } else { "$WorkDir\fwfiles\efisys.bin" }
+        # The boot files come from the ADK's Oscdimg folder: newer copype versions no longer create fwfiles.
+        $bootFiles = Get-IsoBootFiles -AdkRoot $adk -WorkDir $WorkDir -NoPrompt:([bool]$CaptureConfig)
         if ($CaptureConfig) { Remove-Item "$WorkDir\media\boot\bootfix.bin" -ErrorAction SilentlyContinue }
-        $bootData = "2#p0,e,b`"$WorkDir\fwfiles\etfsboot.com`"#pEF,e,b`"$efi`""
+        $bootData = "2#p0,e,b`"$($bootFiles.BiosBoot)`"#pEF,e,b`"$($bootFiles.UefiBoot)`""
         & cmd /c "oscdimg -m -o -u2 -udfver102 -bootdata:$bootData `"$WorkDir\media`" `"$iso`""
-        if ($LASTEXITCODE -ne 0) { throw 'oscdimg failed' }
+        if ($LASTEXITCODE -ne 0) {
+            throw ("oscdimg could not build $iso (exit code $LASTEXITCODE). Its own message above says why. " +
+                "It used $WorkDir\media with the boot files $($bootFiles.BiosBoot) and $($bootFiles.UefiBoot). " +
+                'Check that the output folder exists, has free space and the ISO is not open or attached to a VM.')
+        }
         Write-Host "ISO written to $iso"
 
         if ($BootVM) {
