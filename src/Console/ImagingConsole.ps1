@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Admin console for the imaging tool: images, driver library, media builder, deploy settings and logs.
+    Admin console for the imaging tool: images, driver library, media builder, deploy settings, dashboard and logs.
 .DESCRIPTION
     Run on a Windows admin PC. Relaunches itself elevated and in STA mode, which WPF and DISM need.
 .EXAMPLE
@@ -25,6 +25,7 @@ Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
+Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -135,6 +136,7 @@ function Update-Settings {
     $ui.TxtSharePwFile.Text = $s.share.passwordFile
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
     $ui.TxtVersionsToKeep.Text = if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep } else { 0 }
+    $ui.TxtReportPath.Text = if ($s.PSObject.Properties['reporting']) { $s.reporting.path } else { '' }
 }
 
 function Update-Wds {
@@ -217,6 +219,50 @@ function Invoke-Multicast([string]$Action) {
     Set-Status "Multicast: $Action done"
 }
 
+function Get-DashboardFolder {
+    if (-not (Test-ContentRoot $script:root)) { return $null }
+    Get-StatusFolder -ContentRoot $script:root -Settings (Get-DeploySettings -ContentRoot $script:root)
+}
+
+function Update-Dashboard {
+    $folder = Get-DashboardFolder
+    $rows = if ($folder) { @(Get-DeploymentStatus -Folder $folder) } else { @() }
+    $sum = Get-DeploymentSummary -Rows $rows
+    $ui.TxtDashRunning.Text   = $sum.Running
+    $ui.TxtDashSucceeded.Text = $sum.Succeeded
+    $ui.TxtDashWarning.Text   = $sum.Warning
+    $ui.TxtDashFailed.Text    = $sum.Failed
+    $ui.TxtDashTotal.Text     = $sum.Total
+
+    $states = switch ($ui.CmbDashFilter.SelectedIndex) {
+        1 { @('Running') }
+        2 { @('Failed', 'Stalled') }
+        3 { @('Succeeded', 'Warning', 'Cancelled') }
+        default { $null }
+    }
+    if ($states) { $rows = @($rows | Where-Object State -in $states) }
+
+    # Keep the selected PC selected across refreshes.
+    $selectedId = if ($ui.GridDash.SelectedItem) { $ui.GridDash.SelectedItem.Id } else { $null }
+    $ui.GridDash.ItemsSource = $rows
+    if ($selectedId) { $ui.GridDash.SelectedItem = $rows | Where-Object Id -eq $selectedId | Select-Object -First 1 }
+    Update-DashboardDetail
+}
+
+function Update-DashboardDetail {
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
+    $parts = @(
+        "Image: $($r.Image)", "Drivers: $($r.DriverPack)", "MAC: $($r.MacAddress)", "Phase: $($r.Phase)",
+        "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })"
+    )
+    if ($r.Message)  { $parts += "Error: $($r.Message)" }
+    if ($r.Warnings) { $parts += "Warnings: $($r.Warnings)" }
+    $ui.TxtDashDetail.Text = $parts -join '    '
+    $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
+    if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-DeploymentLogs -ContentRoot $script:root) } else { $null }
     $ui.TxtLog.Text = ''
@@ -251,7 +297,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Logs
+    Update-Answers; Update-Images; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -538,11 +584,65 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     $keep = 0
     if (-not [int]::TryParse($ui.TxtVersionsToKeep.Text.Trim(), [ref]$keep) -or $keep -lt 0) { Show-Error 'Versions to keep must be 0 or more (0 keeps every version).'; return }
     if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep = $keep } else { $s | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue $keep }
+    if (-not $s.PSObject.Properties['reporting']) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) }
+    $s.reporting.path     = $ui.TxtReportPath.Text.Trim()
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
-    Update-Answers; Update-Settings
+    Update-Answers; Update-Settings; Update-Dashboard
     Set-Status 'Deploy settings saved'
 } })
+
+#endregion
+
+#region Dashboard
+
+$ui.BtnDashRefresh.Add_Click({ Invoke-Safely { Update-Dashboard; Set-Status 'Dashboard refreshed' } })
+$ui.CmbDashFilter.Add_SelectionChanged({ Invoke-Safely { Update-Dashboard } })
+$ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
+
+$ui.BtnDashRemove.Add_Click({ Invoke-Safely {
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r) { Show-Error 'Select a PC first.'; return }
+    if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
+    Remove-DeploymentStatus -Rows @($r)
+    Update-Dashboard
+    Set-Status "Removed $($r.Serial) from the dashboard. Its final log stays in Deployment Logs."
+} })
+
+$ui.BtnDashClear.Add_Click({ Invoke-Safely {
+    $folder = Get-DashboardFolder
+    if (-not $folder) { return }
+    $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
+    if (-not $done) { Set-Status 'No finished deployments to clear'; return }
+    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay, and final logs stay in Deployment Logs.")) { return }
+    Remove-DeploymentStatus -Rows $done
+    Update-Dashboard
+    Set-Status "Cleared $($done.Count) finished deployment(s)"
+} })
+
+$ui.BtnDashOpen.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $folder = Get-DashboardFolder
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    Invoke-Item $folder
+} })
+
+# Live refresh while the Dashboard tab is open. Errors go to the status bar, not a dialog every 10 seconds.
+$script:dashTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:dashTimer.Interval = [timespan]::FromSeconds(10)
+$script:dashTimer.Add_Tick({
+    if (-not $ui.ChkDashAuto.IsChecked -or $ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
+    try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
+})
+$script:dashTimer.Start()
+$ui.Tabs.Add_SelectionChanged({
+    param($sender, $e)
+    # SelectionChanged bubbles up from the grids and combo boxes inside the tabs; only react to tab switches.
+    if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) {
+        try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
+    }
+})
+$window.Add_Closed({ $script:dashTimer.Stop() })
 
 #endregion
 

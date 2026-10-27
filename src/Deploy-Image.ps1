@@ -22,6 +22,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -61,6 +62,30 @@ function Wait-Countdown([int]$Seconds) {
     $true
 }
 
+function Connect-StatusFolder([string]$Root, $Settings) {
+    # Where this PC reports progress for the console's dashboard (see Resolve-StatusTarget). $null if unreachable.
+    $report = if ($Settings.PSObject.Properties['reporting']) { $Settings.reporting.path } else { $null }
+    $target = Resolve-StatusTarget -ContentRoot $Root -SharePath $Settings.share.path -ReportPath $report
+    if (-not $target.Map) { return $target }
+    try {
+        # A separate status share (USB deployments reporting to a server): needs the network and the share account.
+        & wpeutil.exe WaitForNetwork | Out-Null
+        $user = $null; $pw = $null
+        if ($Settings.share.user -and $Settings.share.passwordFile) {
+            $pwFile = @((Join-Path $Root $Settings.share.passwordFile),
+                        (Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $Settings.share.passwordFile)) |
+                Where-Object { Test-Path $_ } | Select-Object -First 1
+            # Without a password net use would stop and prompt, so only pass the account when its password is known.
+            if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
+        }
+        Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
+        $target
+    } catch {
+        Write-DeployLog "Status share $($target.Map) unavailable, no progress reporting: $($_.Exception.Message)" -Level WARN
+        $null
+    }
+}
+
 function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
     # POSTIMAGE tasks run here in WinPE with the new Windows at %OSDRIVE% (W:) and content at %DEPLOYROOT%.
     $env:OSDRIVE = 'W:'
@@ -70,8 +95,8 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
     }
 }
 
-$root = $null; $hw = $null; $answer = $null; $driverMatch = $null
-$status = 'FAILED'
+$root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
+$status = 'FAILED'; $failure = $null
 try {
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
@@ -85,9 +110,18 @@ try {
     $rootSettings = Join-Path $root 'config\deploy-settings.json'
     $settings = Get-Content -Raw $(if (Test-Path $rootSettings) { $rootSettings } else { $SettingsPath }) | ConvertFrom-Json
 
+    # Report to the dashboard from here on, so even the checks below show up as failures in the console.
+    $statusTarget = Connect-StatusFolder -Root $root -Settings $settings
+    if ($statusTarget) {
+        $net = Get-PrimaryNetworkAddress
+        $statusId = Start-DeployStatus -Folder $statusTarget.Local -Identity $hw -MacAddress $net.MacAddress -IpAddress $net.IpAddress
+        Write-DeployLog "Reporting status to $($statusTarget.Local) as $statusId"
+    }
+
     if (-not $AnswerFile) { $AnswerFile = Select-AnswerFile -Root $root -Default $settings.defaultAnswerFile -Interactive (-not $NoPrompt) }
     $answer = Read-AnswerFile -Path (Join-Path $root "AnswerFiles\$AnswerFile.xml")
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode))"
+    Set-DeployStatus -Step 'Checking the answer file' -Percent 3 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile }
 
     foreach ($share in $answer.Shares) {
         $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $share.PasswordFile } else { $null }
@@ -106,6 +140,8 @@ try {
     $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
     $driverMatch = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
     $driverPack = $driverMatch.FullPath
+    Set-DeployStatus -Fields @{ driverPack = $(if ($driverPack) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { 'inbox only' }) }
+    if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.
     $appRoot = Resolve-ContentPath $root $answer.AppLocation
@@ -125,6 +161,7 @@ try {
         }
     }
 
+    Set-DeployStatus -Fields @{ computerName = $ComputerName }
     $disk = Get-Disk -Number $answer.DiskNumber
     if ($firmware -eq 'BIOS') {
         Write-DeployLog 'Legacy BIOS boot: the disk will be MBR. Boot WinPE in UEFI mode instead if this PC supports it.' -Level WARN
@@ -144,6 +181,7 @@ try {
     Write-Host "Firmware:     $firmware ($(if ($firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
     Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
     if (-not $NoPrompt) {
+        Set-DeployStatus -Step $(if ($answer.Mode -eq 'Unattended') { 'Counting down' } else { 'Waiting for the operator' }) -Percent 5
         $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
@@ -151,6 +189,7 @@ try {
     # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
     $dp = Join-Path $env:TEMP 'diskpart.txt'
     New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
+    Set-DeployStatus -Step 'Partitioning the disk' -Percent 8
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
     # 2. Apply the image. With multicast on, a room of PCs downloads it together onto the new Windows
@@ -158,6 +197,7 @@ try {
     $applyFrom = $imagePath
     $mcPlan = Get-MulticastPlan -Settings $settings -ContentRoot $root -ImagePath $imagePath -IsNetworkRoot ($root -eq 'Z:\')
     if ($mcPlan) {
+        Set-DeployStatus -Step 'Downloading the image by multicast' -Percent 9
         try {
             $cred = Get-ShareCredential -SettingsPath $SettingsPath
             $applyFrom = Receive-MulticastImage -Plan $mcPlan -Destination (Join-Path 'W:\_Multicast' (Split-Path $imagePath -Leaf)) -User $cred.User -Password $cred.Password
@@ -165,47 +205,65 @@ try {
         catch {
             if (-not $mcPlan.Fallback) { throw "Multicast download failed: $($_.Exception.Message)" }
             Write-DeployLog "Multicast download failed, applying from the share instead: $($_.Exception.Message)" -Level WARN
+            Set-DeployStatus -Warning 'Multicast download failed; applied from the share instead'
             Remove-Item 'W:\_Multicast' -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
     # Split images (.swm) need /SWMFile.
     $applyArgs = @('/Apply-Image', "/ImageFile:$applyFrom", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
     if ($applyFrom -like '*.swm') { $applyArgs += "/SWMFile:$($applyFrom -replace '\.swm$', '*.swm')" }
-    Invoke-Native -FilePath 'dism.exe' -ArgumentList $applyArgs
+    # The longest step: DISM's percentage maps to 10-70 % overall, and each poll is a heartbeat for the dashboard.
+    Set-DeployStatus -Step 'Applying the image' -Percent 10
+    Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $applyArgs -OnProgress {
+        param($pct)
+        if ($null -ne $pct) { Set-DeployStatus -Step "Applying the image ($pct %)" -Percent (10 + [int]($pct * 0.6)) }
+        else { Set-DeployStatus }
+    }
     if ($applyFrom -ne $imagePath) { Remove-Item 'W:\_Multicast' -Recurse -Force }
 
     # 3. Inject the OEM driver pack offline.
     if ($driverPack) {
+        Set-DeployStatus -Step 'Injecting drivers' -Percent 72
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Image:W:\', '/Add-Driver', "/Driver:$driverPack", '/Recurse', '/ForceUnsigned:No')
     }
 
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
+    Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
     New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword |
         Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
     Write-DeployLog "Unattend written: name $ComputerName, $($answer.Membership)"
 
     # 5. First boot: applications and FIRSTBOOT tasks run as SYSTEM from SetupComplete.cmd.
+    Set-DeployStatus -Step 'Staging applications' -Percent 82
     New-Item -ItemType Directory -Path 'W:\Deploy\Apps' -Force | Out-Null
     foreach ($app in $apps) {
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
-    Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1') 'W:\Deploy\FirstBoot.ps1'
-    New-FirstBootPlan -Answer $answer -AppDefinitions $apps | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1') 'W:\Deploy\'
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps
+    # The new Windows can keep reporting only to a UNC path (as the computer account), not to WinPE's drive letters.
+    if ($statusTarget -and $statusTarget.Unc) {
+        $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
+    }
+    $plan | ConvertTo-Json -Depth 5 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
 
     # 6. POSTIMAGE tasks, then boot files.
+    Set-DeployStatus -Step 'Running post-image tasks' -Percent 86
     Invoke-Phase -Phase 'POSTIMAGE' -Answer $answer -Root $root
+    Set-DeployStatus -Step 'Writing boot files' -Percent 88
     Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', $firmware)
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'
 }
 catch {
-    Write-DeployLog $_.Exception.Message -Level ERROR
+    $failure = $_.Exception.Message
+    Write-DeployLog $failure -Level ERROR
 }
 finally {
     # Keep the log on the deployed disk and, when available, on the content root for central review.
@@ -213,7 +271,21 @@ finally {
     if ($root -and $hw -and $status -ne 'CANCELLED') {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
-        Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir ("{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status)) -ErrorAction SilentlyContinue
+        $logName = "{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status
+        Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir $logName) -ErrorAction SilentlyContinue
+    }
+    $final = @{ logFile = $logName }
+    switch ($status) {
+        'OK' {
+            if ($plan -and $plan.PSObject.Properties['status']) {
+                # FirstBoot.ps1 takes over from 90 % and marks the deployment finished.
+                Set-DeployStatus -Step 'Waiting for first boot in Windows' -Percent 90 -Phase 'FirstBoot' -Fields $final
+            } else {
+                Set-DeployStatus -Step 'Image applied; applications install at first boot' -Percent 100 -State Succeeded -Fields $final
+            }
+        }
+        'CANCELLED' { Set-DeployStatus -Step 'Cancelled by operator' -State Cancelled -Fields $final }
+        default     { Set-DeployStatus -Message $failure -State Failed -Fields $final }
     }
     # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
     if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {

@@ -11,7 +11,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
                      Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
-                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1
+                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
@@ -57,6 +57,10 @@ and click **Create folders** the first time. Then:
   `boot.wim` to a WDS server (see [PXE with WDS](#pxe-with-wds)).
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
+- **Dashboard**: every PC being deployed, live: computer name, model, IP,
+  answer file, state, a progress bar, the current step, duration and when it was
+  last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
+  See [Deployment dashboard](#deployment-dashboard).
 - **Deployment Logs**: one log per deployed PC, with result and full text.
 
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
@@ -72,6 +76,7 @@ Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
 Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
+Status\        <serial>.json + <serial>.log per PC, for the Dashboard
 ```
 
 ## Answer files
@@ -257,6 +262,37 @@ doesn't flood every port. From the command line:
 `.\src\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream`,
 then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
 `-Action Start`, `-Action Disconnect -ClientId <Id from Monitor>` or `-Action Remove`.
+## Deployment dashboard
+
+Each PC writes `Status\<serial>.json` (and a live copy of its log) at every step:
+checking the answer file, partitioning, applying the image (with DISM's
+percentage, updated every 15 seconds), drivers, settings, applications, boot
+files. The console reads the folder and shows:
+
+| State | Meaning |
+|---|---|
+| Running | Deploying now. |
+| Succeeded | Finished. |
+| Warning | Finished, but something needs a look: no driver pack matched, or an application failed. |
+| Failed | Stopped with an error; the error and the log are shown underneath. |
+| Cancelled | The operator cancelled at the prompt. |
+| Stalled | Running, but nothing heard for 45 minutes: powered off, network lost, hung, or (at first boot) unable to reach the share. |
+
+After WinPE the PC restarts into Windows, and `FirstBoot.ps1` carries on from
+90 % while the applications install, then marks it Succeeded. That part needs
+a UNC path, so it works when the PC deployed from the share (or a status share
+is set), and it writes **as the computer account**: give `Domain Computers`
+modify rights on the `Status` folder. Without that, the PC shows as Stalled
+after first boot even though it finished; its `C:\Windows\Temp\FirstBoot.log`
+has the result. USB deployments write to the stick's `Status` folder, unless
+**Status share** is set on the Deploy Settings tab (for example
+`\\deploy-server\Deploy\Status`), in which case WinPE maps it as `R:` with the
+share account and reports there.
+
+**Remove** takes one PC off the dashboard and **Clear finished** removes all
+succeeded, warning and cancelled PCs; final logs stay in Deployment Logs. A PC
+that is redeployed replaces its earlier entry. PCs with a placeholder serial
+(common on white boxes) are listed by MAC address.
 
 ## Workflow
 

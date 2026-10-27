@@ -16,7 +16,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
 
@@ -205,6 +205,29 @@ BIOS but is not supported there by Microsoft.
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order, applies the options, runs FIRSTBOOT tasks and removes
 `C:\Deploy`.
+
+### Status reporting
+
+`DeployStatus.psm1` is shared by WinPE, first boot and the console. As soon as
+the content root is found, `Deploy-Image.ps1` starts a status record and
+rewrites `Status\<id>.json` (write to `.tmp`, then rename) plus `Status\<id>.log`
+at each step; `<id>` is the BIOS serial, or `MAC-<mac>` for placeholder serials.
+`Resolve-StatusTarget` picks the folder: the content root's `Status`, or
+`reporting.path` from `deploy-settings.json`, reached through the share's `Z:`
+when it lies under the share and mapped as `R:` otherwise. DISM's apply runs
+through `Invoke-NativeWithProgress`, which polls its output every 15 seconds
+for a percentage and doubles as a heartbeat. Reporting never fails a deployment:
+a write error is one warning in the log.
+
+When the status folder has a UNC path, `firstboot.json` carries it and the id,
+WinPE leaves the record Running at 90 %, and `FirstBoot.ps1` resumes it
+(`Resume-DeployStatus`, retried for a minute while the network comes up) and
+finishes it at 100 %. Application failures are recorded as warnings, so the PC
+ends as Warning instead of Succeeded.
+
+The console's Dashboard tab reads the folder every 10 seconds with
+`Get-DeploymentStatus`, which marks a Running record with no update for 45
+minutes as Stalled.
 
 The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through

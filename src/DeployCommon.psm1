@@ -18,6 +18,37 @@ function Invoke-Native {
     if ($LASTEXITCODE -ne 0) { throw "$FilePath exited with code $LASTEXITCODE" }
 }
 
+function Invoke-NativeWithProgress {
+    # Like Invoke-Native for long DISM runs: polls the tool's output every few seconds and calls OnProgress with
+    # the last percentage it printed (or $null), so the dashboard shows progress and a live heartbeat.
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory)][scriptblock]$OnProgress,
+        [int]$IntervalSeconds = 15
+    )
+    Write-DeployLog "> $FilePath $($ArgumentList -join ' ')"
+    $out = Join-Path $env:TEMP ("native-{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    $quoted = @($FilePath) + $ArgumentList | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }
+    # cmd's redirection keeps the file readable while the tool writes to it.
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$($quoted -join ' ') > `"$out`" 2>&1`"" -NoNewWindow -PassThru
+    $null = $p.Handle   # PowerShell 5.1 only keeps ExitCode if the handle was read before exit
+    $last = $null
+    while (-not $p.WaitForExit($IntervalSeconds * 1000)) {
+        $text = try { [IO.File]::ReadAllText($out) } catch { '' }
+        $found = [regex]::Matches($text, '(\d{1,3})(?:[.,]\d+)?%')
+        if ($found.Count) { $last = [int]$found[$found.Count - 1].Groups[1].Value }
+        try { & $OnProgress $last } catch { }
+    }
+    if (Test-Path $out) {
+        # Keep the result lines, not every progress bar redraw.
+        [IO.File]::ReadAllText($out) -split "`n" | ForEach-Object { ($_.TrimEnd("`r") -split "`r")[-1] } | Where-Object { $_.Trim() } |
+            ForEach-Object { Add-Content -Path $script:LogPath -Value "  $_" }
+        Remove-Item $out -Force -ErrorAction SilentlyContinue
+    }
+    if ($p.ExitCode -ne 0) { throw "$FilePath exited with code $($p.ExitCode)" }
+}
+
 function Get-HardwareIdentity {
     # Returns the values the driver catalog can match on.
     $cs   = Get-CimInstance Win32_ComputerSystem
@@ -303,5 +334,5 @@ function Receive-MulticastImage {
     $Destination
 }
 
-Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage
