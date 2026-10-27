@@ -67,6 +67,7 @@
           <RadioButton x:Name="RbVmDisk" GroupName="Ref" Content="A Hyper-V VM on this PC (hands-free, recommended)" FontWeight="SemiBold" Margin="0,6,0,4"/>
           <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
                      Text="You do not run sysprep. The tool takes a checkpoint, starts the VM once so Windows runs the sysprep checks at boot and shuts down, captures the VM's disk with the VM off, and rolls the VM back to the checkpoint. No password or network is needed. Generation 2 VMs only."/>
+          <TextBlock x:Name="TxtVMStatus" Style="{StaticResource Body}" Margin="22,0,0,6" Foreground="#B91C1C" Visibility="Collapsed"/>
           <DockPanel Margin="22,0,0,8">
             <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
             <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
