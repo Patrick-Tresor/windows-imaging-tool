@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DriverPackManifest xmlns="openmanage/cm/dm" baseLocation="downloads.dell.com" baseLocationAccessProtocols="HTTP,HTTPS" dateTime="2026-10-01T05:00:00-05:00" version="2026.10">
+  <DriverPackage dateTime="2026-06-10T10:00:00-05:00" hashMD5="0123456789ABCDEF0123456789ABCDEF" path="FOLDER1/1/Latitude-5440-5540-Win11-A07.exe" releaseID="X1Y2Z" size="1610612736" type="win" vendorVersion="A07">
+    <Name><Display lang="en"><![CDATA[Latitude-5440-5540-Win11-A07.exe]]></Display></Name>
+    <Cryptography><Hash algorithm="SHA256">aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</Hash></Cryptography>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="Windows11" osArch="x64" osVendor="Microsoft" majorVersion="10" minorVersion="0"><Display lang="en"><![CDATA[Windows 11]]></Display></OperatingSystem>
+    </SupportedOperatingSystems>
+    <SupportedSystems>
+      <Brand key="3" prefix="LAT"><Display lang="en"><![CDATA[Latitude]]></Display>
+        <Model systemID="0B0B" name="5440"><Display lang="en"><![CDATA[5440]]></Display></Model>
+        <Model systemID="0C1D" name="5440"><Display lang="en"><![CDATA[5440]]></Display></Model>
+        <Model systemID="0B0C" name="5540"><Display lang="en"><![CDATA[5540]]></Display></Model>
+      </Brand>
+    </SupportedSystems>
+  </DriverPackage>
+  <DriverPackage dateTime="2025-01-10T10:00:00-05:00" hashMD5="FEDCBA9876543210FEDCBA9876543210" path="FOLDER2/1/5440-win10-A03-OLD.CAB" releaseID="OLD01" size="1073741824" type="win" vendorVersion="A03">
+    <SupportedOperatingSystems><OperatingSystem osCode="Windows10" osArch="x64"/></SupportedOperatingSystems>
+    <SupportedSystems><Brand prefix="LAT"><Display lang="en">Latitude</Display><Model systemID="0B0B" name="5440"><Display lang="en">5440</Display></Model></Brand></SupportedSystems>
+  </DriverPackage>
+  <DriverPackage dateTime="2026-02-01T10:00:00-05:00" hashMD5="11111111111111111111111111111111" path="FOLDER3/1/WinPE11.0-Drivers-A02.CAB" releaseID="PE001" size="300000000" type="winpe" vendorVersion="A02">
+    <SupportedOperatingSystems><OperatingSystem osCode="Windows11" osArch="x64"/></SupportedOperatingSystems>
+    <SupportedSystems><Brand prefix="LAT"><Display lang="en">Latitude</Display><Model systemID="0B0B" name="5440"><Display lang="en">5440</Display></Model></Brand></SupportedSystems>
+  </DriverPackage>
+</DriverPackManifest>

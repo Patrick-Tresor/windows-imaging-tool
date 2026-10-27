@@ -1,0 +1,18 @@
+{
+  "_comment": "Paths are relative to <ContentRoot>\\Drivers. Matched most-specific first: sku, model, modelPattern, then the maker fallback.",
+  "entries": [
+    { "maker": "Dell",   "sku": "0B0B",           "path": "Dell\\Latitude 5440" },
+    { "maker": "Dell",   "model": "Latitude 5440", "path": "Dell\\Latitude 5440" },
+    { "maker": "Dell",   "modelPattern": "OptiPlex 70*0*", "path": "Dell\\OptiPlex 7000 Series" },
+    { "maker": "HP",     "sku": "8A86",           "path": "HP\\EliteBook 840 G9" },
+    { "maker": "HP",     "model": "HP EliteBook 840 14 inch G9 Notebook PC", "path": "HP\\EliteBook 840 G9" },
+    { "maker": "Lenovo", "machineType": "21HD",   "path": "Lenovo\\ThinkPad T14 Gen 4" },
+    { "maker": "Lenovo", "model": "ThinkPad T14 Gen 4", "path": "Lenovo\\ThinkPad T14 Gen 4" },
+    { "maker": "Microsoft Corporation", "model": "Virtual Machine", "path": null }
+  ],
+  "fallbacks": {
+    "Dell":   "Dell\\_Generic WinPE-Storage-Net",
+    "HP":     "HP\\_Generic WinPE-Storage-Net",
+    "Lenovo": "Lenovo\\_Generic WinPE-Storage-Net"
+  }
+}

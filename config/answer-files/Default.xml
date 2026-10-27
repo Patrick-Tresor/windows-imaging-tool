@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Answer file: everything one deployment needs, like a SmartDeploy deploy wizard answer file.
+  Paths are relative to the content root unless absolute (Y:\..., \\server\share\...).
+  Passwords never go in this file: each *PasswordFile points to a text file under the content root
+  (for example config\secrets\join.txt). Anyone who can read the share can read those files, so use
+  a join account that can only join computers to one OU.
+-->
+<deployment version="1.0">
+  <!-- Interactive: pick the answer file and type YES. Unattended: start after unattendDelay seconds unless a key is pressed. -->
+  <mode>Interactive</mode>
+  <unattendDelay>10</unattendDelay>
+
+  <image>
+    <file>Images\Win11-Enterprise.wim</file>
+    <index>1</index>
+    <!-- Windows 11 images only: check TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the
+         disk is wiped. Block: stop on a PC that fails. Warn: show the problems and carry on. Off: skip. -->
+    <windows11Check>Block</windows11Check>
+    <!-- Empty: the current image. A version (e.g. 20261022-1530) pins this answer file to an earlier copy
+         kept in Images\Previous\, which the console's Images > Versions... lists. -->
+    <version></version>
+  </image>
+
+  <disk>
+    <number>0</number>
+    <!-- Recreate: wipe the disk and create new partitions. GPT (EFI, MSR, Windows, Recovery) when WinPE
+         booted in UEFI mode, MBR (System, Windows, Recovery) when it booted in legacy BIOS mode.
+         (A Local userData store keeps the partitions instead; see userData.) -->
+    <option>Recreate</option>
+  </disk>
+
+  <!-- User data migration with USMT: back up the user profiles of the Windows already on the disk, in WinPE,
+       before it is erased, and restore them on first boot after the applications. A PC with no Windows on the
+       disk is deployed without user data. A BitLocker-locked disk stops the deploy before anything is erased.
+       store Local: hard links on the old Windows partition. Fast and nothing is copied, but the partitions
+         are kept and only the Windows partition is emptied (GPT disks, not BitLocker encrypted).
+       store Share: a compressed copy in storePath\<BIOS serial> (relative to the content root, or a path on
+         an extra share), then the disk is recreated. The copy stays there as a backup; delete it when done.
+         encrypt uses the key in keyFile (a file under the content root, like the passwords).
+       rules: USMT's MigDocs.xml (user files), MigApp.xml (application settings), MigUser.xml, or your own
+         rule files relative to the content root. The same rules are used for the backup and the restore.
+       excludeUsers: profiles to skip, as DOMAIN\user with * wildcards, for example *\Administrator.
+       createLocalAccounts: recreate local accounts that have profiles. They are created disabled, without a
+         password; domain accounts need nothing.
+       keepStore: keep C:\UserState on the PC after a successful restore. -->
+  <userData>
+    <migrate>false</migrate>
+    <store>Local</store>
+    <storePath>UserState</storePath>
+    <rules>
+      <rule>MigDocs.xml</rule>
+      <rule>MigApp.xml</rule>
+    </rules>
+    <excludeUsers>
+      <!-- <user>*\Administrator</user> -->
+    </excludeUsers>
+    <createLocalAccounts>false</createLocalAccounts>
+    <encrypt>false</encrypt>
+    <keyFile>config\secrets\usmt.txt</keyFile>
+    <keepStore>false</keepStore>
+  </userData>
+
+  <!-- Driver library root (SmartDeploy: Platform Packs). Matching uses config\driver-catalog.json. -->
+  <drivers>
+    <root>Drivers</root>
+  </drivers>
+
+  <!-- Installed in this order at first boot, as SYSTEM. Each is a folder under the location with an app.json. -->
+  <applications location="Applications">
+    <!-- <application order="1">Dell-Command-Update</application> -->
+    <!-- <application order="2">Microsoft-Teams</application> -->
+  </applications>
+
+  <!-- Leave empty to use the key or activation already in the image (KMS, digital licence). -->
+  <productKey></productKey>
+
+  <userInformation>
+    <fullName>IT Department</fullName>
+    <organization>Contoso</organization>
+  </userInformation>
+
+  <!-- Time zone IDs: tzutil /l. Locales: language tags such as en-US, fr-CA. -->
+  <regional>
+    <timeZone>Eastern Standard Time</timeZone>
+    <inputLocale>en-US</inputLocale>
+    <systemLocale>en-US</systemLocale>
+    <uiLanguage>en-US</uiLanguage>
+    <userLocale>en-US</userLocale>
+  </regional>
+
+  <identification>
+    <!-- WMI: prefix + the query's value. Custom: prefix + scheme, # = random digit, {SERIAL} = BIOS serial.
+         Prompt: ask in interactive mode, WMI otherwise. Names are cut to 15 characters. -->
+    <naming mode="WMI">
+      <wmiQuery>SELECT SerialNumber FROM Win32_SystemEnclosure</wmiQuery>
+      <customScheme>A########</customScheme>
+      <prefix></prefix>
+    </naming>
+  </identification>
+
+  <network>
+    <!-- Domain or Workgroup -->
+    <membership>Workgroup</membership>
+    <workgroup>WORKGROUP</workgroup>
+    <domain>corp.example.com</domain>
+    <organizationalUnit></organizationalUnit>
+    <joinCredentials>
+      <username>svc-join</username>
+      <domain>CORP</domain>
+      <passwordFile>config\secrets\join.txt</passwordFile>
+    </joinCredentials>
+  </network>
+
+  <options>
+    <disableSystemRestore>true</disableSystemRestore>
+    <enableAdministrator>false</enableAdministrator>
+    <administratorPasswordFile>config\secrets\admin.txt</administratorPasswordFile>
+  </options>
+
+  <!-- POSTIMAGE: in WinPE after the image and drivers are applied (%OSDRIVE% = the new Windows drive,
+       %DEPLOYROOT% = content root). FIRSTBOOT: on the PC as SYSTEM after the applications.
+       FIRSTLOGON: when the first user logs on. -->
+  <tasks>
+    <!-- <task phase="POSTIMAGE">copy %DEPLOYROOT%\Scripts\*.ps1 %OSDRIVE%\Temp\</task> -->
+    <!-- <task phase="FIRSTBOOT">powershell -ExecutionPolicy Bypass -File C:\Temp\Setup.ps1</task> -->
+    <!-- <task phase="FIRSTLOGON">powershell -ExecutionPolicy Bypass -File C:\Temp\User.ps1</task> -->
+  </tasks>
+
+  <!-- Extra shares mapped in WinPE before the deploy, for images or applications kept elsewhere. -->
+  <shares>
+    <!-- <share>
+      <localName>Y:</localName>
+      <remoteName>\\server\Apps</remoteName>
+      <username>svc-deploy</username>
+      <domain>CORP</domain>
+      <passwordFile>config\secrets\share.txt</passwordFile>
+    </share> -->
+  </shares>
+
+  <!-- BitLocker on the OS drive, turned on at first boot as SYSTEM after the applications and FIRSTBOOT tasks.
+       The recovery password is backed up first; with requireBackup, BitLocker stays off if no backup worked.
+       protector: Tpm, or TpmPin (startup PIN read from pinFile). encryptionMethod: XtsAes128, XtsAes256, Aes128, Aes256.
+       backupToAD: store the recovery password on the computer object (domain only).
+       recoveryKeyFolder: \\server\share folder that Domain Computers can write to; one text file per PC. -->
+  <bitlocker>
+    <enabled>false</enabled>
+    <encryptionMethod>XtsAes256</encryptionMethod>
+    <usedSpaceOnly>true</usedSpaceOnly>
+    <protector>Tpm</protector>
+    <pinFile>config\secrets\bitlocker-pin.txt</pinFile>
+    <backupToAD>true</backupToAD>
+    <recoveryKeyFolder></recoveryKeyFolder>
+    <requireBackup>true</requireBackup>
+  </bitlocker>
+
+  <!-- BIOS/UEFI settings, applied in WinPE before the disk is wiped. Only the settings for this PC's maker are used.
+       Dell: Dell Command | Configure (copy its WinPE x64 folder to <toolsRoot>\Dell); names as in cctk (SecureBoot).
+       HP and Lenovo: the firmware's WMI interface, no tool; names as the BIOS shows them.
+       passwordFile: the current BIOS admin / supervisor password, if one is set. Leave empty if none.
+       stopOnError: true stops the deployment (before the disk is wiped) when a setting fails. -->
+  <bios>
+    <enabled>false</enabled>
+    <passwordFile></passwordFile>
+    <toolsRoot>Tools\BIOS</toolsRoot>
+    <stopOnError>false</stopOnError>
+    <setting maker="Dell" name="SecureBoot">Enabled</setting>
+    <setting maker="Dell" name="TpmSecurity">Enabled</setting>
+    <setting maker="HP" name="Secure Boot">Enable</setting>
+    <setting maker="HP" name="TPM State">Enable</setting>
+    <setting maker="Lenovo" name="SecureBoot">Enable</setting>
+    <setting maker="Lenovo" name="SecurityChip">Enable</setting>
+  </bios>
+
+  <completion>
+    <reboot>true</reboot>
+    <shutdown>false</shutdown>
+  </completion>
+</deployment>

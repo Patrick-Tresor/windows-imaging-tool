@@ -1,0 +1,45 @@
+{
+  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml. The wds section is read only by the console and Publish-WdsBootImage.ps1. The multicast section is read by Deploy-Image.ps1 (from the content root copy) and Set-WdsMulticast.ps1.",
+  "share": {
+    "path": "\\\\deploy-server\\Deploy",
+    "user": "DOMAIN\\svc-deploy",
+    "passwordFile": "config\\share.cred"
+  },
+  "defaultAnswerFile": "Default",
+  "wds": {
+    "server": "",
+    "imageName": "Imaging Tool (x64)",
+    "setup": false,
+    "remoteInstallPath": "D:\\RemoteInstall",
+    "dhcpOnServer": false,
+    "noPrompt": false
+  },
+  "multicast": {
+    "enabled": false,
+    "server": "",
+    "namespace": "ImagingTool",
+    "contentPath": "",
+    "type": "AutoCast",
+    "clients": 0,
+    "startTime": "",
+    "speedPolicy": "None",
+    "thresholdKbps": 1024,
+    "fallback": true
+  },
+  "reporting": {
+    "_comment": "Optional. Where PCs report progress for the console's Dashboard. Empty = <content root>\\Status. Set a UNC path (e.g. \\\\deploy-server\\Deploy\\Status) so USB deployments report to a server too.",
+    "path": ""
+  },
+  "checks": {
+    "_comment": "Post-deploy checks at the end of first boot, reported to the Dashboard. bitLocker: Auto (required when the answer file turns BitLocker on), Required, Report or Off. deviceErrors: Required, Report or Off. ignoreDevices: wildcards for device names or ids to skip.",
+    "enabled": true,
+    "bitLocker": "Auto",
+    "deviceErrors": "Required",
+    "ignoreDevices": []
+  },
+  "remote": {
+    "_comment": "Remote reimaging. wakePort: UDP port for Wake-on-LAN magic packets. wdsServer: the WDS server that PCs PXE boot from, for the no-F12 option (empty = the wds.server setting, or this PC).",
+    "wakePort": 9,
+    "wdsServer": ""
+  }
+}
