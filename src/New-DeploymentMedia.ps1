@@ -3,6 +3,7 @@
     Builds the WinPE boot image with the deploy tool inside, then a USB stick, an ISO, or a boot.wim for PXE.
 .DESCRIPTION
     Run as admin on a workstation with the Windows ADK and the WinPE add-on installed.
+    All three targets boot both UEFI and legacy BIOS PCs.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare
 .EXAMPLE
@@ -42,7 +43,6 @@ if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
 if ($BootVM) {
     # Check the VM before spending minutes on the build.
     $vm = Get-VM -Name $BootVM
-    if ($vm.Generation -ne 2) { throw "VM $BootVM is generation $($vm.Generation). Only generation 2 (UEFI) VMs are supported." }
     if ($vm.State -ne 'Off') { throw "VM $BootVM is $($vm.State). Let sysprep shut it down first." }
 }
 
@@ -89,7 +89,9 @@ switch ($Target) {
         $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
         if (Test-Path $iso) { Remove-Item $iso }
         # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
+        # UEFI: the no-prompt EFI boot image. BIOS: etfsboot.com only prompts when boot\bootfix.bin exists.
         $efi = if ($CaptureConfig) { "$adk\Deployment Tools\amd64\Oscdimg\efisys_noprompt.bin" } else { "$WorkDir\fwfiles\efisys.bin" }
+        if ($CaptureConfig) { Remove-Item "$WorkDir\media\boot\bootfix.bin" -ErrorAction SilentlyContinue }
         $bootData = "2#p0,e,b`"$WorkDir\fwfiles\etfsboot.com`"#pEF,e,b`"$efi`""
         & cmd /c "oscdimg -m -o -u2 -udfver102 -bootdata:$bootData `"$WorkDir\media`" `"$iso`""
         if ($LASTEXITCODE -ne 0) { throw 'oscdimg failed' }
@@ -99,7 +101,9 @@ switch ($Target) {
             $dvd = Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1
             if ($dvd) { Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $iso }
             else { $dvd = Add-VMDvdDrive -VMName $BootVM -Path $iso -Passthru }
-            Set-VMFirmware -VMName $BootVM -FirstBootDevice (Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1)
+            # Generation 2 (UEFI) picks a boot device; generation 1 (BIOS) orders device types.
+            if ($vm.Generation -eq 2) { Set-VMFirmware -VMName $BootVM -FirstBootDevice (Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1) }
+            else { Set-VMBios -VMName $BootVM -StartupOrder @('CD', 'IDE', 'LegacyNetworkAdapter', 'Floppy') }
             Start-VM -Name $BootVM
             Write-Host "Started $BootVM from $iso. Watch it with: vmconnect localhost `"$BootVM`""
 
@@ -108,8 +112,11 @@ switch ($Target) {
             Write-Host 'Waiting for the capture to finish and the VM to shut down...'
             while ((Get-VM -Name $BootVM).State -ne 'Off') { Start-Sleep -Seconds 30 }
             Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $null
-            $disk = Get-VMHardDiskDrive -VMName $BootVM | Select-Object -First 1
-            if ($disk) { Set-VMFirmware -VMName $BootVM -FirstBootDevice $disk }
+            if ($vm.Generation -eq 2) {
+                $disk = Get-VMHardDiskDrive -VMName $BootVM | Select-Object -First 1
+                if ($disk) { Set-VMFirmware -VMName $BootVM -FirstBootDevice $disk }
+            }
+            else { Set-VMBios -VMName $BootVM -StartupOrder @('IDE', 'CD', 'LegacyNetworkAdapter', 'Floppy') }
             Write-Host "$BootVM is off, the ISO is ejected and it boots from its disk again. Check the Logs folder for the capture result."
         }
     }
@@ -119,7 +126,7 @@ switch ($Target) {
         if ($disk.BusType -ne 'USB') { throw "Disk $UsbDiskNumber is $($disk.BusType), not USB. Refusing to erase it." }
         if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
 
-        # Two partitions: FAT32 to boot UEFI, NTFS for images larger than 4 GB.
+        # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
         Clear-Disk -Number $UsbDiskNumber -RemoveData -RemoveOEM -Confirm:$false
         Initialize-Disk -Number $UsbDiskNumber -PartitionStyle MBR
         $boot = New-Partition -DiskNumber $UsbDiskNumber -Size 2GB -IsActive -AssignDriveLetter
@@ -130,6 +137,10 @@ switch ($Target) {
         $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
         $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
         robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL | Out-Null
+        # Legacy BIOS boot code in the MBR and the partition boot sector, as MakeWinPEMedia writes it.
+        $bootsect = "$adk\Deployment Tools\amd64\BCDBoot\bootsect.exe"
+        & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
         # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
         New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
         if ($ContentSource) {
