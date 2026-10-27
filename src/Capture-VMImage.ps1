@@ -17,7 +17,9 @@
     a temporary VHD with qemu-img, removes the agent's leftovers from that copy, captures it, and reverts the VM to
     the snapshot. No password, network or capture ISO is needed. Needs vmrun.exe (part of VMware Workstation Pro)
     and qemu-img.exe on this PC, and free space for a copy of the whole disk. Fully encrypted VMs are not
-    supported; a VM whose encryption only covers its TPM is read from its disk files.
+    supported; a VM whose encryption only covers its TPM is read from its disk files. vmrun can only open an
+    encrypted VM (every VM with a virtual TPM) with its encryption password: give it with -VmxPassword, or the
+    script asks for it.
 
     -DiskPath (any VM software): the VM must already be shut down and its Windows already sysprepped. The file
     can be a VHD or VHDX, which is mounted directly, or a VMDK, VDI, qcow2 or raw disk, which is converted to a
@@ -43,6 +45,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
     [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
     [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
+    [Parameter(ParameterSetName = 'VMware')][securestring]$VmxPassword,   # the VM's encryption password, when it is encrypted
     [Parameter(Mandatory)][string]$Name,
     [Parameter(Mandatory)][string]$ContentRoot,
     [string]$Description,
@@ -202,9 +205,16 @@ function Invoke-Vmrun {
     # Runs vmrun on the VM at $VmxPath (or on none with -NoVmx) and returns its output lines.
     param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @(), [switch]$NoVmx, [switch]$AllowFailure)
     $vmx = if ($NoVmx) { $null } else { $VmxPath }
-    $argList = New-VmrunArguments -Command $Command -VmxPath $vmx -Arguments $Arguments
+    $argList = New-VmrunArguments -Command $Command -VmxPath $vmx -Arguments $Arguments -Password $(if ($vmx) { $script:VmrunPassword })
     $out = @(& $script:Vmrun @argList 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) { throw "vmrun $Command failed: $(($out -join ' ').Trim())" }
+    if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) {
+        if (Test-VmrunWrongPassword $out) {
+            throw ("VMware could not open the VM: its encryption password is missing or wrong (vmrun: $(($out -join ' ').Trim())). " +
+                'Windows 11 VMs are encrypted for their virtual TPM. Use the password you typed when you created the VM or turned on its TPM. ' +
+                'If Workstation never asked you for one, it made one up and keeps it to itself; see the README for what to do then.')
+        }
+        throw "vmrun $Command failed: $(($out -join ' ').Trim())"
+    }
     $out
 }
 
@@ -327,6 +337,19 @@ try {
         $VmxPath = (Resolve-Path -LiteralPath $VmxPath).ProviderPath
         $vmLabel = [IO.Path]::GetFileNameWithoutExtension($VmxPath)
         if (Test-VMwareRunning) { throw "$vmLabel is running. Shut it down first; this script starts it itself." }
+        $script:VmrunPassword = $null
+        if (Test-VmxEncrypted -VmxPath $VmxPath) {
+            if (-not $VmxPassword) {
+                if ($NoPrompt) { Write-Host "$vmLabel is encrypted (Windows 11 VMs are, for their virtual TPM), so VMware needs its encryption password." }
+                $VmxPassword = Read-Host "Encryption password of $vmLabel" -AsSecureString
+            }
+            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($VmxPassword)
+            try { $script:VmrunPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            # Opens the VM without changing it, so a wrong password stops here, before the snapshot.
+            Invoke-Vmrun listSnapshots | Out-Null
+            Write-DeployLog "The encryption password of $vmLabel works."
+        }
         if (-not $NoPrompt -and (Read-Host "Type YES to sysprep and capture $vmLabel (it is reverted to a snapshot afterwards)") -ne 'YES') {
             Write-DeployLog 'Cancelled by operator' -Level WARN
             $status = 'CANCELLED'

@@ -20,6 +20,10 @@ try {
     Assert-Equal ((New-VmrunArguments -Command snapshot -VmxPath 'D:\VMs\Staff\Staff.vmx' -Arguments 'Before capture') -join '|') `
         '-T|ws|snapshot|D:\VMs\Staff\Staff.vmx|Before capture' 'vmrun arguments keep a name with spaces as one argument'
     Assert-Equal ((New-VmrunArguments -Command list) -join '|') '-T|ws|list' 'vmrun list takes no VM'
+    Assert-Equal ((New-VmrunArguments -Command start -VmxPath 'D:\VMs\Staff\Staff.vmx' -Arguments 'nogui' -Password 'p w') -join '|') `
+        '-T|ws|-vp|p w|start|D:\VMs\Staff\Staff.vmx|nogui' 'the encryption password goes before the command'
+    Assert-Equal (Test-VmrunWrongPassword @('Error: Cannot open VM: C:\Users\Pat\Documents\Test\Clone of Staff.vmx, Incorrect password')) $true 'a wrong encryption password is recognized'
+    Assert-Equal (Test-VmrunWrongPassword @('Error: The virtual machine is not powered on')) $false 'other vmrun errors are not password errors'
 
     $vmx = Join-Path $root 'Staff.vmx'
     $listed = ConvertFrom-VmrunList @('Total running VMs: 2', $vmx.ToUpperInvariant(), 'E:\Other\Other.vmx', '')
@@ -49,6 +53,8 @@ try {
     $encrypted = Join-Path $root 'Encrypted.vmx'
     Set-Content -LiteralPath $encrypted -Encoding ASCII -Value @('.encoding = "UTF-8"', 'encryption.keySafe = "vmware:key/list/(pair/(phrase/abc))"', 'encryption.data = "AAAA"')
     Assert-Equal ($null -eq (Get-VmxDiskPaths -VmxPath $encrypted)) $true 'an encrypted .vmx cannot be read for its disks'
+    Assert-Equal (Test-VmxEncrypted -VmxPath $encrypted) $true 'an encrypted .vmx is recognized'
+    Assert-Equal (Test-VmxEncrypted -VmxPath $vmx) $false 'a plain .vmx is not encrypted'
 
     # Snapshot chains: Staff.vmdk (split disk: text descriptor + extent) <- Staff-000001.vmdk (single file, descriptor
     # inside) <- Staff-000002.vmdk (text descriptor naming its parent by full path).
