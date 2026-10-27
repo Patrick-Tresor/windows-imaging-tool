@@ -512,24 +512,25 @@ What the PCs need:
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
-2. **Build the reference** in a Hyper-V VM (generation 2 is best; generation 1 works too): install Windows, apps
-   and updates, no OEM drivers. Take a checkpoint.
+2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
+   from a capture ISO): install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
-   1. Run the prepare command it shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
-      Store apps that break sysprep, then runs sysprep and shuts down.
-   2. Name the image and choose compression.
-   3. Choose the reference machine. For a **Hyper-V VM, captured with the VM off**
-      the wizard takes a checkpoint, has Windows run `Prepare-Reference.ps1` at boot
-      if the VM is not sysprepped yet (sysprep shuts it down), reads the VM's disk on
-      the admin PC (`src\Capture-VMImage.ps1`) with the VM off, and then rolls the VM
-      back to the checkpoint. No password is needed, and the VM needs no network
-      (generation 2 VMs only; a generation 1 VM is booted from a capture ISO). For
-      a **Hyper-V VM booted from a capture ISO** the wizard builds the ISO, boots the
-      VM from it, and ejects it when the capture finishes. Use an **ISO** for other
-      VMs, or a **USB stick** for a physical PC.
-   4. Review and click Build and start.
-   The image is saved to the share's `Images` folder, or to the USB stick, and a
+   1. Choose the reference machine. **A Hyper-V VM on this PC** is the default and is
+      hands-free: you do not run sysprep. The wizard offers to shut the VM down if it is
+      running, takes a checkpoint, has Windows run `Prepare-Reference.ps1` at boot if the
+      VM is not sysprepped yet (sysprep shuts it down), reads the VM's disk on the admin
+      PC (`src\Capture-VMImage.ps1`) with the VM off, and then rolls the VM back to the
+      checkpoint. No password is needed, and the VM needs no network (generation 2 VMs
+      only). The other choices are a **Hyper-V VM booted from a capture ISO** (the wizard
+      builds the ISO, boots the VM from it, and ejects it when the capture finishes), an
+      **ISO** for other VMs, or a **USB stick** for a physical PC.
+   2. For those other choices only, run the prepare command the wizard shows on the
+      reference machine (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot,
+      BitLocker and Store apps that break sysprep, then runs sysprep and shuts down.
+   3. Name the image and choose compression.
+   4. Review and click Start (hands-free) or Build and start.
+   The image is saved to the content root's `Images` folder (hands-free), the share's
+   `Images` folder, or the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
