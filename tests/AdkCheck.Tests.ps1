@@ -28,7 +28,7 @@ try {
     Assert-Equal ($s.Problems[1] -like '*Windows PE add-on*separate download*') $true 'the WinPE problem says it is a separate download'
 
     # Deployment Tools only.
-    foreach ($f in 'DandISetEnv.bat', 'amd64\Oscdimg\oscdimg.exe', 'amd64\Oscdimg\efisys_noprompt.bin') { New-FakeFile (Join-Path $adk 'Deployment Tools') $f }
+    foreach ($f in 'DandISetEnv.bat', 'amd64\Oscdimg\oscdimg.exe', 'amd64\Oscdimg\etfsboot.com', 'amd64\Oscdimg\efisys.bin', 'amd64\Oscdimg\efisys_noprompt.bin') { New-FakeFile (Join-Path $adk 'Deployment Tools') $f }
     $s = Get-AdkStatus -AdkRoot $adk -Versions $same
     Assert-Equal $s.Problems.Count 1 'with Deployment Tools, only the WinPE add-on is missing'
     Assert-Equal ($s.Problems[0] -like '*Windows PE add-on*not installed*') $true 'the missing add-on is named'
@@ -52,9 +52,32 @@ try {
     Assert-Equal $s.Ready $true 'mismatched versions can still build'
     Assert-Equal ($s.Warnings[0] -like '*different versions*') $true 'mismatched versions are warned about'
 
+    # ISO boot files: from the ADK's Oscdimg folder, since ADK 10.1.26100 copype makes no fwfiles folder.
+    $oscdimg = Join-Path (Join-Path (Join-Path $adk 'Deployment Tools') 'amd64') 'Oscdimg'
+    $work = Join-Path $base 'WinPE_Build'
+    New-Item -ItemType Directory -Path (Join-Path $work 'media') -Force | Out-Null
+    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work
+    Assert-Equal $b.BiosBoot (Join-Path $oscdimg 'etfsboot.com') 'the BIOS boot file comes from the ADK without fwfiles'
+    Assert-Equal $b.UefiBoot (Join-Path $oscdimg 'efisys.bin') 'the UEFI boot file comes from the ADK without fwfiles'
+    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work -NoPrompt
+    Assert-Equal $b.UefiBoot (Join-Path $oscdimg 'efisys_noprompt.bin') 'capture media uses the no-prompt UEFI boot file'
+
+    # An ADK without the files falls back to an older copype's fwfiles folder.
+    Remove-Item (Join-Path $oscdimg 'etfsboot.com'), (Join-Path $oscdimg 'efisys.bin')
+    New-FakeFile $work 'fwfiles\etfsboot.com'
+    New-FakeFile $work 'fwfiles\efisys.bin'
+    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work
+    Assert-Equal $b.BiosBoot (Join-Path (Join-Path $work 'fwfiles') 'etfsboot.com') 'the BIOS boot file falls back to fwfiles'
+    Assert-Equal $b.UefiBoot (Join-Path (Join-Path $work 'fwfiles') 'efisys.bin') 'the UEFI boot file falls back to fwfiles'
+
+    Remove-Item (Join-Path $work 'fwfiles') -Recurse -Force
+    $message = ''
+    try { Get-IsoBootFiles -AdkRoot $adk -WorkDir $work | Out-Null } catch { $message = $_.Exception.Message }
+    Assert-Equal ($message -like "*etfsboot.com, efisys.bin were not found*$oscdimg*fwfiles*Deployment Tools*") $true 'missing boot files name the file and the folders searched'
+
     Remove-Item (Join-Path $adk 'Deployment Tools/amd64') -Recurse -Force
     $s = Get-AdkStatus -AdkRoot $adk -Versions $same
-    Assert-Equal ($s.Problems[0] -like '*missing parts of Deployment Tools (amd64\Oscdimg\oscdimg.exe, amd64\Oscdimg\efisys_noprompt.bin)*') $true 'missing oscdimg is reported'
+    Assert-Equal ($s.Problems[0] -like '*missing parts of Deployment Tools (amd64\Oscdimg\oscdimg.exe, amd64\Oscdimg\etfsboot.com, amd64\Oscdimg\efisys.bin, amd64\Oscdimg\efisys_noprompt.bin)*') $true 'missing oscdimg and boot files are reported'
 
     # Off Windows there is no registry; the check still answers instead of throwing.
     $s = Get-AdkStatus
