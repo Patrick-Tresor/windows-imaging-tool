@@ -1,0 +1,81 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Download Driver Packs" Width="980" Height="640" MinWidth="760" MinHeight="420"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="8,0,0,0"/>
+      <Setter Property="MinWidth" Value="90"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False"/>
+      <Setter Property="HeadersVisibility" Value="Column"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
+      <Setter Property="RowHeight" Value="26"/>
+      <Setter Property="CanUserAddRows" Value="False"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel Margin="16">
+    <StackPanel DockPanel.Dock="Top">
+      <TextBlock FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" Text="Download driver packs from the vendor"/>
+      <TextBlock Foreground="#5B6170" TextWrapping="Wrap" Margin="0,0,0,12"
+                 Text="Lists the newest enterprise driver pack for every model in the Dell, HP or Lenovo catalog. Tick the models you deploy, then Download. Each pack is checked (hash and vendor signature), extracted to Drivers\Maker\Model and matched by its SKUs or machine types and model name. Packs are 0.5 to 3 GB each."/>
+      <DockPanel Margin="0,0,0,10">
+        <Label Content="Maker"/>
+        <ComboBox x:Name="CmbVendor" Width="100" SelectedIndex="0">
+          <ComboBoxItem Content="Dell"/><ComboBoxItem Content="HP"/><ComboBoxItem Content="Lenovo"/>
+        </ComboBox>
+        <Label Content="Windows" Margin="12,0,0,0"/>
+        <ComboBox x:Name="CmbOs" Width="110" SelectedIndex="0">
+          <ComboBoxItem Content="Windows 11"/><ComboBoxItem Content="Windows 10"/>
+        </ComboBox>
+        <Button x:Name="BtnReload" DockPanel.Dock="Right" Content="Refresh catalog" ToolTip="Download the vendor's catalog again (it is cached for a day)"/>
+        <Label Content="Search" Margin="12,0,0,0"/>
+        <TextBox x:Name="TxtSearch" ToolTip="Part of a model name, a SKU (Dell, HP) or a machine type (Lenovo)"/>
+      </DockPanel>
+    </StackPanel>
+
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+      <Button x:Name="BtnClose" DockPanel.Dock="Right" Content="Close"/>
+      <Button x:Name="BtnDownload" DockPanel.Dock="Right" Content="Download" Style="{StaticResource Primary}"/>
+      <CheckBox x:Name="ChkKeep" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="0,0,8,0" Content="Keep downloaded files"/>
+      <Button x:Name="BtnSelectUpdates" Content="Select updates" Margin="0" ToolTip="Tick every model in the library that has a newer pack"/>
+      <Button x:Name="BtnClearSelection" Content="Clear"/>
+      <TextBlock x:Name="TxtSelection" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#5B6170"/>
+    </DockPanel>
+
+    <DataGrid x:Name="GridPacks" SelectionMode="Extended">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="" Width="34">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="2*" IsReadOnly="True"/>
+        <DataGridTextColumn Header="SKUs / machine types" Binding="{Binding Ids}" Width="*" IsReadOnly="True"/>
+        <DataGridTextColumn Header="Release" Binding="{Binding Release}" Width="65" IsReadOnly="True"/>
+        <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80" IsReadOnly="True"/>
+        <DataGridTextColumn Header="Released" Binding="{Binding Released}" Width="85" IsReadOnly="True"/>
+        <DataGridTextColumn Header="Size (MB)" Binding="{Binding SizeMB}" Width="70" IsReadOnly="True"/>
+        <DataGridTextColumn Header="In library" Binding="{Binding Installed}" Width="*" IsReadOnly="True"/>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</Window>

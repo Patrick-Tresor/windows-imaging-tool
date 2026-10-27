@@ -23,10 +23,12 @@ Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
 . (Join-Path $PSScriptRoot 'UpdateImage.ps1')
+. (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -365,6 +367,12 @@ $ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
 
 $ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
 $ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
+$ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    if (Show-DriverDownloader -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
+        Set-Status 'Driver pack download started in a separate window. Click Refresh when it finishes.'
+    }
+} })
 
 $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
     $row = $ui.GridDrivers.SelectedItem
