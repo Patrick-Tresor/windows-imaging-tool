@@ -30,6 +30,7 @@ Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
+Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')

@@ -149,7 +149,7 @@ To skip the F12 prompt only for these PCs, the PC is prestaged in WDS with
 
 ## Why the golden image is hardware-independent
 
-Build the reference image in a **VM** (Hyper-V), not on real hardware, so it
+Build the reference image in a **VM** (Hyper-V or VMware Workstation), not on real hardware, so it
 contains no OEM drivers. Run `sysprep /generalize /oobe /shutdown` before
 capture. All hardware specifics arrive at deploy time from the driver library.
 This is the same idea SmartDeploy's "Platform Packs" use.

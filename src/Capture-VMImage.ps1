@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Captures a reference VM's disk to a WIM on the admin PC. Hyper-V can be fully hands-free; other VM software takes a shut-down disk file.
+    Captures a reference VM's disk to a WIM on the admin PC. Hyper-V and VMware Workstation VMs can be fully hands-free; other VM software takes a shut-down disk file.
 .DESCRIPTION
     Runs on the admin PC (elevated, with DISM). Two ways to give it the disk:
 
@@ -9,6 +9,15 @@
     next boot, and sysprep shuts the VM down), starts the VM and waits for it to shut down, removes the boot
     command again, and captures the disk with the VM off. Afterwards it rolls the VM back to the checkpoint.
     A VM whose Windows is already sysprepped is not started.
+
+    -VmxPath (VMware Workstation Pro, hands-free): the VM must be shut down, not sysprepped yet, and have VMware
+    Tools and the capture agent installed (run VMwareCaptureAgent.ps1 -Install in it once). The script takes a
+    snapshot, starts the VM with vmrun, and asks the agent through a VMware guest variable to run
+    Prepare-Reference.ps1; sysprep shuts the VM down. Then it reads the VM's current disk (the snapshot chain) into
+    a temporary VHD with qemu-img, removes the agent's leftovers from that copy, captures it, and reverts the VM to
+    the snapshot. No password, network or capture ISO is needed. Needs vmrun.exe (part of VMware Workstation Pro)
+    and qemu-img.exe on this PC, and free space for a copy of the whole disk. Fully encrypted VMs are not
+    supported; a VM whose encryption only covers its TPM is read from its disk files.
 
     -DiskPath (any VM software): the VM must already be shut down and its Windows already sysprepped. The file
     can be a VHD or VHDX, which is mounted directly, or a VMDK, VDI, qcow2 or raw disk, which is converted to a
@@ -20,10 +29,12 @@
     an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
     as a version in Images\Previous\ (see ImageVersions.psm1).
 
-    Untested on Windows: the Setup\CmdLine boot hook and sysprep run that way, the checkpoint rollback, and every
-    -DiskPath conversion.
+    Untested on Windows: the Setup\CmdLine boot hook and sysprep run that way, the checkpoint rollback, every
+    -DiskPath conversion, and the whole -VmxPath route (vmrun, the guest agent, qemu-img on a snapshot chain).
 .EXAMPLE
     .\src\Capture-VMImage.ps1 -VMName Win11-Ref -Name Win11-24H2-Enterprise -ContentRoot D:\DeployShare
+.EXAMPLE
+    .\src\Capture-VMImage.ps1 -VmxPath 'D:\VMware\Staff\Staff.vmx' -Name Win11-Staff -ContentRoot D:\DeployShare
 .EXAMPLE
     .\src\Capture-VMImage.ps1 -DiskPath 'D:\VMware\Win11-Ref\Win11-Ref.vmdk' -Name Win11-24H2 -ContentRoot D:\DeployShare
 #>
@@ -31,6 +42,7 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
     [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
+    [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
     [Parameter(Mandatory)][string]$Name,
     [Parameter(Mandatory)][string]$ContentRoot,
     [string]$Description,
@@ -43,6 +55,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1') -Force
 
 $logPath = Join-Path $env:TEMP 'Capture-VMImage.log'
 Set-Content -Path $logPath -Value $null
@@ -56,14 +69,23 @@ function Mount-VMDisks {
     $mount = [pscustomobject]@{ Root = $null; Mounted = @(); Assigned = @() }
     try {
         foreach ($path in $Paths) {
-            $vhd = Mount-VHD -Path $path -ReadOnly:(-not $ReadWrite) -PassThru
-            $mount.Mounted += $path
-            foreach ($part in @(Get-Partition -DiskNumber $vhd.DiskNumber | Where-Object Type -eq 'Basic')) {
-                Add-PartitionAccessPath -DiskNumber $vhd.DiskNumber -PartitionNumber $part.PartitionNumber -AssignDriveLetter
-                $letter = (Get-Partition -DiskNumber $vhd.DiskNumber -PartitionNumber $part.PartitionNumber).DriveLetter
+            # Mount-VHD needs Hyper-V; Mount-DiskImage is in every Windows 10/11 and mounts a VHD or VHDX too.
+            if (Get-Command Mount-VHD -ErrorAction SilentlyContinue) {
+                $diskNumber = (Mount-VHD -Path $path -ReadOnly:(-not $ReadWrite) -PassThru).DiskNumber
+                $mount.Mounted += [pscustomobject]@{ Path = $path; HyperV = $true }
+            }
+            else {
+                $access = if ($ReadWrite) { 'ReadWrite' } else { 'ReadOnly' }
+                $diskNumber = (Mount-DiskImage -ImagePath $path -Access $access -NoDriveLetter -PassThru | Get-Disk).Number
+                $mount.Mounted += [pscustomobject]@{ Path = $path; HyperV = $false }
+            }
+            # GPT data partitions are Basic; MBR ones (BIOS VMs) are IFS.
+            foreach ($part in @(Get-Partition -DiskNumber $diskNumber | Where-Object { $_.Type -in 'Basic', 'IFS' })) {
+                Add-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber -AssignDriveLetter
+                $letter = (Get-Partition -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber).DriveLetter
                 if (-not $letter) { continue }
                 $root = "$($letter):\"
-                $mount.Assigned += [pscustomobject]@{ Disk = $vhd.DiskNumber; Partition = $part.PartitionNumber; Path = $root }
+                $mount.Assigned += [pscustomobject]@{ Disk = $diskNumber; Partition = $part.PartitionNumber; Path = $root }
                 if (Test-Path (Join-Path $root 'Windows\System32\config\SYSTEM')) { $mount.Root = $root; break }
             }
             if ($mount.Root) { break }
@@ -80,7 +102,10 @@ function Dismount-VMDisks {
     # Removes the drive letters Mount-VMDisks gave out first, since a disk with letters in use cannot be dismounted.
     param([Parameter(Mandatory)]$Mount)
     foreach ($a in $Mount.Assigned) { Remove-PartitionAccessPath -DiskNumber $a.Disk -PartitionNumber $a.Partition -AccessPath $a.Path -ErrorAction SilentlyContinue }
-    foreach ($path in $Mount.Mounted) { Dismount-VHD -Path $path -ErrorAction SilentlyContinue }
+    foreach ($m in $Mount.Mounted) {
+        if ($m.HyperV) { Dismount-VHD -Path $m.Path -ErrorAction SilentlyContinue }
+        else { Dismount-DiskImage -ImagePath $m.Path -ErrorAction SilentlyContinue | Out-Null }
+    }
 }
 
 function Test-Generalized {
@@ -94,7 +119,7 @@ function Get-DiskForCapture {
     # The VHD to mount for a disk file. Other formats are converted to a temporary VHD, which the caller deletes.
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Disk file not found: $Path" }
-    $qemu = (Get-Command qemu-img.exe -ErrorAction SilentlyContinue).Source
+    $qemu = Find-QemuImg
     $vbox = (Get-Command VBoxManage.exe -ErrorAction SilentlyContinue).Source
     if (-not $vbox -and (Test-Path (Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'))) {
         $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
@@ -173,9 +198,99 @@ function Restore-PreCaptureCheckpoint {
     }
 }
 
+function Invoke-Vmrun {
+    # Runs vmrun on the VM at $VmxPath (or on none with -NoVmx) and returns its output lines.
+    param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @(), [switch]$NoVmx, [switch]$AllowFailure)
+    $vmx = if ($NoVmx) { $null } else { $VmxPath }
+    $argList = New-VmrunArguments -Command $Command -VmxPath $vmx -Arguments $Arguments
+    $out = @(& $script:Vmrun @argList 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) { throw "vmrun $Command failed: $(($out -join ' ').Trim())" }
+    $out
+}
+
+function Test-VMwareRunning {
+    Test-VmxInList -VmxPath $VmxPath -RunningPaths (ConvertFrom-VmrunList (Invoke-Vmrun list -NoVmx))
+}
+
+function Wait-VMwareAgent {
+    # Waits for the agent in the VM to answer the capture request, or for the VM to go off. Throws when neither
+    # happens in time, naming the likely reason.
+    param([Parameter(Mandatory)][int]$Minutes)
+    $vars = Get-VMwareCaptureVariables
+    $deadline = (Get-Date).AddMinutes($Minutes)
+    while ($true) {
+        if (-not (Test-VMwareRunning)) { return }
+        $state = "$(Invoke-Vmrun readVariable -Arguments @('guestVar', $vars.State) -AllowFailure)".Trim()
+        if ($state -in 'started', 'failed') { return }
+        if ((Get-Date) -gt $deadline) {
+            $tools = "$(Invoke-Vmrun checkToolsState -AllowFailure)".Trim()
+            if ($tools -ne 'running') { throw "VMware Tools is not running in the VM (vmrun says '$tools'), so the capture could not start. Install VMware Tools and the capture agent in the VM." }
+            throw 'The capture agent in the VM did not answer. Boot the VM, run VMwareCaptureAgent.ps1 -Install in it from an elevated PowerShell window, shut it down, and capture again.'
+        }
+        Start-Sleep -Seconds 10
+    }
+}
+
+function Wait-VMwareOff {
+    param([Parameter(Mandatory)][int]$Minutes)
+    $deadline = (Get-Date).AddMinutes($Minutes)
+    while (Test-VMwareRunning) {
+        if ((Get-Date) -gt $deadline) { throw "The VM is still running $Minutes minutes after sysprep was started. It did not finish; check the VM." }
+        Start-Sleep -Seconds 15
+    }
+}
+
+function Get-VMwareCaptureDisk {
+    # Copies the VM's current disk (its snapshot chain) to a temporary VHD, finds Windows on it, removes the capture
+    # agent's leftovers from the copy, and reports whether Windows was generalized. The caller deletes Temp.
+    $paths = Get-VmxDiskPaths -VmxPath $VmxPath
+    if ($null -eq $paths) { $paths = Get-VmdkLeafPaths -Folder (Split-Path -Parent $VmxPath) }
+    if (-not $paths) { throw "No virtual disk found for $(Split-Path -Leaf $VmxPath)." }
+    foreach ($path in $paths) {
+        $disk = Get-DiskForCapture -Path $path
+        $found = $null
+        try {
+            $m = Mount-VMDisks -Paths @($disk.Path) -ReadWrite
+            try {
+                if ($m.Root) {
+                    $agentDir = Join-Path $m.Root 'Windows\Temp\ImagingTool'
+                    $agentLog = Join-Path $agentDir 'capture-agent.log'
+                    $found = [pscustomobject]@{
+                        Path     = $disk.Path
+                        Temp     = $disk.Temp
+                        State    = Get-OfflineImageState -Root $m.Root
+                        AgentLog = @(if (Test-Path -LiteralPath $agentLog) { Get-Content -LiteralPath $agentLog })
+                    }
+                    Remove-Item -LiteralPath $agentDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+            finally { Dismount-VMDisks $m }
+        }
+        finally {
+            if (-not $found -and $disk.Temp) { Remove-Item -LiteralPath $disk.Temp -Force -ErrorAction SilentlyContinue }
+        }
+        if ($found) { return $found }
+    }
+    throw "No Windows install found on the disks of $(Split-Path -Leaf $VmxPath)."
+}
+
+function Restore-VMwareSnapshot {
+    # Reverts the VM to the snapshot taken before the capture and deletes the snapshot, as for Hyper-V.
+    param([Parameter(Mandatory)][string]$Name)
+    try {
+        if (Test-VMwareRunning) { Invoke-Vmrun stop -Arguments @('hard') | Out-Null }
+        Invoke-Vmrun revertToSnapshot -Arguments @($Name) | Out-Null
+        Invoke-Vmrun deleteSnapshot -Arguments @($Name) | Out-Null
+        Write-DeployLog "Reverted the VM to the snapshot from before the capture."
+    }
+    catch {
+        Write-DeployLog "Could not revert the VM to snapshot '$Name': $($_.Exception.Message). Revert to it by hand in VMware Workstation (VM > Snapshot)." -Level WARN
+    }
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) { throw 'Run this from an elevated PowerShell (Hyper-V and DISM need administrator rights).' }
+if (-not $isAdmin) { throw 'Run this from an elevated PowerShell (mounting disks and DISM need administrator rights).' }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
 
 $imagesDir = Join-Path $ContentRoot 'Images'
@@ -184,6 +299,7 @@ $status = 'FAILED'
 $staging = $null
 $swapping = $false
 $checkpoint = $null   # set only when this run changes a Hyper-V VM; rolled back in finally
+$snapshot = $null     # the same for a VMware VM
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
 
@@ -202,6 +318,41 @@ try {
         $disk = Get-DiskForCapture -Path $DiskPath
         $tempDisk = $disk.Temp
         $paths = @($disk.Path)
+    }
+    elseif ($PSCmdlet.ParameterSetName -eq 'VMware') {
+        $script:Vmrun = Find-Vmrun
+        if (-not $script:Vmrun) { throw 'vmrun.exe was not found. It comes with VMware Workstation Pro 17 or later; install that on this PC.' }
+        if (-not (Find-QemuImg)) { throw 'qemu-img.exe was not found. Install QEMU for Windows (it includes qemu-img) and add its folder to PATH; it reads the VMware disk.' }
+        if (-not (Test-Path -LiteralPath $VmxPath -PathType Leaf)) { throw "VM file not found: $VmxPath" }
+        $VmxPath = (Resolve-Path -LiteralPath $VmxPath).ProviderPath
+        $vmLabel = [IO.Path]::GetFileNameWithoutExtension($VmxPath)
+        if (Test-VMwareRunning) { throw "$vmLabel is running. Shut it down first; this script starts it itself." }
+        if (-not $NoPrompt -and (Read-Host "Type YES to sysprep and capture $vmLabel (it is reverted to a snapshot afterwards)") -ne 'YES') {
+            Write-DeployLog 'Cancelled by operator' -Level WARN
+            $status = 'CANCELLED'
+            return
+        }
+
+        $snapshotName = "Before capture of $Name $(Get-Date -Format 'yyyyMMdd-HHmm')"
+        Invoke-Vmrun snapshot -Arguments @($snapshotName) | Out-Null
+        $snapshot = $snapshotName
+        Write-DeployLog "Took snapshot '$snapshot'. The VM is reverted to it after the capture."
+
+        Write-DeployLog "Starting $vmLabel. The capture agent in the VM runs Prepare-Reference.ps1, and sysprep shuts the VM down when it is done."
+        Invoke-Vmrun start -Arguments @('nogui') | Out-Null
+        Invoke-Vmrun writeVariable -Arguments @('guestVar', (Get-VMwareCaptureVariables).Request, 'sysprep') | Out-Null
+        Wait-VMwareAgent -Minutes 15
+        Wait-VMwareOff -Minutes 60
+        Write-DeployLog "$vmLabel is off. Copying its disk to a temporary VHD with qemu-img (the whole disk, so it takes a while)."
+
+        $disk = Get-VMwareCaptureDisk
+        $tempDisk = $disk.Temp
+        $paths = @($disk.Path)
+        if (-not $disk.State.Generalized) {
+            foreach ($line in $disk.AgentLog) { Write-DeployLog "  agent: $line" }
+            $why = if ($disk.State.LastError) { " Last sysprep error: $($disk.State.LastError)" } elseif ($disk.AgentLog) { " The agent's log says: $($disk.AgentLog[-1])" } else { ' The capture agent left no log, so it probably did not run.' }
+            throw "Windows on $vmLabel was not generalized (ImageState $($disk.State.ImageState)).$why"
+        }
     }
     else {
         $vm = Get-VM -Name $VMName
@@ -263,7 +414,7 @@ try {
         if ($PSCmdlet.ParameterSetName -eq 'Disk') {
             throw 'Windows on this disk was not generalized. Boot the VM once, run Prepare-Reference.ps1 in it, shut the VM down, and run this again.'
         }
-        throw "Windows on $VMName was not generalized. Prepare-Reference.ps1 did not run or did not finish; check the VM and run this again."
+        throw "Windows on $(if ($VmxPath) { $vmLabel } else { $VMName }) was not generalized. Prepare-Reference.ps1 did not run or did not finish; check the VM and run this again."
     }
 
     New-Item -ItemType Directory -Path $imagesDir -Force | Out-Null
@@ -316,6 +467,7 @@ finally {
     # Release the disk before the rollback and the temporary copy's deletion, which need it free.
     if ($mount) { Dismount-VMDisks $mount }
     if ($checkpoint) { Restore-PreCaptureCheckpoint -VMName $VMName -Name $checkpoint }
+    if ($snapshot) { Restore-VMwareSnapshot -Name $snapshot }
     if ($tempDisk) { Remove-Item -LiteralPath $tempDisk -Force -ErrorAction SilentlyContinue }
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
     if ($staging -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }

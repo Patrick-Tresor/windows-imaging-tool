@@ -54,6 +54,7 @@ function Update-ContentTools {
     $dest = Join-Path $ContentRoot 'Tools'
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
     Copy-Item (Join-ContentPath $script:RepoRoot 'src\Prepare-Reference.ps1') $dest -Force
+    Copy-Item (Join-ContentPath $script:RepoRoot 'src\VMwareCaptureAgent.ps1') $dest -Force
 }
 
 function Test-ContentRoot {
@@ -676,11 +677,14 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window.
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a Hyper-V VM by name, or a
+    # VMware Workstation VM by its .vmx file.
+    [CmdletBinding(DefaultParameterSetName = 'HyperV')]
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory)][string]$VMName,
+        [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
+        [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
@@ -689,7 +693,8 @@ function Get-VMCaptureArguments {
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $cmd = "& $(& $quote $ScriptPath) -VMName $(& $quote $VMName) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
+    $vm = if ($VmxPath) { "-VmxPath $(& $quote $VmxPath)" } else { "-VMName $(& $quote $VMName)" }
+    $cmd = "& $(& $quote $ScriptPath) $vm -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
