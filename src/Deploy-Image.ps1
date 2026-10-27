@@ -8,6 +8,8 @@
     domain join, tasks, extra shares, BIOS settings and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
     answer file win over the answer file's naming, the answer file's OU and the default answer file.
+    Unless -NoPrompt, an Unattended answer file or a remote reimage job starts it, a graphical wizard
+    (DeployWizard.psm1) lets the operator pick the answer file, name, OU, disk and applications.
     Wipes the target disk (or, when user data is kept on the disk, only its Windows partition) and partitions it
     to match the firmware WinPE booted with: GPT for UEFI, MBR for legacy BIOS.
 .EXAMPLE
@@ -17,8 +19,8 @@
 param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
-    [string]$ComputerName,      # overrides the naming list and the answer file's naming
-    [switch]$NoPrompt,          # no countdown or confirmation, whatever the answer file's mode
+    [string]$ComputerName,      # overrides the naming list and the answer file's naming (the wizard still lets the operator change it)
+    [switch]$NoPrompt,          # no wizard, countdown or confirmation, whatever the answer file's mode
     [switch]$IgnoreWindows11Check   # deploy even when a Windows 11 requirement fails in Block mode
 )
 
@@ -35,30 +37,106 @@ $usmtDir = Join-Path $PSScriptRoot 'USMT'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
     if ([IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $Root $Path }
 }
 
-function Select-AnswerFile([string]$Root, [string]$Default, [bool]$Interactive) {
-    $files = @(Get-ChildItem -Path (Join-Path $Root 'AnswerFiles') -Filter *.xml -File | Sort-Object Name)
-    if (-not $files) { throw "No answer files in $Root\AnswerFiles." }
-    if (-not $Interactive -or $files.Count -eq 1) {
-        if ($Default) { return $Default }
-        return $files[0].BaseName
-    }
+function Get-AnswerFileNames([string]$Root) {
+    $names = @(Get-ChildItem -Path (Join-Path $Root 'AnswerFiles') -Filter *.xml -File | Sort-Object Name | ForEach-Object BaseName)
+    if (-not $names) { throw "No answer files in $Root\AnswerFiles." }
+    $names
+}
+
+function Select-AnswerFile([string[]]$Names, [string]$Default) {
+    # Console fallback when WinPE has no WinForms (media built without WinPE-NetFX).
+    if ($Names.Count -eq 1) { return $Names[0] }
     Write-Host ''
     Write-Host 'Answer files:'
-    for ($i = 0; $i -lt $files.Count; $i++) {
-        $mark = if ($files[$i].BaseName -eq $Default) { ' (default)' } else { '' }
-        Write-Host ("  {0}. {1}{2}" -f ($i + 1), $files[$i].BaseName, $mark)
+    for ($i = 0; $i -lt $Names.Count; $i++) {
+        $mark = if ($Names[$i] -eq $Default) { ' (default)' } else { '' }
+        Write-Host ("  {0}. {1}{2}" -f ($i + 1), $Names[$i], $mark)
     }
     $pick = Read-Host 'Number to deploy (Enter for the default)'
     if (-not $pick -and $Default) { return $Default }
     $n = 0
-    if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $files.Count) { return $files[$n - 1].BaseName }
+    if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $Names.Count) { return $Names[$n - 1] }
     throw "No answer file number '$pick'."
+}
+
+function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
+    # Reads an answer file; a naming list entry's OU replaces the answer file's (domain joins only).
+    $path = Join-Path $Root "AnswerFiles\$Name.xml"
+    if (-not (Test-Path $path)) { throw "Answer file $Name not found in $Root\AnswerFiles." }
+    $a = Read-AnswerFile -Path $path
+    if ($Listed -and $Listed.OU) {
+        if ($a.Membership -eq 'Domain') { $a.OrganizationalUnit = $Listed.OU }
+        else { Write-DeployLog "Naming list OU $($Listed.OU) ignored: answer file $($a.Name) joins a workgroup" -Level WARN }
+    }
+    $a
+}
+
+$script:Mounted = @{}
+function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
+    # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
+    # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
+    foreach ($share in $Answer.Shares) {
+        if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
+        $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $Root -RelativePath $share.PasswordFile } else { $null }
+        $user = if ($share.Domain -and $share.Username) { "$($share.Domain)\$($share.Username)" } else { $share.Username }
+        Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
+        $script:Mounted[$share.LocalName] = $share.RemoteName
+    }
+
+    $imagePath = Resolve-ContentPath $Root $Answer.ImageFile
+    if ($Answer.ImageVersion) {
+        # Pinned to an earlier version kept in Images\Previous.
+        $imagePath = Get-ImageVersionPath -ImagePath $imagePath -Version $Answer.ImageVersion
+        Write-DeployLog "Image version $($Answer.ImageVersion): $imagePath"
+    }
+    if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
+
+    # Windows 11 hardware requirements are checked now, before the disk is wiped.
+    $win11 = Invoke-Windows11Check -Answer $Answer -ImagePath $imagePath -Hardware $Hardware -Override $IgnoreWin11
+
+    $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
+    $driverMatch = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
+
+    # The wizard offers every application in the library, not only the answer file's.
+    $appRoot = Resolve-ContentPath $Root $Answer.AppLocation
+    $available = @(Get-ChildItem -Path $appRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName 'app.json') } | ForEach-Object Name)
+
+    $wmiValue = try { Get-WmiNamingValue -Query $Answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $Hardware.Serial }
+    if (-not $wmiValue) { $wmiValue = $Hardware.Serial }
+    $fromList = $Listed -and $Listed.ComputerName
+
+    # Extra summary lines, shown before ERASE in the wizard and on the console.
+    $biosCount = @($Answer.Bios.Settings | Where-Object Maker -eq $Hardware.Maker).Count
+    $bl = $Answer.BitLocker
+    $details = @(
+        "Windows 11:   $win11"
+        "Firmware:     $Firmware ($(if ($Firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
+        "BIOS:         $(if ($Answer.Bios.Enabled -and $biosCount) { "$biosCount setting(s) for $($Hardware.Maker)" } else { 'unchanged' })"
+        "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
+    )
+    if ($Answer.MigrateUserData) { $details += "User data:    kept ($($Answer.UserDataStore) store), checked once the disk is chosen" }
+
+    [pscustomobject]@{
+        ImagePath     = $imagePath
+        DriverMatch   = $driverMatch
+        DriverPack    = $driverMatch.FullPath
+        DriverRoot    = $driverRoot
+        AppRoot       = $appRoot
+        AvailableApps = $available
+        WmiValue      = $wmiValue
+        DefaultName   = if ($fromList) { $Listed.ComputerName.ToUpperInvariant() } else { Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial }
+        NameSource    = if ($fromList) { 'naming list' } else { "answer file, $($Answer.NamingMode)" }
+        Win11         = $win11
+        Details       = $details
+    }
 }
 
 function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Override) {
@@ -160,6 +238,7 @@ try {
         $AnswerFile = $job.answerFile
         if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
     }
+    $givenName = $ComputerName
 
     # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
     $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
@@ -172,42 +251,62 @@ try {
         Write-DeployLog "Serial $($hw.Serial) is not in the naming list; using the answer file's naming"
     }
 
-    if (-not $AnswerFile) { $AnswerFile = Select-AnswerFile -Root $root -Default $settings.defaultAnswerFile -Interactive (-not $NoPrompt) }
-    $answerPath = Join-Path $root "AnswerFiles\$AnswerFile.xml"
-    if (-not (Test-Path $answerPath)) { throw "Answer file $AnswerFile not found in $root\AnswerFiles." }
-    $answer = Read-AnswerFile -Path $answerPath
-    Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode))"
-    Set-DeployStatus -Step 'Checking the answer file' -Percent 3 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile }
-    if ($listed -and $listed.OU) {
-        if ($answer.Membership -eq 'Domain') { $answer.OrganizationalUnit = $listed.OU }
-        else { Write-DeployLog "Naming list OU $($listed.OU) ignored: answer file $($answer.Name) joins a workgroup" -Level WARN }
+    $names = Get-AnswerFileNames -Root $root
+    if (-not $AnswerFile) {
+        if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
+        elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
+    }
+    $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
+    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -Firmware $firmware -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
+
+    # -NoPrompt, Unattended answer files and remote reimage jobs start without the wizard. A key pressed during
+    # the countdown opens the wizard instead, so the operator can change anything.
+    $deployPlan = $null; $confirmed = $false
+    if ($AnswerFile) {
+        $answer = & $readAnswer $AnswerFile
+        if ($NoPrompt) { $confirmed = $true }
+        elseif ($answer.Mode -eq 'Unattended' -or $job) {
+            $deployPlan = & $preparePlan $answer
+            $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
+            Write-Host ''
+            Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $name -Disk (Get-Disk -Number $answer.DiskNumber) -Applications $answer.Applications |
+                ForEach-Object { Write-Host $_ }
+            Set-DeployStatus -Step 'Counting down' -Percent 5
+            # Nobody is at a remotely reimaged PC: count down, so someone who is can still cancel.
+            $confirmed = Wait-Countdown $(if ($job) { [Math]::Max([int]$answer.UnattendDelay, 15) } else { $answer.UnattendDelay })
+            if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
+        }
     }
 
-    foreach ($share in $answer.Shares) {
-        $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $share.PasswordFile } else { $null }
-        $user = if ($share.Domain -and $share.Username) { "$($share.Domain)\$($share.Username)" } else { $share.Username }
-        Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
+    if (-not $confirmed -and (Test-DeployWizardAvailable)) {
+        Set-DeployStatus -Step 'Waiting for the operator' -Percent 5
+        $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
+            -ReadAnswer $readAnswer -PreparePlan $preparePlan
+        if (-not $choice) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+        $answer = $choice.Answer; $deployPlan = $choice.Plan; $ComputerName = $choice.ComputerName
+        $confirmed = $true
     }
 
-    $imagePath = Resolve-ContentPath $root $answer.ImageFile
-    if ($answer.ImageVersion) {
-        # Pinned to an earlier version kept in Images\Previous.
-        $imagePath = Get-ImageVersionPath -ImagePath $imagePath -Version $answer.ImageVersion
-        Write-DeployLog "Image version $($answer.ImageVersion): $imagePath"
+    if (-not $answer) { $answer = & $readAnswer (Select-AnswerFile -Names $names -Default $settings.defaultAnswerFile) }
+    if (-not $deployPlan) { $deployPlan = & $preparePlan $answer }
+    if (-not $ComputerName) {
+        $ComputerName = $deployPlan.DefaultName
+        if ($answer.NamingMode -eq 'Prompt' -and -not $confirmed -and -not ($listed -and $listed.ComputerName)) {
+            $typed = Read-Host "Computer name (Enter for $ComputerName)"
+            if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $deployPlan.WmiValue -Serial $hw.Serial -Typed $typed }
+        }
     }
-    if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
+    $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $givenName -eq $job.computerName) { 'remote reimage' } else { 'parameter' } }
+                  elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
+    Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
+    Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName }
 
-    # Windows 11 hardware requirements are checked now, before the disk is wiped.
-    $win11 = Invoke-Windows11Check -Answer $answer -ImagePath $imagePath -Hardware $hw -Override $IgnoreWindows11Check.IsPresent
-
-    $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
-    $driverMatch = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
-    $driverPack = $driverMatch.FullPath
+    $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
+    $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot
     Set-DeployStatus -Fields @{ driverPack = $(if ($driverPack) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { 'inbox only' }) }
     if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.
-    $appRoot = Resolve-ContentPath $root $answer.AppLocation
     # Apps limited to other makers or models (Dell Command Update on a Lenovo) are left out.
     $apps = @($answer.Applications | ForEach-Object { Get-AppDefinition -AppRoot $appRoot -Name $_ } | Where-Object {
         if (Test-AppRequirement -Definition $_ -Identity $hw) { return $true }
@@ -220,28 +319,11 @@ try {
     $bl = $answer.BitLocker
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Read-SecretFile -ContentRoot $root -RelativePath $bl.PinFile } else { $null }
     $bios = $answer.Bios
+    $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
     # No password file means the BIOS has no admin password yet.
     $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $bios.PasswordFile } else { $null }
 
-    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive' -and -not $job
-    $nameSource = if ($job -and $job.computerName -and $ComputerName -eq $job.computerName) { 'remote reimage' } else { 'parameter' }
-    if (-not $ComputerName -and $listed -and $listed.ComputerName) {
-        $ComputerName = $listed.ComputerName.ToUpperInvariant()
-        $nameSource = 'naming list'
-    }
-    if (-not $ComputerName) {
-        $nameSource = "answer file, $($answer.NamingMode)"
-        $wmiValue = try { Get-WmiNamingValue -Query $answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $hw.Serial }
-        if (-not $wmiValue) { $wmiValue = $hw.Serial }
-        $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $wmiValue -Serial $hw.Serial
-        if ($answer.NamingMode -eq 'Prompt' -and $interactive) {
-            $typed = Read-Host "Computer name (Enter for $ComputerName)"
-            if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $wmiValue -Serial $hw.Serial -Typed $typed }
-        }
-    }
-
-    Set-DeployStatus -Fields @{ computerName = $ComputerName }
-    # User data: find the old Windows and check the backup can be done, still before anything is erased.
+    # User data: find the old Windows on the chosen disk and check the backup can be done, still before anything is erased.
     $migration = $null
     if ($answer.MigrateUserData) {
         $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial `
@@ -262,30 +344,20 @@ try {
             Write-DeployLog 'This is a Windows 11 image. It installs on legacy BIOS, but Microsoft does not support it there and Windows Update may withhold feature updates.' -Level WARN
         }
     }
-    Write-Host ''
-    Write-Host "Answer file:  $($answer.Name)"
-    Write-Host "Image:        $imagePath (index $($answer.ImageIndex)$(if ($answer.ImageVersion) { ", version $($answer.ImageVersion)" }))"
-    Write-Host "Drivers:      $(if ($driverPack) { $driverPack } else { 'inbox only' })"
-    Write-Host "Windows 11:   $win11" -ForegroundColor $(if ($win11 -like 'NOT READY*') { 'Yellow' } else { 'Gray' })
-    Write-Host "Applications: $(if ($apps) { ($apps.name -join ', ') } else { 'none' })"
-    Write-Host "Name:         $ComputerName ($nameSource)"
-    Write-Host "Joins:        $(if ($answer.Membership -eq 'Domain') { "domain $($answer.Domain)$(if ($answer.OrganizationalUnit) { ", $($answer.OrganizationalUnit)" })" } else { "workgroup $($answer.Workgroup)" })"
-    Write-Host "Firmware:     $firmware ($(if ($firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
-    $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
-    Write-Host "BIOS:         $(if ($bios.Enabled -and $biosCount) { "$biosCount setting(s) for $($hw.Maker)" } else { 'unchanged' })"
-    Write-Host "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
-    if ($migration) { Write-Host "User data:    $($migration.Summary)" }
-    if ($keepPartitions) {
-        Write-Host ("ERASE:        everything on {0} except the user data, disk {1} {2}" -f $migration.Volume.Drive, $disk.Number, $disk.FriendlyName) -ForegroundColor Red
-    } else {
-        Write-Host ("ERASE disk:   {0} {1} ({2:N0} GB)" -f $disk.Number, $disk.FriendlyName, ($disk.Size / 1GB)) -ForegroundColor Red
+
+    $summary = @(Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $ComputerName -Disk $disk -Applications @($apps | ForEach-Object name))
+    if ($migration) {
+        # The real user data plan, now that the disk is known, replaces the wizard's placeholder line.
+        $summary = @($summary | Where-Object { $_ -notlike 'User data:*' -and $_ -notlike 'ERASE*' })
+        $summary += "User data:    $($migration.Summary)"
+        $summary += if ($keepPartitions) { "ERASE:        everything on $($migration.Volume.Drive) except the user data, disk $(Format-DiskChoice $disk)" } else { "ERASE disk:   $(Format-DiskChoice $disk)" }
     }
-    if (-not $NoPrompt) {
-        Set-DeployStatus -Step $(if ($answer.Mode -eq 'Unattended') { 'Counting down' } else { 'Waiting for the operator' }) -Percent 5
-        # Nobody is at a remotely reimaged PC: count down, so someone who is can still cancel.
-        $go = if ($job) { Wait-Countdown ([Math]::Max([int]$answer.UnattendDelay, 15)) }
-              elseif ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
-        if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
+    foreach ($line in $summary) { Write-DeployLog $line }
+    if (-not $confirmed) {
+        Write-Host ''
+        $summary | ForEach-Object { Write-Host $_ -ForegroundColor $(if ($_ -like 'ERASE*') { 'Red' } elseif ($_ -like 'Windows 11:   NOT READY*') { 'Yellow' } else { 'Gray' }) }
+        Set-DeployStatus -Step 'Waiting for the operator'
+        if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
     # 0. BIOS settings, before anything is erased. They take effect on the reboot into Windows.

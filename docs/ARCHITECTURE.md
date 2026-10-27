@@ -30,6 +30,27 @@ content root's `deploy-settings.json`. `Deploy-Image.ps1` re-reads that file
 from the content root at run time, so settings such as the default image take
 effect without rebuilding media.
 
+## Deploy wizard
+
+`DeployWizard.psm1` is the window the technician sees in WinPE. WinPE-NetFX
+has no WPF, so it uses WinForms. Its pages are: answer file (with a preview and
+any validation problems), computer name, OU and target disk, applications (the
+answer file's ticked, the rest of the library unticked), and a summary with an
+erase confirmation. It holds no deploy logic: `Deploy-Image.ps1` passes it two
+script blocks, one that reads an answer file and one (`Get-DeployPlan`) that
+maps the answer file's shares and finds the image, driver pack, application
+library and suggested name (the naming list's, when the PC is listed), and
+runs the Windows 11 check. So a missing image, or a PC that a Block-mode Windows
+11 check refuses, is reported when the answer file is picked, before anything is
+erased. The plan also carries extra summary lines (Windows 11, firmware, BIOS,
+BitLocker, user data) that the wizard shows before the ERASE line. The choices come back as a copy of the
+answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
+replaced, and the deploy continues exactly as for a command-line run.
+`-NoPrompt`, an `Unattended` countdown and a remote reimage job skip the window;
+a key pressed during the countdown opens it. User data migration is checked
+after the window closes, once the disk is known, and still before anything is
+erased. Without WinForms the console prompts are used instead.
+
 ## Capture wizard
 
 `CaptureWizard.ps1` writes `config\capture.json` (name, description,
@@ -444,6 +465,6 @@ pack on them by other means, once it is in the library.
 
 ## Not in v1
 
-A deploy-time GUI on the target PC (it uses a console prompt), BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
+BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
 migrating user data from one PC to a different PC (only the same PC is supported, see User data migration),
 SmartDeploy's wipe-and-load / SmartMigrate disk options, static IP, display settings, Azure AD join, and a management agent.

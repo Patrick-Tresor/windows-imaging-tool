@@ -13,7 +13,7 @@ src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Captu
                      Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Start-RemoteReimage.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, UserState.psm1, NamingList.psm1,
-                     RemoteReimage.psm1, Win11Readiness.psm1
+                     RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, naming-list.csv (header only),
@@ -99,8 +99,9 @@ An answer file (`AnswerFiles\<name>.xml`) is one deployment profile. Edit it in
 the console; the format is documented in the commented
 [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
-- **mode**: `Interactive` (pick the answer file and type YES) or `Unattended`
-  (start after `unattendDelay` seconds unless a key is pressed).
+- **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
+  (start after `unattendDelay` seconds; a key pressed during the countdown opens
+  the wizard instead).
 - **image** and index, **disk** number, **drivers** root.
 - **user data**: keep the users' files and settings when redeploying a PC (see below).
 - **Windows 11 check** (`image/windows11Check`): `Block` (default), `Warn` or
@@ -535,9 +536,17 @@ What the PCs need:
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, add the new cumulative update with **Update image...** instead of
    capturing again.
-5. **Deploy**: boot the target PC from USB or PXE. The tool detects the model,
-   applies the BIOS settings, wipes disk 0, applies the image, injects the
+5. **Deploy**: boot the target PC from USB or PXE. The deploy wizard opens
+   and shows the detected maker, model and serial. Pick the answer file, check
+   or change the computer name, OU and target disk, tick the applications, then
+   review the summary, tick the erase confirmation and click **Deploy**. A PC in
+   the naming list starts with its own answer file, name and OU filled in. The
+   tool applies the BIOS settings, wipes the disk, applies the image, injects the
    drivers, and reboots. BitLocker, if set, starts at first boot.
+   `Unattended` answer files and remote reimage jobs skip the wizard after their
+   countdown, and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
+   entirely. If the WinPE image has no WinForms (built without WinPE-NetFX), the
+   same questions are asked on the console.
 
 ## Status
 
