@@ -18,6 +18,35 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-SysprepErrors {
+    # Returns the sysprep error lines in setuperr.log under $LogDir, from the latest sysprep run at or after $Since.
+    # Windows upgrades write setuperr.log in the same folder (MOUPG, CONX, BFSVC lines); those say nothing about
+    # sysprep, so only SYSPRP lines and sysprep failures count. setupact.log marks where each sysprep run begins.
+    param([Parameter(Mandatory)][string]$LogDir, [datetime]$Since = [datetime]::MinValue)
+    $errLog = Join-Path $LogDir 'setuperr.log'
+    if (-not (Test-Path -LiteralPath $errLog)) { return }
+    if ((Get-Item -LiteralPath $errLog).LastWriteTime -lt $Since) { return }
+    $stamp = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $actLog = Join-Path $LogDir 'setupact.log'
+    if (Test-Path -LiteralPath $actLog) {
+        foreach ($m in Select-String -LiteralPath $actLog -Pattern 'Beginning of a new sysprep run') {
+            if ($m.Line -match $stamp) {
+                $start = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $culture)
+                if ($start -gt $Since) { $Since = $start }
+            }
+        }
+    }
+    $time = $null
+    foreach ($line in Get-Content -LiteralPath $errLog) {
+        # Lines without a time (continuations) belong to the line above.
+        if ($line -match $stamp) { $time = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $culture) }
+        if ($line -notmatch '\bSYSPRP\b|sysprep(\.exe)?\b.*\bfail') { continue }
+        if ($time -and $time -lt $Since) { continue }
+        $line.Trim()
+    }
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw 'Run this from an elevated PowerShell window.' }
@@ -61,8 +90,13 @@ if ($userOnly) {
     }
 }
 
-if (Test-Path "$env:WINDIR\System32\Sysprep\Panther\setuperr.log") {
-    $warnings.Add("An earlier sysprep left errors in $env:WINDIR\System32\Sysprep\Panther\setuperr.log.")
+# Only a sysprep failure since the last boot counts; an older or unrelated setuperr.log (a Windows upgrade writes one
+# in the same folder) is no reason to worry.
+$panther = "$env:WINDIR\System32\Sysprep\Panther"
+$lastBoot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+$sysprepErrors = @(Get-SysprepErrors -LogDir $panther -Since $lastBoot)
+if ($sysprepErrors) {
+    $warnings.Add("The last sysprep run failed ($($sysprepErrors.Count) error line(s) in $panther\setuperr.log). First: $($sysprepErrors[0])")
 }
 
 foreach ($w in $warnings) { Write-Host "WARNING: $w" -ForegroundColor Yellow }
