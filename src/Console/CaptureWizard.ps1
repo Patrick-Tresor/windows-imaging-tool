@@ -11,6 +11,7 @@ function Show-CaptureWizard {
     [xml]$wxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'CaptureWizard.xaml')
     $wiz = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($wxaml))
     $wiz.Owner = $Owner
+    Enable-WheelScrolling $wiz
     $w = @{}
     foreach ($node in $wxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
         $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')

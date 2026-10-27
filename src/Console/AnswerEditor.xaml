@@ -92,61 +92,65 @@
 
     <Grid Margin="24,18">
       <!-- 0 General -->
-      <StackPanel x:Name="Sec0">
-        <TextBlock Style="{StaticResource Title}" Text="General"/>
-        <TextBlock Style="{StaticResource Hint}" Text="How the deployment starts and ends on the PC."/>
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Answer file name"/>
-          <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Shown in the menu on the PC."/>
-          <Label Grid.Row="1" Content="Mode"/>
-          <StackPanel Grid.Row="1" Grid.Column="1">
-            <RadioButton x:Name="RbInteractive" GroupName="Mode" Content="Interactive: the technician picks this answer file and types YES"/>
-            <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a countdown"/>
-          </StackPanel>
-          <Label Grid.Row="2" Content="Countdown (seconds)"/>
-          <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
-          <Label Grid.Row="3" Content="When finished"/>
-          <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-            <RadioButton x:Name="RbReboot" GroupName="Done" Content="Restart"/>
-            <RadioButton x:Name="RbShutdown" GroupName="Done" Content="Shut down"/>
-            <RadioButton x:Name="RbStay" GroupName="Done" Content="Stay in WinPE"/>
-          </StackPanel>
-        </Grid>
-      </StackPanel>
+      <ScrollViewer x:Name="Sec0" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="General"/>
+          <TextBlock Style="{StaticResource Hint}" Text="How the deployment starts and ends on the PC."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Answer file name"/>
+            <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Shown in the menu on the PC."/>
+            <Label Grid.Row="1" Content="Mode"/>
+            <StackPanel Grid.Row="1" Grid.Column="1">
+              <RadioButton x:Name="RbInteractive" GroupName="Mode" Content="Interactive: the technician picks this answer file and types YES"/>
+              <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a countdown"/>
+            </StackPanel>
+            <Label Grid.Row="2" Content="Countdown (seconds)"/>
+            <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
+            <Label Grid.Row="3" Content="When finished"/>
+            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+              <RadioButton x:Name="RbReboot" GroupName="Done" Content="Restart"/>
+              <RadioButton x:Name="RbShutdown" GroupName="Done" Content="Shut down"/>
+              <RadioButton x:Name="RbStay" GroupName="Done" Content="Stay in WinPE"/>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- 1 Image and disk -->
-      <StackPanel x:Name="Sec1" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Image and disk"/>
-        <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned, unless the user data is kept on the disk (User data)."/>
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Image"/>
-          <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
-          <Label Grid.Row="1" Content="Version"/>
-          <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
-                    ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>
-          <Label Grid.Row="2" Content="Edition (index)"/>
-          <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
-          <Label Grid.Row="3" Content="Target disk number"/>
-          <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
-          <Label Grid.Row="4" Content="Disk option"/>
-          <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
-            <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
-          </ComboBox>
-          <Label Grid.Row="5" Content="Driver library folder"/>
-          <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
-          <Label Grid.Row="6" Content="Windows 11 check"/>
-          <ComboBox x:Name="CmbWin11Check" Grid.Row="6" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
-                    ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
-            <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
-            <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>
-            <ComboBoxItem Content="Off: do not check"/>
-          </ComboBox>
-        </Grid>
-      </StackPanel>
+      <ScrollViewer x:Name="Sec1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Image and disk"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned, unless the user data is kept on the disk (User data)."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Image"/>
+            <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
+            <Label Grid.Row="1" Content="Version"/>
+            <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
+                      ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>
+            <Label Grid.Row="2" Content="Edition (index)"/>
+            <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
+            <Label Grid.Row="3" Content="Target disk number"/>
+            <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
+            <Label Grid.Row="4" Content="Disk option"/>
+            <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
+              <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
+            </ComboBox>
+            <Label Grid.Row="5" Content="Driver library folder"/>
+            <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
+            <Label Grid.Row="6" Content="Windows 11 check"/>
+            <ComboBox x:Name="CmbWin11Check" Grid.Row="6" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
+                      ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
+              <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
+              <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>
+              <ComboBoxItem Content="Off: do not check"/>
+            </ComboBox>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- 2 Applications -->
       <DockPanel x:Name="Sec2" Visibility="Collapsed">
@@ -216,62 +220,66 @@
       </ScrollViewer>
 
       <!-- 4 Computer name -->
-      <StackPanel x:Name="Sec4" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
-        <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
-        <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number"/>
-        <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom scheme"/>
-        <RadioButton x:Name="RbNamePrompt" GroupName="Naming" Content="Ask the technician (interactive mode; uses the WMI value otherwise)"/>
-        <Grid Margin="0,10,0,0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Prefix"/>
-          <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left"/>
-          <Label Grid.Row="1" Content="WMI query"/>
-          <ComboBox x:Name="CmbWmi" Grid.Row="1" Grid.Column="1" IsEditable="True">
-            <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
-            <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
-            <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
-            <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
-          </ComboBox>
-          <Label Grid.Row="2" Content="Custom scheme"/>
-          <TextBox x:Name="TxtScheme" Grid.Row="2" Grid.Column="1" ToolTip="# = random digit, {SERIAL} = BIOS serial. Example: LAB-####"/>
-          <Label Grid.Row="3" Content="Example on this PC"/>
-          <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-            <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
-            <Button x:Name="BtnNamePreview" Content="Preview"/>
-          </StackPanel>
-        </Grid>
-      </StackPanel>
+      <ScrollViewer x:Name="Sec4" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
+          <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number"/>
+          <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom scheme"/>
+          <RadioButton x:Name="RbNamePrompt" GroupName="Naming" Content="Ask the technician (interactive mode; uses the WMI value otherwise)"/>
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Prefix"/>
+            <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left"/>
+            <Label Grid.Row="1" Content="WMI query"/>
+            <ComboBox x:Name="CmbWmi" Grid.Row="1" Grid.Column="1" IsEditable="True">
+              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
+              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
+              <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
+              <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
+            </ComboBox>
+            <Label Grid.Row="2" Content="Custom scheme"/>
+            <TextBox x:Name="TxtScheme" Grid.Row="2" Grid.Column="1" ToolTip="# = random digit, {SERIAL} = BIOS serial. Example: LAB-####"/>
+            <Label Grid.Row="3" Content="Example on this PC"/>
+            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+              <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
+              <Button x:Name="BtnNamePreview" Content="Preview"/>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- 5 Domain or workgroup -->
-      <StackPanel x:Name="Sec5" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Domain or workgroup"/>
-        <TextBlock Style="{StaticResource Hint}" Text="The password is saved in its own file under config\secrets, not in the answer file. Use an account that can only join computers to the OU."/>
-        <StackPanel Orientation="Horizontal">
-          <RadioButton x:Name="RbDomain" GroupName="Join" Content="Join a domain"/>
-          <RadioButton x:Name="RbWorkgroup" GroupName="Join" Content="Join a workgroup"/>
-        </StackPanel>
-        <Grid Margin="0,10,0,0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Domain"/>
-          <TextBox x:Name="TxtDomain" Grid.Column="1" ToolTip="corp.example.com"/>
-          <Label Grid.Row="1" Content="Organizational unit"/>
-          <TextBox x:Name="TxtOU" Grid.Row="1" Grid.Column="1" ToolTip="OU=Laptops,DC=corp,DC=example,DC=com. Leave empty for the default Computers container."/>
-          <Label Grid.Row="2" Content="Join account"/>
-          <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-          <Label Grid.Row="3" Content="Account's domain"/>
-          <TextBox x:Name="TxtJoinDomain" Grid.Row="3" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="NetBIOS name such as CORP. Leave empty to use the domain above."/>
-          <Label Grid.Row="4" Content="Password"/>
-          <StackPanel Grid.Row="4" Grid.Column="1">
-            <PasswordBox x:Name="PwdJoin" Width="260" HorizontalAlignment="Left"/>
-            <TextBlock x:Name="TxtJoinPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+      <ScrollViewer x:Name="Sec5" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Domain or workgroup"/>
+          <TextBlock Style="{StaticResource Hint}" Text="The password is saved in its own file under config\secrets, not in the answer file. Use an account that can only join computers to the OU."/>
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="RbDomain" GroupName="Join" Content="Join a domain"/>
+            <RadioButton x:Name="RbWorkgroup" GroupName="Join" Content="Join a workgroup"/>
           </StackPanel>
-          <Label Grid.Row="5" Content="Workgroup"/>
-          <TextBox x:Name="TxtWorkgroup" Grid.Row="5" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-        </Grid>
-      </StackPanel>
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Domain"/>
+            <TextBox x:Name="TxtDomain" Grid.Column="1" ToolTip="corp.example.com"/>
+            <Label Grid.Row="1" Content="Organizational unit"/>
+            <TextBox x:Name="TxtOU" Grid.Row="1" Grid.Column="1" ToolTip="OU=Laptops,DC=corp,DC=example,DC=com. Leave empty for the default Computers container."/>
+            <Label Grid.Row="2" Content="Join account"/>
+            <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="3" Content="Account's domain"/>
+            <TextBox x:Name="TxtJoinDomain" Grid.Row="3" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="NetBIOS name such as CORP. Leave empty to use the domain above."/>
+            <Label Grid.Row="4" Content="Password"/>
+            <StackPanel Grid.Row="4" Grid.Column="1">
+              <PasswordBox x:Name="PwdJoin" Width="260" HorizontalAlignment="Left"/>
+              <TextBlock x:Name="TxtJoinPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="5" Content="Workgroup"/>
+            <TextBox x:Name="TxtWorkgroup" Grid.Row="5" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- 6 Tasks -->
       <DockPanel x:Name="Sec6" Visibility="Collapsed">

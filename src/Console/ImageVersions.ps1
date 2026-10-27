@@ -12,6 +12,7 @@ function Show-ImageVersionsDialog {
     [xml]$vx = Get-Content -Raw (Join-Path $PSScriptRoot 'ImageVersions.xaml')
     $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($vx))
     $win.Owner = $Owner
+    Enable-WheelScrolling $win
     $v = @{}
     foreach ($node in $vx.SelectNodes('//*[@*[local-name()="Name"]]')) {
         $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
