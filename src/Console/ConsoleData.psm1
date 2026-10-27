@@ -5,6 +5,7 @@ $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'ImageVersions.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -36,7 +37,7 @@ function Initialize-ContentRoot {
     foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'Tools\BIOS\Dell', 'AnswerFiles', 'Applications', 'Updates') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
-    foreach ($file in 'driver-catalog.json', 'deploy-settings.json') {
+    foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'naming-list.csv') {
         $dest = Join-ContentPath $Path "config\$file"
         if (-not (Test-Path $dest)) { Copy-Item (Join-ContentPath $script:RepoRoot "config\$file") $dest }
     }
@@ -676,6 +677,91 @@ function Get-ImageUpdateArguments {
 
 #endregion
 
+#region Naming list
+
+function Get-NamingListPath {
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    Join-ContentPath $ContentRoot 'config\naming-list.csv'
+}
+
+function Get-AnswerFileNames {
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    @(Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+}
+
+function Get-NamingListRows {
+    # Naming list rows for the grid, with each row's problems and the result of the last deploy of that serial.
+    param([Parameter(Mandatory)][string]$ContentRoot, [object[]]$Entries)
+    if (-not $PSBoundParameters.ContainsKey('Entries')) { $Entries = @(Read-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot)) }
+    $answers = Get-AnswerFileNames -ContentRoot $ContentRoot
+    $last = @{}
+    foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
+        # Logs come newest first; keep the first per serial.
+        $key = "$($log.Serial)".ToUpperInvariant()
+        if ($key -and -not $log.Serial.StartsWith('CAPTURE-') -and -not $last.ContainsKey($key)) { $last[$key] = '{0:yyyy-MM-dd HH:mm} {1}' -f $log.When, $log.Status }
+    }
+    $problems = @(Test-NamingList -Entries @($Entries) -AnswerFileNames $answers)
+    for ($i = 0; $i -lt @($Entries).Count; $i++) {
+        $e = @($Entries)[$i]
+        $mine = @($problems | Where-Object { $_ -like "Row $($i + 1)[ :]*" } | ForEach-Object { $_ -replace '^Row \d+( \([^)]*\))?: ', '' })
+        [pscustomobject]@{
+            Serial       = $e.Serial
+            ComputerName = $e.ComputerName
+            OU           = $e.OU
+            AnswerFile   = $e.AnswerFile
+            Notes        = $e.Notes
+            Status       = if ($mine) { $mine -join ' ' } else { 'OK' }
+            LastDeploy   = if ($e.Serial -and $last.ContainsKey($e.Serial.ToUpperInvariant())) { $last[$e.Serial.ToUpperInvariant()] } else { '' }
+        }
+    }
+}
+
+function Save-NamingListFromConsole {
+    # Validates every row against the content root's answer files, then writes the CSV. Throws listing every problem.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+    $entries = @($Rows | Where-Object { "$($_.Serial)$($_.ComputerName)$($_.OU)$($_.AnswerFile)$($_.Notes)".Trim() } | ForEach-Object {
+        [pscustomobject]@{
+            Serial       = "$($_.Serial)".Trim()
+            ComputerName = "$($_.ComputerName)".Trim().ToUpperInvariant()
+            OU           = "$($_.OU)".Trim()
+            AnswerFile   = "$($_.AnswerFile)".Trim()
+            Notes        = "$($_.Notes)".Trim()
+        }
+    })
+    $problems = @(Test-NamingList -Entries $entries -AnswerFileNames (Get-AnswerFileNames -ContentRoot $ContentRoot))
+    if ($problems) { throw "The naming list was not saved:`n - " + ($problems -join "`n - ") }
+    Save-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot) -Entries $entries
+    $entries.Count
+}
+
+function Merge-NamingList {
+    # Adds rows from an imported CSV: a serial already listed is updated with the imported row's non-empty columns.
+    param([AllowEmptyCollection()][object[]]$Existing = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Incoming)
+    $rows = [Collections.Generic.List[object]]::new()
+    $bySerial = @{}
+    foreach ($e in $Existing) {
+        $copy = [pscustomobject]@{ Serial = $e.Serial; ComputerName = $e.ComputerName; OU = $e.OU; AnswerFile = $e.AnswerFile; Notes = $e.Notes }
+        $rows.Add($copy)
+        if ($e.Serial) { $bySerial["$($e.Serial)".Trim().ToUpperInvariant()] = $copy }
+    }
+    $added = 0; $updated = 0
+    foreach ($n in $Incoming) {
+        $key = "$($n.Serial)".Trim().ToUpperInvariant()
+        if (-not $key) { continue }
+        if ($bySerial.ContainsKey($key)) {
+            $target = $bySerial[$key]
+            foreach ($c in 'ComputerName', 'OU', 'AnswerFile', 'Notes') { if ($n.$c) { $target.$c = $n.$c } }
+            $updated++
+        } else {
+            $copy = [pscustomobject]@{ Serial = $n.Serial; ComputerName = $n.ComputerName; OU = $n.OU; AnswerFile = $n.AnswerFile; Notes = $n.Notes }
+            $rows.Add($copy); $bySerial[$key] = $copy; $added++
+        }
+    }
+    [pscustomobject]@{ Rows = $rows.ToArray(); Added = $added; Updated = $updated }
+}
+
+#endregion
+
 #region Settings and logs
 
 function Get-DeploySettings {
@@ -837,4 +923,5 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
-    Get-ApplicationUsage, Save-Application, Remove-Application
+    Get-ApplicationUsage, Save-Application, Remove-Application,
+    Get-NamingListPath, Get-AnswerFileNames, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList

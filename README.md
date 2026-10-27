@@ -12,10 +12,11 @@ ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
                      Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
-                     PostDeployChecks.psm1, UserState.psm1
+                     PostDeployChecks.psm1, UserState.psm1, NamingList.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
-config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
+config/              default deploy-settings.json, driver-catalog.json, naming-list.csv (header only),
+                     answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 ```
@@ -41,6 +42,10 @@ and click **Create folders** the first time. Then:
   boxes and saved to their own files.
 - **Applications**: the application pack builder. Build, edit, test, export and
   import packs (see Applications below).
+- **Naming List**: one row per PC by BIOS serial, with its computer name, OU
+  and answer file (see below). Edit cells, **Import CSV...** to merge a list
+  from Excel or an inventory export, **Export CSV...**, then **Save**. Each row
+  shows its problems and the result of that PC's last deploy.
 - **Driver Library**: **Download from vendor...** lists every model in the Dell,
   HP or Lenovo driver pack catalog for Windows 10 or 11; tick the models you
   deploy and it downloads, checks, extracts and registers their packs, and shows
@@ -76,7 +81,7 @@ Updates\       .msu / .cab packages from the Microsoft Update Catalog
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
-config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
+config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (password files)
 UserState\     user data backups, one folder per PC serial (only with a folder store)
 Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
@@ -336,6 +341,7 @@ doesn't flood every port. From the command line:
 `.\src\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream`,
 then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
 `-Action Start`, `-Action Disconnect -ClientId <Id from Monitor>` or `-Action Remove`.
+
 ## Deployment dashboard
 
 Each PC writes `Status\<serial>.json` (and a live copy of its log) at every step:
@@ -401,6 +407,24 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 succeeded, warning and cancelled PCs; final logs stay in Deployment Logs. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
+
+## Naming list
+
+`config\naming-list.csv` on the content root names PCs you know in advance,
+by BIOS serial number (Dell service tag, HP or Lenovo serial):
+
+```csv
+Serial,ComputerName,OU,AnswerFile,Notes
+5CG0000ABC,MTL-ACC-014,"OU=Accounting,OU=Workstations,DC=corp,DC=example",W11-Office-FR,Front desk
+PF0XXXXX,MTL-LAB-002,,,
+```
+
+When a PC's serial is listed, the deploy uses its computer name instead of the
+answer file's naming, joins its OU instead of the answer file's OU (domain
+answer files only), and deploys its answer file without asking which one. Empty
+cells fall back to the answer file, and an unlisted PC is named by the answer
+file as before. Edit it in the console or in Excel; comma and semicolon files
+are both read. The deploy log says which entry was used.
 
 ## Workflow
 

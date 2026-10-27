@@ -16,7 +16,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
 
@@ -165,8 +165,11 @@ deleted. On failure it falls back to applying from the share unless fallback is 
 
 ## Deploy sequence
 
-1. Detect hardware and content root; choose the answer file (the default, or a
-   menu in interactive mode); map its extra shares.
+1. Detect hardware and content root; look the BIOS serial up in
+   `config\naming-list.csv`; choose the answer file (the naming list's, else the
+   default, or a menu in interactive mode); map its extra shares.
+   A naming list entry's computer name and OU replace the answer file's naming
+   and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
 2. Check everything before touching the disk: image, driver pack, applications,
    password files, computer name. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
@@ -300,6 +303,14 @@ The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through
 `Save-AnswerFromEditor`, which validates it, writes typed passwords to
 `config\secrets\<answer>-*.txt` and exports the XML.
+
+`NamingList.psm1` reads and writes the naming list CSV (comma or semicolon,
+UTF-8 or ANSI, as Excel saves it; header spellings such as `Serial Number` or
+`Hostname` are accepted), looks a serial up and validates rows. The console's
+Naming List tab edits it through `Get-NamingListRows`, `Merge-NamingList` and
+`Save-NamingListFromConsole`, which refuses to save names over 15 characters,
+duplicate serials or names, OUs that are not distinguished names, and answer
+files that do not exist.
 
 `AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
 SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
