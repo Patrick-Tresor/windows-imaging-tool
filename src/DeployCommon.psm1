@@ -352,5 +352,29 @@ function Get-DiskConversionCommand {
     throw "Cannot convert $(Split-Path $SourcePath -Leaf) to VHD. Install qemu-img (for qcow2, raw, vmdk and vdi) or VirtualBox (for vmdk and vdi)."
 }
 
+function Get-OfflineImageState {
+    # What sysprep left in an offline Windows at $Root: ImageState from Windows\Setup\State\State.ini ($null when the
+    # file is missing), whether that means generalized, and the last SYSPRP error line in the sysprep Panther log.
+    # IMAGE_STATE_COMPLETE means sysprep never ran or failed; IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE means it finished.
+    param([Parameter(Mandatory)][string]$Root)
+    $state = $null
+    $ini = Join-Path $Root 'Windows\Setup\State\State.ini'
+    if (Test-Path -LiteralPath $ini) {
+        $m = Select-String -LiteralPath $ini -Pattern '^\s*ImageState\s*=\s*(\S+)' | Select-Object -First 1
+        $state = if ($m) { $m.Matches[0].Groups[1].Value } else { '' }
+    }
+    $lastError = $null
+    $errLog = Join-Path $Root 'Windows\System32\Sysprep\Panther\setuperr.log'
+    if (Test-Path -LiteralPath $errLog) {
+        $lastError = Select-String -LiteralPath $errLog -Pattern '\bSYSPRP\b' | Select-Object -Last 1 | ForEach-Object { $_.Line.Trim() }
+    }
+    [pscustomobject]@{
+        Root        = $Root
+        ImageState  = $state
+        Generalized = ($null -eq $state) -or ($state -eq 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE')
+        LastError   = $lastError
+    }
+}
+
 Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
-    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand
+    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState
