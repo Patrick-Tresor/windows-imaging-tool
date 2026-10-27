@@ -14,6 +14,23 @@ class DriverPackRow {
     [object]$Pack
 }
 
+function Start-DriverPackDownload {
+    # Hands the packs to Get-DriverPacks.ps1 in its own window through a job file. Also used by the Unknown Models window.
+    param(
+        [Parameter(Mandatory)][object[]]$Packs,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$SrcDir,
+        [switch]$KeepDownload
+    )
+    $job = Join-Path ([IO.Path]::GetTempPath()) ('driverpacks-{0:yyyyMMdd-HHmmss}.json' -f (Get-Date))
+    ConvertTo-Json -InputObject $Packs -Depth 4 | Set-Content -Path $job -Encoding utf8
+    $runArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Get-DriverPacks.ps1')),
+        '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job))
+    if ($KeepDownload) { $runArgs += '-KeepDownload' }
+    Start-Process powershell.exe -ArgumentList $runArgs
+}
+
 function Show-DriverDownloader {
     param(
         [Parameter(Mandatory)]$Owner,
@@ -89,13 +106,7 @@ function Show-DriverDownloader {
         try {
             $packs = @($state.Rows | Where-Object Selected | ForEach-Object Pack)
             if (-not $packs) { Show-DownloaderError 'Tick at least one model.'; return }
-            $job = Join-Path ([IO.Path]::GetTempPath()) ('driverpacks-{0:yyyyMMdd-HHmmss}.json' -f (Get-Date))
-            ConvertTo-Json -InputObject $packs -Depth 4 | Set-Content -Path $job -Encoding utf8
-            $runArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-                '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Get-DriverPacks.ps1')),
-                '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job))
-            if ($d.ChkKeep.IsChecked) { $runArgs += '-KeepDownload' }
-            Start-Process powershell.exe -ArgumentList $runArgs
+            Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -KeepDownload:$d.ChkKeep.IsChecked
             $state.Started = $true
             $dlg.Close()
         } catch { Show-DownloaderError $_.Exception.Message }

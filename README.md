@@ -12,8 +12,8 @@ ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
                      Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1
-src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1, *.xaml,
-                     ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs)
+src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
+                     UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
@@ -44,6 +44,12 @@ and click **Create folders** the first time. Then:
   which ones have a newer pack. You can also import a pack you already have
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
+  **Unknown models...** (with a count when there are any) lists the models that
+  were deployed without their driver pack: they got the maker fallback, inbox
+  drivers only, or a catalog entry whose folder is missing. It shows how many
+  PCs and which ones, and finds each model's pack in the vendor catalog. Models
+  with a pack are pre-ticked, so **Download** fetches them all in one click.
+  **Use inbox drivers** marks a model (a VM, say) as needing no pack.
 - **Media**: build a USB stick, ISO or PXE `boot.wim` in one click. The tab shows
   whether the Windows ADK and its WinPE add-on are installed (and their version),
   with a **Download ADK** button when they aren't. Media builds and the capture
@@ -65,6 +71,7 @@ AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 config\        deploy-settings.json, driver-catalog.json, secrets\ (password files)
 Logs\          one log per deployed PC or capture
+Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
 ```
 
 ## Answer files
@@ -275,7 +282,8 @@ then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
 4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
    or from the command line:
    `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
-   (drop `-List` to download). You can also extract a pack into
+   (drop `-List` to download). After deploying, `Get-DriverPacks.ps1 -ContentRoot D:\Deploy -UnknownModels -List`
+   shows the models that had no pack (drop `-List` to download their packs). You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, add the new cumulative update with **Update image...** instead of

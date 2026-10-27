@@ -70,7 +70,7 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
     }
 }
 
-$root = $null; $hw = $null; $answer = $null
+$root = $null; $hw = $null; $answer = $null; $driverMatch = $null
 $status = 'FAILED'
 try {
     $hw = Get-HardwareIdentity
@@ -104,7 +104,8 @@ try {
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 
     $driverRoot = Resolve-ContentPath $root $answer.DriverRoot
-    $driverPack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot
+    $driverMatch = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
+    $driverPack = $driverMatch.FullPath
 
     # Applications are checked now, before the disk is wiped.
     $appRoot = Resolve-ContentPath $root $answer.AppLocation
@@ -213,6 +214,13 @@ finally {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
         Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir ("{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status)) -ErrorAction SilentlyContinue
+    }
+    # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
+    if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {
+        try {
+            Write-DriverReport -ContentRoot $root -Identity $hw -Match $driverMatch -ComputerName $ComputerName `
+                -AnswerFile $(if ($answer) { $answer.Name }) -Result $status
+        } catch { Write-Warning "Could not write the driver report: $($_.Exception.Message)" }
     }
 }
 

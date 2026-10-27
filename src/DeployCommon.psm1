@@ -110,40 +110,92 @@ exit
     }
 }
 
+function Find-DriverCatalogMatch {
+    # The most specific catalog entry for a PC, without logging, so the console can re-check reported PCs.
+    # Status: Matched, InboxOnly (an entry with no path), Fallback (maker fallback), None.
+    param(
+        [Parameter(Mandatory)]$Identity,
+        [string]$CatalogPath,
+        $Catalog   # the parsed catalog, instead of CatalogPath, when checking many PCs
+    )
+    $catalog = if ($Catalog) { $Catalog } else { Get-Content -Raw -Path $CatalogPath | ConvertFrom-Json }
+    $mine = @($catalog.entries | Where-Object { $_.maker -eq $Identity.Maker })
+
+    $by = 'sku'
+    $match = $mine | Where-Object { $_.sku -and $_.sku -eq $Identity.Sku } | Select-Object -First 1
+    if (-not $match) { $by = 'machineType';  $match = $mine | Where-Object { $_.machineType -and $_.machineType -eq $Identity.MachineType } | Select-Object -First 1 }
+    if (-not $match) { $by = 'model';        $match = $mine | Where-Object { $_.model -and $_.model -eq $Identity.Model } | Select-Object -First 1 }
+    if (-not $match) { $by = 'modelPattern'; $match = $mine | Where-Object { $_.modelPattern -and $Identity.Model -like $_.modelPattern } | Select-Object -First 1 }
+
+    if ($match) {
+        $status = if ($match.path) { 'Matched' } else { 'InboxOnly' }
+        return [pscustomobject]@{ Status = $status; MatchedBy = $by; Path = $match.path }
+    }
+    if ($catalog.fallbacks -and $catalog.fallbacks.PSObject.Properties[$Identity.Maker]) {
+        return [pscustomobject]@{ Status = 'Fallback'; MatchedBy = 'fallback'; Path = $catalog.fallbacks.($Identity.Maker) }
+    }
+    [pscustomobject]@{ Status = 'None'; MatchedBy = $null; Path = $null }
+}
+
 function Resolve-DriverPack {
     # Picks the most specific catalog entry for this PC. Returns a full path, or $null for inbox drivers only.
+    # -Detailed returns the Find-DriverCatalogMatch result with FullPath added (MissingFolder when it is not there).
     param(
         [Parameter(Mandatory)]$Identity,
         [Parameter(Mandatory)][string]$CatalogPath,
-        [Parameter(Mandatory)][string]$DriverRoot
+        [Parameter(Mandatory)][string]$DriverRoot,
+        [switch]$Detailed
     )
-    $catalog = Get-Content -Raw -Path $CatalogPath | ConvertFrom-Json
-    $mine = @($catalog.entries | Where-Object { $_.maker -eq $Identity.Maker })
-
-    $match =
-        ($mine | Where-Object { $_.sku -and $_.sku -eq $Identity.Sku } | Select-Object -First 1)
-    if (-not $match) { $match = $mine | Where-Object { $_.machineType -and $_.machineType -eq $Identity.MachineType } | Select-Object -First 1 }
-    if (-not $match) { $match = $mine | Where-Object { $_.model -and $_.model -eq $Identity.Model } | Select-Object -First 1 }
-    if (-not $match) { $match = $mine | Where-Object { $_.modelPattern -and $Identity.Model -like $_.modelPattern } | Select-Object -First 1 }
-
-    $relative = $null
-    if ($match) {
-        $relative = $match.path
-        Write-DeployLog "Driver catalog match: $relative"
-    } elseif ($catalog.fallbacks.PSObject.Properties[$Identity.Maker]) {
-        $relative = $catalog.fallbacks.($Identity.Maker)
-        Write-DeployLog "No exact driver pack for '$($Identity.Model)'; using maker fallback $relative" -Level WARN
-    } else {
-        Write-DeployLog "No driver pack for $($Identity.Maker) '$($Identity.Model)'; Windows inbox drivers only" -Level WARN
+    $m = Find-DriverCatalogMatch -Identity $Identity -CatalogPath $CatalogPath
+    switch ($m.Status) {
+        'Matched'   { Write-DeployLog "Driver catalog match: $($m.Path)" }
+        'InboxOnly' { Write-DeployLog "Catalog says Windows inbox drivers only for '$($Identity.Model)'" }
+        'Fallback'  { Write-DeployLog "No exact driver pack for '$($Identity.Model)'; using maker fallback $($m.Path)" -Level WARN }
+        'None'      { Write-DeployLog "No driver pack for $($Identity.Maker) '$($Identity.Model)'; Windows inbox drivers only" -Level WARN }
     }
 
-    if (-not $relative) { return $null }
-    $full = Join-Path $DriverRoot $relative
-    if (-not (Test-Path $full)) {
-        Write-DeployLog "Driver folder missing: $full" -Level WARN
-        return $null
+    $full = $null
+    if ($m.Path) {
+        $full = Join-Path $DriverRoot ($m.Path -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+        if (-not (Test-Path $full)) {
+            Write-DeployLog "Driver folder missing: $full" -Level WARN
+            $full = $null
+            if ($m.Status -eq 'Matched') { $m.Status = 'MissingFolder' }
+        }
     }
-    $full
+    if (-not $Detailed) { return $full }
+    $m | Add-Member -NotePropertyName FullPath -NotePropertyValue $full -PassThru
+}
+
+function Write-DriverReport {
+    # Records which drivers this PC got in <content root>\Reports\Drivers\<serial>.json, one file per PC, newest
+    # deployment wins. The console's Unknown Models report lists the PCs that got no exact pack.
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)]$Match,
+        [string]$ComputerName,
+        [string]$AnswerFile,
+        [string]$Result
+    )
+    $dir = Join-Path (Join-Path $ContentRoot 'Reports') 'Drivers'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $serial = "$($Identity.Serial)" -replace '[\\/:*?"<>|\s]', '_'
+    if (-not $serial.Trim('_')) { $serial = "$($Identity.Maker)-$($Identity.Model)" -replace '[\\/:*?"<>|\s]', '_' }
+    [ordered]@{
+        serial       = $Identity.Serial
+        computerName = $ComputerName
+        maker        = $Identity.Maker
+        model        = $Identity.Model
+        sku          = $Identity.Sku
+        machineType  = $Identity.MachineType
+        driverStatus = $Match.Status
+        matchedBy    = $Match.MatchedBy
+        driverPath   = $Match.Path
+        answerFile   = $AnswerFile
+        result       = $Result
+        date         = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+    } | ConvertTo-Json | Set-Content -Path (Join-Path $dir "$serial.json") -Encoding utf8
 }
 
 function Find-ContentRoot {
@@ -251,5 +303,5 @@ function Receive-MulticastImage {
     $Destination
 }
 
-Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Resolve-DriverPack, Find-ContentRoot, Mount-NetworkShare,
-    Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage
+Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage
