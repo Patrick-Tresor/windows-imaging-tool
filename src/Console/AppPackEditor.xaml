@@ -1,0 +1,189 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Application" Width="900" Height="680" MinWidth="800" MinHeight="560"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="12,5"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="MinWidth" Value="80"/>
+    </Style>
+    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0F6CBD"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#0F6CBD"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Margin" Value="0,4,0,8"/>
+    </Style>
+    <Style TargetType="RadioButton">
+      <Setter Property="Margin" Value="0,4,16,8"/>
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="Padding" Value="0,4,8,4"/>
+      <Setter Property="VerticalAlignment" Value="Top"/>
+    </Style>
+    <Style x:Key="Title" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+    <Style x:Key="Hint" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#5B6170"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False"/>
+      <Setter Property="HeadersVisibility" Value="Column"/>
+      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
+      <Setter Property="RowHeight" Value="26"/>
+      <Setter Property="CanUserAddRows" Value="False"/>
+      <Setter Property="SelectionMode" Value="Single"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- Sections -->
+    <Border DockPanel.Dock="Left" Width="190" Background="#1F2937">
+      <ListBox x:Name="LstSections" Background="Transparent" BorderThickness="0" Foreground="#E5E7EB" Padding="0,12" FontSize="14">
+        <ListBox.ItemContainerStyle>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="18,9"/>
+          </Style>
+        </ListBox.ItemContainerStyle>
+        <ListBoxItem Content="Installer"/>
+        <ListBoxItem Content="Install command"/>
+        <ListBoxItem Content="Detection"/>
+        <ListBoxItem Content="Which PCs"/>
+      </ListBox>
+    </Border>
+
+    <!-- Problems and buttons -->
+    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
+          <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
+        </StackPanel>
+        <TextBlock x:Name="TxtProblems" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+      </DockPanel>
+    </Border>
+
+    <Grid Margin="24,18">
+      <!-- 0 Installer -->
+      <ScrollViewer x:Name="Sec0" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Installer"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. Inspect reads its type, name, version and MSI product code, and fills in the silent command and a detection rule. A template gives known settings for common applications."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Installer file or folder"/>
+            <TextBox x:Name="TxtSource" Grid.Column="1" ToolTip="Copied into Applications\&lt;name&gt; when you save. When editing, leave empty to keep the files already there."/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,8">
+              <Button x:Name="BtnSourceFile" Content="File..."/>
+              <Button x:Name="BtnSourceFolder" Content="Folder..." Margin="0"/>
+            </StackPanel>
+            <Label Grid.Row="1" Content="Installer to run"/>
+            <ComboBox x:Name="CmbInstaller" Grid.Row="1" Grid.Column="1" IsEditable="True" ToolTip="The file in the application folder that installs it."/>
+            <Button x:Name="BtnInspect" Grid.Row="1" Grid.Column="2" Content="Inspect" Margin="8,0,0,8"/>
+            <Label Grid.Row="2" Content="Template"/>
+            <ComboBox x:Name="CmbTemplate" Grid.Row="2" Grid.Column="1" ToolTip="Known silent switches, detection and PC limits for common applications."/>
+            <Button x:Name="BtnTemplate" Grid.Row="2" Grid.Column="2" Content="Apply" Margin="8,0,0,8"/>
+            <TextBlock x:Name="TxtTemplateNote" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+            <Label Grid.Row="4" Content="Name"/>
+            <TextBox x:Name="TxtName" Grid.Row="4" Grid.Column="1" ToolTip="Folder name under Applications. Letters, digits, dot, dash and underscore."/>
+            <Label Grid.Row="5" Content="Display name"/>
+            <TextBox x:Name="TxtDisplayName" Grid.Row="5" Grid.Column="1"/>
+            <Label Grid.Row="6" Content="Version"/>
+            <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <Label Grid.Row="7" Content="Publisher"/>
+            <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1"/>
+          </Grid>
+          <Label Content="Notes"/>
+          <TextBox x:Name="TxtNotes" Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 1 Install command -->
+      <ScrollViewer x:Name="Sec1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Install command"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Runs with cmd /c in the application's folder, as SYSTEM, the first time the PC starts. Nobody can click through it, so it must be silent. Exit codes not in the success list mark the app as failed in C:\Windows\Temp\FirstBoot.log."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Installer type"/>
+            <ComboBox x:Name="CmbType" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+            <Button x:Name="BtnSuggest" Grid.Column="2" Content="Suggest command" Margin="8,0,0,8"/>
+            <TextBlock x:Name="TxtTypeNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+            <Label Grid.Row="2" Content="Install command"/>
+            <TextBox x:Name="TxtCommand" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas"/>
+            <Label Grid.Row="3" Content="Uninstall command"/>
+            <TextBox x:Name="TxtUninstall" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas" ToolTip="Optional. Kept with the pack for removing the app later."/>
+            <Label Grid.Row="4" Content="Success exit codes"/>
+            <TextBox x:Name="TxtCodes" Grid.Row="4" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <Label Grid.Row="5" Content="Restart exit codes"/>
+            <TextBox x:Name="TxtRebootCodes" Grid.Row="5" Grid.Column="1" Width="200" HorizontalAlignment="Left" ToolTip="Success codes that mean a restart is needed (MSI: 3010, 1641)."/>
+            <Label Grid.Row="6" Content="Timeout (minutes)"/>
+            <TextBox x:Name="TxtTimeout" Grid.Row="6" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 2 Detection -->
+      <DockPanel x:Name="Sec2" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="Detection"/>
+          <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skip when already there, e.g. in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="RbMatchAll" GroupName="Match" Content="All rules must match"/>
+            <RadioButton x:Name="RbMatchAny" GroupName="Match" Content="Any rule is enough"/>
+            <CheckBox x:Name="ChkSkip" Content="Skip the install when already detected" Margin="16,4,0,8"/>
+          </StackPanel>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+          <StackPanel Orientation="Horizontal">
+            <Button x:Name="BtnRuleAdd" Content="Add rule"/>
+            <Button x:Name="BtnRuleRemove" Content="Remove rule"/>
+            <Button x:Name="BtnRuleTest" Content="Test on this PC"/>
+          </StackPanel>
+          <TextBlock x:Name="TxtRuleTest" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#5B6170"/>
+        </StackPanel>
+        <DataGrid x:Name="GridRules">
+          <DataGrid.Columns>
+            <DataGridComboBoxColumn Header="Type" SelectedItemBinding="{Binding Type}" Width="100"/>
+            <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="3*"/>
+            <DataGridTextColumn Header="Registry value" Binding="{Binding Value}" Width="*"/>
+            <DataGridComboBoxColumn Header="Operator" SelectedItemBinding="{Binding Operator}" Width="80"/>
+            <DataGridTextColumn Header="Version or data" Binding="{Binding Version}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <!-- 3 Which PCs -->
+      <StackPanel x:Name="Sec3" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource Title}" Text="Which PCs"/>
+        <TextBlock Style="{StaticResource Hint}" Text="Leave both empty to install on every PC. Otherwise the app is only installed when the PC's maker and model match (comma-separated, wildcards allowed: Latitude*, ThinkPad T14*). Lenovo models also match their 4-character machine type (21HD). Checked in WinPE, so skipped apps are not even copied."/>
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Makers"/>
+          <TextBox x:Name="TxtMakers" Grid.Column="1" ToolTip="Dell, HP, Lenovo, or the manufacturer as WMI reports it."/>
+          <Label Grid.Row="1" Content="Models"/>
+          <TextBox x:Name="TxtModels" Grid.Row="1" Grid.Column="1"/>
+        </Grid>
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</Window>

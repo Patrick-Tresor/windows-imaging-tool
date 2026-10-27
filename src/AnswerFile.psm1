@@ -1,8 +1,12 @@
-# Answer files: one XML per deployment profile (image, apps, disk, regional settings, naming,
+# Answer files: one XML per deployment profile (image, apps, disk, user data, regional settings, naming,
 # domain join, tasks, shares), modelled on SmartDeploy's deploy wizard answer files.
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
+$script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
+$script:BitLockerProtectors = 'Tpm', 'TpmPin'
+$script:BiosMakers = 'Dell', 'HP', 'Lenovo'
+Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1')
 
 function Get-XmlText {
     # Inner text of the first node matching an XPath, trimmed; $Default when missing or empty.
@@ -17,6 +21,33 @@ function Get-XmlText {
 function ConvertTo-Bool([string]$Value, [bool]$Default) {
     if (-not $Value) { return $Default }
     $Value -in 'true', '1', 'yes'
+}
+
+function Read-BitLockerNode($d) {
+    # <bitlocker>: encrypt the OS drive at first boot. Defaults when the element is missing (BitLocker off).
+    [pscustomobject]@{
+        Enabled           = ConvertTo-Bool (Get-XmlText $d 'bitlocker/enabled') $false
+        EncryptionMethod  = Get-XmlText $d 'bitlocker/encryptionMethod' 'XtsAes256'
+        UsedSpaceOnly     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/usedSpaceOnly') $true
+        Protector         = Get-XmlText $d 'bitlocker/protector' 'Tpm'
+        PinFile           = Get-XmlText $d 'bitlocker/pinFile'
+        BackupToAD        = ConvertTo-Bool (Get-XmlText $d 'bitlocker/backupToAD') $true
+        RecoveryKeyFolder = Get-XmlText $d 'bitlocker/recoveryKeyFolder'
+        RequireBackup     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/requireBackup') $true
+    }
+}
+
+function Read-BiosNode($d) {
+    # <bios>: firmware settings per maker, applied in WinPE before the disk is wiped. Off when missing.
+    [pscustomobject]@{
+        Enabled      = ConvertTo-Bool (Get-XmlText $d 'bios/enabled') $false
+        PasswordFile = Get-XmlText $d 'bios/passwordFile'
+        ToolsRoot    = Get-XmlText $d 'bios/toolsRoot' 'Tools\BIOS'
+        StopOnError  = ConvertTo-Bool (Get-XmlText $d 'bios/stopOnError') $false
+        Settings     = @($d.SelectNodes('bios/setting') | ForEach-Object {
+            [pscustomobject]@{ Maker = $_.GetAttribute('maker'); Name = $_.GetAttribute('name'); Value = "$($_.InnerText)".Trim() }
+        })
+    }
 }
 
 function Read-AnswerFile {
@@ -37,10 +68,20 @@ function Read-AnswerFile {
         UnattendDelay        = [int](Get-XmlText $d 'unattendDelay' '10')
         ImageFile            = Get-XmlText $d 'image/file'
         ImageIndex           = [int](Get-XmlText $d 'image/index' '1')
+        Windows11Check       = Get-XmlText $d 'image/windows11Check' 'Block'
         ImageVersion         = Get-XmlText $d 'image/version'
         DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
         DriverRoot           = Get-XmlText $d 'drivers/root' 'Drivers'
+        MigrateUserData      = ConvertTo-Bool (Get-XmlText $d 'userData/migrate') $false
+        UserDataStore        = Get-XmlText $d 'userData/store' 'Local'
+        UserDataPath         = Get-XmlText $d 'userData/storePath' 'UserState'
+        UserDataRules        = @()
+        UserDataExclude      = @()
+        UserDataLocalAccounts = ConvertTo-Bool (Get-XmlText $d 'userData/createLocalAccounts') $false
+        UserDataEncrypt      = ConvertTo-Bool (Get-XmlText $d 'userData/encrypt') $false
+        UserDataKeyFile      = Get-XmlText $d 'userData/keyFile'
+        UserDataKeepStore    = ConvertTo-Bool (Get-XmlText $d 'userData/keepStore') $false
         AppLocation          = Get-XmlText $d 'applications/@location' 'Applications'
         Applications         = @()
         ProductKey           = Get-XmlText $d 'productKey'
@@ -69,11 +110,16 @@ function Read-AnswerFile {
         Shares               = @()
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
         Shutdown             = ConvertTo-Bool (Get-XmlText $d 'completion/shutdown') $false
+        BitLocker            = Read-BitLockerNode $d
+        Bios                 = Read-BiosNode $d
     }
 
     $a.Applications = @($d.SelectNodes('applications/application') |
         Sort-Object { [int]$_.GetAttribute('order') } |
         ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
+    $a.UserDataRules = @($d.SelectNodes('userData/rules/rule') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
+    if (-not $d.SelectSingleNode('userData/rules')) { $a.UserDataRules = @('MigDocs.xml', 'MigApp.xml') }
+    $a.UserDataExclude = @($d.SelectNodes('userData/excludeUsers/user') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
     $a.Tasks = @($d.SelectNodes('tasks/task') | ForEach-Object {
         [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Command = "$($_.InnerText)".Trim() }
     })
@@ -100,6 +146,7 @@ function Test-AnswerFile {
     if ($a.Mode -notin 'Interactive', 'Unattended') { "mode must be Interactive or Unattended, not '$($a.Mode)'." }
     if (-not $a.ImageFile) { 'image/file is required.' }
     if ($a.ImageIndex -lt 1) { 'image/index must be 1 or more.' }
+    if ($a.Windows11Check -notin 'Block', 'Warn', 'Off') { "image/windows11Check must be Block, Warn or Off, not '$($a.Windows11Check)'." }
     if ($a.ImageVersion -and $a.ImageVersion -notmatch '^\d{8}-\d{4}(-\d+)?$') { "image/version '$($a.ImageVersion)' must be a version time stamp such as 20261022-1530, or empty for the current image." }
     if ($a.DiskOption -ne 'Recreate') { "disk/option '$($a.DiskOption)' is not supported yet; only Recreate (wipe the disk and recreate partitions)." }
     if ($a.NamingMode -notin 'WMI', 'Custom', 'Prompt') { "identification/naming mode must be WMI, Custom or Prompt, not '$($a.NamingMode)'." }
@@ -108,6 +155,14 @@ function Test-AnswerFile {
     if ($a.Membership -eq 'Domain') {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
         if (-not $a.JoinUser -or -not $a.JoinPasswordFile) { 'Domain membership needs network/joinCredentials username and passwordFile.' }
+    }
+    if ($a.MigrateUserData) {
+        if ($a.UserDataStore -notin 'Local', 'Share') { "userData/store must be Local or Share, not '$($a.UserDataStore)'." }
+        if ($a.UserDataStore -eq 'Share' -and -not $a.UserDataPath) { 'A Share user data store needs userData/storePath.' }
+        if (-not @($a.UserDataRules).Count) { 'User data migration needs at least one rule file (MigDocs.xml, MigApp.xml).' }
+        if ($a.UserDataStore -eq 'Share' -and $a.UserDataEncrypt -and -not $a.UserDataKeyFile) { 'userData/encrypt needs userData/keyFile.' }
+        if ($a.UserDataStore -eq 'Local' -and $a.UserDataEncrypt) { 'A Local (hard-link) user data store can''t be encrypted; it never leaves the PC.' }
+        if ('MigDocs.xml' -in $a.UserDataRules -and 'MigUser.xml' -in $a.UserDataRules) { 'Use MigDocs.xml or MigUser.xml, not both: they collect the same files.' }
     }
     if ($a.EnableAdministrator -and -not $a.AdminPasswordFile) { 'options/enableAdministrator needs options/administratorPasswordFile.' }
     foreach ($t in $a.Tasks) {
@@ -120,6 +175,24 @@ function Test-AnswerFile {
         if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
     if ($a.Prefix -and $a.Prefix.Length -gt 14) { 'identification/naming/prefix is longer than a computer name allows.' }
+    $bl = $a.BitLocker
+    if ($bl -and $bl.Enabled) {
+        if ($bl.EncryptionMethod -notin $script:BitLockerMethods) { "bitlocker/encryptionMethod must be one of $($script:BitLockerMethods -join ', '), not '$($bl.EncryptionMethod)'." }
+        if ($bl.Protector -notin $script:BitLockerProtectors) { "bitlocker/protector must be Tpm or TpmPin, not '$($bl.Protector)'." }
+        if ($bl.Protector -eq 'TpmPin' -and -not $bl.PinFile) { 'A TpmPin protector needs bitlocker/pinFile.' }
+        if ($bl.BackupToAD -and $a.Membership -ne 'Domain') { 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' }
+        if ($bl.RecoveryKeyFolder -and $bl.RecoveryKeyFolder -notmatch '^\\\\[^\\]+\\.+') { "bitlocker/recoveryKeyFolder '$($bl.RecoveryKeyFolder)' must be a \\server\share path." }
+        if ($bl.RequireBackup -and -not $bl.BackupToAD -and -not $bl.RecoveryKeyFolder) { 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' }
+    }
+    $bios = $a.Bios
+    if ($bios -and $bios.Enabled) {
+        if (-not $bios.Settings) { 'bios is enabled but has no settings.' }
+        foreach ($s in $bios.Settings) {
+            if ($s.Maker -notin $script:BiosMakers) { "BIOS setting '$($s.Name)': maker must be Dell, HP or Lenovo, not '$($s.Maker)'." }
+            if (-not $s.Name -or -not $s.Value) { "A $($s.Maker) BIOS setting needs a name and a value." }
+            elseif ($s.Maker -eq 'Lenovo' -and "$($s.Name)$($s.Value)" -match '[,;]') { "Lenovo BIOS setting '$($s.Name)': names and values can't contain , or ;." }
+        }
+    }
 }
 
 function Resolve-ComputerName {
@@ -270,28 +343,35 @@ $accounts$logonBlock    </component>
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @())
+    # userState (Copy-UserStateForRestore) is restored after the applications, so their settings apply.
+    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), $UserState = $null, [string]$BitLockerPin)
+    $bl = $Answer.BitLocker
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
+        userState            = $UserState
         tasks                = @($Answer.Tasks | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object Command)
+        bitlocker            = if ($bl -and $bl.Enabled) {
+            [pscustomobject]@{
+                encryptionMethod  = $bl.EncryptionMethod
+                usedSpaceOnly     = $bl.UsedSpaceOnly
+                protector         = $bl.Protector
+                pin               = if ($bl.Protector -eq 'TpmPin') { $BitLockerPin } else { $null }
+                backupToAD        = $bl.BackupToAD
+                recoveryKeyFolder = $bl.RecoveryKeyFolder
+                requireBackup     = $bl.RequireBackup
+            }
+        } else { $null }
     }
 }
 
 function Get-AppDefinition {
-    # Applications\<name>\app.json: { "command": "setup.exe /S", "successCodes": [0, 3010] }
+    # Applications\<name>\app.json, normalized by AppPack.psm1 (silent command, codes, requirements, detection).
     param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Name)
-    $json = Join-Path (Join-Path $AppRoot $Name) 'app.json'
-    if (-not (Test-Path $json)) { throw "Application '$Name' has no app.json in $AppRoot\$Name." }
-    $def = Get-Content -Raw $json | ConvertFrom-Json
-    if (-not $def.command) { throw "Application '$Name': app.json has no command." }
-    [pscustomobject]@{
-        name         = $Name
-        command      = $def.command
-        successCodes = if ($def.successCodes) { @($def.successCodes | ForEach-Object { [int]$_ }) } else { @(0, 3010) }
-    }
+    Read-AppPack -AppRoot $AppRoot -Name $Name
 }
 
 function Export-AnswerFile {
@@ -305,6 +385,8 @@ function Export-AnswerFile {
     $b = { param([bool]$v) if ($v) { 'true' } else { 'false' } }
     $i = 0
     $apps = foreach ($n in $a.Applications) { $i++; "    <application order=`"$i`">$(& $x $n)</application>" }
+    $rules = foreach ($r in $a.UserDataRules) { "      <rule>$(& $x $r)</rule>" }
+    $excluded = foreach ($u in $a.UserDataExclude) { "      <user>$(& $x $u)</user>" }
     $tasks = foreach ($t in $a.Tasks) { "    <task phase=`"$($t.Phase)`">$(& $x $t.Command)</task>" }
     $shares = foreach ($s in $a.Shares) {
         @"
@@ -317,6 +399,9 @@ function Export-AnswerFile {
     </share>
 "@
     }
+    $bl = if ($a.BitLocker) { $a.BitLocker } else { Read-BitLockerNode ([xml]'<deployment/>').DocumentElement }
+    $bios = if ($a.Bios) { $a.Bios } else { Read-BiosNode ([xml]'<deployment/>').DocumentElement }
+    $biosSettings = foreach ($s in $bios.Settings) { "    <setting maker=`"$(& $x $s.Maker)`" name=`"$(& $x $s.Name)`">$(& $x $s.Value)</setting>" }
     $text = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
@@ -326,6 +411,7 @@ function Export-AnswerFile {
   <image>
     <file>$(& $x $a.ImageFile)</file>
     <index>$($a.ImageIndex)</index>
+    <windows11Check>$(& $x $(if ($a.Windows11Check) { $a.Windows11Check } else { 'Block' }))</windows11Check>
     <version>$(& $x $a.ImageVersion)</version>
   </image>
   <disk>
@@ -335,6 +421,21 @@ function Export-AnswerFile {
   <drivers>
     <root>$(& $x $a.DriverRoot)</root>
   </drivers>
+  <userData>
+    <migrate>$(& $b $a.MigrateUserData)</migrate>
+    <store>$(& $x $a.UserDataStore)</store>
+    <storePath>$(& $x $a.UserDataPath)</storePath>
+    <rules>
+$($rules -join "`n")
+    </rules>
+    <excludeUsers>
+$($excluded -join "`n")
+    </excludeUsers>
+    <createLocalAccounts>$(& $b $a.UserDataLocalAccounts)</createLocalAccounts>
+    <encrypt>$(& $b $a.UserDataEncrypt)</encrypt>
+    <keyFile>$(& $x $a.UserDataKeyFile)</keyFile>
+    <keepStore>$(& $b $a.UserDataKeepStore)</keepStore>
+  </userData>
   <applications location="$(& $x $a.AppLocation)">
 $($apps -join "`n")
   </applications>
@@ -379,6 +480,23 @@ $($tasks -join "`n")
   <shares>
 $($shares -join "`n")
   </shares>
+  <bitlocker>
+    <enabled>$(& $b $bl.Enabled)</enabled>
+    <encryptionMethod>$(& $x $bl.EncryptionMethod)</encryptionMethod>
+    <usedSpaceOnly>$(& $b $bl.UsedSpaceOnly)</usedSpaceOnly>
+    <protector>$(& $x $bl.Protector)</protector>
+    <pinFile>$(& $x $bl.PinFile)</pinFile>
+    <backupToAD>$(& $b $bl.BackupToAD)</backupToAD>
+    <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
+    <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>
+  </bitlocker>
+  <bios>
+    <enabled>$(& $b $bios.Enabled)</enabled>
+    <passwordFile>$(& $x $bios.PasswordFile)</passwordFile>
+    <toolsRoot>$(& $x $bios.ToolsRoot)</toolsRoot>
+    <stopOnError>$(& $b $bios.StopOnError)</stopOnError>
+$($biosSettings -join "`n")
+  </bios>
   <completion>
     <reboot>$(& $b $a.Reboot)</reboot>
     <shutdown>$(& $b $a.Shutdown)</shutdown>
@@ -417,10 +535,14 @@ function ConvertFrom-SmartDeployAnswerFile {
     $apps = @($w.SelectNodes('application_packs/application_pack') |
         Sort-Object { [int]$_.GetAttribute('installation_order') } |
         ForEach-Object { [IO.Path]::GetFileNameWithoutExtension("$($_.InnerText)".Trim()) })
-    if ($apps) { $notes.Add("Applications: SmartDeploy .spk packs can't be read. Create a folder with an app.json under Applications\ for each of: $($apps -join ', ').") }
+    if ($apps) {
+        $known = @($apps | Where-Object { Find-AppTemplate -Name $_ })
+        $tip = if ($known) { " The builder has templates for $($known -join ', ')." } else { '' }
+        $notes.Add("Applications: SmartDeploy .spk packs can't be read. Rebuild each one on the Applications tab (New..., keeping the same name): $($apps -join ', ').$tip")
+    }
 
     $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
-    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't supported; the disk will be recreated.") }
+    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated. To keep the users' data, turn on User data in the editor.") }
 
     $membership = switch (Get-XmlText $w 'network_identification/membership' '1') { '0' { 'Domain' } '2' { 'Workgroup' } default { 'Workgroup' } }
     if ((Get-XmlText $w 'network_identification/membership') -eq '2') { $notes.Add('Azure AD join isn''t supported; set to Workgroup.') }
@@ -488,10 +610,20 @@ function ConvertFrom-SmartDeployAnswerFile {
         UnattendDelay        = [int](Get-XmlText $w 'settings/unattend_delay' '10')
         ImageFile            = "Images\$imageLeaf"
         ImageIndex           = 1
+        Windows11Check       = 'Block'
         ImageVersion         = $null
         DiskNumber           = 0
         DiskOption           = 'Recreate'
         DriverRoot           = 'Drivers'
+        MigrateUserData      = $false
+        UserDataStore        = 'Local'
+        UserDataPath         = 'UserState'
+        UserDataRules        = @('MigDocs.xml', 'MigApp.xml')
+        UserDataExclude      = @()
+        UserDataLocalAccounts = $false
+        UserDataEncrypt      = $false
+        UserDataKeyFile      = 'config\secrets\usmt.txt'
+        UserDataKeepStore    = $false
         AppLocation          = 'Applications'
         Applications         = $apps
         ProductKey           = Get-XmlText $w 'product_key/product_key'
@@ -520,6 +652,8 @@ function ConvertFrom-SmartDeployAnswerFile {
         Shares               = $shares
         Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'
         Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
+        BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
+        Bios                 = Read-BiosNode ([xml]'<deployment/>').DocumentElement
     }
     if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: put its password in config\secrets\admin.txt.') }
     @{ Answer = $answer; Notes = @($notes) }

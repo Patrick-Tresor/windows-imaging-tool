@@ -1,0 +1,47 @@
+# Runs the plain-script test suites on a Windows runner (Windows PowerShell 5.1, as in WinPE, and PowerShell 7),
+# after checking that every script parses and every XAML window loads. Nothing here needs WinPE, the ADK or Hyper-V.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, initial-imaging-tool]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse scripts and load XAML
+        shell: powershell
+        run: |
+          $bad = 0
+          # Windows PowerShell 5.1 (WinPE, the console) reads a file without a BOM as ANSI, so accented letters change.
+          foreach ($f in Get-ChildItem src, tests -Recurse -Include *.ps1, *.psm1, *.xaml) {
+              $raw = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($f.FullName))
+              if ($raw -match '[^\x00-\x7F]' -and $raw -notmatch '^\xEF\xBB\xBF') { $bad++; Write-Host "$($f.Name): non-ASCII characters in a file without a BOM" }
+          }
+          foreach ($f in Get-ChildItem src, tests -Recurse -Include *.ps1, *.psm1) {
+              $errors = $null
+              [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors)
+              foreach ($e in $errors) { $bad++; Write-Host "$($f.Name):$($e.Extent.StartLineNumber): $($e.Message)" }
+          }
+          Add-Type -AssemblyName PresentationFramework
+          foreach ($f in Get-ChildItem src -Recurse -Include *.xaml) {
+              try { [void][Windows.Markup.XamlReader]::Parse((Get-Content -Raw $f.FullName)) }
+              catch { $bad++; Write-Host "$($f.Name): $($_.Exception.InnerException.Message) $($_.Exception.Message)" }
+          }
+          if ($bad) { Write-Host "$bad problem(s)"; exit 1 }
+
+      - name: Tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\tests\Run-All.ps1
+
+      - name: Tests (PowerShell 7)
+        if: always()
+        shell: pwsh
+        run: |
+          $env:TESTS_SHELL = 'pwsh'
+          ./tests/Run-All.ps1

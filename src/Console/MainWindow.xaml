@@ -139,6 +139,8 @@
             <Button x:Name="BtnDriversRemove" Content="Remove row"/>
             <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
             <Button x:Name="BtnDriversOpen" Content="Open folder"/>
+            <Button x:Name="BtnDriversDownload" Content="Download from vendor..." ToolTip="Pick Dell, HP or Lenovo models and download their driver packs from the vendor catalog"/>
+            <Button x:Name="BtnDriversUnknown" Content="Unknown models..." ToolTip="Deployed PCs that got no driver pack, with the vendor pack for each model"/>
           </StackPanel>
 
           <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
@@ -157,6 +159,7 @@
 
       <!-- Media -->
       <TabItem Header="Media">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
           <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
@@ -173,7 +176,7 @@
 
           <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
-          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (import into WDS; content comes from the network share)" Margin="0,4"/>
+          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (publish to a WDS server; content comes from the network share)" Margin="0,4"/>
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -196,10 +199,142 @@
             <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
           </Grid>
 
+          <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Hint}" Text="After the build, boot.wim is published to the WDS server and becomes the default UEFI network boot entry. Publishing again replaces it. Leave the server empty to use this PC. A remote server must allow PowerShell remoting and you must be an administrator on it."/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+
+                <Label Content="Publish to WDS"/>
+                <CheckBox x:Name="ChkWdsPublish" Grid.Column="1" IsChecked="True" VerticalAlignment="Center" Content="Publish boot.wim to the WDS server after building"/>
+
+                <Label Grid.Row="2" Content="WDS server"/>
+                <TextBox x:Name="TxtWdsServer" Grid.Row="2" Grid.Column="1" ToolTip="Server name, for example wds01. Empty: this PC."/>
+                <Button x:Name="BtnWdsCheck" Grid.Row="2" Grid.Column="2" Content="Check server" Margin="8,0,0,0"/>
+
+                <Label Grid.Row="4" Content="Boot menu name"/>
+                <TextBox x:Name="TxtWdsImageName" Grid.Row="4" Grid.Column="1" ToolTip="Shown in the PXE boot menu. An image with this name is replaced."/>
+
+                <Label Grid.Row="6" Content="Set up WDS"/>
+                <CheckBox x:Name="ChkWdsSetup" Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
+                          Content="Install and configure WDS if needed (standalone, answers all PXE clients)"/>
+
+                <Label Grid.Row="8" Content="RemoteInstall folder"/>
+                <TextBox x:Name="TxtWdsRemInst" Grid.Row="8" Grid.Column="1" IsEnabled="{Binding IsChecked, ElementName=ChkWdsSetup}"
+                         ToolTip="On the WDS server. Used only when WDS is configured for the first time. Not the system drive."/>
+
+                <Label Grid.Row="10" Content="Options"/>
+                <StackPanel Grid.Row="10" Grid.Column="1">
+                  <CheckBox x:Name="ChkWdsDhcp" Content="DHCP runs on the WDS server too" Margin="0,2"/>
+                  <CheckBox x:Name="ChkWdsNoPrompt" Content="Boot without pressing F12 or Enter (any PC set to network boot starts the deploy)" Margin="0,2"/>
+                </StackPanel>
+              </Grid>
+              <TextBox x:Name="TxtWdsStatus" Height="80" Margin="0,10,0,0" IsReadOnly="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+            </StackPanel>
+          </GroupBox>
+
           <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
           </StackPanel>
         </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <!-- Multicast -->
+      <TabItem Header="Multicast">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Multicast: image a room of PCs at once"/>
+            <TextBlock Style="{StaticResource Hint}" Text="WDS sends the image once over the network and every PC in the session receives it together, instead of each PC copying its own. PCs booted from PXE, ISO or a small USB stick (network share mode) use it; USB sticks that carry the images do not. The content root must be on the WDS server. WinPE reads these settings from the content root, so no media rebuild is needed."/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/>
+                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+              </Grid.RowDefinitions>
+
+              <Label Content="Use multicast"/>
+              <StackPanel Grid.Column="1">
+                <CheckBox x:Name="ChkMcEnabled" Content="PCs download the image by multicast" Margin="0,2"/>
+                <CheckBox x:Name="ChkMcFallback" Content="If multicast fails, copy the image from the share instead" Margin="0,2"/>
+              </StackPanel>
+
+              <Label Grid.Row="2" Content="WDS server"/>
+              <TextBox x:Name="TxtMcServer" Grid.Row="2" Grid.Column="1" ToolTip="Empty: the server on the Media tab's WDS box, or else the server in the network share path. PCs need a name here, so set it when the console runs on the WDS server itself."/>
+
+              <Label Grid.Row="4" Content="Session name"/>
+              <TextBox x:Name="TxtMcNamespace" Grid.Row="4" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="The multicast namespace PCs ask WDS for."/>
+
+              <Label Grid.Row="6" Content="Content folder on server"/>
+              <TextBox x:Name="TxtMcContentPath" Grid.Row="6" Grid.Column="1" ToolTip="The content root as a folder on the WDS server, for example D:\Deploy. Empty: the folder behind the network share in Deploy Settings."/>
+
+              <Label Grid.Row="8" Content="Session type"/>
+              <StackPanel Grid.Row="8" Grid.Column="1">
+                <RadioButton x:Name="RbMcAuto" GroupName="McType" Content="Start as soon as a PC asks (PCs that join late catch up)" Margin="0,2"/>
+                <RadioButton x:Name="RbMcScheduled" GroupName="McType" Content="Wait for the room: start when enough PCs have joined or at a set time" Margin="0,2"/>
+              </StackPanel>
+
+              <Label Grid.Row="10" Content="Wait for"/>
+              <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" IsEnabled="{Binding IsChecked, ElementName=RbMcScheduled}">
+                <TextBox x:Name="TxtMcClients" Width="60" ToolTip="0: no PC count, use the start time or Start now."/>
+                <Label Content="PCs, or start at"/>
+                <TextBox x:Name="TxtMcStartTime" Width="140" ToolTip="yyyy-MM-dd HH:mm, server time. Empty: no start time."/>
+                <Label Content="(yyyy-MM-dd HH:mm)"/>
+              </StackPanel>
+
+              <Label Grid.Row="12" Content="Slow PCs"/>
+              <StackPanel Grid.Row="12" Grid.Column="1">
+                <RadioButton x:Name="RbMcSpeedNone" GroupName="McSpeed" Content="Everyone goes at the slowest PC's speed" Margin="0,2"/>
+                <RadioButton x:Name="RbMcSpeedMulti" GroupName="McSpeed" Content="Put slow PCs in a second, slower stream" Margin="0,2"/>
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton x:Name="RbMcSpeedDrop" GroupName="McSpeed" Content="Drop PCs slower than" Margin="0,2" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TxtMcThreshold" Width="70" Margin="6,0" IsEnabled="{Binding IsChecked, ElementName=RbMcSpeedDrop}"/>
+                  <Label Content="KB/s (they copy from the share instead)"/>
+                </StackPanel>
+              </StackPanel>
+
+              <Label Grid.Row="14" Content="Server answer"/>
+              <TextBox x:Name="TxtMcStatus" Grid.Row="14" Grid.Column="1" Height="60" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"
+                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+              <Button x:Name="BtnMcSave" Content="Save and set up session" Style="{StaticResource Primary}"
+                      ToolTip="Saves the settings and creates the session on the WDS server, replacing one with the same name."/>
+              <Button x:Name="BtnMcStart" Content="Start now" ToolTip="Starts a waiting session without waiting for more PCs."/>
+              <Button x:Name="BtnMcRemove" Content="Remove session"/>
+            </StackPanel>
+
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Room monitor" Margin="0,24,0,4"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Every PC receiving the image from the session, slowest first. PCs show their WinPE name (MININT-...); match them by IP or MAC address. Disconnecting a PC stops its multicast download; with fallback on it then copies the image from the share."/>
+            <TextBlock x:Name="TxtMcSummary" FontWeight="SemiBold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <DataGrid x:Name="GridMcClients" Height="220" IsReadOnly="True">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="PC" Binding="{Binding Name}" Width="140"/>
+                <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="230"/>
+                <DataGridTemplateColumn Header="Progress" Width="200">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid>
+                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="16"/>
+                        <TextBlock Text="{Binding Progress}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                      </Grid>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Image" Binding="{Binding File}" Width="*"/>
+                <DataGridTextColumn Header="Joined" Binding="{Binding Joined}" Width="90"/>
+                <DataGridTextColumn Header="Session speed" Binding="{Binding Speed}" Width="110"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+              <Button x:Name="BtnMcStatus" Content="Refresh" ToolTip="Reads the session and its PCs from the WDS server."/>
+              <Button x:Name="BtnMcDisconnect" Content="Disconnect selected PC"/>
+              <CheckBox x:Name="ChkMcAutoRefresh" Content="Refresh every 10 seconds" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
       </TabItem>
 
       <!-- Answer files -->
@@ -233,6 +368,141 @@
         </DockPanel>
       </TabItem>
 
+      <!-- Applications -->
+      <TabItem Header="Applications">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnAppEdit" Content="Edit"/>
+            <Button x:Name="BtnAppTest" Content="Test detection"/>
+            <Button x:Name="BtnAppExport" Content="Export..."/>
+            <Button x:Name="BtnAppImport" Content="Import..."/>
+            <Button x:Name="BtnAppDelete" Content="Delete"/>
+            <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
+            <Button x:Name="BtnAppsOpen" Content="Open folder"/>
+          </StackPanel>
+          <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+          <DataGrid x:Name="GridApps" IsReadOnly="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+              <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="90"/>
+              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
+              <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
+              <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
+              <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- Naming list -->
+      <TabItem Header="Naming List">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Naming list"/>
+            <TextBlock Style="{StaticResource Hint}" Text="One row per PC, matched by BIOS serial number at deploy time. A listed PC gets its computer name, OU and answer file from here; an empty cell keeps the answer file's setting (or the default answer file). Saved to config\naming-list.csv, which you can also edit in Excel. Edit cells directly, then Save."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnNamingSave" Content="Save" Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnNamingImport" Content="Import CSV..."/>
+            <Button x:Name="BtnNamingExport" Content="Export CSV..."/>
+            <Button x:Name="BtnNamingRemove" Content="Remove row"/>
+            <Button x:Name="BtnNamingRefresh" Content="Refresh"/>
+            <Button x:Name="BtnNamingOpen" Content="Open folder"/>
+          </StackPanel>
+          <TextBox x:Name="TxtNamingIssues" DockPanel.Dock="Bottom" Height="70" Margin="0,10,0,0" IsReadOnly="True"
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="#B91C1C"/>
+          <DataGrid x:Name="GridNaming" CanUserAddRows="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="130"/>
+              <DataGridTextColumn Header="Computer name" Binding="{Binding ComputerName}" Width="130"/>
+              <DataGridTextColumn Header="OU" Binding="{Binding OU}" Width="3*"/>
+              <DataGridComboBoxColumn Header="Answer file" SelectedItemBinding="{Binding AnswerFile}" Width="150"/>
+              <DataGridTextColumn Header="Notes" Binding="{Binding Notes}" Width="*"/>
+              <DataGridTextColumn Header="Last deploy" Binding="{Binding LastDeploy}" Width="140" IsReadOnly="True"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="2*" IsReadOnly="True"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <!-- Remote reimage -->
+      <TabItem Header="Remote Reimage">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Remote reimage"/>
+            <TextBlock Style="{StaticResource Hint}" Text="PCs this tool can wake and reimage over the network. Deployed PCs are added automatically; add others by hand, import a CSV (Name, MAC, Address, Group, Relay), or click Read from PCs for ones that are on. Reimage wakes PCs that are off, restarts running ones into a one-time network boot, and the deploy uses the chosen answer file without asking. PCs need Wake-on-LAN and the UEFI network stack enabled in their BIOS, and PowerShell remoting with your account as administrator."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Label Content="Group"/>
+            <ComboBox x:Name="CmbPcGroup" Width="160" Margin="0,0,12,0"/>
+            <Button x:Name="BtnPcRefresh" Content="Refresh"/>
+            <Button x:Name="BtnPcCheck" Content="Check online"/>
+            <Button x:Name="BtnPcRead" Content="Read from PCs" ToolTip="For selected PCs that are on: read the MAC, IP, model and serial over PowerShell remoting."/>
+            <Button x:Name="BtnPcImport" Content="Import CSV..."/>
+            <Button x:Name="BtnPcRemove" Content="Remove"/>
+          </StackPanel>
+          <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <GroupBox Header="Add or update a PC" Padding="8">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Name"/>
+                <TextBox x:Name="TxtPcName" Grid.Column="1"/>
+                <Label Grid.Row="2" Content="MAC"/>
+                <TextBox x:Name="TxtPcMac" Grid.Row="2" Grid.Column="1" ToolTip="Wired adapter, e.g. 00-15-5D-0A-1B-2C"/>
+                <Label Grid.Row="4" Content="Address"/>
+                <TextBox x:Name="TxtPcAddress" Grid.Row="4" Grid.Column="1" ToolTip="Name or IP used for remoting. Empty = the name."/>
+                <Label Grid.Row="6" Content="Group"/>
+                <TextBox x:Name="TxtPcGroup" Grid.Row="6" Grid.Column="1" ToolTip="A lab or room, e.g. Lab-B204"/>
+                <Label Grid.Row="8" Content="Relay"/>
+                <TextBox x:Name="TxtPcRelay" Grid.Row="8" Grid.Column="1" ToolTip="Optional: a PC that is usually on in the same subnet. It sends the Wake-on-LAN packet when routers block it."/>
+                <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
+                  <Button x:Name="BtnPcSave" Content="Save PC"/>
+                  <Button x:Name="BtnPcClear" Content="Clear"/>
+                </StackPanel>
+              </Grid>
+            </GroupBox>
+            <GroupBox Grid.Column="2" Header="Selected PCs" Padding="8">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="6"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Answer file"/>
+                <ComboBox x:Name="CmbReimageAnswer" Grid.Column="1"/>
+                <CheckBox x:Name="ChkKeepNames" Grid.Row="2" Grid.ColumnSpan="2" IsChecked="True" Content="Keep each PC's name (instead of the answer file's naming)"/>
+                <CheckBox x:Name="ChkSkipF12" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="True" Content="Boot without F12: prestage these PCs in WDS until their deploy starts"/>
+                <Label Grid.Row="6" Content="WDS server"/>
+                <TextBox x:Name="TxtReimageWds" Grid.Row="6" Grid.Column="1" ToolTip="Empty = this PC (or the WDS server in the PXE settings). Saved to deploy-settings.json."/>
+                <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal">
+                  <Button x:Name="BtnPcReimage" Content="Reimage..." Style="{StaticResource Primary}"/>
+                  <Button x:Name="BtnPcWake" Content="Wake"/>
+                  <Button x:Name="BtnPcCancel" Content="Cancel reimage"/>
+                </StackPanel>
+              </Grid>
+            </GroupBox>
+          </Grid>
+          <DataGrid x:Name="GridPcs" IsReadOnly="True" SelectionMode="Extended">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+              <DataGridTextColumn Header="MAC" Binding="{Binding Mac}" Width="130"/>
+              <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="100"/>
+              <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
+              <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="60"/>
+              <DataGridTextColumn Header="Last deployed" Binding="{Binding LastDeployed}" Width="120"/>
+              <DataGridTextColumn Header="Result" Binding="{Binding LastResult}" Width="60"/>
+              <DataGridTextColumn Header="Reimage" Binding="{Binding Job}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
       <!-- Settings -->
       <TabItem Header="Deploy Settings">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -243,7 +513,8 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Grid.RowDefinitions>
                 <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
-                <RowDefinition Height="8"/><RowDefinition/>
+                <RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+                <RowDefinition Height="20"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
               </Grid.RowDefinitions>
               <Label Content="Network share"/>
               <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
@@ -256,12 +527,126 @@
               <Label Grid.Row="8" Content="Versions to keep"/>
               <TextBox x:Name="TxtVersionsToKeep" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"
                        ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. 0 keeps all. Versions an answer file is pinned to are never deleted."/>
+              <Label Grid.Row="10" Content="Status share (optional)"/>
+              <TextBox x:Name="TxtReportPath" Grid.Row="10" Grid.Column="1"
+                       ToolTip="Where PCs report progress for the Dashboard. Empty: the content root's Status folder. Set a \\server\share\Status path so USB deployments report to a server too. Rebuild media after changing it."/>
+              <Label Grid.Row="12" Content="Post-deploy checks"/>
+              <CheckBox x:Name="ChkChecksEnabled" Grid.Row="12" Grid.Column="1" VerticalAlignment="Center"
+                        Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and report pass/fail to the Dashboard"/>
+              <Label Grid.Row="14" Content="BitLocker check"/>
+              <ComboBox x:Name="CmbCheckBitLocker" Grid.Row="14" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+                        ToolTip="Auto: required when the answer file turns BitLocker on, otherwise only reported. Report: a warning, never a failure.">
+                <ComboBoxItem Content="Auto"/><ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
+              </ComboBox>
+              <Label Grid.Row="16" Content="Device driver check"/>
+              <ComboBox x:Name="CmbCheckDevices" Grid.Row="16" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+                        ToolTip="Any device with an error in Device Manager (no driver, cannot start). Disabled devices are ignored.">
+                <ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
+              </ComboBox>
+              <Label Grid.Row="18" Content="Ignore devices"/>
+              <TextBox x:Name="TxtCheckIgnore" Grid.Row="18" Grid.Column="1"
+                       ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
             <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
             </StackPanel>
           </StackPanel>
         </ScrollViewer>
+      </TabItem>
+
+      <!-- Dashboard -->
+      <TabItem x:Name="TabDashboard" Header="Dashboard">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Checks column shows the result, and the details below show each check. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it."/>
+            <UniformGrid Rows="1" Margin="0,0,0,12">
+              <UniformGrid.Resources>
+                <Style TargetType="Border">
+                  <Setter Property="Background" Value="#F8FAFC"/>
+                  <Setter Property="BorderBrush" Value="#E1E3E8"/>
+                  <Setter Property="BorderThickness" Value="1"/>
+                  <Setter Property="CornerRadius" Value="4"/>
+                  <Setter Property="Padding" Value="12,8"/>
+                  <Setter Property="Margin" Value="0,0,8,0"/>
+                </Style>
+              </UniformGrid.Resources>
+              <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#0F6CBD"/><TextBlock Text="Deploying" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#15803D"/><TextBlock Text="Succeeded" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B45309"/><TextBlock Text="With warnings" Foreground="#5B6170"/></StackPanel></Border>
+              <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B91C1C"/><TextBlock Text="Failed or stalled" Foreground="#5B6170"/></StackPanel></Border>
+              <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="#5B6170"/></StackPanel></Border>
+            </UniformGrid>
+          </StackPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <Button x:Name="BtnDashRefresh" Content="Refresh"/>
+            <CheckBox x:Name="ChkDashAuto" Content="Refresh every 10 s" IsChecked="True" VerticalAlignment="Center" Margin="4,0,16,0"/>
+            <Label Content="Show"/>
+            <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
+              <ComboBoxItem Content="All"/>
+              <ComboBoxItem Content="Deploying"/>
+              <ComboBoxItem Content="Failed or stalled"/>
+              <ComboBoxItem Content="Finished"/>
+            </ComboBox>
+            <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
+            <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
+            <Button x:Name="BtnDashRemove" DockPanel.Dock="Right" Content="Remove" Margin="8,0,0,0"/>
+            <TextBlock/>
+          </DockPanel>
+          <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="220" MinHeight="80"/></Grid.RowDefinitions>
+            <DataGrid x:Name="GridDash" IsReadOnly="True">
+              <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding State}" Value="Failed"><Setter Property="Background" Value="#FEF2F2"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Stalled"><Setter Property="Background" Value="#FEF2F2"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Warning"><Setter Property="Background" Value="#FFFBEB"/></DataTrigger>
+                    <DataTrigger Binding="{Binding State}" Value="Succeeded"><Setter Property="Background" Value="#F0FDF4"/></DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </DataGrid.RowStyle>
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Computer" Binding="{Binding ComputerName}" Width="120"/>
+                <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
+                <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="100"/>
+                <DataGridTextColumn Header="IP" Binding="{Binding IpAddress}" Width="100"/>
+                <DataGridTextColumn Header="Answer file" Binding="{Binding AnswerFile}" Width="110"/>
+                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="80"/>
+                <DataGridTemplateColumn Header="Progress" Width="110">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid Margin="2,4">
+                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100"/>
+                        <TextBlock Text="{Binding Percent, StringFormat={}{0} %}" HorizontalAlignment="Center" FontSize="11"/>
+                      </Grid>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Step" Binding="{Binding Step}" Width="2*"/>
+                <DataGridTextColumn Header="Checks" Binding="{Binding Checks}" Width="1.5*">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="ToolTip" Value="{Binding Checks}"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Failed"><Setter Property="Foreground" Value="#B91C1C"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Warning"><Setter Property="Foreground" Value="#B45309"/></DataTrigger>
+                        <DataTrigger Binding="{Binding CheckResult}" Value="Passed"><Setter Property="Foreground" Value="#15803D"/></DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Started" Binding="{Binding Started, StringFormat=MM-dd HH:mm}" Width="85"/>
+                <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70"/>
+                <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="70"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
+            <TextBlock x:Name="TxtDashDetail" Grid.Row="2" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="#374151"/>
+            <TextBox x:Name="TxtDashLog" Grid.Row="3" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
+          </Grid>
+        </DockPanel>
       </TabItem>
 
       <!-- Logs -->

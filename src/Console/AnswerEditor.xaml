@@ -73,6 +73,9 @@
         <ListBoxItem Content="Domain or workgroup"/>
         <ListBoxItem Content="Tasks"/>
         <ListBoxItem Content="Network shares"/>
+        <ListBoxItem Content="BIOS settings"/>
+        <ListBoxItem Content="BitLocker"/>
+        <ListBoxItem Content="User data"/>
       </ListBox>
     </Border>
 
@@ -116,10 +119,10 @@
       <!-- 1 Image and disk -->
       <StackPanel x:Name="Sec1" Visibility="Collapsed">
         <TextBlock Style="{StaticResource Title}" Text="Image and disk"/>
-        <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned."/>
+        <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned, unless the user data is kept on the disk (User data)."/>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Label Content="Image"/>
           <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
           <Label Grid.Row="1" Content="Version"/>
@@ -135,6 +138,13 @@
           </ComboBox>
           <Label Grid.Row="5" Content="Driver library folder"/>
           <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
+          <Label Grid.Row="6" Content="Windows 11 check"/>
+          <ComboBox x:Name="CmbWin11Check" Grid.Row="6" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
+                    ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
+            <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
+            <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>
+            <ComboBoxItem Content="Off: do not check"/>
+          </ComboBox>
         </Grid>
       </StackPanel>
 
@@ -142,7 +152,7 @@
       <DockPanel x:Name="Sec2" Visibility="Collapsed">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Style="{StaticResource Title}" Text="Applications"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Installed in this order the first time the PC starts, before anyone logs on. Add installers with New application."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Installed in this order the first time the PC starts, before anyone logs on. Apps limited to other makers or models are skipped on that PC. New application opens the application pack builder; manage packs on the Applications tab."/>
         </StackPanel>
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -305,6 +315,117 @@
           </DataGrid.Columns>
         </DataGrid>
       </DockPanel>
+
+      <!-- 8 BIOS settings -->
+      <DockPanel x:Name="Sec8" Visibility="Collapsed">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Style="{StaticResource Title}" Text="BIOS settings"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Applied in WinPE before the disk is wiped; only the rows for the PC's maker are used. Dell needs Dell Command | Configure's WinPE x64 folder in the tools folder below, under Dell. HP and Lenovo use the firmware's WMI interface. Names and values differ by maker and model: check them on one PC first."/>
+          <CheckBox x:Name="ChkBios" Content="Apply these BIOS settings"/>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Current BIOS password"/>
+            <StackPanel Grid.Column="1">
+              <PasswordBox x:Name="PwdBios" Width="260" HorizontalAlignment="Left" ToolTip="The BIOS admin (setup / supervisor) password the PCs already have. Leave empty if they have none."/>
+              <TextBlock x:Name="TxtBiosPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="1" Content="Tools folder"/>
+            <TextBox x:Name="TxtBiosTools" Grid.Row="1" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="Relative to the content root. Dell's cctk.exe goes in &lt;folder&gt;\Dell."/>
+            <Label Grid.Row="2" Content="If a setting fails"/>
+            <CheckBox x:Name="ChkBiosStop" Grid.Row="2" Grid.Column="1" Content="Stop the deployment (nothing is erased yet)"/>
+          </Grid>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+          <Button x:Name="BtnBiosAdd" Content="Add"/>
+          <Button x:Name="BtnBiosRemove" Content="Remove"/>
+          <TextBlock Text="Add recommended for:" VerticalAlignment="Center" Margin="12,0,8,0"/>
+          <ComboBox x:Name="CmbBiosPreset" Width="100" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+          <Button x:Name="BtnBiosPreset" Content="Add"/>
+        </StackPanel>
+        <DataGrid x:Name="GridBios">
+          <DataGrid.Columns>
+            <DataGridComboBoxColumn Header="Maker" SelectedItemBinding="{Binding Maker}" Width="100"/>
+            <DataGridTextColumn Header="Setting" Binding="{Binding Name}" Width="2*"/>
+            <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <!-- 9 BitLocker -->
+      <ScrollViewer x:Name="Sec9" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="BitLocker"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Turned on at first boot, after the applications and tasks. The recovery password is backed up before anything is encrypted. The PC needs a TPM that is turned on: add the TPM setting under BIOS settings."/>
+          <CheckBox x:Name="ChkBitLocker" Content="Encrypt the Windows drive with BitLocker"/>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Encryption"/>
+            <ComboBox x:Name="CmbBlMethod" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="1" Content="Encrypt"/>
+            <CheckBox x:Name="ChkBlUsedSpace" Grid.Row="1" Grid.Column="1" Content="Used space only (faster; fine for a freshly wiped disk)"/>
+            <Label Grid.Row="2" Content="Unlock at startup"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+              <RadioButton x:Name="RbBlTpm" GroupName="BlProt" Content="TPM only"/>
+              <RadioButton x:Name="RbBlTpmPin" GroupName="BlProt" Content="TPM and a startup PIN"/>
+            </StackPanel>
+            <Label Grid.Row="3" Content="Startup PIN"/>
+            <StackPanel Grid.Row="3" Grid.Column="1">
+              <PasswordBox x:Name="PwdBlPin" Width="260" HorizontalAlignment="Left" ToolTip="6 to 20 digits. Every PC deployed with this answer file gets the same PIN; users can change it later."/>
+              <TextBlock x:Name="TxtBlPinState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="4" Content="Recovery key backup"/>
+            <CheckBox x:Name="ChkBlAD" Grid.Row="4" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>
+            <Label Grid.Row="5" Content="Also save to folder"/>
+            <TextBox x:Name="TxtBlFolder" Grid.Row="5" Grid.Column="1" ToolTip="\\server\share\BitLocker. One text file per PC. Domain Computers need write access; restrict who can read it."/>
+            <Label Grid.Row="6" Content="If no backup worked"/>
+            <CheckBox x:Name="ChkBlRequire" Grid.Row="6" Grid.Column="1" Content="Leave BitLocker off (recommended)"/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 10 User data -->
+      <ScrollViewer x:Name="Sec10" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="User data"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Back up the user profiles of the Windows already on the PC with USMT before it is erased, and restore them the first time the PC starts, after the applications. A PC with no Windows on the disk is deployed without user data. A disk locked by BitLocker stops the deployment before anything is erased."/>
+          <CheckBox x:Name="ChkMigrate" Content="Keep the users' data and settings when redeploying a PC"/>
+          <Grid x:Name="GridMigrate" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Keep it during the deploy"/>
+            <StackPanel Grid.Column="1">
+              <RadioButton x:Name="RbStoreLocal" GroupName="Store" Content="On the PC's disk (hard links: fast, nothing is copied)"/>
+              <TextBlock Style="{StaticResource Hint}" Margin="20,-4,0,8" Text="The partitions are kept and only the Windows partition is emptied. Needs a GPT disk without BitLocker encryption."/>
+              <RadioButton x:Name="RbStoreShare" GroupName="Store" Content="In a folder on the content root or a share (copied)"/>
+              <TextBlock Style="{StaticResource Hint}" Margin="20,-4,0,8" Text="Each PC gets a subfolder named after its serial number. The disk is recreated, and the copy stays in the folder as a backup: delete it when you no longer need it."/>
+            </StackPanel>
+            <Label Grid.Row="1" Content="Folder"/>
+            <TextBox x:Name="TxtStorePath" Grid.Row="1" Grid.Column="1" ToolTip="Relative to the content root (UserState), or a folder on an extra share such as Y:\UserState. WinPE must be able to write to it."/>
+            <Label Grid.Row="2" Content="Encryption"/>
+            <StackPanel Grid.Row="2" Grid.Column="1">
+              <CheckBox x:Name="ChkEncrypt" Content="Encrypt the copy (AES-256) with this key"/>
+              <PasswordBox x:Name="PwdUsmtKey" Width="260" HorizontalAlignment="Left"/>
+              <TextBlock x:Name="TxtUsmtKeyState" Foreground="#5B6170" Margin="0,0,0,8"/>
+            </StackPanel>
+            <Label Grid.Row="3" Content="What to keep"/>
+            <StackPanel Grid.Row="3" Grid.Column="1">
+              <CheckBox x:Name="ChkMigDocs" Content="Documents, desktop, pictures and other user files (MigDocs.xml)"/>
+              <CheckBox x:Name="ChkMigApp" Content="Application settings (MigApp.xml)"/>
+            </StackPanel>
+            <Label Grid.Row="4" Content="Extra rule files"/>
+            <TextBox x:Name="TxtExtraRules" Grid.Row="4" Grid.Column="1" ToolTip="Your own USMT rule files, relative to the content root, separated by semicolons. Example: config\usmt\Custom.xml"/>
+            <Label Grid.Row="5" Content="Skip these users"/>
+            <TextBox x:Name="TxtExcludeUsers" Grid.Row="5" Grid.Column="1" ToolTip="DOMAIN\user or COMPUTER\user, * as a wildcard, separated by semicolons. Example: *\Administrator; CORP\temp*"/>
+            <Label Grid.Row="6" Content="Options"/>
+            <StackPanel Grid.Row="6" Grid.Column="1">
+              <CheckBox x:Name="ChkLocalAccounts" Content="Recreate local user accounts (created disabled and without a password; enable them afterwards)"/>
+              <CheckBox x:Name="ChkKeepStore" Content="Keep the data in C:\UserState on the PC after a successful restore"/>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
     </Grid>
   </DockPanel>
 </Window>

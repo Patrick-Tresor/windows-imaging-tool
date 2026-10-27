@@ -48,6 +48,15 @@ try {
     $pack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config/driver-catalog.json') -DriverRoot (Join-Path $root 'Drivers') 6>$null
     Assert-Equal ([IO.Path]::GetFileName($pack)) 'ProBook 450 G10' 'deploy matches the imported pack by SKU'
 
+    # Disk layout follows the firmware: GPT + EFI for UEFI, MBR + active System for legacy BIOS.
+    $gpt = New-DiskpartScript -DiskNumber 1 -Firmware UEFI
+    $mbr = New-DiskpartScript -DiskNumber 1 -Firmware BIOS
+    Assert-Equal (($gpt -match 'convert gpt') -and ($gpt -match 'create partition efi') -and ($gpt -notmatch 'active')) $true 'UEFI layout is GPT with an EFI partition'
+    Assert-Equal (($mbr -match 'convert mbr') -and ($mbr -match '(?m)^active') -and ($mbr -match 'set id=27') -and ($mbr -notmatch 'efi|msr|gpt')) $true 'BIOS layout is MBR with an active system partition'
+    foreach ($script in $gpt, $mbr) {
+        Assert-Equal (($script -match 'select disk 1') -and ($script -match 'assign letter=S') -and ($script -match 'assign letter=W')) $true 'both layouts select the disk and use S: and W:'
+    }
+
     # Images: split parts count as one image.
     Set-Content (Join-Path $root 'Images/Win11.wim') 'x'
     Set-Content (Join-Path $root 'Images/Big.swm') 'x'
@@ -68,6 +77,59 @@ try {
     Assert-Equal (Get-DeploySettings -ContentRoot $root).defaultAnswerFile 'Lab' 'settings round-trip'
     $s.defaultAnswerFile = 'Default'
     Save-DeploySettings -ContentRoot $root -Settings $s
+
+    # WDS settings: defaults for older settings files, round-trip, and the share settings are kept.
+    $s.PSObject.Properties.Remove('wds')
+    Save-DeploySettings -ContentRoot $root -Settings $s
+    $w = Get-WdsSettings -ContentRoot $root
+    Assert-Equal "$($w.server)|$($w.imageName)|$($w.setup)" '|Imaging Tool (x64)|False' 'WDS settings default when the section is missing'
+    Save-WdsSettings -ContentRoot $root -Wds ([pscustomobject]@{ server = ' wds01 '; imageName = ''; setup = $true; remoteInstallPath = 'E:\RemoteInstall'; dhcpOnServer = $true; noPrompt = $false })
+    $w = Get-WdsSettings -ContentRoot $root
+    Assert-Equal "$($w.server)|$($w.imageName)|$($w.setup)|$($w.remoteInstallPath)|$($w.dhcpOnServer)|$($w.noPrompt)" 'wds01|Imaging Tool (x64)|True|E:\RemoteInstall|True|False' 'WDS settings round-trip'
+    Assert-Equal (Get-DeploySettings -ContentRoot $root).share.path $s.share.path 'saving WDS settings keeps the share'
+
+    # Multicast settings: defaults, validation, round-trip, and the other sections are kept.
+    $m = Get-MulticastSettings -ContentRoot $root
+    Assert-Equal "$($m.enabled)|$($m.namespace)|$($m.type)|$($m.speedPolicy)|$($m.fallback)" 'False|ImagingTool|AutoCast|None|True' 'multicast settings default to off'
+    $bad = [pscustomobject]@{ enabled = $true; namespace = 'Room 12'; type = 'ScheduledCast'; clients = ''; startTime = '03/11/2026 8h30'; speedPolicy = 'AutoDisconnect'; thresholdKbps = '0' }
+    Assert-Equal (@(Get-MulticastIssues -Multicast $bad).Count) 2 'bad start time and threshold are reported'
+    $bad.startTime = ''
+    Assert-Equal ((@(Get-MulticastIssues -Multicast $bad)) -match 'needs a number of PCs').Count 1 'a scheduled session needs a trigger'
+    $threw = $false; try { Save-MulticastSettings -ContentRoot $root -Multicast $bad } catch { $threw = $true }
+    Assert-Equal $threw $true 'invalid multicast settings are not saved'
+    Save-MulticastSettings -ContentRoot $root -Multicast ([pscustomobject]@{ enabled = $true; server = ' wds01 '; namespace = 'Room 12'; contentPath = 'D:\Deploy'
+        type = 'ScheduledCast'; clients = '24'; startTime = '2026-11-03 08:30'; speedPolicy = 'Multistream'; thresholdKbps = ''; fallback = $false })
+    $m = Get-MulticastSettings -ContentRoot $root
+    Assert-Equal "$($m.enabled)|$($m.server)|$($m.namespace)|$($m.type)|$($m.clients)|$($m.startTime)|$($m.speedPolicy)|$($m.thresholdKbps)|$($m.fallback)" 'True|wds01|Room 12|ScheduledCast|24|2026-11-03 08:30|Multistream|1024|False' 'multicast settings round-trip'
+    Assert-Equal (Get-WdsSettings -ContentRoot $root).server 'wds01' 'saving multicast settings keeps the WDS settings'
+
+    # Multicast room monitor: summary line and rows, slowest PC first.
+    $mon = [pscustomobject]@{ Server = 'WDS01'; Namespace = 'Room 12'; Exists = $true; Sessions = 1; Clients = @(
+        [pscustomobject]@{ Id = 7; Name = 'MININT-A'; IpAddress = '10.0.12.21'; MacAddress = '00-15-5D-01-02-03'; File = 'Images\W11.wim'; Percent = 80; JoinedSeconds = 300; RateBytes = 40MB }
+        [pscustomobject]@{ Id = 9; Name = 'MININT-B'; IpAddress = '10.0.12.22'; MacAddress = ''; File = 'Images\W11.wim'; Percent = 20; JoinedSeconds = 3900; RateBytes = 512KB }
+        [pscustomobject]@{ Id = 4; Name = 'MININT-C'; IpAddress = '10.0.12.23'; MacAddress = ''; File = 'Images\W11.wim'; Percent = 100; JoinedSeconds = 60; RateBytes = 40MB }) }
+    $view = ConvertTo-MulticastView -Monitor $mon
+    Assert-Equal $view.Summary '3 PCs receiving, average 67 %, 1 done. Slowest: MININT-B at 20 %.' 'multicast monitor summary'
+    Assert-Equal "$($view.Rows[0].Id)|$($view.Rows[0].Address)|$($view.Rows[0].File)|$($view.Rows[0].Joined)|$($view.Rows[0].Speed)" '9|10.0.12.22|W11.wim|1 h 05 min|512 KB/s' 'multicast monitor row, slowest first'
+    Assert-Equal "$($view.Rows[1].Address)|$($view.Rows[1].Joined)|$($view.Rows[1].Speed)" '10.0.12.21  00-15-5D-01-02-03|5 min|40.0 MB/s' 'multicast monitor row details'
+    $mon.Sessions = 0; $mon.Clients = @()
+    Assert-Equal ((ConvertTo-MulticastView -Monitor $mon).Summary -like '*has not started sending yet*') $true 'waiting session summary'
+    $mon.Exists = $false
+    Assert-Equal (@((ConvertTo-MulticastView -Monitor $mon).Rows).Count) 0 'missing session has no rows'
+
+    # Multicast plan in WinPE: which server, namespace and file, and when to stay unicast.
+    $ds = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\files01\Deploy' }; wds = [pscustomobject]@{ server = '' }
+        multicast = [pscustomobject]@{ enabled = $true; server = ''; namespace = ''; fallback = $null } }
+    $plan = Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11-23H2.wim'
+    Assert-Equal "$($plan.Server)|$($plan.Namespace)|$($plan.SourceFile)|$($plan.Fallback)" 'files01|ImagingTool|Images\W11-23H2.wim|True' 'multicast plan defaults to the share server'
+    $ds.wds.server = 'wds01'; $ds.multicast.namespace = 'Room 12'; $ds.multicast.fallback = $false
+    $plan = Get-MulticastPlan -Settings $ds -ContentRoot 'Z:' -ImagePath 'z:\Images\Sub\W10.wim'
+    Assert-Equal "$($plan.Server)|$($plan.Namespace)|$($plan.SourceFile)|$($plan.Fallback)" 'wds01|Room 12|Images\Sub\W10.wim|False' 'multicast plan prefers the WDS server'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'D:\' -ImagePath 'D:\Images\W11.wim' -IsNetworkRoot $false)) $true 'USB content stays unicast'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Y:\Other\W11.wim')) $true 'images outside the content root stay unicast'
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11.swm')) $true 'split images stay unicast'
+    $ds.multicast.enabled = $false
+    Assert-Equal ($null -eq (Get-MulticastPlan -Settings $ds -ContentRoot 'Z:\' -ImagePath 'Z:\Images\W11.wim')) $true 'multicast off stays unicast'
 
     # Answer files.
     $rows = @(Get-AnswerFileRows -ContentRoot $root)
@@ -117,7 +179,7 @@ try {
     Set-Content $inst 'msi'
     New-Application -ContentRoot $root -Name 'Zoom' -Source $inst -Command 'msiexec /i zoom-src.msi /qn' | Out-Null
     $appList = @(Get-ApplicationList -ContentRoot $root)
-    Assert-Equal "$($appList.Name)|$($appList.Status)|$(Test-Path (Join-Path $root 'Applications/Zoom/zoom-src.msi'))" 'Zoom|Ready|True' 'new application copies the installer and writes app.json'
+    Assert-Equal "$($appList.Name)|$($appList.Status)|$(Test-Path (Join-Path $root 'Applications/Zoom/zoom-src.msi'))" 'Zoom|Ready (no detection)|True' 'new application copies the installer and writes app.json'
 
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'
@@ -134,6 +196,20 @@ try {
     $ed.Name = 'Broken'; $ed.Domain = ''
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew | Out-Null; '' } catch { $_.Exception.Message }
     Assert-Equal ($msg -like '*needs network/domain*') $true 'editor save reports validation problems'
+    $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
+    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null; $ed.Bios.Enabled = $true
+    $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal $msg 'The BitLocker startup PIN must be 6 to 20 digits.' 'editor save rejects a PIN that is not digits'
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -BiosPassword 'B10s' -IsNew
+    $back = Read-AnswerFile -Path $saved
+    Assert-Equal "$($back.BitLocker.PinFile)|$($back.Bios.PasswordFile)" 'config\secrets\Secure-bitlocker-pin.txt|config\secrets\Secure-bios.txt' 'editor save names the PIN and BIOS password files'
+    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))|$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bios.txt'))" '246810|B10s' 'PIN and BIOS password go to their own files'
+    Assert-Equal ((Get-Content -Raw $saved) -match '246810|B10s') $false 'PIN and BIOS password are not in the answer file'
+    $mig = Get-NewAnswer -Name 'Migrate'
+    $mig.MigrateUserData = $true; $mig.UserDataStore = 'Share'; $mig.UserDataEncrypt = $true
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $mig -UserDataKey 'K3y!' -IsNew
+    $back = Read-AnswerFile -Path $saved
+    Assert-Equal "$($back.MigrateUserData)|$($back.UserDataStore)|$($back.UserDataKeyFile)|$(Get-Content -Raw (Join-Path $root 'config/secrets/Migrate-usmt.txt'))" 'True|Share|config\secrets\Migrate-usmt.txt|K3y!' 'user data encryption key goes to its own file'
     $threw = $false
     try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
     Assert-Equal $threw $true 'password files must stay inside the content root'
@@ -173,6 +249,24 @@ try {
     $threw = $false
     try { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @('a.msu') -ResetBase | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'reset base without cleanup is rejected'
+
+    $vc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy Share' -VMName "Win11's Ref" `
+        -Name 'Win11-24H2' -Description 'Lab build' -Split -NewVersion
+    $vcDecoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vc[-1]))
+    Assert-Equal $vcDecoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -VMName 'Win11''s Ref' -Name 'Win11-24H2' -ContentRoot 'D:\Deploy Share' -Compression max -Description 'Lab build' -SplitSizeMB 3800 -NewVersion -NoPrompt" 'VM capture command quotes the VM name and adds the options'
+    $threw = $false
+    try { Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'y' -VMName 'v' -Name 'bad name' | Out-Null } catch { $threw = $true }
+    Assert-Equal $threw $true 'VM capture rejects an image name with spaces'
+
+    $vhdxConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vhdx' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe'
+    Assert-Equal $vhdxConv $null 'a VHDX needs no conversion'
+    $qcowConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.qcow2' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe' -VBoxManage 'C:\VBox\VBoxManage.exe'
+    Assert-Equal ($qcowConv.ArgumentList -join ' ') 'convert -p -O vpc D:\VMs\a.qcow2 T\b.vhd' 'qcow2 converts with qemu-img when it is installed'
+    $vmdkConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vmdk' -DestinationPath 'T\b.vhd' -VBoxManage 'C:\VBox\VBoxManage.exe'
+    Assert-Equal ($vmdkConv.ArgumentList -join ' ') 'clonemedium disk D:\VMs\a.vmdk T\b.vhd --format VHD' 'VMDK converts with VirtualBox when qemu-img is missing'
+    $threwConv = $false
+    try { Get-DiskConversionCommand -SourcePath 'D:\VMs\a.qcow2' -DestinationPath 'T\b.vhd' -VBoxManage 'C:\VBox\VBoxManage.exe' | Out-Null } catch { $threwConv = $true }
+    Assert-Equal $threwConv $true 'qcow2 without qemu-img is rejected'
 
     Set-Content (Join-Path $root 'Logs/SERVICE-Win11_20261023-1000_OK.log') 'x'
     Assert-Equal ((Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'SERVICE-*').Status) 'OK' 'update log is parsed'

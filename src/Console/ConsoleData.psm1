@@ -4,6 +4,8 @@
 $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'ImageVersions.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -32,10 +34,10 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Updates') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'Tools\BIOS\Dell', 'AnswerFiles', 'Applications', 'Updates', 'Computers', 'Reimage') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
-    foreach ($file in 'driver-catalog.json', 'deploy-settings.json') {
+    foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'naming-list.csv') {
         $dest = Join-ContentPath $Path "config\$file"
         if (-not (Test-Path $dest)) { Copy-Item (Join-ContentPath $script:RepoRoot "config\$file") $dest }
     }
@@ -234,14 +236,14 @@ function Get-CaptureReadiness {
 }
 
 function Get-ReferenceVMs {
-    # Hyper-V VMs that can be captured: generation 2 only, since deploys are UEFI.
+    # Hyper-V VMs that can be captured. Capture media boots both generation 2 (UEFI) and generation 1 (BIOS).
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return @() }
     @(Get-VM | ForEach-Object {
         [pscustomobject]@{
             Name       = $_.Name
             State      = "$($_.State)"
             Generation = $_.Generation
-            Usable     = $_.Generation -eq 2
+            Usable     = $_.Generation -in 1, 2
             Label      = '{0}  ({1}, gen {2})' -f $_.Name, $_.State, $_.Generation
         }
     })
@@ -270,7 +272,12 @@ function Get-AnswerFileIssues {
     elseif ((& $local $a.ImageFile) -and -not (Test-Path (Join-ContentPath $ContentRoot $a.ImageFile))) { "Image $($a.ImageFile) is not in the content root." }
     if (& $local $a.AppLocation) {
         foreach ($app in $a.Applications) {
-            if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json." }
+            $appRoot = Join-ContentPath $ContentRoot $a.AppLocation
+            if (-not (Test-Path (Join-ContentPath $ContentRoot "$($a.AppLocation)\$app\app.json"))) { "Application $app has no $($a.AppLocation)\$app\app.json."; continue }
+            try {
+                $def = Read-AppPack -AppRoot $appRoot -Name $app
+                foreach ($p in Test-AppPack -Definition $def -Folder (Join-Path $appRoot $app) | Where-Object { $_ -notlike 'Warning:*' }) { "Application ${app}: $p" }
+            } catch { "Application ${app}: $($_.Exception.Message)" }
         }
     }
     $secrets = @()
@@ -333,6 +340,9 @@ function Get-NewAnswer {
     $a.Path = $null
     $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
+    $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
+    $a.Bios.PasswordFile = $null
+    $a.UserDataKeyFile = "config\secrets\$Name-usmt.txt"
     $a
 }
 
@@ -362,6 +372,9 @@ function Save-AnswerFromEditor {
         [string]$JoinPassword,
         [string]$AdminPassword,
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
+        [string]$BiosPassword,
+        [string]$BitLockerPin,
+        [string]$UserDataKey,               # encryption key for a Share user data store
         [switch]$IsNew
     )
     $a = $Answer
@@ -371,6 +384,10 @@ function Save-AnswerFromEditor {
 
     if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
+    if ($BiosPassword -and -not $a.Bios.PasswordFile) { $a.Bios.PasswordFile = "config\secrets\$($a.Name)-bios.txt" }
+    if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
+    if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
+    if (-not $a.UserDataKeyFile) { $a.UserDataKeyFile = "config\secrets\$($a.Name)-usmt.txt" }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -380,6 +397,9 @@ function Save-AnswerFromEditor {
 
     if ($JoinPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Value $JoinPassword }
     if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
+    if ($BiosPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.Bios.PasswordFile -Value $BiosPassword }
+    if ($BitLockerPin) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Value $BitLockerPin }
+    if ($UserDataKey) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile -Value $UserDataKey }
     foreach ($sh in $a.Shares) {
         $pw = $SharePasswords[$sh.LocalName]
         if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }
@@ -388,35 +408,78 @@ function Save-AnswerFromEditor {
     $dest
 }
 
+function Get-ApplicationUsage {
+    # Application name -> names of the answer files that install it.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        foreach ($n in $a.Applications) {
+            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
+            $usage[$n] += $f.BaseName
+        }
+    }
+    $usage
+}
+
 function Get-ApplicationList {
-    # Applications\<name>\app.json folders, for the editor's application picker.
+    # Applications\<name>\app.json folders, for the Applications tab and the answer file editor's picker.
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Applications'
+    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
     Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $cmd = $null; $status = 'Ready'
-        try { $cmd = (Get-AppDefinition -AppRoot $root -Name $_.Name).command } catch { $status = $_.Exception.Message }
-        [pscustomobject]@{ Name = $_.Name; Command = $cmd; Status = $status }
+        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'
+                           UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
+                           Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
+        try {
+            $d = Read-AppPack -AppRoot $root -Name $_.Name
+            $row.Definition = $d
+            $row.DisplayName = $d.displayName; $row.Version = $d.version; $row.Type = $d.installerType; $row.Command = $d.command
+            $row.Detection = if ($d.detection.rules) { (@($d.detection.rules | ForEach-Object { "$($_.type) $($_.target)" }) -join " $($d.detection.match) ") } else { 'none' }
+            $for = @($d.requirements.makers) + @($d.requirements.models)
+            if ($for) { $row.For = $for -join ', ' }
+            $row.Issues = @(Test-AppPack -Definition $d -Folder $_.FullName)
+            $errors = @($row.Issues | Where-Object { $_ -notlike 'Warning:*' })
+            $row.Status = if ($errors) { "$($errors.Count) problem(s)" } elseif ($row.Issues) { 'Ready (no detection)' } else { 'Ready' }
+        } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
+        [pscustomobject]$row
     }
 }
 
 function New-Application {
     # Creates Applications\<name>: copies the installer (a file, or a folder's contents) and writes app.json.
+    # The simple form (-Command, -SuccessCodes) or a full -Definition from the application pack builder.
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Source,
-        [Parameter(Mandatory)][string]$Command,
-        [int[]]$SuccessCodes = @(0, 3010)
+        [string]$Command,
+        [int[]]$SuccessCodes = @(0, 3010),
+        $Definition
     )
     if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    if (-not (Test-Path $Source)) { throw "Installer not found: $Source" }
-    $dest = Join-ContentPath $ContentRoot "Applications\$Name"
-    if (Test-Path $dest) { throw "An application named $Name already exists." }
-    New-Item -ItemType Directory -Path $dest -Force | Out-Null
-    if (Test-Path $Source -PathType Container) { Copy-Item -Path (Join-Path $Source '*') -Destination $dest -Recurse -Force }
-    else { Copy-Item -Path $Source -Destination $dest }
-    [pscustomobject]@{ command = $Command; successCodes = $SuccessCodes } | ConvertTo-Json | Set-Content (Join-Path $dest 'app.json') -Encoding utf8
-    $dest
+    if (-not $Definition) {
+        $leaf = if (Test-Path $Source -PathType Leaf) { Split-Path $Source -Leaf } else { '' }
+        $Definition = ConvertTo-AppDefinition -Name $Name -Json ([pscustomobject]@{ command = $Command; successCodes = $SuccessCodes; installer = $leaf })
+    }
+    $Definition.name = $Name
+    Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source
+}
+
+function Save-Application {
+    # Saves an edited definition over Applications\<name>; -Source adds or replaces installer files.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Definition, [string]$Source)
+    Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source -Overwrite
+}
+
+function Remove-Application {
+    # Deletes Applications\<name>. Refuses while an answer file still installs it.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
+    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
+    $dir = Join-Path (Join-Path $ContentRoot 'Applications') $Name
+    if (-not (Test-Path (Join-Path $dir 'app.json'))) { throw "$Name is not an application folder." }
+    Remove-Item $dir -Recurse -Force
 }
 
 function Get-ImageUsage {
@@ -612,6 +675,113 @@ function Get-ImageUpdateArguments {
     @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
+function Get-VMCaptureArguments {
+    # Command line for Capture-VMImage.ps1, run by the console in its own window.
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$VMName,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$Description,
+        [ValidateSet('fast', 'max')][string]$Compression = 'max',
+        [switch]$Split,
+        [switch]$NewVersion
+    )
+    if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
+    $cmd = "& $(& $quote $ScriptPath) -VMName $(& $quote $VMName) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
+    if ($Description) { $cmd += " -Description $(& $quote $Description)" }
+    if ($Split) { $cmd += ' -SplitSizeMB 3800' }
+    if ($NewVersion) { $cmd += ' -NewVersion' }
+    $cmd += ' -NoPrompt'   # the console already asked
+    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+}
+
+#endregion
+
+#region Naming list
+
+function Get-NamingListPath {
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    Join-ContentPath $ContentRoot 'config\naming-list.csv'
+}
+
+function Get-AnswerFileNames {
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    @(Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+}
+
+function Get-NamingListRows {
+    # Naming list rows for the grid, with each row's problems and the result of the last deploy of that serial.
+    param([Parameter(Mandatory)][string]$ContentRoot, [object[]]$Entries)
+    if (-not $PSBoundParameters.ContainsKey('Entries')) { $Entries = @(Read-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot)) }
+    $answers = Get-AnswerFileNames -ContentRoot $ContentRoot
+    $last = @{}
+    foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
+        # Logs come newest first; keep the first per serial.
+        $key = "$($log.Serial)".ToUpperInvariant()
+        if ($key -and -not $log.Serial.StartsWith('CAPTURE-') -and -not $last.ContainsKey($key)) { $last[$key] = '{0:yyyy-MM-dd HH:mm} {1}' -f $log.When, $log.Status }
+    }
+    $problems = @(Test-NamingList -Entries @($Entries) -AnswerFileNames $answers)
+    for ($i = 0; $i -lt @($Entries).Count; $i++) {
+        $e = @($Entries)[$i]
+        $mine = @($problems | Where-Object { $_ -like "Row $($i + 1)[ :]*" } | ForEach-Object { $_ -replace '^Row \d+( \([^)]*\))?: ', '' })
+        [pscustomobject]@{
+            Serial       = $e.Serial
+            ComputerName = $e.ComputerName
+            OU           = $e.OU
+            AnswerFile   = $e.AnswerFile
+            Notes        = $e.Notes
+            Status       = if ($mine) { $mine -join ' ' } else { 'OK' }
+            LastDeploy   = if ($e.Serial -and $last.ContainsKey($e.Serial.ToUpperInvariant())) { $last[$e.Serial.ToUpperInvariant()] } else { '' }
+        }
+    }
+}
+
+function Save-NamingListFromConsole {
+    # Validates every row against the content root's answer files, then writes the CSV. Throws listing every problem.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)
+    $entries = @($Rows | Where-Object { "$($_.Serial)$($_.ComputerName)$($_.OU)$($_.AnswerFile)$($_.Notes)".Trim() } | ForEach-Object {
+        [pscustomobject]@{
+            Serial       = "$($_.Serial)".Trim()
+            ComputerName = "$($_.ComputerName)".Trim().ToUpperInvariant()
+            OU           = "$($_.OU)".Trim()
+            AnswerFile   = "$($_.AnswerFile)".Trim()
+            Notes        = "$($_.Notes)".Trim()
+        }
+    })
+    $problems = @(Test-NamingList -Entries $entries -AnswerFileNames (Get-AnswerFileNames -ContentRoot $ContentRoot))
+    if ($problems) { throw "The naming list was not saved:`n - " + ($problems -join "`n - ") }
+    Save-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot) -Entries $entries
+    $entries.Count
+}
+
+function Merge-NamingList {
+    # Adds rows from an imported CSV: a serial already listed is updated with the imported row's non-empty columns.
+    param([AllowEmptyCollection()][object[]]$Existing = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Incoming)
+    $rows = [Collections.Generic.List[object]]::new()
+    $bySerial = @{}
+    foreach ($e in $Existing) {
+        $copy = [pscustomobject]@{ Serial = $e.Serial; ComputerName = $e.ComputerName; OU = $e.OU; AnswerFile = $e.AnswerFile; Notes = $e.Notes }
+        $rows.Add($copy)
+        if ($e.Serial) { $bySerial["$($e.Serial)".Trim().ToUpperInvariant()] = $copy }
+    }
+    $added = 0; $updated = 0
+    foreach ($n in $Incoming) {
+        $key = "$($n.Serial)".Trim().ToUpperInvariant()
+        if (-not $key) { continue }
+        if ($bySerial.ContainsKey($key)) {
+            $target = $bySerial[$key]
+            foreach ($c in 'ComputerName', 'OU', 'AnswerFile', 'Notes') { if ($n.$c) { $target.$c = $n.$c } }
+            $updated++
+        } else {
+            $copy = [pscustomobject]@{ Serial = $n.Serial; ComputerName = $n.ComputerName; OU = $n.OU; AnswerFile = $n.AnswerFile; Notes = $n.Notes }
+            $rows.Add($copy); $bySerial[$key] = $copy; $added++
+        }
+    }
+    [pscustomobject]@{ Rows = $rows.ToArray(); Added = $added; Updated = $updated }
+}
+
 #endregion
 
 #region Settings and logs
@@ -624,6 +794,122 @@ function Get-DeploySettings {
 function Save-DeploySettings {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Settings)
     $Settings | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -Encoding utf8
+}
+
+function Get-WdsSettings {
+    # The "wds" section of deploy-settings.json, with defaults for content roots made before it existed.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $wds = [ordered]@{ server = ''; imageName = 'Imaging Tool (x64)'; setup = $false; remoteInstallPath = 'D:\RemoteInstall'; dhcpOnServer = $false; noPrompt = $false }
+    $saved = (Get-DeploySettings -ContentRoot $ContentRoot).wds
+    if ($saved) { foreach ($p in $saved.PSObject.Properties) { if ($wds.Contains($p.Name)) { $wds[$p.Name] = $p.Value } } }
+    [pscustomobject]$wds
+}
+
+function Save-WdsSettings {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Wds)
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $s | Add-Member -NotePropertyName wds -NotePropertyValue ([pscustomobject]@{
+        server            = "$($Wds.server)".Trim()
+        imageName         = $(if ("$($Wds.imageName)".Trim()) { "$($Wds.imageName)".Trim() } else { 'Imaging Tool (x64)' })
+        setup             = [bool]$Wds.setup
+        remoteInstallPath = "$($Wds.remoteInstallPath)".Trim()
+        dhcpOnServer      = [bool]$Wds.dhcpOnServer
+        noPrompt          = [bool]$Wds.noPrompt
+    }) -Force
+    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+}
+
+function Get-MulticastSettings {
+    # The "multicast" section of deploy-settings.json, with defaults. WinPE reads it from the content root,
+    # so turning multicast on or off needs no media rebuild.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $mc = [ordered]@{ enabled = $false; server = ''; namespace = 'ImagingTool'; contentPath = ''; type = 'AutoCast'
+        clients = 0; startTime = ''; speedPolicy = 'None'; thresholdKbps = 1024; fallback = $true }
+    $saved = (Get-DeploySettings -ContentRoot $ContentRoot).multicast
+    if ($saved) { foreach ($p in $saved.PSObject.Properties) { if ($mc.Contains($p.Name)) { $mc[$p.Name] = $p.Value } } }
+    [pscustomobject]$mc
+}
+
+function Get-MulticastIssues {
+    # What is wrong with multicast settings before they are saved or sent to the server; empty when fine.
+    param([Parameter(Mandatory)]$Multicast)
+    $issues = @()
+    if ("$($Multicast.namespace)".Trim() -notmatch '^[A-Za-z0-9][A-Za-z0-9 _.-]*$') { $issues += 'Session name: letters, digits, spaces, dots, dashes and underscores only.' }
+    if ($Multicast.type -notin 'AutoCast', 'ScheduledCast') { $issues += "Session type must be AutoCast or ScheduledCast, not '$($Multicast.type)'." }
+    if ($Multicast.speedPolicy -notin 'None', 'AutoDisconnect', 'Multistream') { $issues += "Slow PC policy must be None, AutoDisconnect or Multistream, not '$($Multicast.speedPolicy)'." }
+    $clients = 0
+    $clientText = "$($Multicast.clients)".Trim()   # empty means 0
+    if ($clientText -and (-not [int]::TryParse($clientText, [ref]$clients) -or $clients -lt 0)) { $issues += 'Number of PCs must be a whole number, 0 or more.' }
+    $start = "$($Multicast.startTime)".Trim()
+    $t = [datetime]::MinValue
+    if ($start -and -not [datetime]::TryParseExact($start, 'yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture, 'None', [ref]$t)) {
+        $issues += "Start time must look like 2026-11-03 08:30, not '$start'."
+    }
+    if ($Multicast.type -eq 'ScheduledCast' -and $clients -le 0 -and -not $start) {
+        $issues += 'A scheduled session needs a number of PCs, a start time, or both.'
+    }
+    $kbps = 0
+    if ($Multicast.speedPolicy -eq 'AutoDisconnect' -and (-not [int]::TryParse("$($Multicast.thresholdKbps)", [ref]$kbps) -or $kbps -le 0)) {
+        $issues += 'Disconnect threshold must be a number of KB/s above 0.'
+    }
+    $issues
+}
+
+function Save-MulticastSettings {
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Multicast)
+    $issues = @(Get-MulticastIssues -Multicast $Multicast)
+    if ($issues) { throw ($issues -join "`n") }
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $s | Add-Member -NotePropertyName multicast -NotePropertyValue ([pscustomobject]@{
+        enabled       = [bool]$Multicast.enabled
+        server        = "$($Multicast.server)".Trim()
+        namespace     = "$($Multicast.namespace)".Trim()
+        contentPath   = "$($Multicast.contentPath)".Trim()
+        type          = $Multicast.type
+        clients       = [int]"$($Multicast.clients)".Trim()
+        startTime     = "$($Multicast.startTime)".Trim()
+        speedPolicy   = $Multicast.speedPolicy
+        thresholdKbps = $(if ("$($Multicast.thresholdKbps)".Trim()) { [int]"$($Multicast.thresholdKbps)" } else { 1024 })
+        fallback      = [bool]$Multicast.fallback
+    }) -Force
+    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+}
+
+function Format-ByteRate([long]$BytesPerSecond) {
+    if ($BytesPerSecond -ge 1MB) { '{0:N1} MB/s' -f ($BytesPerSecond / 1MB) } else { '{0:N0} KB/s' -f ($BytesPerSecond / 1KB) }
+}
+
+function ConvertTo-MulticastView {
+    # Turns Set-WdsMulticast.ps1 -Action Monitor output into the Multicast tab's summary line and grid rows.
+    param([Parameter(Mandatory)]$Monitor)
+    $clients = @($Monitor.Clients | Where-Object { $_ })
+    $rows = foreach ($c in $clients | Sort-Object Percent, Name) {
+        $joined = [timespan]::FromSeconds([long]$c.JoinedSeconds)
+        [pscustomobject]@{
+            Id       = [long]$c.Id
+            Name     = $c.Name
+            Address  = (@($c.IpAddress, $c.MacAddress) | Where-Object { $_ }) -join '  '
+            File     = Split-Path "$($c.File)" -Leaf
+            Percent  = [int]$c.Percent
+            Progress = "$([int]$c.Percent) %"
+            Joined   = $(if ($joined.TotalHours -ge 1) { '{0} h {1:00} min' -f [int][math]::Floor($joined.TotalHours), $joined.Minutes } else { '{0} min' -f [int][math]::Floor($joined.TotalMinutes) })
+            Speed    = Format-ByteRate $c.RateBytes
+        }
+    }
+    $rows = @($rows)
+    $summary = if (-not $Monitor.Exists) {
+        "No multicast session named '$($Monitor.Namespace)' on $($Monitor.Server). Click Save and set up session."
+    } elseif ($Monitor.Sessions -eq 0) {
+        "Session '$($Monitor.Namespace)' on $($Monitor.Server) has not started sending yet. PCs waiting for a scheduled start show up once it starts."
+    } elseif (-not $rows) {
+        "Session '$($Monitor.Namespace)' on $($Monitor.Server): no PCs connected."
+    } else {
+        $avg = [int][math]::Round(($rows | Measure-Object Percent -Average).Average)
+        $slow = $rows[0]
+        $done = @($rows | Where-Object Percent -ge 100).Count
+        "$($rows.Count) PC$(if ($rows.Count -ne 1) { 's' }) receiving, average $avg %, $done done. Slowest: $($slow.Name) at $($slow.Percent) %."
+    }
+    [pscustomobject]@{ Summary = $summary; Rows = $rows }
 }
 
 function Get-DeploymentLogs {
@@ -651,10 +937,14 @@ function Get-DeploymentLogs {
 
 Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
-    Get-DeploySettings, Save-DeploySettings, Get-DeploymentLogs,
+    Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
+    Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, ConvertTo-MulticastView, Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Get-ApplicationList, New-Application,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
-    Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments
+    Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
+    Get-ApplicationUsage, Save-Application, Remove-Application,
+    Get-NamingListPath, Get-AnswerFileNames, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
+    Get-VMCaptureArguments
