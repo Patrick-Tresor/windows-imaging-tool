@@ -70,10 +70,10 @@ function Show-AnswerEditor {
         $pinned = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
         if ($img -and $pinned) {
             $editions = @()
-            try { $editions = Get-ImageEditions -ImagePath (Get-ImageVersionPath -ImagePath (Join-Path (Join-Path $ContentRoot 'Images') $img.Name) -Version $pinned) } catch { }
+            try { $editions = @(Get-ImageEditions -ImagePath (Get-ImageVersionPath -ImagePath (Join-Path (Join-Path $ContentRoot 'Images') $img.Name) -Version $pinned)) } catch { }
             $e.CmbIndex.ItemsSource = $editions
         } else {
-            $e.CmbIndex.ItemsSource = if ($img -and $img.Indexes) { @($img.Indexes -split '; ') } else { @() }
+            $e.CmbIndex.ItemsSource = @(if ($img -and $img.Indexes) { $img.Indexes -split '; ' })
         }
     }
     $updateVersions = {

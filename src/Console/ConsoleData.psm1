@@ -70,7 +70,7 @@ function Get-ImageList {
     $files = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.wim' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
     foreach ($f in $files) {
-        $parts = if ($f.Extension -eq '.swm') { @(Get-ChildItem -Path $dir -Filter "$($f.BaseName)*.swm") } else { @($f) }
+        $parts = @(if ($f.Extension -eq '.swm') { Get-ChildItem -Path $dir -Filter "$($f.BaseName)*.swm" } else { $f })
         $indexes = ''
         if (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue) {
             try {

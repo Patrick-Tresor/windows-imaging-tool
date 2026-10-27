@@ -88,7 +88,7 @@ function Show-AppPackEditor {
     & $load $def
     $e.GridRules.ItemsSource = $rules
     $e.TxtName.IsEnabled = $isNew
-    $e.CmbInstaller.ItemsSource = & $folderFiles
+    $e.CmbInstaller.ItemsSource = @(& $folderFiles)
     if ($isNew -and $SuggestedName) {
         # Rebuilding a SmartDeploy pack by name: preselect its template.
         $t = Find-AppTemplate -Name $SuggestedName -Templates $templates
@@ -161,7 +161,7 @@ function Show-AppPackEditor {
     }
 
     $afterSource = {
-        $e.CmbInstaller.ItemsSource = & $folderFiles
+        $e.CmbInstaller.ItemsSource = @(& $folderFiles)
         $src = $e.TxtSource.Text
         if (Test-Path $src -PathType Leaf) { $e.CmbInstaller.Text = Split-Path $src -Leaf }
         elseif (@($e.CmbInstaller.ItemsSource).Count) {
