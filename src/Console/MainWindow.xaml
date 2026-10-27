@@ -432,6 +432,77 @@
         </DockPanel>
       </TabItem>
 
+      <!-- Remote reimage -->
+      <TabItem Header="Remote Reimage">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Remote reimage"/>
+            <TextBlock Style="{StaticResource Hint}" Text="PCs this tool can wake and reimage over the network. Deployed PCs are added automatically; add others by hand, import a CSV (Name, MAC, Address, Group, Relay), or click Read from PCs for ones that are on. Reimage wakes PCs that are off, restarts running ones into a one-time network boot, and the deploy uses the chosen answer file without asking. PCs need Wake-on-LAN and the UEFI network stack enabled in their BIOS, and PowerShell remoting with your account as administrator."/>
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+            <Label Content="Group"/>
+            <ComboBox x:Name="CmbPcGroup" Width="160" Margin="0,0,12,0"/>
+            <Button x:Name="BtnPcRefresh" Content="Refresh"/>
+            <Button x:Name="BtnPcCheck" Content="Check online"/>
+            <Button x:Name="BtnPcRead" Content="Read from PCs" ToolTip="For selected PCs that are on: read the MAC, IP, model and serial over PowerShell remoting."/>
+            <Button x:Name="BtnPcImport" Content="Import CSV..."/>
+            <Button x:Name="BtnPcRemove" Content="Remove"/>
+          </StackPanel>
+          <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <GroupBox Header="Add or update a PC" Padding="8">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Name"/>
+                <TextBox x:Name="TxtPcName" Grid.Column="1"/>
+                <Label Grid.Row="2" Content="MAC"/>
+                <TextBox x:Name="TxtPcMac" Grid.Row="2" Grid.Column="1" ToolTip="Wired adapter, e.g. 00-15-5D-0A-1B-2C"/>
+                <Label Grid.Row="4" Content="Address"/>
+                <TextBox x:Name="TxtPcAddress" Grid.Row="4" Grid.Column="1" ToolTip="Name or IP used for remoting. Empty = the name."/>
+                <Label Grid.Row="6" Content="Group"/>
+                <TextBox x:Name="TxtPcGroup" Grid.Row="6" Grid.Column="1" ToolTip="A lab or room, e.g. Lab-B204"/>
+                <Label Grid.Row="8" Content="Relay"/>
+                <TextBox x:Name="TxtPcRelay" Grid.Row="8" Grid.Column="1" ToolTip="Optional: a PC that is usually on in the same subnet. It sends the Wake-on-LAN packet when routers block it."/>
+                <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
+                  <Button x:Name="BtnPcSave" Content="Save PC"/>
+                  <Button x:Name="BtnPcClear" Content="Clear"/>
+                </StackPanel>
+              </Grid>
+            </GroupBox>
+            <GroupBox Grid.Column="2" Header="Selected PCs" Padding="8">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="6"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Answer file"/>
+                <ComboBox x:Name="CmbReimageAnswer" Grid.Column="1"/>
+                <CheckBox x:Name="ChkKeepNames" Grid.Row="2" Grid.ColumnSpan="2" IsChecked="True" Content="Keep each PC's name (instead of the answer file's naming)"/>
+                <CheckBox x:Name="ChkSkipF12" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="True" Content="Boot without F12: prestage these PCs in WDS until their deploy starts"/>
+                <Label Grid.Row="6" Content="WDS server"/>
+                <TextBox x:Name="TxtReimageWds" Grid.Row="6" Grid.Column="1" ToolTip="Empty = this PC (or the WDS server in the PXE settings). Saved to deploy-settings.json."/>
+                <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal">
+                  <Button x:Name="BtnPcReimage" Content="Reimage..." Style="{StaticResource Primary}"/>
+                  <Button x:Name="BtnPcWake" Content="Wake"/>
+                  <Button x:Name="BtnPcCancel" Content="Cancel reimage"/>
+                </StackPanel>
+              </Grid>
+            </GroupBox>
+          </Grid>
+          <DataGrid x:Name="GridPcs" IsReadOnly="True" SelectionMode="Extended">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+              <DataGridTextColumn Header="MAC" Binding="{Binding Mac}" Width="130"/>
+              <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="100"/>
+              <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
+              <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="60"/>
+              <DataGridTextColumn Header="Last deployed" Binding="{Binding LastDeployed}" Width="120"/>
+              <DataGridTextColumn Header="Result" Binding="{Binding LastResult}" Width="60"/>
+              <DataGridTextColumn Header="Reimage" Binding="{Binding Job}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
       <!-- Settings -->
       <TabItem Header="Deploy Settings">
         <ScrollViewer VerticalScrollBarVisibility="Auto">

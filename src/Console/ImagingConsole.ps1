@@ -30,6 +30,7 @@ Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
+Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -358,7 +359,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs
+    Update-Answers; Update-Images; Update-Apps; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs; Update-Pcs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -747,6 +748,170 @@ $ui.ChkMcAutoRefresh.Add_Unchecked({ $script:mcTimer.Stop() })
 $ui.BtnMcRemove.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Confirm-Action 'Remove the multicast session? PCs downloading from it stop (with fallback on, they copy from the share instead).') { Invoke-Multicast 'Remove'; Update-MulticastMonitor }
+} })
+
+#endregion
+
+#region Remote reimage
+
+$script:pcRows = @()
+$script:online = @{}
+
+function Show-PcRows {
+    $group = $ui.CmbPcGroup.SelectedItem
+    $ui.GridPcs.ItemsSource = @($script:pcRows | Where-Object { -not $group -or $group -eq '(all)' -or $_.Group -eq $group } | ForEach-Object {
+        $state = if ($script:online.ContainsKey($_.Mac)) { if ($script:online[$_.Mac]) { 'Yes' } else { 'No' } } else { '' }
+        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $state -Force -PassThru
+    })
+}
+
+function Update-Pcs {
+    if (-not (Test-ContentRoot $script:root)) { $script:pcRows = @(); $ui.GridPcs.ItemsSource = $null; return }
+    $script:pcRows = @(Get-KnownComputerRows -ContentRoot $script:root)
+    $groups = @('(all)') + @($script:pcRows | ForEach-Object Group | Where-Object { $_ } | Sort-Object -Unique)
+    $current = $ui.CmbPcGroup.SelectedItem
+    $ui.CmbPcGroup.ItemsSource = $groups
+    $ui.CmbPcGroup.SelectedItem = if ($current -and $groups -contains $current) { $current } else { '(all)' }
+    Show-PcRows
+
+    $s = Get-DeploySettings -ContentRoot $script:root
+    $answers = @(Get-ChildItem (Join-Path $script:root 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+    $picked = $ui.CmbReimageAnswer.SelectedItem
+    $ui.CmbReimageAnswer.ItemsSource = $answers
+    $ui.CmbReimageAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } else { $s.defaultAnswerFile }
+    $ui.TxtReimageWds.Text = if ($s.remote) { $s.remote.wdsServer } else { '' }
+}
+
+function Get-SelectedPcs {
+    $rows = @($ui.GridPcs.SelectedItems)
+    if (-not $rows) { Show-Error 'Select one or more PCs first (Ctrl+click or Shift+click for several).' }
+    $rows
+}
+
+function Save-ReimageWdsServer {
+    $s = Get-DeploySettings -ContentRoot $script:root
+    if (-not $s.PSObject.Properties['remote']) { $s | Add-Member -NotePropertyName remote -NotePropertyValue ([pscustomobject]@{ wakePort = 9; wdsServer = '' }) }
+    if (-not $s.remote.PSObject.Properties['wdsServer']) { $s.remote | Add-Member -NotePropertyName wdsServer -NotePropertyValue '' }
+    $s.remote.wdsServer = $ui.TxtReimageWds.Text.Trim()
+    Save-DeploySettings -ContentRoot $script:root -Settings $s
+}
+
+$ui.CmbPcGroup.Add_SelectionChanged({ Invoke-Safely { Show-PcRows } })
+$ui.BtnPcRefresh.Add_Click({ Invoke-Safely { Update-Pcs; Set-Status 'Computer list refreshed' } })
+
+$ui.GridPcs.Add_SelectionChanged({
+    $rows = @($ui.GridPcs.SelectedItems)
+    if ($rows.Count -ne 1) { return }
+    $ui.TxtPcName.Text = $rows[0].Name; $ui.TxtPcMac.Text = $rows[0].Mac; $ui.TxtPcAddress.Text = $rows[0].Computer.address
+    $ui.TxtPcGroup.Text = $rows[0].Group; $ui.TxtPcRelay.Text = $rows[0].Relay
+})
+
+$ui.BtnPcClear.Add_Click({ foreach ($t in 'TxtPcName', 'TxtPcMac', 'TxtPcAddress', 'TxtPcGroup', 'TxtPcRelay') { $ui[$t].Text = '' } })
+
+$ui.BtnPcSave.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $name = $ui.TxtPcName.Text.Trim(); $mac = $ui.TxtPcMac.Text.Trim(); $address = $ui.TxtPcAddress.Text.Trim()
+    if (-not $name) { Show-Error 'Name is required.'; return }
+    if (-not $mac) {
+        # No MAC typed: read it from the PC, which must be on.
+        Set-Status "Reading the MAC address from $name..."
+        $info = Get-RemoteComputerInfo -ComputerName $(if ($address) { $address } else { $name })
+        $mac = (Update-KnownComputerFromInfo -ContentRoot $script:root -Info $info -Existing ([pscustomobject]@{ name = $name; mac = '' })).mac
+    }
+    $pc = Save-KnownComputer -ContentRoot $script:root -Mac $mac -Fields @{
+        name = $name; address = $address; group = $ui.TxtPcGroup.Text.Trim(); relay = $ui.TxtPcRelay.Text.Trim() }
+    Update-Pcs
+    Set-Status "Saved $($pc.name) ($($pc.mac))"
+} })
+
+$ui.BtnPcRemove.Add_Click({ Invoke-Safely {
+    $rows = Get-SelectedPcs; if (-not $rows) { return }
+    if (-not (Confirm-Action "Remove $($rows.Count) PC(s) from the list? $(($rows.Name) -join ', ')")) { return }
+    foreach ($r in $rows) { Remove-KnownComputer -ContentRoot $script:root -Mac $r.Mac }
+    Update-Pcs
+    Set-Status "Removed $($rows.Count) PC(s)"
+} })
+
+$ui.BtnPcImport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
+    $dlg.Filter = 'CSV (*.csv)|*.csv'
+    if (-not $dlg.ShowDialog($window)) { return }
+    $result = Import-KnownComputerCsv -ContentRoot $script:root -Path $dlg.FileName
+    Update-Pcs
+    Set-Status "Imported $($result.Added) PC(s) from $($dlg.FileName)"
+    if ($result.Skipped) { Show-Error ("Imported $($result.Added) PC(s). Skipped:`n" + (($result.Skipped | ForEach-Object { "- $_" }) -join "`n")) }
+} })
+
+$ui.BtnPcCheck.Add_Click({ Invoke-Safely {
+    $rows = @($ui.GridPcs.ItemsSource)
+    if (-not $rows) { return }
+    $window.Cursor = 'Wait'
+    try { $up = Test-WinRMReachable -ComputerName @($rows.Address) } finally { $window.Cursor = $null }
+    foreach ($r in $rows) { $script:online[$r.Mac] = [bool]$up[$r.Address] }
+    Show-PcRows
+    Set-Status "$(@($rows | Where-Object { $up[$_.Address] }).Count) of $($rows.Count) PCs answer on PowerShell remoting"
+} })
+
+$ui.BtnPcRead.Add_Click({ Invoke-Safely {
+    $rows = Get-SelectedPcs; if (-not $rows) { return }
+    $window.Cursor = 'Wait'
+    $failed = [Collections.Generic.List[string]]::new()
+    try {
+        foreach ($r in $rows) {
+            try {
+                $pc = Update-KnownComputerFromInfo -ContentRoot $script:root -Info (Get-RemoteComputerInfo -ComputerName $r.Address) -Existing $r.Computer
+                # The PC's wired MAC differs from the one listed (a typo, or a new network card): keep only the real one.
+                if ((ConvertTo-MacKey $pc.mac) -ne (ConvertTo-MacKey $r.Mac)) {
+                    [void](Save-KnownComputer -ContentRoot $script:root -Mac $pc.mac -Fields @{ address = $r.Computer.address; group = $r.Group; relay = $r.Relay })
+                    Remove-KnownComputer -ContentRoot $script:root -Mac $r.Mac
+                }
+                $script:online[$pc.mac] = $true
+            } catch { $failed.Add("$($r.Name): $($_.Exception.Message)") }
+        }
+    } finally { $window.Cursor = $null }
+    Update-Pcs
+    Set-Status "Read $($rows.Count - $failed.Count) of $($rows.Count) PC(s)"
+    if ($failed.Count) { Show-Error ("Could not read:`n" + ($failed -join "`n")) }
+} })
+
+$ui.BtnPcWake.Add_Click({ Invoke-Safely {
+    $rows = Get-SelectedPcs; if (-not $rows) { return }
+    $s = Get-DeploySettings -ContentRoot $script:root
+    $port = if ($s.remote -and $s.remote.wakePort) { [int]$s.remote.wakePort } else { 9 }
+    foreach ($r in $rows) { Send-WakeOnLan -Computer $r.Computer -Port $port }
+    Set-Status "Wake-on-LAN sent to $($rows.Count) PC(s). Click Check online in a minute or two."
+} })
+
+$ui.BtnPcReimage.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = Get-SelectedPcs; if (-not $rows) { return }
+    $answer = $ui.CmbReimageAnswer.SelectedItem
+    if (-not $answer) { Show-Error 'Choose the answer file to deploy.'; return }
+    $text = "ERASE and reimage $($rows.Count) PC(s) with answer file $answer?`n`n$(($rows.Name) -join ', ')`n`n" +
+        "Running PCs restart after a 60 second warning, and anyone logged on loses unsaved work. PCs that are off are woken up."
+    if (-not (Confirm-Action $text)) { return }
+    Save-ReimageWdsServer
+    $reimageArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
+        '-ContentRoot', (ConvertTo-Arg $script:root), '-AnswerFile', (ConvertTo-Arg $answer), '-Mac', (($rows | ForEach-Object { ConvertTo-MacKey $_.Mac }) -join ','))
+    if ($ui.ChkKeepNames.IsChecked) { $reimageArgs += '-KeepNames' }
+    if ($ui.ChkSkipF12.IsChecked) { $reimageArgs += '-SkipPxePrompt' }
+    # Its own window: it waits up to 20 minutes for the PCs to start their deploy.
+    Start-Process powershell.exe -ArgumentList $reimageArgs
+    Start-Sleep -Milliseconds 1500   # let it write the jobs so the list shows them
+    Update-Pcs
+    Set-Status "Reimage of $($rows.Count) PC(s) started in a separate window"
+} })
+
+$ui.BtnPcCancel.Add_Click({ Invoke-Safely {
+    $rows = Get-SelectedPcs; if (-not $rows) { return }
+    $wds = Get-WdsServerName (Get-DeploySettings -ContentRoot $script:root)
+    foreach ($r in $rows) {
+        Remove-ReimageJob -ContentRoot $script:root -Mac $r.Mac
+        try { Set-WdsNoPrompt -Server $wds -Mac $r.Mac -Remove } catch { }
+    }
+    Update-Pcs
+    Set-Status "Cancelled the reimage of $($rows.Count) PC(s). A PC that already started its deploy is not stopped."
 } })
 
 #endregion

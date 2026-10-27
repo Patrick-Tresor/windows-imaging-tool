@@ -16,7 +16,8 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
+| **Remote reimage** (`src/Start-RemoteReimage.ps1` + `src/RemoteReimage.psm1`) | Admin workstation | Queues reimage jobs, wakes PCs with Wake-on-LAN, restarts running PCs into a one-time PXE boot. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, multicast, remote reimage, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
 
@@ -79,6 +80,7 @@ as kept by an offline update.
   `Get-ImageVersionPath` (the file in the version folder) instead of the current image.
 - Deleting and pruning (`Remove-ImageVersions`, `Get-ImageVersionsToDelete` in
   `ConsoleData.psm1`) refuse versions an answer file names.
+
 ## Offline image updates
 
 `UpdateImage.ps1` (the console dialog) lists packages from `Updates\` with
@@ -94,6 +96,35 @@ original moved to `Images\Previous\` and replaced. Any failure before that
 discards the mount and leaves the original alone. `Add-ImageServicingRecord`
 appends the packages, results and resulting builds to `Images\<name>.updates.json`,
 which the Images tab reads.
+
+## Remote reimage
+
+The pieces meet on the content root, so the admin PC and WinPE never talk directly:
+
+- `Computers\<MAC>.json`: one per PC. Written by the console (manual, CSV, or
+  read over WinRM) and by `Deploy-Image.ps1` at the end of every deploy.
+- `Reimage\<MAC>.json`: a pending job (answer file, name to keep, expiry).
+  `Deploy-Image.ps1` matches it against the MACs of its adapters with an IP
+  (`Win32_NetworkAdapterConfiguration`), then moves it to `Reimage\Started\`. The
+  move is what `Start-RemoteReimage.ps1` waits for, and it means a PC that network
+  boots again later finds no job and gets the normal deploy menu.
+
+Forcing the network boot on a running PC uses the firmware boot manager:
+`bcdedit /enum firmware` lists the firmware's boot entries, the network one is
+picked by its firmware description (PXE, IPv4, Network, NIC...; IPv4 before IPv6),
+and `bcdedit /set {fwbootmgr} bootsequence {id}` makes it the next boot only.
+bcdedit's labels are localized (`identifier` / `identificateur`), so the parser
+only reads GUIDs, dashed separators and the firmware's own descriptions.
+
+A PC that is off gets a Wake-on-LAN magic packet (6 x `FF`, then the MAC 16 times)
+on UDP port 9 (`remote.wakePort`), sent to 255.255.255.255, to its subnet's
+directed broadcast when its IP is known, and from its relay PC over WinRM when it
+has one. A PC whose firmware boots the network first goes straight to WinPE;
+otherwise Windows starts, WinRM answers and it gets the one-time PXE restart.
+
+To skip the F12 prompt only for these PCs, the PC is prestaged in WDS with
+`New-WdsClient -DeviceID <MAC> -PxePromptPolicy NoPrompt` and removed with
+`Remove-WdsClient` when its job is taken or the wait times out.
 
 ## Why the golden image is hardware-independent
 

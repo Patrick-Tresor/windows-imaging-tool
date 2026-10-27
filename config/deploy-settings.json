@@ -36,5 +36,10 @@
     "bitLocker": "Auto",
     "deviceErrors": "Required",
     "ignoreDevices": []
+  },
+  "remote": {
+    "_comment": "Remote reimaging. wakePort: UDP port for Wake-on-LAN magic packets. wdsServer: the WDS server that PCs PXE boot from, for the no-F12 option (empty = the wds.server setting, or this PC).",
+    "wakePort": 9,
+    "wdsServer": ""
   }
 }

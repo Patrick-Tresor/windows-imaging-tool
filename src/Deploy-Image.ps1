@@ -32,6 +32,7 @@ Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
 $usmtDir = Join-Path $PSScriptRoot 'USMT'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -105,6 +106,7 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
 }
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
+$job = $null; $adapters = @()
 $status = 'FAILED'; $failure = $null
 try {
     $hw = Get-HardwareIdentity
@@ -125,6 +127,16 @@ try {
         $net = Get-PrimaryNetworkAddress
         $statusId = Start-DeployStatus -Folder $statusTarget.Local -Identity $hw -MacAddress $net.MacAddress -IpAddress $net.IpAddress
         Write-DeployLog "Reporting status to $($statusTarget.Local) as $statusId"
+    }
+
+    # A remote reimage from the console queued a job for this PC's MAC: use its answer file without asking.
+    # Taking the job deletes it, so the next network boot of this PC does not reimage it again.
+    $adapters = @(Get-LocalMacAddresses)
+    $job = Receive-ReimageJob -ContentRoot $root -Mac @($adapters | ForEach-Object Mac)
+    if ($job) {
+        Write-DeployLog "Remote reimage requested by $($job.requestedBy) at $($job.requestedAt): answer file $($job.answerFile)"
+        $AnswerFile = $job.answerFile
+        if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
     }
 
     # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
@@ -186,8 +198,8 @@ try {
     # No password file means the BIOS has no admin password yet.
     $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $bios.PasswordFile } else { $null }
 
-    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive'
-    $nameSource = 'parameter'
+    $interactive = -not $NoPrompt -and $answer.Mode -eq 'Interactive' -and -not $job
+    $nameSource = if ($job -and $job.computerName -and $ComputerName -eq $job.computerName) { 'remote reimage' } else { 'parameter' }
     if (-not $ComputerName -and $listed -and $listed.ComputerName) {
         $ComputerName = $listed.ComputerName.ToUpperInvariant()
         $nameSource = 'naming list'
@@ -244,7 +256,9 @@ try {
     }
     if (-not $NoPrompt) {
         Set-DeployStatus -Step $(if ($answer.Mode -eq 'Unattended') { 'Counting down' } else { 'Waiting for the operator' }) -Percent 5
-        $go = if ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
+        # Nobody is at a remotely reimaged PC: count down, so someone who is can still cancel.
+        $go = if ($job) { Wait-Countdown ([Math]::Max([int]$answer.UnattendDelay, 15)) }
+              elseif ($answer.Mode -eq 'Unattended') { Wait-Countdown $answer.UnattendDelay } else { (Read-Host 'Type YES to continue') -eq 'YES' }
         if (-not $go) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
@@ -362,6 +376,12 @@ finally {
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
         $logName = "{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status
         Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir $logName) -ErrorAction SilentlyContinue
+        # Remember this PC (MAC, IP, model) so the console can wake and reimage it later.
+        $nic = $adapters | Where-Object IP | Select-Object -First 1
+        if ($nic) {
+            try { Save-DeployedComputer -ContentRoot $root -Adapter $nic -Identity $hw -ComputerName $ComputerName -AnswerFile $AnswerFile -Result $status | Out-Null }
+            catch { Write-DeployLog "Could not update the computer list: $($_.Exception.Message)" -Level WARN }
+        }
     }
     $final = @{ logFile = $logName }
     switch ($status) {
