@@ -28,6 +28,7 @@ function Show-AppPackEditor {
     [xml]$px = Get-Content -Raw (Join-Path $PSScriptRoot 'AppPackEditor.xaml')
     $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($px))
     $win.Owner = $Owner
+    Enable-WheelScrolling $win
     $e = Get-XamlControls $px $win
     $win.Title = if ($isNew) { 'New application' } else { "Application: $Name" }
     $state = @{ Saved = $null; AppFolder = if ($isNew) { $null } else { Join-Path $appRoot $Name } }

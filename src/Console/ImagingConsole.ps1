@@ -21,6 +21,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'WheelScroll.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
@@ -62,6 +63,7 @@ class NamingRow {
 
 [xml]$xaml = Get-Content -Raw (Join-Path $PSScriptRoot 'MainWindow.xaml')
 $window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
+Enable-WheelScrolling $window
 $ui = @{}
 $xns = 'http://schemas.microsoft.com/winfx/2006/xaml'
 foreach ($node in $xaml.SelectNodes('//*[@*[local-name()="Name"]]')) {

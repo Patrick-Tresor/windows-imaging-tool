@@ -59,81 +59,87 @@
 
     <Grid Margin="24,20">
       <!-- Page 1: reference machine -->
-      <StackPanel x:Name="Page0">
-        <TextBlock Style="{StaticResource Title}" Text="Where is the reference machine?"/>
-        <TextBlock Style="{StaticResource Body}"
-                   Text="Build the reference in a Hyper-V VM if you can: Windows 10 or 11, updates and your apps, no OEM drivers."/>
-        <RadioButton x:Name="RbVmDisk" GroupName="Ref" Content="A Hyper-V VM on this PC (hands-free, recommended)" FontWeight="SemiBold" Margin="0,6,0,4"/>
-        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                   Text="You do not run sysprep. The tool takes a checkpoint, starts the VM once so Windows runs the sysprep checks at boot and shuts down, captures the VM's disk with the VM off, and rolls the VM back to the checkpoint. No password or network is needed. Generation 2 VMs only."/>
-        <DockPanel Margin="22,0,0,8">
-          <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
-          <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
-        </DockPanel>
+      <ScrollViewer x:Name="Page0" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Where is the reference machine?"/>
+          <TextBlock Style="{StaticResource Body}"
+                     Text="Build the reference in a Hyper-V VM if you can: Windows 10 or 11, updates and your apps, no OEM drivers."/>
+          <RadioButton x:Name="RbVmDisk" GroupName="Ref" Content="A Hyper-V VM on this PC (hands-free, recommended)" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                     Text="You do not run sysprep. The tool takes a checkpoint, starts the VM once so Windows runs the sysprep checks at boot and shuts down, captures the VM's disk with the VM off, and rolls the VM back to the checkpoint. No password or network is needed. Generation 2 VMs only."/>
+          <DockPanel Margin="22,0,0,8">
+            <Button x:Name="BtnVMRefresh" DockPanel.Dock="Right" Content="Refresh"/>
+            <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
+          </DockPanel>
 
-        <RadioButton x:Name="RbVM" GroupName="Ref" Content="The Hyper-V VM above, booted from a capture ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
-        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,12"
-                   Text="For generation 1 VMs. You run sysprep in the VM yourself; then the tool builds a capture ISO, boots the VM from it, and ejects it when the capture is done. The VM needs network access to the share."/>
+          <RadioButton x:Name="RbVM" GroupName="Ref" Content="The Hyper-V VM above, booted from a capture ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,12"
+                     Text="For generation 1 VMs. You run sysprep in the VM yourself; then the tool builds a capture ISO, boots the VM from it, and ejects it when the capture is done. The VM needs network access to the share."/>
 
-        <RadioButton x:Name="RbIso" GroupName="Ref" Content="Another VM or a PC that boots from an ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
-        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                   Text="You run sysprep yourself, then attach the capture ISO. The machine saves the image to the network share."/>
-        <DockPanel Margin="22,0,0,12">
-          <Button x:Name="BtnIsoFolder" DockPanel.Dock="Right" Content="Browse..."/>
-          <TextBox x:Name="TxtIsoFolder" ToolTip="Folder for Capture-WinPE.iso"/>
-        </DockPanel>
+          <RadioButton x:Name="RbIso" GroupName="Ref" Content="Another VM or a PC that boots from an ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                     Text="You run sysprep yourself, then attach the capture ISO. The machine saves the image to the network share."/>
+          <DockPanel Margin="22,0,0,12">
+            <Button x:Name="BtnIsoFolder" DockPanel.Dock="Right" Content="Browse..."/>
+            <TextBox x:Name="TxtIsoFolder" ToolTip="Folder for Capture-WinPE.iso"/>
+          </DockPanel>
 
-        <RadioButton x:Name="RbUsb" GroupName="Ref" Content="A physical PC, with a USB stick" FontWeight="SemiBold" Margin="0,6,0,4"/>
-        <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                   Text="You run sysprep yourself. Erases the stick and makes it capture media; the image is saved on the stick's DEPLOY partition, copy it to the content root afterwards."/>
-        <DockPanel Margin="22,0,0,0">
-          <Button x:Name="BtnUsbRefresh" DockPanel.Dock="Right" Content="Refresh"/>
-          <ComboBox x:Name="CmbUsb" DisplayMemberPath="Label"/>
-        </DockPanel>
-      </StackPanel>
+          <RadioButton x:Name="RbUsb" GroupName="Ref" Content="A physical PC, with a USB stick" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                     Text="You run sysprep yourself. Erases the stick and makes it capture media; the image is saved on the stick's DEPLOY partition, copy it to the content root afterwards."/>
+          <DockPanel Margin="22,0,0,0">
+            <Button x:Name="BtnUsbRefresh" DockPanel.Dock="Right" Content="Refresh"/>
+            <ComboBox x:Name="CmbUsb" DisplayMemberPath="Label"/>
+          </DockPanel>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- Page 2: manual sysprep, skipped for the hands-free Hyper-V capture -->
-      <StackPanel x:Name="Page1" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Run sysprep on the reference machine"/>
-        <TextBlock Style="{StaticResource Body}" Text="The tool cannot reach this machine's Windows by itself, so prepare it by hand. Run this in an elevated PowerShell window on the reference machine. It checks for a pending reboot, BitLocker and Store apps that break sysprep, then runs sysprep and shuts the machine down."/>
-        <DockPanel Margin="0,0,0,8">
-          <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
-          <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
-        </DockPanel>
-        <TextBlock Style="{StaticResource Body}" Foreground="#6B7280"
-                   Text="Add -CheckOnly to only report problems, or -RemoveUserApps to remove the Store apps that block sysprep."/>
-        <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
-                  Content="The reference machine has been prepared with sysprep and is shut down"/>
-      </StackPanel>
+      <ScrollViewer x:Name="Page1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Run sysprep on the reference machine"/>
+          <TextBlock Style="{StaticResource Body}" Text="The tool cannot reach this machine's Windows by itself, so prepare it by hand. Run this in an elevated PowerShell window on the reference machine. It checks for a pending reboot, BitLocker and Store apps that break sysprep, then runs sysprep and shuts the machine down."/>
+          <DockPanel Margin="0,0,0,8">
+            <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
+            <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
+          </DockPanel>
+          <TextBlock Style="{StaticResource Body}" Foreground="#6B7280"
+                     Text="Add -CheckOnly to only report problems, or -RemoveUserApps to remove the Store apps that block sysprep."/>
+          <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
+                    Content="The reference machine has been prepared with sysprep and is shut down"/>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- Page 3: image details -->
-      <StackPanel x:Name="Page2" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Image details"/>
-        <TextBlock Style="{StaticResource Body}" Text="The image is saved to the Images folder of the content root."/>
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions>
-            <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
-            <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
-          </Grid.RowDefinitions>
-          <Label Content="Name"/>
-          <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Becomes the file name."/>
-          <Label Grid.Row="2" Content="Description"/>
-          <TextBox x:Name="TxtDescription" Grid.Row="2" Grid.Column="1"/>
-          <Label Grid.Row="4" Content="Compression"/>
-          <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
-            <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
-            <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
-          </ComboBox>
-          <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
-                    Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
-          <CheckBox x:Name="ChkUnattended" Grid.Row="8" Grid.Column="1" IsChecked="True"
-                    Content="Start without asking and shut down when done (needed to boot a Hyper-V VM from a capture ISO)"/>
-          <CheckBox x:Name="ChkNewVersion" Grid.Row="10" Grid.Column="1"
-                    Content="If an image with this name exists, replace it and keep the old one as an earlier version"
-                    ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>
-        </Grid>
-      </StackPanel>
+      <ScrollViewer x:Name="Page2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Image details"/>
+          <TextBlock Style="{StaticResource Body}" Text="The image is saved to the Images folder of the content root."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
+              <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+            </Grid.RowDefinitions>
+            <Label Content="Name"/>
+            <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Becomes the file name."/>
+            <Label Grid.Row="2" Content="Description"/>
+            <TextBox x:Name="TxtDescription" Grid.Row="2" Grid.Column="1"/>
+            <Label Grid.Row="4" Content="Compression"/>
+            <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
+              <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
+              <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
+            </ComboBox>
+            <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
+                      Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
+            <CheckBox x:Name="ChkUnattended" Grid.Row="8" Grid.Column="1" IsChecked="True"
+                      Content="Start without asking and shut down when done (needed to boot a Hyper-V VM from a capture ISO)"/>
+            <CheckBox x:Name="ChkNewVersion" Grid.Row="10" Grid.Column="1"
+                      Content="If an image with this name exists, replace it and keep the old one as an earlier version"
+                      ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
 
       <!-- Page 4: summary -->
       <DockPanel x:Name="Page3" Visibility="Collapsed">

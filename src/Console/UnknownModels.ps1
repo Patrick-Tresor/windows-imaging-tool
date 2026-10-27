@@ -26,6 +26,7 @@ function Show-UnknownModels {
     [xml]$uxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'UnknownModels.xaml')
     $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($uxaml))
     $dlg.Owner = $Owner
+    Enable-WheelScrolling $dlg
     $u = @{}
     foreach ($node in $uxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
         $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')

@@ -172,18 +172,20 @@
       </DockPanel>
 
       <!-- 3 Which PCs -->
-      <StackPanel x:Name="Sec3" Visibility="Collapsed">
-        <TextBlock Style="{StaticResource Title}" Text="Which PCs"/>
-        <TextBlock Style="{StaticResource Hint}" Text="Leave both empty to install on every PC. Otherwise the app is only installed when the PC's maker and model match (comma-separated, wildcards allowed: Latitude*, ThinkPad T14*). Lenovo models also match their 4-character machine type (21HD). Checked in WinPE, so skipped apps are not even copied."/>
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Makers"/>
-          <TextBox x:Name="TxtMakers" Grid.Column="1" ToolTip="Dell, HP, Lenovo, or the manufacturer as WMI reports it."/>
-          <Label Grid.Row="1" Content="Models"/>
-          <TextBox x:Name="TxtModels" Grid.Row="1" Grid.Column="1"/>
-        </Grid>
-      </StackPanel>
+      <ScrollViewer x:Name="Sec3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Which PCs"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Leave both empty to install on every PC. Otherwise the app is only installed when the PC's maker and model match (comma-separated, wildcards allowed: Latitude*, ThinkPad T14*). Lenovo models also match their 4-character machine type (21HD). Checked in WinPE, so skipped apps are not even copied."/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Makers"/>
+            <TextBox x:Name="TxtMakers" Grid.Column="1" ToolTip="Dell, HP, Lenovo, or the manufacturer as WMI reports it."/>
+            <Label Grid.Row="1" Content="Models"/>
+            <TextBox x:Name="TxtModels" Grid.Row="1" Grid.Column="1"/>
+          </Grid>
+        </StackPanel>
+      </ScrollViewer>
     </Grid>
   </DockPanel>
 </Window>

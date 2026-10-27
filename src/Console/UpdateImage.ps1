@@ -12,6 +12,7 @@ function Show-UpdateImageDialog {
     [xml]$dxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'UpdateImage.xaml')
     $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($dxaml))
     $dlg.Owner = $Owner
+    Enable-WheelScrolling $dlg
     $d = @{}
     foreach ($node in $dxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
         $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')

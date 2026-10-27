@@ -47,6 +47,7 @@ function Show-AnswerEditor {
     [xml]$ex = Get-Content -Raw (Join-Path $PSScriptRoot 'AnswerEditor.xaml')
     $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($ex))
     $win.Owner = $Owner
+    Enable-WheelScrolling $win
     $e = Get-XamlControls $ex $win
     $win.Title = if ($isNew) { 'New answer file' } else { "Answer file: $($a.Name)" }
     $state = @{ Saved = $false; SharePasswords = @{} }
