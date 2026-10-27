@@ -238,7 +238,7 @@ function Get-CaptureReadiness {
 function Get-ReferenceVMs {
     # Hyper-V VMs that can be captured. Capture media boots both generation 2 (UEFI) and generation 1 (BIOS).
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return @() }
-    @(Get-VM | ForEach-Object {
+    @(Get-VM -ErrorAction Stop | ForEach-Object {
         [pscustomobject]@{
             Name       = $_.Name
             State      = "$($_.State)"

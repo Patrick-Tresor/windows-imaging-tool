@@ -30,24 +30,43 @@ function Show-CaptureWizard {
     Update-ContentTools -ContentRoot $ContentRoot
     $toolsPath = if ($settings.share.path) { Join-Path $settings.share.path 'Tools\Prepare-Reference.ps1' } else { Join-Path $ContentRoot 'Tools\Prepare-Reference.ps1' }
     $w.TxtPrepCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$toolsPath`""
-    $w.BtnCopyCmd.Add_Click({ [Windows.Clipboard]::SetText($w.TxtPrepCmd.Text) })
+    $w.BtnCopyCmd.Add_Click({
+        # Another program (clipboard history, remote desktop) can hold the clipboard for a moment, so retry
+        # and never let a failed copy close the wizard.
+        try {
+            [Windows.Forms.Clipboard]::SetDataObject($w.TxtPrepCmd.Text, $true, 10, 100)
+        } catch {
+            $w.TxtPrepCmd.Focus() | Out-Null
+            $w.TxtPrepCmd.SelectAll()
+            Show-WizardError "Could not copy: another program is using the clipboard. The command is selected; press Ctrl+C to copy it."
+        }
+    })
 
     # Page 3 defaults.
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
 
     # Page 1: reference machine choices. The hands-free Hyper-V capture is the default when Hyper-V is here.
+    $vmLabels = @{ VmDisk = $w.RbVmDisk.Content; VM = $w.RbVM.Content }
     $loadVMs = {
-        $vms = @(Get-ReferenceVMs)
+        $vms = @()
+        $why = $null
+        if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
+            $why = 'Hyper-V or its PowerShell module is not installed on this PC'
+        } else {
+            try { $vms = @(Get-ReferenceVMs) } catch { $why = "Hyper-V did not answer: $($_.Exception.Message)" }
+            if (-not $why -and -not $vms) { $why = 'no VMs found; create one, then click Refresh' }
+        }
         $w.CmbVM.ItemsSource = $vms
+        $w.TxtVMStatus.Text = if ($why) { "Not available: $why." } else { '' }
+        $w.TxtVMStatus.Visibility = if ($why) { 'Visible' } else { 'Collapsed' }
+        $w.RbVmDisk.IsEnabled = [bool]$vms
+        $w.RbVM.IsEnabled = [bool]$vms
+        $w.RbVmDisk.Content = $vmLabels.VmDisk
+        $w.RbVM.Content = $vmLabels.VM
         if ($vms) {
             $w.CmbVM.SelectedItem = $vms | Where-Object Usable | Select-Object -First 1
-            $w.RbVmDisk.IsEnabled = $true
-            $w.RbVM.IsEnabled = $true
-        } else {
-            $w.RbVmDisk.IsEnabled = $false
-            $w.RbVM.IsEnabled = $false
-            $w.RbVmDisk.Content = 'A Hyper-V VM on this PC (Hyper-V is not available here)'
-            $w.RbVM.Content = 'A Hyper-V VM booted from a capture ISO (Hyper-V is not available here)'
+        } elseif ($w.RbVmDisk.IsChecked -or $w.RbVM.IsChecked) {
+            $w.RbIso.IsChecked = $true
         }
     }
     $loadUsb = {
