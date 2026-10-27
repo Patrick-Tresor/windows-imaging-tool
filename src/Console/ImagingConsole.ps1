@@ -122,7 +122,8 @@ function Update-Images {
 }
 
 function Update-Answers {
-    $rows = if (Test-ContentRoot $script:root) { @(Get-AnswerFileRows -ContentRoot $script:root) } else { @() }
+    # @() outside the if: an if statement unrolls its output, so one answer file would come back as a lone object.
+    $rows = @(if (Test-ContentRoot $script:root) { Get-AnswerFileRows -ContentRoot $script:root })
     $ui.GridAnswers.ItemsSource = $rows
     $ui.CmbDefaultAnswer.ItemsSource = @($rows.Name)
     $ui.TxtAnswerIssues.Text = ''
@@ -159,9 +160,9 @@ function Show-NamingRows($Rows) {
 
 function Update-Naming {
     # The answer file column is a drop-down of the content root's answer files; empty means the default.
-    $names = if (Test-ContentRoot $script:root) { @(Get-AnswerFileNames -ContentRoot $script:root | Sort-Object) } else { @() }
+    $names = @(if (Test-ContentRoot $script:root) { Get-AnswerFileNames -ContentRoot $script:root | Sort-Object })
     $ui.GridNaming.Columns[3].ItemsSource = @('') + $names
-    Show-NamingRows $(if (Test-ContentRoot $script:root) { @(Get-NamingListRows -ContentRoot $script:root) } else { @() })
+    Show-NamingRows @(if (Test-ContentRoot $script:root) { Get-NamingListRows -ContentRoot $script:root })
 }
 
 function Get-NamingGridRows {
@@ -254,7 +255,7 @@ function Update-MulticastMonitor([switch]$Quiet) {
     } finally { if (-not $Quiet) { $window.Cursor = $null } }
     $view = ConvertTo-MulticastView -Monitor $mon
     $selected = $ui.GridMcClients.SelectedItem
-    $ui.GridMcClients.ItemsSource = $view.Rows
+    $ui.GridMcClients.ItemsSource = @($view.Rows)
     if ($selected) { $ui.GridMcClients.SelectedItem = $view.Rows | Where-Object Id -eq $selected.Id | Select-Object -First 1 }
     $ui.TxtMcSummary.Text = "$($view.Summary)  (as of $(Get-Date -Format 'HH:mm:ss'))"
     if (-not $Quiet) { Set-Status 'Multicast: session read' }
@@ -278,7 +279,7 @@ function Get-DashboardFolder {
 
 function Update-Dashboard {
     $folder = Get-DashboardFolder
-    $rows = if ($folder) { @(Get-DeploymentStatus -Folder $folder) } else { @() }
+    $rows = @(if ($folder) { Get-DeploymentStatus -Folder $folder })
     $sum = Get-DeploymentSummary -Rows $rows
     $ui.TxtDashRunning.Text   = $sum.Running
     $ui.TxtDashSucceeded.Text = $sum.Succeeded
@@ -286,12 +287,11 @@ function Update-Dashboard {
     $ui.TxtDashFailed.Text    = $sum.Failed
     $ui.TxtDashTotal.Text     = $sum.Total
 
-    $states = switch ($ui.CmbDashFilter.SelectedIndex) {
-        1 { @('Running') }
-        2 { @('Failed', 'Stalled') }
-        3 { @('Succeeded', 'Warning', 'Cancelled') }
-        default { $null }
-    }
+    $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
+        1 { 'Running' }
+        2 { 'Failed', 'Stalled' }
+        3 { 'Succeeded', 'Warning', 'Cancelled' }
+    })
     if ($states) { $rows = @($rows | Where-Object State -in $states) }
 
     # Keep the selected PC selected across refreshes.
@@ -321,12 +321,12 @@ function Update-DashboardDetail {
 }
 
 function Update-Apps {
-    $ui.GridApps.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-ApplicationList -ContentRoot $script:root) } else { $null }
+    $ui.GridApps.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-ApplicationList -ContentRoot $script:root })
     $ui.TxtAppIssues.Text = ''
 }
 
 function Update-Logs {
-    $ui.GridLogs.ItemsSource = if (Test-ContentRoot $script:root) { @(Get-DeploymentLogs -ContentRoot $script:root) } else { $null }
+    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-DeploymentLogs -ContentRoot $script:root })
     $ui.TxtLog.Text = ''
 }
 

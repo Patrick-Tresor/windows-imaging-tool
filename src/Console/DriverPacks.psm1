@@ -290,11 +290,11 @@ function Expand-VendorDriverPack {
     if ($ext -ne '.exe') { throw "Don't know how to extract $ext files." }
 
     Test-VendorSignature -File $File -Maker $Maker
-    $switches = switch ($Maker) {
-        'Dell'   { @('/s', "/e=`"$Destination`"") }
-        'HP'     { @('/s', '/e', '/f', "`"$Destination`"") }
-        'Lenovo' { @('/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES') }
-    }
+    $switches = @(switch ($Maker) {
+        'Dell'   { '/s', "/e=`"$Destination`"" }
+        'HP'     { '/s', '/e', '/f', "`"$Destination`"" }
+        'Lenovo' { '/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES' }
+    })
     $proc = Start-Process -FilePath $File -ArgumentList $switches -Wait -PassThru -WindowStyle Hidden
     if ($proc.ExitCode -ne 0) { throw "$([IO.Path]::GetFileName($File)) exited with code $($proc.ExitCode) while extracting." }
 }
