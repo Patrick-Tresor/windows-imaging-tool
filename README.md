@@ -9,9 +9,10 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, FirstBoot.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
+src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Prepare-Reference.ps1,
                      Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
-                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1
+                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
+                     PostDeployChecks.psm1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, answer-files/Default.xml (commented sample)
@@ -273,7 +274,7 @@ files. The console reads the folder and shows:
 |---|---|
 | Running | Deploying now. |
 | Succeeded | Finished. |
-| Warning | Finished, but something needs a look: no driver pack matched, or an application failed. |
+| Warning | Finished, but something needs a look: no driver pack matched, an application failed, or a post-deploy check did not pass. |
 | Failed | Stopped with an error; the error and the log are shown underneath. |
 | Cancelled | The operator cancelled at the prompt. |
 | Stalled | Running, but nothing heard for 45 minutes: powered off, network lost, hung, or (at first boot) unable to reach the share. |
@@ -288,6 +289,47 @@ has the result. USB deployments write to the stick's `Status` folder, unless
 **Status share** is set on the Deploy Settings tab (for example
 `\\deploy-server\Deploy\Status`), in which case WinPE maps it as `R:` with the
 share account and reports there.
+
+### Post-deploy checks
+
+At the end of first boot, after the applications and FIRSTBOOT tasks, the PC
+checks itself and reports each result to the dashboard (the **Checks** column,
+with every check listed under the PC's details):
+
+| Check | Passes when |
+|---|---|
+| Computer name | Windows has the name the answer file gave it. |
+| Domain join | The PC is in the answer file's domain and a domain controller answers (secure channel). Workgroup answer files check the PC stayed in a workgroup. |
+| Device drivers | No device in Device Manager has an error (no driver, cannot start). Disabled devices are ignored. |
+| App: *name* | The installer's exit code was a success code and, when its `app.json` has a `detect` rule, the app is really there. |
+| BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
+
+Any failed check turns the deployment into Warning, with the failed checks
+named. The **Deploy Settings** tab sets how strict they are, saved as `checks`
+in `deploy-settings.json`: turn them off, make BitLocker **Required**,
+**Report** only (a warning, never a failure) or **Off** (**Auto**, the default,
+requires it when the answer file turns BitLocker on), do the same for device
+errors, and list devices to ignore (wildcards, for example `*Smart Card*`).
+
+A detection rule in an application's `app.json` catches installers that exit 0
+without installing anything:
+
+```json
+{ "command": "setup.exe /S", "successCodes": [0, 3010],
+  "detect": { "displayName": "Google Chrome*" } }
+```
+
+`displayName` is matched against installed programs; use
+`"path": "%ProgramFiles%\\App\\app.exe"` for apps that don't register one.
+
+The checks stay on the PC in `C:\ProgramData\ImagingTool`. After fixing
+something (adding a missing driver, re-joining the domain) or once BitLocker
+finishes, run them again as an administrator; the dashboard row updates, and
+the warning clears when everything passes:
+
+```
+powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deployment.ps1
+```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
 succeeded, warning and cancelled PCs; final logs stay in Deployment Logs. A PC
