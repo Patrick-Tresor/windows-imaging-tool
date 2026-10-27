@@ -15,6 +15,7 @@ function Get-WheelScrollTarget($Source, [double]$Delta) {
         }
         # An open drop-down list lives in its own popup: never scroll the page behind it.
         if ($node.GetType().Name -eq 'PopupRoot') { return $null }
+        if ($node -is [Windows.Controls.ComboBox] -and $node.IsDropDownOpen) { return $null }
         $parent = $null
         if ($node -is [Windows.Media.Visual] -or $node -is [Windows.Media.Media3D.Visual3D]) {
             $parent = [Windows.Media.VisualTreeHelper]::GetParent($node)
@@ -46,7 +47,7 @@ function Enable-WheelScrolling([Windows.Window]$Window) {
         param($s, $e)
         try {
             # Ctrl+wheel is zoom, not scrolling.
-            if ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control) { return }
+            if ([Windows.Input.Keyboard]::Modifiers.HasFlag([Windows.Input.ModifierKeys]::Control)) { return }
             $target = Get-WheelScrollTarget $e.OriginalSource $e.Delta
             if ($target) {
                 Invoke-WheelScroll $target $e.Delta

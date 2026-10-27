@@ -56,14 +56,16 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
 <ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" VerticalScrollBarVisibility="Auto">
   <StackPanel>
     <Border Height="150"/>
-    <DataGrid x:Name="Grid" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Height="120" AutoGenerateColumns="True"/>
+    <DataGrid x:Name="Grid" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Height="120" RowHeight="20" AutoGenerateColumns="False">
+      <DataGrid.Columns><DataGridTextColumn Header="PC" Binding="{Binding}"/></DataGrid.Columns>
+    </DataGrid>
     <Border Height="600"/>
   </StackPanel>
 </ScrollViewer>
 '@
     $page = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($px))
     $grid = $page.FindName('Grid')
-    $grid.ItemsSource = @(1..60 | ForEach-Object { [pscustomobject]@{ Name = "PC$_" } })
+    $grid.ItemsSource = @(1..60 | ForEach-Object { "PC$_" })
     $win = New-Object Windows.Window -Property @{
         Width = 400; Height = 300; Left = -2000; Top = -2000; ShowInTaskbar = $false; ShowActivated = $false
         WindowStyle = 'None'; Content = $page
@@ -73,7 +75,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     try {
         $win.UpdateLayout()
         $gridScroll = Find-Visual $grid ([Windows.Controls.ScrollViewer])
-        $row = Find-Visual $grid ([Windows.Controls.DataGridRow])
+        # The rows panel stays in the grid while rows scroll in and out of view.
+        $row = Find-Visual $grid ([Windows.Controls.Primitives.DataGridRowsPresenter])
         Assert-Equal ($gridScroll.ScrollableHeight -gt 0) $true 'the grid has rows to scroll'
         Assert-Equal ($page.ScrollableHeight -gt 0) $true 'the page has room to scroll'
 
@@ -95,11 +98,12 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         $gridScroll.ScrollToHome(); $page.ScrollToEnd(); $win.UpdateLayout()
         Assert-Equal ([object]::ReferenceEquals((Get-WheelScrollTarget $row 120), $page)) $true 'wheel up over a grid at its top scrolls the page'
 
-        # The real event: a wheel turn over the grid row, raised through the window.
+        # The real event: a wheel turn over a grid row, raised through the window.
         $gridScroll.ScrollToHome(); $page.ScrollToHome(); $win.UpdateLayout()
-        $wheel = New-Object Windows.Input.MouseWheelEventArgs ([Windows.Input.Mouse]::PrimaryDevice), 0, -120
+        $cell = Find-Visual $grid ([Windows.Controls.DataGridRow])
+        $wheel = [Windows.Input.MouseWheelEventArgs]::new([Windows.Input.Mouse]::PrimaryDevice, 0, -120)
         $wheel.RoutedEvent = [Windows.UIElement]::PreviewMouseWheelEvent
-        $row.RaiseEvent($wheel)
+        $cell.RaiseEvent($wheel)
         $win.UpdateLayout()
         Assert-Equal $wheel.Handled $true 'the window handles a wheel turn over the grid'
         Assert-Equal ($gridScroll.VerticalOffset -gt 0) $true 'that wheel turn scrolls the grid'
