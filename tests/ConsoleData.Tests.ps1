@@ -204,7 +204,7 @@ try {
     # Domain join fields the editor points at before saving.
     $j = Get-NewAnswer -Name 'Join'
     Assert-Equal (Get-DomainJoinProblem -Answer $j) $null 'a workgroup answer needs no join account'
-    $j.Membership = 'Domain'
+    $j.Membership = 'Domain'; $j.Domain = ''; $j.JoinUser = ''
     Assert-Equal (Get-DomainJoinProblem -Answer $j).Control 'TxtDomain' 'missing domain points at the Domain box'
     $j.Domain = 'corp.example.com'
     Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordTyped $true).Control 'TxtJoinUser' 'missing join user points at the user name box'
