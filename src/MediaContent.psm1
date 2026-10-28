@@ -12,16 +12,18 @@ function Join-MediaPath {
 }
 
 function ConvertTo-MediaRelative([string]$Path) {
-    ($Path -replace '/', '\').Trim('\')
+    ($Path -replace '/', '\') -replace '^\\+|\\+$', ''
 }
 
 function Split-MediaPath([string]$Path) {
     # Folder and base name of a content path with backslashes, the same on Windows and in tests off Windows.
     $rel = ConvertTo-MediaRelative $Path
-    $i = $rel.LastIndexOf('\')
-    $leaf = $rel.Substring($i + 1)
-    $dot = $leaf.LastIndexOf('.')
-    [pscustomobject]@{ Dir = $(if ($i -ge 0) { $rel.Substring(0, $i) } else { '' }); Base = $(if ($dot -gt 0) { $leaf.Substring(0, $dot) } else { $leaf }) }
+    $dir = ''
+    $leaf = $rel
+    if ($rel -match '^(.*)\\([^\\]*)$') { $dir = $Matches[1]; $leaf = $Matches[2] }
+    $base = $leaf -replace '\.[^.]*$', ''
+    if (-not $base) { $base = $leaf }
+    New-Object PSObject -Property @{ Dir = $dir; Base = $base }
 }
 
 function Join-MediaRelative([string[]]$Parts) {
@@ -31,6 +33,12 @@ function Join-MediaRelative([string[]]$Parts) {
 function Test-MediaRooted([string]$Path) {
     # Y:\... or \\server\... (read at deploy time), also when the tests run off Windows.
     [IO.Path]::IsPathRooted($Path) -or $Path -match '^([A-Za-z]:|\\\\)'
+}
+
+function Test-MediaWithin([string]$Path, [string[]]$Folders) {
+    # True when $Path is inside one of $Folders (not equal to it).
+    foreach ($f in $Folders) { if ($Path.StartsWith("$f\", [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    $false
 }
 
 function Get-MediaAnswerFileNames {
@@ -53,78 +61,76 @@ function Get-MediaContent {
     )
     $all = Get-MediaAnswerFileNames -ContentRoot $ContentRoot
     $names = @(if ($AnswerFiles) { $AnswerFiles } else { $all })
-    $folders = New-Object Collections.Generic.List[string]
-    $files = New-Object Collections.Generic.List[string]
-    $problems = New-Object Collections.Generic.List[string]
-    $notes = New-Object Collections.Generic.List[string]
-    $rows = New-Object Collections.Generic.List[object]
-    $addFolder = { param($p) $p = ConvertTo-MediaRelative $p; if ($p -and -not $folders.Contains($p)) { $folders.Add($p) } }
-    $addFile = { param($p) $p = ConvertTo-MediaRelative $p; if ($p -and -not $files.Contains($p)) { $files.Add($p) } }
+    # Plain arrays: everything is added with +=, and paths are deduplicated at the end.
+    $folders = @(); $files = @(); $problems = @(); $notes = @(); $rows = @()
 
-    if (-not $all) { $problems.Add("There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys.") }
-    elseif (-not $names) { $problems.Add('Choose at least one answer file to put on the USB stick.') }
+    if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
+    elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
     # Always: settings, driver catalog, naming list, password files, and the BIOS tools.
-    foreach ($dir in 'config', 'Tools') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { & $addFolder $dir } }
+    foreach ($dir in 'config', 'Tools') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
 
     foreach ($name in $names) {
         $path = Join-MediaPath $ContentRoot "AnswerFiles\$name.xml"
-        if (-not (Test-Path $path)) { $problems.Add("Answer file $name is not in $ContentRoot\AnswerFiles."); continue }
-        & $addFile "AnswerFiles\$name.xml"
-        try { $a = Read-AnswerFile -Path $path -SkipValidation }
-        catch { $problems.Add("Answer file $name can't be read: $($_.Exception.Message)"); continue }
+        if (-not (Test-Path $path)) { $problems += "Answer file $name is not in $ContentRoot\AnswerFiles."; continue }
+        $files += "AnswerFiles\$name.xml"
+        $a = $null
+        try { $a = Read-AnswerFile -Path $path -SkipValidation } catch { $problems += "Answer file $name can't be read: $($_.Exception.Message)" }
+        if (-not $a) { continue }
 
         $image = "$($a.ImageFile)"
-        $row = [pscustomobject]@{ Name = $name; Image = $image; Version = $a.ImageVersion; Size = [int64]0 }
-        $rows.Add($row)
-        if (-not $image) { $problems.Add("Answer file $name names no image. Choose one on its Image page."); continue }
-        if (Test-MediaRooted $image) {
-            $notes.Add("Answer file $name reads its image from $image, which is not copied: the PC needs that path at deploy time.")
+        $size = [int64]0
+        if (-not $image) { $problems += "Answer file $name names no image. Choose one on its Image page." }
+        elseif (Test-MediaRooted $image) {
+            $notes += "Answer file $name reads its image from $image, which is not copied: the PC needs that path at deploy time."
         } else {
             $current = Join-MediaPath $ContentRoot $image
+            $sp = Split-MediaPath $image
             if ($a.ImageVersion) {
                 # A pinned answer file deploys the copy in Images\Previous\<name>_<version>; copy that whole folder.
-                try {
-                    $pinned = Get-ImageVersionPath -ImagePath $current -Version $a.ImageVersion
-                    $sp = Split-MediaPath $image
-                    & $addFolder (Join-MediaRelative $sp.Dir, 'Previous', "$($sp.Base)_$($a.ImageVersion)")
-                    $row.Size = (Get-ImagePartFiles -ImagePath $pinned | Measure-Object Length -Sum).Sum
-                } catch { $problems.Add("Answer file $name uses image $image version $($a.ImageVersion): $($_.Exception.Message)") }
+                $pinned = $null
+                try { $pinned = Get-ImageVersionPath -ImagePath $current -Version $a.ImageVersion }
+                catch { $problems += "Answer file $name uses image $image version $($a.ImageVersion): $($_.Exception.Message)" }
+                if ($pinned) {
+                    $folders += Join-MediaRelative $sp.Dir, 'Previous', "$($sp.Base)_$($a.ImageVersion)"
+                    $size = [int64](Get-ImagePartFiles -ImagePath $pinned | Measure-Object Length -Sum).Sum
+                }
             } else {
                 $parts = @(Get-ImagePartFiles -ImagePath $current)
-                if (-not $parts) { $problems.Add("Answer file $name uses image $image, which is not in $ContentRoot. Capture it or pick another image on the answer file's Image page.") }
-                $sp = Split-MediaPath $image
-                foreach ($p in $parts) { & $addFile (Join-MediaRelative $sp.Dir, $p.Name) }
+                if (-not $parts) { $problems += "Answer file $name uses image $image, which is not in $ContentRoot. Capture it or pick another image on the answer file's Image page." }
+                foreach ($part in $parts) { $files += Join-MediaRelative $sp.Dir, $part.Name }
                 if (Test-Path (Join-Path (Split-Path $current -Parent) "$($sp.Base).updates.json")) {
-                    & $addFile (Join-MediaRelative $sp.Dir, "$($sp.Base).updates.json")
+                    $files += Join-MediaRelative $sp.Dir, "$($sp.Base).updates.json"
                 }
-                $row.Size = ($parts | Measure-Object Length -Sum).Sum
+                if ($parts) { $size = [int64]($parts | Measure-Object Length -Sum).Sum }
             }
         }
+        $rows += [pscustomobject]@{ Name = $name; Image = $image; Version = $a.ImageVersion; Size = $size }
 
         # The deploy wizard offers every application in the library, so copy the whole folder, not only this file's.
-        foreach ($dir in $a.DriverRoot, $a.AppLocation, $a.Bios.ToolsRoot) {
+        foreach ($dir in @($a.DriverRoot, $a.AppLocation, $a.Bios.ToolsRoot)) {
             if (-not $dir) { continue }
-            if (Test-MediaRooted $dir) { $notes.Add("Answer file $name reads $dir at deploy time; it is not copied."); continue }
-            if (Test-Path (Join-MediaPath $ContentRoot $dir)) { & $addFolder $dir }
+            if (Test-MediaRooted $dir) { $notes += "Answer file $name reads $dir at deploy time; it is not copied."; continue }
+            if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir }
         }
     }
 
-    # A folder already copied whole covers the files and folders inside it.
-    $within = { param($p) foreach ($f in $folders) { if ($p -ne $f -and $p.StartsWith("$f\", [StringComparison]::OrdinalIgnoreCase)) { return $true } }; $false }
-    $keptFolders = @($folders | Where-Object { -not (& $within $_) })
-    $folders.Clear(); foreach ($f in $keptFolders) { $folders.Add($f) }
-    $keptFiles = @($files | Where-Object { -not (& $within $_) })
+    # Same path once, in the order first seen; a folder already copied whole covers the files and folders inside it.
+    $folders = @($folders | ForEach-Object { ConvertTo-MediaRelative $_ } | Where-Object { $_ } | Select-Object -Unique)
+    $files = @($files | ForEach-Object { ConvertTo-MediaRelative $_ } | Where-Object { $_ } | Select-Object -Unique)
+    $outer = $folders
+    $folders = @($folders | Where-Object { -not (Test-MediaWithin $_ $outer) })
+    $files = @($files | Where-Object { -not (Test-MediaWithin $_ $outer) })
 
     if ($DefaultAnswerFile -and $names -and $DefaultAnswerFile -notin $names) {
-        $notes.Add("The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use.")
+        $notes += "The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use."
     }
     [pscustomobject]@{
-        AnswerFiles = @($rows)
-        Folders     = @($folders)
-        Files       = $keptFiles
-        Problems    = @($problems)
-        Notes       = @($notes)
+        AnswerFiles = $rows
+        Folders     = $folders
+        Files       = $files
+        Problems    = $problems
+        Notes       = $notes
     }
 }
 
