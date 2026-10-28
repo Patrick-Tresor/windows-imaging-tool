@@ -78,6 +78,16 @@ try {
     $leaves = @(Get-VmdkLeafPaths -Folder $chain)
     Assert-Equal $leaves.Count 1 'one disk with two snapshots has one current disk'
     Assert-Equal (Split-Path -Leaf $leaves[0]) 'Staff-000002.vmdk' 'the newest delta is the current disk'
+    Assert-Equal @(Get-VmdkDescriptorPaths -Folder $chain).Count 3 'every disk with a descriptor is listed, extent files are not'
+
+    # A delta left behind by an interrupted snapshot operation is a leaf too; the disk written last comes first.
+    $orphan = Join-Path $chain 'Staff-000003.vmdk'
+    Set-Content -LiteralPath $orphan -Encoding ASCII -Value @('# Disk DescriptorFile', 'version=1', 'parentCID=11111111', 'parentFileNameHint="Staff.vmdk"')
+    (Get-Item -LiteralPath $orphan).LastWriteTime = (Get-Date).AddDays(-1)
+    (Get-Item -LiteralPath (Join-Path $chain 'Staff-000002.vmdk')).LastWriteTime = Get-Date
+    $leaves = @(Get-VmdkLeafPaths -Folder $chain)
+    Assert-Equal $leaves.Count 2 'a leftover delta is also a leaf'
+    Assert-Equal (Split-Path -Leaf $leaves[0]) 'Staff-000002.vmdk' 'the disk written last comes first, not the first by name'
 
     # Workstation's library and recent VMs.
     $appData = Join-Path $root 'AppData'

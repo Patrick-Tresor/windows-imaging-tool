@@ -119,15 +119,23 @@ function Get-VmdkDescriptor {
     $text.Substring($start, $end - $start)
 }
 
+function Get-VmdkDescriptorPaths {
+    # Every .vmdk in a VM folder that is a disk (has a descriptor), not an extent file.
+    param([Parameter(Mandatory)][string]$Folder)
+    @(Get-ChildItem -LiteralPath $Folder -Filter *.vmdk -File | Where-Object { Get-VmdkDescriptor -Path $_.FullName } | ForEach-Object { $_.FullName })
+}
+
 function Get-VmdkLeafPaths {
     # The current disk of each snapshot chain in a VM folder: every .vmdk with a descriptor that no other .vmdk
-    # names as its parent. Used when the .vmx is encrypted.
+    # names as its parent, most recently written first. A delta left behind by an interrupted snapshot operation
+    # is a leaf too, so the newest one is the likeliest to be the disk the VM just used. Used when the .vmx is
+    # encrypted and no snapshot taken by this run tells which disk is current.
     param([Parameter(Mandatory)][string]$Folder)
-    $descriptors = @(Get-ChildItem -LiteralPath $Folder -Filter *.vmdk -File | Where-Object { Get-VmdkDescriptor -Path $_.FullName })
+    $descriptors = @(Get-VmdkDescriptorPaths -Folder $Folder | ForEach-Object { Get-Item -LiteralPath $_ })
     $parents = @(foreach ($d in $descriptors) {
         if ((Get-VmdkDescriptor -Path $d.FullName) -match '(?m)^parentFileNameHint\s*=\s*"([^"]+)"') { Split-Path -Leaf $Matches[1] }
     })
-    @($descriptors | Where-Object { $parents -notcontains $_.Name } | Sort-Object Name | ForEach-Object { $_.FullName })
+    @($descriptors | Where-Object { $parents -notcontains $_.Name } | Sort-Object LastWriteTimeUtc, Name -Descending | ForEach-Object { $_.FullName })
 }
 
 function Get-VMwareInventory {
@@ -150,4 +158,4 @@ function Get-VMwareInventory {
 }
 
 Export-ModuleMember -Function Get-VMwareCaptureVariables, Find-Vmrun, Find-QemuImg, New-VmrunArguments, ConvertFrom-VmrunList, Test-VmxInList,
-    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkLeafPaths, Get-VMwareInventory
+    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkDescriptorPaths, Get-VmdkLeafPaths, Get-VMwareInventory
