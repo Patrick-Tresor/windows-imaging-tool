@@ -118,6 +118,37 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     } finally {
         $win.Close()
     }
+
+    # Capture wizard labels wrap: no check box or option text runs past the right edge of its page, even at the
+    # smallest window size.
+    [xml]$cx = Get-Content -Raw -LiteralPath (Join-Path $console 'CaptureWizard.xaml')
+    $wiz = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($cx))
+    $wiz.Left = -3000; $wiz.Top = -3000; $wiz.ShowInTaskbar = $false; $wiz.ShowActivated = $false
+    $wiz.Width = $wiz.MinWidth
+    $wiz.Show()
+    try {
+        foreach ($p in 0..2) {
+            0..3 | ForEach-Object { $wiz.FindName("Page$_").Visibility = 'Collapsed' }
+            $page = $wiz.FindName("Page$p")
+            $page.Visibility = 'Visible'
+            $wiz.UpdateLayout()
+            $page.ScrollToHome()
+            $boxes = New-Object Collections.ArrayList
+            $stack = New-Object Collections.Stack; $stack.Push($page)
+            while ($stack.Count) {
+                $v = $stack.Pop()
+                if ($v -is [Windows.Controls.CheckBox] -or $v -is [Windows.Controls.RadioButton]) { [void]$boxes.Add($v) }
+                for ($i = 0; $i -lt [Windows.Media.VisualTreeHelper]::GetChildrenCount($v); $i++) { $stack.Push([Windows.Media.VisualTreeHelper]::GetChild($v, $i)) }
+            }
+            foreach ($box in $boxes) {
+                $text = Find-Visual $box ([Windows.Controls.TextBlock])
+                $right = $text.TransformToAncestor($page).Transform([Windows.Point]::new($text.ActualWidth, 0)).X
+                Assert-Equal ($right -le $page.ViewportWidth + 0.5) $true "capture wizard: $($box.Name) label fits the page ($([int]$right) <= $([int]$page.ViewportWidth))"
+            }
+        }
+    } finally {
+        $wiz.Close()
+    }
 }
 
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
