@@ -79,7 +79,7 @@ function Mount-VMDisks {
             }
             else {
                 $access = if ($ReadWrite) { 'ReadWrite' } else { 'ReadOnly' }
-                $diskNumber = (Mount-DiskImage -ImagePath $path -Access $access -NoDriveLetter -PassThru | Get-Disk).Number
+                $diskNumber = (Mount-DiskImage -ImagePath $path -Access $access -NoDriveLetter -PassThru -ErrorAction Stop | Get-Disk).Number
                 $mount.Mounted += [pscustomobject]@{ Path = $path; HyperV = $false }
             }
             # GPT data partitions are Basic; MBR ones (BIOS VMs) are IFS.
@@ -132,7 +132,23 @@ function Get-DiskForCapture {
     if (-not $conversion) { return [pscustomobject]@{ Path = $Path; Temp = $null } }
     Write-DeployLog "Converting $(Split-Path $Path -Leaf) to a temporary VHD. This copies the whole disk, so it needs free space."
     Invoke-Native -FilePath $conversion.FilePath -ArgumentList $conversion.ArgumentList
+    Clear-MountBlockingAttributes -Path $temp
     [pscustomobject]@{ Path = $temp; Temp = $temp }
+}
+
+function Clear-MountBlockingAttributes {
+    # Windows mounts a VHD only when the file itself is not sparse, compressed or encrypted (0xC03A001A). qemu-img
+    # writes a sparse file, and a TEMP folder can be compressed, so undo both. The VHD keeps its own format.
+    param([Parameter(Mandatory)][string]$Path)
+    $attributes = (Get-Item -LiteralPath $Path).Attributes
+    if ($attributes -band [IO.FileAttributes]::SparseFile) { Invoke-Native -FilePath 'fsutil.exe' -ArgumentList @('sparse', 'setflag', $Path, '0') }
+    if ($attributes -band [IO.FileAttributes]::Compressed) { Invoke-Native -FilePath 'compact.exe' -ArgumentList @('/u', '/q', $Path) }
+    $attributes = (Get-Item -LiteralPath $Path).Attributes
+    foreach ($flag in 'SparseFile', 'Compressed', 'Encrypted') {
+        if ($attributes -band [IO.FileAttributes]$flag) {
+            throw "Windows cannot mount $Path because the file is marked $flag. Set TEMP to a folder on a plain NTFS drive and run this again."
+        }
+    }
 }
 
 function Edit-OfflineSetupKey {
@@ -290,11 +306,26 @@ function Restore-VMwareSnapshot {
     try {
         if (Test-VMwareRunning) { Invoke-Vmrun stop -Arguments @('hard') | Out-Null }
         Invoke-Vmrun revertToSnapshot -Arguments @($Name) | Out-Null
-        Invoke-Vmrun deleteSnapshot -Arguments @($Name) | Out-Null
         Write-DeployLog "Reverted the VM to the snapshot from before the capture."
     }
     catch {
-        Write-DeployLog "Could not revert the VM to snapshot '$Name': $($_.Exception.Message). Revert to it by hand in VMware Workstation (VM > Snapshot)." -Level WARN
+        Write-DeployLog "Could not revert the VM to snapshot '$Name': $($_.Exception.Message). In VMware Workstation open VM > Snapshot > Snapshot Manager, pick '$Name' and click Go To, then delete it." -Level WARN
+        return
+    }
+    # Right after a revert VMware can still hold the VM's files for a moment, so deleting the snapshot is retried.
+    for ($try = 1; ; $try++) {
+        try {
+            Invoke-Vmrun deleteSnapshot -Arguments @($Name) | Out-Null
+            Write-DeployLog "Deleted snapshot '$Name'."
+            return
+        }
+        catch {
+            if ($try -ge 4) {
+                Write-DeployLog "The VM is back as it was, but snapshot '$Name' could not be deleted: $($_.Exception.Message). Delete it in VMware Workstation (VM > Snapshot > Snapshot Manager); it only takes disk space." -Level WARN
+                return
+            }
+            Start-Sleep -Seconds 15
+        }
     }
 }
 
