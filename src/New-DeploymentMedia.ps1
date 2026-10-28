@@ -6,6 +6,10 @@
     All three targets boot both UEFI and legacy BIOS PCs.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare
+    Copies every answer file, the images they deploy, drivers, applications and config to the stick.
+.EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -AnswerFiles Staff-W11
+    Copies only the Staff-W11 answer file and the image it names (not every image in the content root).
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
 .EXAMPLE
@@ -20,7 +24,8 @@ param(
     [Parameter(Mandatory)][ValidateSet('Usb', 'Iso', 'Pxe')][string]$Target,
     [string]$WorkDir = 'C:\WinPE_Build',
     [int]$UsbDiskNumber = -1,
-    [string]$ContentSource,          # Images, Drivers, config to copy to the USB's DEPLOY partition
+    [string]$ContentSource,          # content root to copy to the USB's DEPLOY partition (answer files, their images, drivers, apps, config)
+    [string[]]$AnswerFiles,          # with -ContentSource: only these answer files and the images they name; default all
     [string]$OutputPath = (Get-Location).Path,
     [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
@@ -34,6 +39,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -46,6 +52,19 @@ $peRoot = "$adk\Windows Preinstallation Environment"
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
 if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
 if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target Pxe.' }
+if ($AnswerFiles -and -not $ContentSource) { throw '-AnswerFiles needs -ContentSource.' }
+# The console passes the names as one comma-separated argument (powershell.exe -File doesn't take arrays).
+$AnswerFiles = @($AnswerFiles | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$content = $null
+if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
+    # Check the content before the build and before the stick is erased: a stick without its answer file and
+    # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
+    $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
+    $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default
+    if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
+    foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
+    foreach ($n in $content.Notes) { Write-Warning $n }
+}
 if ($BootVM) {
     # Check the VM before spending minutes on the build.
     $vm = Get-VM -Name $BootVM
@@ -158,7 +177,23 @@ switch ($Target) {
         if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
         # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
         New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
-        if ($ContentSource) {
+        if ($content) {
+            # The answer files, the image each one names, and what they use. Robocopy exit codes 8 and up are failures.
+            foreach ($dir in $content.Folders) {
+                Write-Host "Copying $dir..."
+                robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" /E /NFL /NDL /NJH /NJS | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "Copying $dir to the USB stick failed (robocopy exit code $LASTEXITCODE). Is the stick full?" }
+            }
+            foreach ($file in $content.Files) {
+                Write-Host "Copying $file..."
+                $dir = Split-Path $file -Parent
+                robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" (Split-Path $file -Leaf) /NFL /NDL /NJH /NJS | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "Copying $file to the USB stick failed (robocopy exit code $LASTEXITCODE). Is the stick full?" }
+            }
+            $listed = ($content.AnswerFiles | ForEach-Object Name) -join ', '
+            Write-Host "Answer files on the stick: $listed"
+        } elseif ($ContentSource) {
+            # Capture media: the capture saves to Images and reads its settings from config.
             foreach ($dir in 'Images', 'Drivers', 'config') {
                 robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" /E /NFL /NDL | Out-Null
             }

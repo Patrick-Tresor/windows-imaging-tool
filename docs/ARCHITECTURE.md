@@ -195,7 +195,8 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 **content root** differs, and the script finds it by itself:
 
 1. **Offline USB**: the boot partition (FAT32) holds WinPE, a second NTFS
-   partition labelled `DEPLOY` holds `Images\`, `Drivers\`, `config\`.
+   partition labelled `DEPLOY` holds `AnswerFiles\`, the images those answer files name,
+   `Drivers\`, `Applications\`, `Tools\` and `config\` (`src/MediaContent.psm1` decides what goes).
    Two partitions because UEFI needs FAT32 to boot and a WIM is usually over 4 GB.
    The stick is MBR with the FAT32 partition active and `bootsect /nt60 /mbr`
    boot code, so it also boots legacy BIOS PCs.

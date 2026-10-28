@@ -65,6 +65,9 @@ and click **Create folders** the first time. Then:
   with a **Download ADK** button when they aren't. Media builds and the capture
   wizard refuse to start until both are there. For PXE it also publishes
   `boot.wim` to a WDS server (see [PXE with WDS](#pxe-with-wds)).
+  A USB stick gets the answer files you check in the list, the image each one
+  names (its pinned version when it has one), drivers, applications and config.
+  The build stops before erasing the stick when an answer file's image is missing.
 - **Remote Reimage**: the PCs on the network, by lab or room. Wake them, or
   reimage a whole lab from here (see [Remote reimage](#remote-reimage)).
 - **Deploy Settings**: the network share WinPE uses to find the content root,
@@ -513,6 +516,7 @@ What the PCs need:
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
+   Add `-AnswerFiles Staff-W11,Lab` to put only those answer files and their images on the stick.
 2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
    from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):

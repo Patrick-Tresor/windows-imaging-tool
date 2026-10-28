@@ -33,6 +33,7 @@ Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -130,6 +131,18 @@ function Update-Answers {
     $ui.GridAnswers.ItemsSource = $rows
     $ui.CmbDefaultAnswer.ItemsSource = @($rows.Name)
     $ui.TxtAnswerIssues.Text = ''
+    Update-MediaAnswers
+}
+
+function Update-MediaAnswers {
+    # The Media tab's answer file list: keeps what was unchecked, checks answer files that are new since last time.
+    $old = @{}
+    foreach ($i in @($ui.LstMediaAnswers.Items)) { $old[$i.Name] = $ui.LstMediaAnswers.SelectedItems.Contains($i) }
+    $choices = @(if (Test-ContentRoot $script:root) { Get-MediaAnswerChoices -ContentRoot $script:root })
+    $ui.LstMediaAnswers.ItemsSource = $choices
+    foreach ($c in $choices) {
+        if (-not $old.ContainsKey($c.Name) -or $old[$c.Name]) { [void]$ui.LstMediaAnswers.SelectedItems.Add($c) }
+    }
 }
 
 function Update-Drivers {
@@ -677,9 +690,16 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($ui.RbUsb.IsChecked) {
         $disk = $ui.CmbUsb.SelectedItem
         if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
+        if ($ui.ChkCopyContent.IsChecked) {
+            # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+            $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+            if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names -DefaultAnswerFile (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile
+            if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+        } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
         if (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
         $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-        if ($ui.ChkCopyContent.IsChecked) { $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root)) }
+        if ($ui.ChkCopyContent.IsChecked) { $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ',')) }
     } else {
         if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
         $buildArgs += @('-Target', $(if ($ui.RbIso.IsChecked) { 'Iso' } else { 'Pxe' }), '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
