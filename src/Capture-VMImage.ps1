@@ -245,9 +245,12 @@ function Wait-VMwareAgent {
     $vars = Get-VMwareCaptureVariables
     $deadline = (Get-Date).AddMinutes($Minutes)
     while ($true) {
-        if (-not (Test-VMwareRunning)) { return }
+        if (-not (Test-VMwareRunning)) {
+            Write-DeployLog 'The VM went off before the capture agent in it answered, so sysprep probably did not run. Is the agent installed (VMwareCaptureAgent.ps1 -Install)?' -Level WARN
+            return
+        }
         $state = "$(Invoke-Vmrun readVariable -Arguments @('guestVar', $vars.State) -AllowFailure)".Trim()
-        if ($state -in 'started', 'failed') { return }
+        if ($state -in 'started', 'failed') { Write-DeployLog "The capture agent in the VM answered: $state."; return }
         if ((Get-Date) -gt $deadline) {
             $tools = "$(Invoke-Vmrun checkToolsState -AllowFailure)".Trim()
             if ($tools -ne 'running') { throw "VMware Tools is not running in the VM (vmrun says '$tools'), so the capture could not start. Install VMware Tools and the capture agent in the VM." }
@@ -269,10 +272,18 @@ function Wait-VMwareOff {
 function Get-VMwareCaptureDisk {
     # Copies the VM's current disk (its snapshot chain) to a temporary VHD, finds Windows on it, removes the capture
     # agent's leftovers from the copy, and reports whether Windows was generalized. The caller deletes Temp.
+    # A readable .vmx names the current disks. An encrypted one does not, but the delta files the snapshot of this
+    # run created are the disks the VM has written to since.
     $paths = Get-VmxDiskPaths -VmxPath $VmxPath
-    if ($null -eq $paths) { $paths = Get-VmdkLeafPaths -Folder (Split-Path -Parent $VmxPath) }
+    if ($null -eq $paths -and $script:SnapshotDeltas) { $paths = @($script:SnapshotDeltas) }
+    if (-not $paths) { $paths = Get-VmdkLeafPaths -Folder (Split-Path -Parent $VmxPath) }
     if (-not $paths) { throw "No virtual disk found for $(Split-Path -Leaf $VmxPath)." }
     foreach ($path in $paths) {
+        $written = (Get-Item -LiteralPath $path).LastWriteTime
+        Write-DeployLog "Reading $(Split-Path -Leaf $path) (last written $($written.ToString('yyyy-MM-dd HH:mm:ss')))."
+        if ($script:VMStarted -and $written -lt $script:VMStarted) {
+            Write-DeployLog "$(Split-Path -Leaf $path) was not written while the VM ran, so it may not be the disk the VM used." -Level WARN
+        }
         $disk = Get-DiskForCapture -Path $path
         $found = $null
         try {
@@ -283,6 +294,7 @@ function Get-VMwareCaptureDisk {
                     $agentLog = Join-Path $agentDir 'capture-agent.log'
                     $found = [pscustomobject]@{
                         Path     = $disk.Path
+                        Source   = $path
                         Temp     = $disk.Temp
                         State    = Get-OfflineImageState -Root $m.Root
                         AgentLog = @(if (Test-Path -LiteralPath $agentLog) { Get-Content -LiteralPath $agentLog })
@@ -320,6 +332,8 @@ function Restore-VMwareSnapshot {
             return
         }
         catch {
+            # An earlier try, or VMware itself, can already have deleted it.
+            if ($_.Exception.Message -match 'does not exist') { Write-DeployLog "Deleted snapshot '$Name'."; return }
             if ($try -ge 4) {
                 Write-DeployLog "The VM is back as it was, but snapshot '$Name' could not be deleted: $($_.Exception.Message). Delete it in VMware Workstation (VM > Snapshot > Snapshot Manager); it only takes disk space." -Level WARN
                 return
@@ -388,9 +402,14 @@ try {
         }
 
         $snapshotName = "Before capture of $Name $(Get-Date -Format 'yyyyMMdd-HHmm')"
+        $vmFolder = Split-Path -Parent $VmxPath
+        $disksBefore = @(Get-VmdkDescriptorPaths -Folder $vmFolder)
         Invoke-Vmrun snapshot -Arguments @($snapshotName) | Out-Null
         $snapshot = $snapshotName
         Write-DeployLog "Took snapshot '$snapshot'. The VM is reverted to it after the capture."
+        $script:SnapshotDeltas = @(Get-VmdkDescriptorPaths -Folder $vmFolder | Where-Object { $disksBefore -notcontains $_ } | Sort-Object)
+        if ($script:SnapshotDeltas) { Write-DeployLog "The VM now writes to $(($script:SnapshotDeltas | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')." }
+        $script:VMStarted = Get-Date
 
         Write-DeployLog "Starting $vmLabel. The capture agent in the VM runs Prepare-Reference.ps1, and sysprep shuts the VM down when it is done."
         Invoke-Vmrun start -Arguments @('nogui') | Out-Null
@@ -404,7 +423,10 @@ try {
         $paths = @($disk.Path)
         if (-not $disk.State.Generalized) {
             foreach ($line in $disk.AgentLog) { Write-DeployLog "  agent: $line" }
-            $why = if ($disk.State.LastError) { " Last sysprep error: $($disk.State.LastError)" } elseif ($disk.AgentLog) { " The agent's log says: $($disk.AgentLog[-1])" } else { ' The capture agent left no log, so it probably did not run.' }
+            # The agent's log is from this run; the sysprep error line can be from an earlier one.
+            $why = if ($disk.AgentLog) { " The capture agent's log says: $($disk.AgentLog[-1])" }
+                   else { " The capture agent left no log on $(Split-Path -Leaf $disk.Source), so it did not run, or this is not the disk the VM used." }
+            if ($disk.State.LastError) { $why += " Last sysprep error on this disk (it may be from an earlier run): $($disk.State.LastError)" }
             throw "Windows on $vmLabel was not generalized (ImageState $($disk.State.ImageState)).$why"
         }
     }
