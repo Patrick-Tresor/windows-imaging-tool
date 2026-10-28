@@ -254,7 +254,7 @@
       <ScrollViewer x:Name="Sec5" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Domain or workgroup"/>
-          <TextBlock Style="{StaticResource Hint}" Text="The password is saved in its own file under config\secrets, not in the answer file. Use an account that can only join computers to the OU."/>
+          <TextBlock Style="{StaticResource Hint}" Text="To join a domain, fill in the domain, the user name of the account that joins PCs to it, and that account's password. The password is saved in its own file under config\secrets, not in the answer file; you don't pick that file. Use an account that can only join computers to the OU."/>
           <StackPanel Orientation="Horizontal">
             <RadioButton x:Name="RbDomain" GroupName="Join" Content="Join a domain"/>
             <RadioButton x:Name="RbWorkgroup" GroupName="Join" Content="Join a workgroup"/>
@@ -266,11 +266,11 @@
             <TextBox x:Name="TxtDomain" Grid.Column="1" ToolTip="corp.example.com"/>
             <Label Grid.Row="1" Content="Organizational unit"/>
             <TextBox x:Name="TxtOU" Grid.Row="1" Grid.Column="1" ToolTip="OU=Laptops,DC=corp,DC=example,DC=com. Leave empty for the default Computers container."/>
-            <Label Grid.Row="2" Content="Join account"/>
-            <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="2" Content="Join account user name"/>
+            <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="The account that joins PCs to the domain, such as svc-join. CORP\svc-join also works and fills in the account's domain."/>
             <Label Grid.Row="3" Content="Account's domain"/>
             <TextBox x:Name="TxtJoinDomain" Grid.Row="3" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="NetBIOS name such as CORP. Leave empty to use the domain above."/>
-            <Label Grid.Row="4" Content="Password"/>
+            <Label Grid.Row="4" Content="Join account password"/>
             <StackPanel Grid.Row="4" Grid.Column="1">
               <PasswordBox x:Name="PwdJoin" Width="260" HorizontalAlignment="Left"/>
               <TextBlock x:Name="TxtJoinPwState" Foreground="#5B6170" Margin="0,0,0,8"/>

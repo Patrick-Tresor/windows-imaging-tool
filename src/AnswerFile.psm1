@@ -154,7 +154,8 @@ function Test-AnswerFile {
     if ($a.Membership -notin 'Domain', 'Workgroup') { "network/membership must be Domain or Workgroup, not '$($a.Membership)'." }
     if ($a.Membership -eq 'Domain') {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
-        if (-not $a.JoinUser -or -not $a.JoinPasswordFile) { 'Domain membership needs network/joinCredentials username and passwordFile.' }
+        if (-not $a.JoinUser) { 'Domain membership needs the join account user name (network/joinCredentials/username).' }
+        if (-not $a.JoinPasswordFile) { 'Domain membership needs the join account password file (network/joinCredentials/passwordFile).' }
     }
     if ($a.MigrateUserData) {
         if ($a.UserDataStore -notin 'Local', 'Share') { "userData/store must be Local or Share, not '$($a.UserDataStore)'." }
