@@ -33,6 +33,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -138,13 +139,11 @@ switch ($Target) {
     }
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
-        $disk = Get-Disk -Number $UsbDiskNumber
-        if ($disk.BusType -ne 'USB') { throw "Disk $UsbDiskNumber is $($disk.BusType), not USB. Refusing to erase it." }
+        $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
         if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
 
         # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
-        Clear-Disk -Number $UsbDiskNumber -RemoveData -RemoveOEM -Confirm:$false
-        Initialize-Disk -Number $UsbDiskNumber -PartitionStyle MBR
+        Reset-UsbDisk -DiskNumber $UsbDiskNumber
         $boot = New-Partition -DiskNumber $UsbDiskNumber -Size 2GB -IsActive -AssignDriveLetter
         Format-Volume -Partition $boot -FileSystem FAT32 -NewFileSystemLabel 'WINPE' -Confirm:$false | Out-Null
         $data = New-Partition -DiskNumber $UsbDiskNumber -UseMaximumSize -AssignDriveLetter
