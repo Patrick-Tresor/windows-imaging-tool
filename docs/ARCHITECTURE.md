@@ -51,6 +51,28 @@ a key pressed during the countdown opens it. User data migration is checked
 after the window closes, once the disk is known, and still before anything is
 erased. Without WinForms the console prompts are used instead.
 
+Both the wizard and the progress window list the steps (answer file, computer
+name, applications, confirm, install, finish) down a sidebar.
+
+## Progress window
+
+From the moment WinPE starts the deploy, `Deploy-Image.ps1` starts
+`DeployProgressWindow.ps1` in its own process, so the window keeps redrawing
+while DISM runs. It shows the hardware, the answer file, image, computer name
+and driver pack, the current step with a progress bar and elapsed time, and the
+end of `Deploy.log`. During an `Unattended` countdown it shows the seconds left
+and a **Change settings** button that opens the wizard instead. At the end it
+shows the result (installed, installed with warnings, failed with the error and
+the step it failed in, or cancelled) with **Restart** and **Shut down**, plus
+**View log** (Notepad) and **Command prompt** at any time. If the deploy script
+dies without writing a result, the window says it stopped.
+
+The window reads `X:\Windows\Temp\DeployProgress.json`, which `DeployStatus.psm1`
+writes on every `Set-DeployStatus` (`Start-LocalProgress`), whether or not the
+dashboard share is reachable; `Set-DeployStatus -LocalOnly` updates only that
+file. `DeployProgress.psm1` turns a record into what the window shows
+(`Get-ProgressView`), so that logic is tested without a screen.
+
 ## Capture wizard
 
 `CaptureWizard.ps1` writes `config\capture.json` (name, description,

@@ -3,6 +3,41 @@
 # Deploy-Image.ps1 passes in the hardware and two script blocks that read an answer file and prepare its
 # plan (map shares, find the image, driver pack and applications), so all deploy logic stays there.
 
+# Steps listed down the left of the wizard and of the progress window (DeployProgress.psm1).
+$script:DeploySteps = 'Answer file', 'Computer name', 'Applications', 'Confirm', 'Install Windows', 'Finish'
+
+function Get-DeploySteps { $script:DeploySteps }
+
+function New-DeploySidebar {
+    # The dark band down the left of a window: a heading and the steps. Returns the step labels.
+    param([Parameter(Mandatory)]$Form, [string]$Heading = 'Deploy Windows')
+    $panel = New-Object Windows.Forms.Panel -Property @{ Dock = 'Left'; Width = 200; BackColor = [Drawing.Color]::FromArgb(31, 58, 95) }
+    $panel.Controls.Add((New-Object Windows.Forms.Label -Property @{
+        Location = (New-Object Drawing.Point(20, 20)); Size = (New-Object Drawing.Size(170, 34)); Text = $Heading
+        Font = New-Object Drawing.Font('Segoe UI', 14); ForeColor = [Drawing.Color]::White
+    }))
+    $labels = for ($i = 0; $i -lt $script:DeploySteps.Count; $i++) {
+        $l = New-Object Windows.Forms.Label -Property @{
+            Location = (New-Object Drawing.Point(20, (84 + 34 * $i))); Size = (New-Object Drawing.Size(170, 28))
+            Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]
+        }
+        $panel.Controls.Add($l); $l
+    }
+    $Form.Controls.Add($panel)
+    $labels
+}
+
+function Set-DeploySidebarStep {
+    # Steps before Current are done, Current is bold and white, the rest are dimmed.
+    param([Parameter(Mandatory)][object[]]$Labels, [Parameter(Mandatory)][int]$Current)
+    for ($i = 0; $i -lt $Labels.Count; $i++) {
+        $Labels[$i].Font = New-Object Drawing.Font('Segoe UI', 10, $(if ($i -eq $Current) { [Drawing.FontStyle]::Bold } else { [Drawing.FontStyle]::Regular }))
+        $Labels[$i].ForeColor = if ($i -eq $Current) { [Drawing.Color]::White }
+                                elseif ($i -lt $Current) { [Drawing.Color]::FromArgb(170, 200, 230) }
+                                else { [Drawing.Color]::FromArgb(120, 140, 165) }
+    }
+}
+
 function Test-ComputerNameValue {
     # Returns why a computer name can't be used, or nothing when it is valid.
     param([string]$Name)
@@ -84,24 +119,25 @@ function Show-DeployWizard {
     $font = New-Object Drawing.Font('Segoe UI', 10)
 
     $form = New-Object Windows.Forms.Form -Property @{
-        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(720, 500); Font = $font
+        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 500); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
         TopMost = $true; BackColor = [Drawing.Color]::White
     }
     $title = New-Object Windows.Forms.Label -Property @{
-        Location = (New-Object Drawing.Point(24, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI', 15)
+        Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI', 15)
     }
     $hwText = "$($Hardware.Maker) $($Hardware.Model)   Serial $($Hardware.Serial)$(if ($Hardware.Sku) { "   SKU $($Hardware.Sku)" })"
-    $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(24, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = [Drawing.Color]::DimGray }
-    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(24, 410)); Size = (New-Object Drawing.Size(672, 40)); ForeColor = [Drawing.Color]::Firebrick }
-    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(384, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
-    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(490, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
-    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(596, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
+    $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = [Drawing.Color]::DimGray }
+    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 40)); ForeColor = [Drawing.Color]::Firebrick }
+    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
+    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
+    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
     $form.CancelButton = $cancel
     $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel))
+    $w.Sidebar = New-DeploySidebar -Form $form
 
     $pages = foreach ($i in 0..3) {
-        $p = New-Object Windows.Forms.Panel -Property @{ Location = (New-Object Drawing.Point(24, 84)); Size = (New-Object Drawing.Size(672, 320)); Visible = $false }
+        $p = New-Object Windows.Forms.Panel -Property @{ Location = (New-Object Drawing.Point(224, 84)); Size = (New-Object Drawing.Size(672, 320)); Visible = $false }
         $form.Controls.Add($p); $p
     }
 
@@ -146,6 +182,7 @@ function Show-DeployWizard {
         $w = $script:wiz
         for ($i = 0; $i -lt $w.Pages.Count; $i++) { $w.Pages[$i].Visible = $i -eq $w.Page }
         $w.Title.Text = @('Choose an answer file', 'Name this computer', 'Choose applications', 'Ready to deploy')[$w.Page]
+        Set-DeploySidebarStep -Labels $w.Sidebar -Current $w.Page
         $w.Back.Enabled = $w.Page -gt 0
         $w.Next.Text = if ($w.Page -eq 3) { 'Deploy' } else { 'Next >' }
         $w.Next.Enabled = if ($w.Page -eq 3) { $w.Confirm.Checked } else { $true }
@@ -252,5 +289,5 @@ function Test-DeployWizardAvailable {
     try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
 }
 
-Export-ModuleMember -Function Test-ComputerNameValue, Format-DiskChoice, Get-TargetDisks, Get-AppChoices, Get-DeploySummary,
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Get-TargetDisks, Get-AppChoices, Get-DeploySummary,
     Show-DeployWizard, Test-DeployWizardAvailable

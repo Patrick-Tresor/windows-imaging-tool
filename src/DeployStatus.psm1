@@ -7,6 +7,8 @@ $script:Folder   = $null   # where this deployment's status is written
 $script:Record   = $null   # the status record, kept in memory and rewritten on each update
 $script:LogPaths = @()     # logs concatenated into Status\<id>.log
 $script:Warned   = $false
+$script:LocalPath = $null  # this PC's own copy for the progress window in WinPE (DeployProgress.psm1), kept even without a dashboard
+$script:Local     = $null
 
 #region Writing (WinPE and first boot)
 
@@ -103,6 +105,8 @@ function Resume-DeployStatus {
 
 function Set-DeployStatus {
     # Updates the record and rewrites the status and live log. Any field of the record can be set through -Fields.
+    # The local progress file (Start-LocalProgress) gets every update too; -LocalOnly updates only that one, for
+    # changes the dashboard does not need, such as each second of a countdown.
     param(
         [string]$Step,
         [Nullable[int]]$Percent,
@@ -110,22 +114,97 @@ function Set-DeployStatus {
         [string]$Phase,
         [string]$Message,
         [string]$Warning,       # appended to the warnings list; the deployment finishes as Warning instead of Succeeded
+        [hashtable]$Fields = @{},
+        [switch]$LocalOnly
+    )
+    $update = @{}
+    foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'LocalOnly') { $update[$k] = $PSBoundParameters[$k] } }
+    if ($script:Local) {
+        Update-StatusRecord -Record $script:Local @update
+        Save-LocalProgress
+    }
+    if ($LocalOnly -or -not $script:Record) { return }
+    Update-StatusRecord -Record $script:Record @update
+    Save-DeployStatus
+}
+
+function Update-StatusRecord {
+    param(
+        [Parameter(Mandatory)]$Record,
+        [string]$Step,
+        [Nullable[int]]$Percent,
+        [string]$State,
+        [string]$Phase,
+        [string]$Message,
+        [string]$Warning,
         [hashtable]$Fields = @{}
     )
-    if (-not $script:Record) { return }
-    if ($Step)    { $script:Record.step = $Step }
-    if ($null -ne $Percent) { $script:Record.percent = [Math]::Max(0, [Math]::Min(100, [int]$Percent)) }
-    if ($Phase)   { $script:Record.phase = $Phase }
-    if ($PSBoundParameters.ContainsKey('Message')) { $script:Record.message = $Message }
-    if ($Warning) { $script:Record.warnings = @($script:Record.warnings) + $Warning }
-    foreach ($k in $Fields.Keys) { $script:Record[$k] = $Fields[$k] }
+    if ($Step)    { $Record.step = $Step }
+    if ($null -ne $Percent) { $Record.percent = [Math]::Max(0, [Math]::Min(100, [int]$Percent)) }
+    if ($Phase)   { $Record.phase = $Phase }
+    if ($PSBoundParameters.ContainsKey('Message')) { $Record.message = $Message }
+    if ($Warning) { $Record.warnings = @($Record.warnings) + $Warning }
+    foreach ($k in $Fields.Keys) { $Record[$k] = $Fields[$k] }
     if ($State) {
-        if ($State -eq 'Succeeded' -and @($script:Record.warnings).Count) { $State = 'Warning' }
-        $script:Record.state = $State
-        if ($State -ne 'Running') { $script:Record.finished = (Get-Date).ToString('o') }
+        if ($State -eq 'Succeeded' -and @($Record.warnings).Count) { $State = 'Warning' }
+        $Record.state = $State
+        if ($State -ne 'Running') { $Record.finished = (Get-Date).ToString('o') }
     }
-    $script:Record.updated = (Get-Date).ToString('o')
-    Save-DeployStatus
+    $Record.updated = (Get-Date).ToString('o')
+}
+
+function Start-LocalProgress {
+    # Starts the progress file that the window on this PC's screen reads (DeployProgressWindow.ps1). Unlike the
+    # dashboard record it needs no share, so it is written for every deployment.
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        $Identity
+    )
+    $script:LocalPath = $Path
+    $now = (Get-Date).ToString('o')
+    $script:Local = [ordered]@{
+        computerName = ''
+        serial       = "$($Identity.Serial)"
+        maker        = "$($Identity.Maker)"
+        model        = "$($Identity.Model)"
+        answerFile   = ''
+        image        = ''
+        driverPack   = ''
+        state        = 'Running'
+        phase        = 'WinPE'
+        step         = 'Starting'
+        percent      = 0
+        message      = ''
+        countdown    = 0
+        whenDone     = ''
+        started      = $now
+        updated      = $now
+        finished     = $null
+        warnings     = @()
+    }
+    Remove-Item -Path (Get-ProgressCancelPath $Path) -Force -ErrorAction SilentlyContinue
+    Save-LocalProgress
+}
+
+function Save-LocalProgress {
+    if (-not $script:LocalPath -or -not $script:Local) { return }
+    try {
+        $tmp = "$($script:LocalPath).tmp"
+        [pscustomobject]$script:Local | ConvertTo-Json -Depth 6 | Set-Content -Path $tmp -Encoding utf8 -ErrorAction Stop
+        Move-Item -Path $tmp -Destination $script:LocalPath -Force -ErrorAction Stop
+    } catch { }   # the window just shows the previous step
+}
+
+function Get-ProgressCancelPath([string]$Path) { "$Path.cancel" }
+
+function Receive-ProgressCancel {
+    # True once when the progress window asked to stop the countdown (its "Change settings" button writes the file).
+    param([string]$Path = $script:LocalPath)
+    if (-not $Path) { return $false }
+    $flag = Get-ProgressCancelPath $Path
+    if (-not (Test-Path -LiteralPath $flag)) { return $false }
+    Remove-Item -LiteralPath $flag -Force -ErrorAction SilentlyContinue
+    $true
 }
 
 function Set-DeployCheckResult {
@@ -284,5 +363,6 @@ function Format-Duration([timespan]$Span) {
 #endregion
 
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
+    Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
     Remove-DeploymentStatus, Format-Duration

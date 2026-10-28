@@ -13,7 +13,8 @@ src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Captu
                      Prepare-Reference.ps1, VMwareCaptureAgent.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
                      Start-RemoteReimage.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, UserState.psm1, NamingList.psm1,
-                     RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1
+                     RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1,
+                     DeployProgress.psm1, DeployProgressWindow.ps1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, naming-list.csv (header only),
@@ -584,8 +585,13 @@ What the PCs need:
    the naming list starts with its own answer file, name and OU filled in. The
    tool applies the BIOS settings, wipes the disk, applies the image, injects the
    drivers, and reboots. BitLocker, if set, starts at first boot.
+   While it works, a progress window shows the current step, a progress bar,
+   the elapsed time and the end of the log. At the end it shows the result, with
+   **Restart**, **Shut down**, **View log** and **Command prompt** buttons; a
+   failure names the step and the error.
    `Unattended` answer files and remote reimage jobs skip the wizard after their
-   countdown, and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
+   countdown (the progress window's **Change settings** button, or any key on the
+   console, opens it instead), and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
    entirely. If the WinPE image has no WinForms (built without WinPE-NetFX), the
    same questions are asked on the console.
 
