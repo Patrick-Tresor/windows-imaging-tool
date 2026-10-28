@@ -45,8 +45,15 @@ function Resolve-ContentPath([string]$Root, [string]$Path) {
 }
 
 function Get-AnswerFileNames([string]$Root) {
-    $names = @(Get-ChildItem -Path (Join-Path $Root 'AnswerFiles') -Filter *.xml -File | Sort-Object Name | ForEach-Object BaseName)
-    if (-not $names) { throw "No answer files in $Root\AnswerFiles." }
+    # The answer file says which image to deploy, so without one there is nothing to do. Old USB sticks were built
+    # without the AnswerFiles folder; say how to fix that instead of PowerShell's "Cannot find path".
+    $dir = Join-Path $Root 'AnswerFiles'
+    $names = @(Get-ChildItem -Path $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
+    if (-not $names) {
+        throw ("No answer files in $dir, so this media doesn't know which image to deploy. " +
+            'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
+            'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
+    }
     $names
 }
 

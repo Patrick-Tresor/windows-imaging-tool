@@ -176,7 +176,7 @@
             </DockPanel>
           </Border>
 
-          <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus images and drivers)" IsChecked="True" Margin="0,4"/>
+          <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus answer files, their images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
           <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (publish to a WDS server; content comes from the network share)" Margin="0,4"/>
 
@@ -188,9 +188,21 @@
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
             <Button x:Name="BtnUsbRefresh" Grid.Column="2" Content="Refresh" Margin="8,0,0,0"/>
 
-            <Label Grid.Row="2" Content="Copy content to USB"/>
-            <CheckBox x:Name="ChkCopyContent" Grid.Row="2" Grid.Column="1" IsChecked="True" VerticalAlignment="Center"
-                      Content="Images, Drivers and config from the content root (needed for offline use)"/>
+            <Label Grid.Row="2" Content="Copy content to USB" VerticalAlignment="Top"/>
+            <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+              <CheckBox x:Name="ChkCopyContent" DockPanel.Dock="Top" IsChecked="True"
+                        Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
+                         Text="An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
+              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
+                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
 
             <Label Grid.Row="4" Content="Output folder (ISO/PXE)"/>
             <TextBox x:Name="TxtOutput" Grid.Row="4" Grid.Column="1"/>
