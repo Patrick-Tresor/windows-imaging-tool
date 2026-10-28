@@ -361,6 +361,38 @@ function Save-SecretFile {
     Set-Content -Path $path -Value $Value -NoNewline -Encoding utf8
 }
 
+function Split-JoinAccount {
+    # "CORP\svc-join" typed as the join account -> user svc-join, domain CORP. Other forms are left as they are.
+    param([string]$User, [string]$Domain)
+    $User = "$User".Trim(); $Domain = "$Domain".Trim()
+    if ($User -match '^([^\\]+)\\([^\\]+)$' -and (-not $Domain -or $Domain -eq $Matches[1])) { $User = $Matches[2]; $Domain = $Matches[1] }
+    [pscustomobject]@{ User = $User; Domain = $Domain }
+}
+
+function Get-DomainJoinProblem {
+    <#
+    .SYNOPSIS
+        The first missing domain join field in the answer file editor, as the control to show and a plain message.
+        Nothing when the answer is a workgroup one or every field is filled in.
+    #>
+    param(
+        [Parameter(Mandatory)]$Answer,
+        [bool]$PasswordTyped,
+        [bool]$PasswordSaved
+    )
+    if ($Answer.Membership -ne 'Domain') { return }
+    $page = 'Domain or workgroup page'
+    if (-not $Answer.Domain) {
+        return [pscustomobject]@{ Control = 'TxtDomain'; Message = "Type the domain to join, such as corp.example.com, in Domain ($page)." }
+    }
+    if (-not $Answer.JoinUser) {
+        return [pscustomobject]@{ Control = 'TxtJoinUser'; Message = "Type the user name of the account that joins PCs to the domain, such as svc-join, in Join account user name ($page)." }
+    }
+    if (-not $PasswordTyped -and -not $PasswordSaved) {
+        return [pscustomobject]@{ Control = 'PwdJoin'; Message = "Type the join account's password in Password ($page). It is saved in its own file under config\secrets, not in the answer file." }
+    }
+}
+
 function Save-AnswerFromEditor {
     <#
     .SYNOPSIS

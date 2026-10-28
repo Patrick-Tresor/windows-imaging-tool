@@ -196,6 +196,28 @@ try {
     $ed.Name = 'Broken'; $ed.Domain = ''
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew | Out-Null; '' } catch { $_.Exception.Message }
     Assert-Equal ($msg -like '*needs network/domain*') $true 'editor save reports validation problems'
+    $ed.Name = 'NoUser'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = ''; $ed.JoinPasswordFile = $null
+    $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal ($msg -like '*join account user name*' -and $msg -notlike '*passwordFile*') $true 'a missing join user is reported on its own; the password file is named by the save'
+    $ed.JoinUser = 'svc-join'; $ed.JoinPasswordFile = 'config\secrets\Office-join.txt'
+
+    # Domain join fields the editor points at before saving.
+    $j = Get-NewAnswer -Name 'Join'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j) $null 'a workgroup answer needs no join account'
+    $j.Membership = 'Domain'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j).Control 'TxtDomain' 'missing domain points at the Domain box'
+    $j.Domain = 'corp.example.com'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordTyped $true).Control 'TxtJoinUser' 'missing join user points at the user name box'
+    $j.JoinUser = 'svc-join'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j).Control 'PwdJoin' 'no typed or saved password points at the password box'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true) $null 'a saved password is enough'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordTyped $true) $null 'a typed password is enough'
+    $s = Split-JoinAccount -User ' CORP\svc-join ' -Domain ''
+    Assert-Equal "$($s.User)|$($s.Domain)" 'svc-join|CORP' 'DOMAIN\user fills in the account domain'
+    $s = Split-JoinAccount -User 'svc-join@corp.example.com' -Domain ''
+    Assert-Equal "$($s.User)|$($s.Domain)" 'svc-join@corp.example.com|' 'a UPN is kept as typed'
+    $s = Split-JoinAccount -User 'CORP\svc' -Domain 'OTHER'
+    Assert-Equal "$($s.User)|$($s.Domain)" 'CORP\svc|OTHER' 'DOMAIN\user is not split over a different account domain'
     $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
     $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null; $ed.Bios.Enabled = $true
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }

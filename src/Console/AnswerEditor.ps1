@@ -133,7 +133,7 @@ function Show-AnswerEditor {
     $e.CmbUILanguage.Text = $a.UILanguage
     $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
-    $pwState = { param($file) if (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $file) { 'A password is saved. Leave empty to keep it.' } else { 'No password saved yet.' } }
+    $pwState = { param($file) if ((Test-SecretFile -ContentRoot $ContentRoot -RelativePath $file)) { 'A password is saved. Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile
 
     $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
@@ -319,8 +319,9 @@ function Show-AnswerEditor {
         $a.Membership    = if ($e.RbDomain.IsChecked) { 'Domain' } else { 'Workgroup' }
         $a.Domain        = $e.TxtDomain.Text.Trim()
         $a.OrganizationalUnit = $e.TxtOU.Text.Trim()
-        $a.JoinUser      = $e.TxtJoinUser.Text.Trim()
-        $a.JoinDomain    = $e.TxtJoinDomain.Text.Trim()
+        $join = Split-JoinAccount -User $e.TxtJoinUser.Text -Domain $e.TxtJoinDomain.Text
+        $a.JoinUser      = $join.User
+        $a.JoinDomain    = $join.Domain
         $a.Workgroup     = $e.TxtWorkgroup.Text.Trim()
         $a.Tasks         = @($tasks | Where-Object { $_.Command } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Command = $_.Command.Trim() } })
         $a.Shares        = @($shares | Where-Object { $_.RemoteName } | ForEach-Object {
@@ -364,8 +365,14 @@ function Show-AnswerEditor {
         try {
             & $collect
             # A domain join or Administrator password is required the first time; later it can stay as saved.
-            if ($a.Membership -eq 'Domain' -and -not $e.PwdJoin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile)) {
-                throw 'Enter the join account password (Domain or workgroup).'
+            $joinPwSaved = Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile
+            $joinProblem = Get-DomainJoinProblem -Answer $a -PasswordTyped ([bool]$e.PwdJoin.Password) -PasswordSaved $joinPwSaved
+            if ($joinProblem) {
+                # Show the page and put the cursor in the field that is missing.
+                $e.LstSections.SelectedIndex = 5
+                $win.UpdateLayout()
+                [void]$e[$joinProblem.Control].Focus()
+                throw $joinProblem.Message
             }
             if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile)) {
                 throw 'Enter the Administrator password (Windows settings).'
