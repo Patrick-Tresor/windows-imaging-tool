@@ -138,6 +138,37 @@ function Get-VmdkLeafPaths {
     @($descriptors | Where-Object { $parents -notcontains $_.Name } | Sort-Object LastWriteTimeUtc, Name -Descending | ForEach-Object { $_.FullName })
 }
 
+function Resolve-VmdkCurrentDisk {
+    # The disk to read for a .vmdk someone picked: the file itself, or, when snapshots were taken on top of it, the
+    # newest delta whose snapshot chain goes back to it (the base disk alone holds the VM as it was at the first
+    # snapshot). Other disk formats are returned unchanged.
+    param([Parameter(Mandatory)][string]$Path)
+    if ([IO.Path]::GetExtension($Path) -ine '.vmdk') { return $Path }
+    $folder = Split-Path -Parent ([IO.Path]::GetFullPath($Path))
+    $parentOf = @{}
+    foreach ($d in Get-VmdkDescriptorPaths -Folder $folder) {
+        $parentOf[(Split-Path -Leaf $d).ToLowerInvariant()] =
+            if ((Get-VmdkDescriptor -Path $d) -match '(?m)^parentFileNameHint\s*=\s*"([^"]+)"') { (Split-Path -Leaf $Matches[1]).ToLowerInvariant() }
+    }
+    $picked = (Split-Path -Leaf $Path).ToLowerInvariant()
+    foreach ($leaf in Get-VmdkLeafPaths -Folder $folder) {
+        # Newest first, so the first chain that reaches the picked disk wins.
+        $name = (Split-Path -Leaf $leaf).ToLowerInvariant()
+        for ($i = 0; $name -and $i -lt 64; $i++) {
+            if ($name -eq $picked) { return $leaf }
+            $name = $parentOf[$name]
+        }
+    }
+    $Path
+}
+
+function Test-VMwareFolderInUse {
+    # True when VMware has the VM in this folder open: it keeps <file>.lck folders next to the .vmx and disks while
+    # the VM runs. Reading a disk then would give a half-written copy.
+    param([Parameter(Mandatory)][string]$Folder)
+    [bool]@(Get-ChildItem -LiteralPath $Folder -Filter *.lck -Directory -ErrorAction SilentlyContinue).Count
+}
+
 function Get-VMwareInventory {
     # The .vmx files VMware Workstation lists in its library (inventory.vmls) and recent VMs (preferences.ini),
     # that still exist. $AppData is %APPDATA%\VMware.
@@ -158,4 +189,4 @@ function Get-VMwareInventory {
 }
 
 Export-ModuleMember -Function Get-VMwareCaptureVariables, Find-Vmrun, Find-QemuImg, New-VmrunArguments, ConvertFrom-VmrunList, Test-VmxInList,
-    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkDescriptorPaths, Get-VmdkLeafPaths, Get-VMwareInventory
+    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkDescriptorPaths, Get-VmdkLeafPaths, Resolve-VmdkCurrentDisk, Test-VMwareFolderInUse, Get-VMwareInventory

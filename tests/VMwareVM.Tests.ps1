@@ -89,6 +89,18 @@ try {
     Assert-Equal $leaves.Count 2 'a leftover delta is also a leaf'
     Assert-Equal (Split-Path -Leaf $leaves[0]) 'Staff-000002.vmdk' 'the disk written last comes first, not the first by name'
 
+    # Picking a disk file: a disk with snapshots on top is read through its newest snapshot.
+    $current = { param($n) Split-Path -Leaf (Resolve-VmdkCurrentDisk -Path (Join-Path $chain $n)) }
+    Assert-Equal (& $current 'Staff.vmdk') 'Staff-000002.vmdk' 'the base disk resolves to the newest delta on top of it'
+    Assert-Equal (& $current 'Staff-000001.vmdk') 'Staff-000002.vmdk' 'a middle delta resolves to the newest delta on top of it'
+    Assert-Equal (& $current 'Staff-000002.vmdk') 'Staff-000002.vmdk' 'the current disk stays itself'
+    Assert-Equal (& $current 'Staff-000003.vmdk') 'Staff-000003.vmdk' 'a leaf of another chain stays itself'
+    Assert-Equal (Resolve-VmdkCurrentDisk -Path 'D:\VMs\a.vhdx') 'D:\VMs\a.vhdx' 'other formats are not resolved'
+
+    Assert-Equal (Test-VMwareFolderInUse -Folder $chain) $false 'a folder without lock folders is not in use'
+    New-Item -ItemType Directory -Path (Join-Path $chain 'Staff.vmx.lck') | Out-Null
+    Assert-Equal (Test-VMwareFolderInUse -Folder $chain) $true 'a VMware lock folder means the VM is open'
+
     # Workstation's library and recent VMs.
     $appData = Join-Path $root 'AppData'
     New-Item -ItemType Directory -Path $appData | Out-Null
@@ -117,6 +129,9 @@ try {
     $vc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy' -VmxPath "D:\VMs\O'Brien\Staff.vmx" -Name 'Win11-Staff'
     $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vc[-1]))
     Assert-Equal $decoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -VmxPath 'D:\VMs\O''Brien\Staff.vmx' -Name 'Win11-Staff' -ContentRoot 'D:\Deploy' -Compression max -NoPrompt" 'VMware capture command passes the .vmx path'
+    $dc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff' -Split
+    $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($dc[-1]))
+    Assert-Equal $decoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff' -ContentRoot 'D:\Deploy' -Compression max -SplitSizeMB 3800 -NoPrompt" 'disk file capture command passes the disk path'
 
     # The agent goes to the content root's Tools folder with Prepare-Reference.ps1, which it needs next to it.
     $content = Join-Path $root 'content'

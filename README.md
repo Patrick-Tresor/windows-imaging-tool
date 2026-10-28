@@ -537,7 +537,7 @@ What the PCs need:
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 
-   **VMware Workstation, hands-free.** No sysprep by hand and no capture ISO. On the
+   **VMware Workstation, hands-free (experimental).** No sysprep by hand and no capture ISO. On the
    admin PC you need VMware Workstation Pro 17 or later (for `vmrun.exe`) and
    `qemu-img.exe` from QEMU for Windows, on the PATH or in `C:\Program Files\qemu`
    (it reads the VMware disk, snapshots included). In the VM you need VMware Tools and,
@@ -561,14 +561,19 @@ What the PCs need:
    Change Password under VM > Settings > Options > Access Control (untested).
    Untested on Windows and VMware so far.
 
-   **Other VM software (VirtualBox, Proxmox, ESXi).** The wizard lists
-   Hyper-V and VMware Workstation VMs only. Boot the VM once to run `Prepare-Reference.ps1`, shut it down,
-   then run `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot
-   <content root>` on the admin PC. VHD and VHDX files are mounted directly. VMDK,
-   VDI, qcow2 and raw files are first converted to a temporary VHD of the whole disk,
-   using qemu-img or VirtualBox, whichever is installed. The VM, its disk and its
-   snapshots are left alone. There is no hands-free boot or rollback here; that is
-   Hyper-V and VMware Workstation only. Untested on Windows, including every conversion.
+   **A VM's disk file (VMware, VirtualBox, Proxmox, ESXi and others).** The simplest way
+   for VMs that are not in Hyper-V, and the recommended one for VMware. In the wizard pick
+   **A VM's disk file on this PC** and the VM's disk. On the next page the wizard shows the
+   prepare command: run it in the VM as administrator (turn BitLocker off first, and don't
+   capture while updates are installing), and sysprep shuts the VM down. Then the tool runs
+   `src\Capture-VMImage.ps1 -DiskPath <disk file>` on the admin PC. VHD and VHDX files are
+   mounted directly. VMDK, VDI, qcow2 and raw files are first converted to a temporary VHD
+   of the whole disk with qemu-img (or VirtualBox), so the admin PC needs free space for it.
+   For a VMware disk with snapshots, the newest snapshot of the chain is read, whichever
+   .vmdk you pick, and the capture refuses to start while VMware still has the VM open. No
+   password, ISO or agent is needed, and the VM, its disk and its snapshots are left alone.
+   Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
+   on it. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
    or from the command line:
    `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`

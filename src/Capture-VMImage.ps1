@@ -365,6 +365,17 @@ try {
     }
 
     if ($PSCmdlet.ParameterSetName -eq 'Disk') {
+        if (-not (Test-Path -LiteralPath $DiskPath -PathType Leaf)) { throw "Disk file not found: $DiskPath" }
+        $DiskPath = (Resolve-Path -LiteralPath $DiskPath).ProviderPath
+        if (Test-VMwareFolderInUse -Folder (Split-Path -Parent $DiskPath)) {
+            throw "VMware has the VM in $(Split-Path -Parent $DiskPath) open (there are .lck folders next to it). Shut the VM down, or close it in VMware Workstation, and run this again."
+        }
+        # A VMware disk with snapshots on top holds the VM as it was at the first snapshot; the newest delta is now.
+        $current = Resolve-VmdkCurrentDisk -Path $DiskPath
+        if ($current -ne $DiskPath) {
+            Write-DeployLog "$(Split-Path -Leaf $DiskPath) has snapshots on top of it, so reading $(Split-Path -Leaf $current), the VM's current disk." -Level WARN
+            $DiskPath = $current
+        }
         if (-not $NoPrompt -and (Read-Host "Type YES to capture $(Split-Path $DiskPath -Leaf) (its VM must be shut down)") -ne 'YES') {
             Write-DeployLog 'Cancelled by operator' -Level WARN
             $status = 'CANCELLED'
@@ -484,11 +495,13 @@ try {
 
     # The capture reads the disk with the VM off.
     $mount = Mount-VMDisks -Paths $paths
-    if (-not $mount.Root) { throw 'No Windows install found on the disk.' }
+    if (-not $mount.Root) { throw 'No Windows install found on the disk. If BitLocker is on in the VM, turn it off there (manage-bde -off C:), wait until it is decrypted, and capture again.' }
     $windowsRoot = $mount.Root
     if (-not (Test-Generalized -Root $windowsRoot)) {
         if ($PSCmdlet.ParameterSetName -eq 'Disk') {
-            throw 'Windows on this disk was not generalized. Boot the VM once, run Prepare-Reference.ps1 in it, shut the VM down, and run this again.'
+            $state = Get-OfflineImageState -Root $windowsRoot
+            $why = if ($state.LastError) { " Last sysprep error on this disk: $($state.LastError)" } else { '' }
+            throw "Windows on this disk was not generalized (ImageState $($state.ImageState)). Boot the VM, run Prepare-Reference.ps1 in it as administrator, let sysprep shut the VM down, and run this again.$why"
         }
         throw "Windows on $(if ($VmxPath) { $vmLabel } else { $VMName }) was not generalized. Prepare-Reference.ps1 did not run or did not finish; check the VM and run this again."
     }
