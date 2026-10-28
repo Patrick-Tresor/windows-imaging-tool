@@ -160,16 +160,37 @@ function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Ov
 }
 
 function Wait-Countdown([int]$Seconds) {
-    # Unattended mode: start after a short countdown that any key cancels, like SmartDeploy's unattend delay.
-    for ($s = $Seconds; $s -gt 0; $s--) {
-        Write-Host -NoNewline "`rStarting in $s s. Press any key to cancel. "
-        for ($t = 0; $t -lt 10; $t++) {
-            if ([Console]::KeyAvailable) { [void][Console]::ReadKey($true); Write-Host ''; return $false }
-            Start-Sleep -Milliseconds 100
+    # Unattended mode: start after a short countdown that any key, or Change settings in the progress window, cancels.
+    try {
+        for ($s = $Seconds; $s -gt 0; $s--) {
+            Write-Host -NoNewline "`rStarting in $s s. Press any key to cancel. "
+            Set-DeployStatus -LocalOnly -Fields @{ countdown = $s }
+            for ($t = 0; $t -lt 10; $t++) {
+                if ([Console]::KeyAvailable) { [void][Console]::ReadKey($true); Write-Host ''; return $false }
+                if (Receive-ProgressCancel) { Write-Host ''; return $false }
+                Start-Sleep -Milliseconds 100
+            }
         }
+        Write-Host ''
+        $true
     }
-    Write-Host ''
-    $true
+    finally { Set-DeployStatus -LocalOnly -Fields @{ countdown = 0 } }
+}
+
+function Start-ProgressWindow([string]$ProgressPath) {
+    # The window on this PC's screen (DeployProgressWindow.ps1), in its own process so it keeps redrawing while DISM runs.
+    # Without WinForms (media built without WinPE-NetFX) the console shows the log as before.
+    if (-not (Test-DeployWizardAvailable)) { return $false }
+    try {
+        $script = Join-Path $PSScriptRoot 'DeployProgressWindow.ps1'
+        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', "`"$script`"",
+            '-ProgressPath', "`"$ProgressPath`"", '-DeployProcessId', $PID) | Out-Null
+        $true
+    } catch {
+        Write-DeployLog "Progress window not started: $($_.Exception.Message)" -Level WARN
+        $false
+    }
 }
 
 function Connect-StatusFolder([string]$Root, $Settings) {
@@ -206,7 +227,7 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
 }
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
-$job = $null; $adapters = @()
+$job = $null; $adapters = @(); $progressWindow = $false
 $status = 'FAILED'; $failure = $null
 try {
     $hw = Get-HardwareIdentity
@@ -215,7 +236,14 @@ try {
     # The disk layout and boot files follow how WinPE booted. A UEFI PC booted through CSM deploys as BIOS.
     $firmware = if ($hw.IsUefi) { 'UEFI' } else { 'BIOS' }
 
+    # Every Set-DeployStatus from here on also updates the progress window on this PC's screen.
+    $progressPath = 'X:\Windows\Temp\DeployProgress.json'
+    Start-LocalProgress -Path $progressPath -Identity $hw
+    $progressWindow = Start-ProgressWindow -ProgressPath $progressPath
+
+    Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
     $root = Find-ContentRoot -SettingsPath $SettingsPath
+    Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
 
     # Settings on the content root (edited in the console) win over the copy baked into the media.
     $rootSettings = Join-Path $root 'config\deploy-settings.json'
@@ -494,6 +522,11 @@ finally {
         'CANCELLED' { Set-DeployStatus -Step 'Cancelled by operator' -State Cancelled -Fields $final }
         default     { Set-DeployStatus -Message $failure -State Failed -Fields $final }
     }
+    if ($status -eq 'OK') {
+        # The dashboard waits for first boot; the window on this PC is done with its part.
+        $whenDone = if ($answer.Shutdown) { 'shutdown' } elseif ($answer.Reboot) { 'restart' } else { 'stay' }
+        Set-DeployStatus -LocalOnly -Step 'Image applied' -Percent 100 -State Succeeded -Fields @{ whenDone = $whenDone }
+    }
     # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
     if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {
         try {
@@ -503,6 +536,8 @@ finally {
     }
 }
 
+# Let the window show the result before the screen goes dark.
+if ($status -eq 'OK' -and $progressWindow -and ($answer.Shutdown -or $answer.Reboot)) { Start-Sleep -Seconds 5 }
 if ($status -eq 'OK' -and $answer.Shutdown) { & wpeutil.exe shutdown }
 elseif ($status -eq 'OK' -and $answer.Reboot) { & wpeutil.exe reboot }
 if ($status -ne 'OK') { exit 1 }
