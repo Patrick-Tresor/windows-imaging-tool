@@ -91,7 +91,23 @@ function Show-CaptureWizard {
         $w.CmbVmx.ItemsSource = $vmx
         if ($vmx -and -not $w.CmbVmx.Text) { $w.CmbVmx.Text = $vmx[0] }
         if ($missing -and $w.RbVmware.IsChecked) { $w.RbIso.IsChecked = $true }
+        # The disk file choice starts at the current disk of the first VMware VM, when there is one.
+        if ($vmx -and -not $w.TxtDiskFile.Text) {
+            try {
+                $disk = @(Get-VmxDiskPaths -VmxPath $vmx[0])[0]
+                if (-not $disk) { $disk = @(Get-VmdkLeafPaths -Folder (Split-Path -Parent $vmx[0]))[0] }
+                if ($disk) { $w.TxtDiskFile.Text = $disk }
+            } catch { }
+        }
     }
+    $w.TxtDiskFileStatus.Text = 'qemu-img.exe is missing, so only VHD and VHDX files can be read: install QEMU for Windows and add its folder to PATH.'
+    $w.TxtDiskFileStatus.Visibility = if (Find-QemuImg) { 'Collapsed' } else { 'Visible' }
+    $w.BtnDiskFileBrowse.Add_Click({
+        $dlg = [Windows.Forms.OpenFileDialog]::new()
+        $dlg.Filter = 'VM disk files (*.vmdk;*.vhdx;*.vhd;*.vdi;*.qcow2)|*.vmdk;*.vhdx;*.vhd;*.vdi;*.qcow2|All files (*.*)|*.*'
+        if ($w.TxtDiskFile.Text -and (Test-Path -LiteralPath (Split-Path -Parent $w.TxtDiskFile.Text))) { $dlg.InitialDirectory = Split-Path -Parent $w.TxtDiskFile.Text }
+        if ($dlg.ShowDialog() -eq 'OK') { $w.TxtDiskFile.Text = $dlg.FileName }
+    })
     $w.BtnVmxBrowse.Add_Click({
         $dlg = [Windows.Forms.OpenFileDialog]::new()
         $dlg.Filter = 'VMware VM (*.vmx)|*.vmx'
@@ -100,8 +116,7 @@ function Show-CaptureWizard {
 
     & $loadVMs; & $loadUsb; & $loadVmware
     if ($w.RbVmDisk.IsEnabled) { $w.RbVmDisk.IsChecked = $true }
-    elseif ($w.RbVmware.IsEnabled) { $w.RbVmware.IsChecked = $true }
-    else { $w.RbIso.IsChecked = $true }
+    else { $w.RbDiskFile.IsChecked = $true }
     $w.BtnVMRefresh.Add_Click($loadVMs)
     $w.BtnUsbRefresh.Add_Click($loadUsb)
     $w.TxtIsoFolder.Text = [Environment]::GetFolderPath('Desktop')
@@ -118,9 +133,10 @@ function Show-CaptureWizard {
             Split       = [bool]$w.ChkSplit.IsChecked
             Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
-            Mode        = if ($w.RbVmDisk.IsChecked) { 'VmDisk' } elseif ($w.RbVmware.IsChecked) { 'Vmware' } elseif ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
+            Mode        = if ($w.RbVmDisk.IsChecked) { 'VmDisk' } elseif ($w.RbDiskFile.IsChecked) { 'DiskFile' } elseif ($w.RbVmware.IsChecked) { 'Vmware' } elseif ($w.RbVM.IsChecked) { 'VM' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
             VM          = $w.CmbVM.SelectedItem
             Vmx         = $w.CmbVmx.Text.Trim().Trim('"')
+            DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
             Usb         = $w.CmbUsb.SelectedItem
         }
@@ -128,7 +144,8 @@ function Show-CaptureWizard {
 
     # The hands-free Hyper-V and VMware captures run sysprep themselves, so they skip the manual sysprep page.
     $skipsPrep = { $w.RbVmDisk.IsChecked -eq $true -or $w.RbVmware.IsChecked -eq $true }
-    $handsFree = @('VmDisk', 'Vmware')
+    # These read the VM's disk with DISM on this PC and save to the content root: no share, no ADK, no media.
+    $onThisPC = @('VmDisk', 'Vmware', 'DiskFile')
 
     # Offers to shut down a running VMware VM; vmrun asks Windows in it to shut down (needs VMware Tools).
     $offerVmwareShutdown = {
@@ -174,11 +191,14 @@ function Show-CaptureWizard {
                 elseif ($c.Mode -eq 'VmDisk' -and $c.VM.State -ne 'Off' -and -not (& $offerShutdown $c.VM)) { "$($c.VM.Name) is $($c.VM.State). Shut it down, then click Refresh." }
                 elseif ($c.Mode -eq 'Vmware' -and ($c.Vmx -notmatch '\.vmx$' -or -not (Test-Path -LiteralPath $c.Vmx -PathType Leaf))) { 'Choose the VM''s .vmx file.' }
                 elseif ($c.Mode -eq 'Vmware' -and -not (& $offerVmwareShutdown $c.Vmx)) { "$([IO.Path]::GetFileNameWithoutExtension($c.Vmx)) is still running. Shut it down first." }
+                elseif ($c.Mode -eq 'DiskFile' -and -not ($c.DiskFile -and (Test-Path -LiteralPath $c.DiskFile -PathType Leaf))) { 'Choose the VM''s disk file.' }
+                elseif ($c.Mode -eq 'DiskFile' -and [IO.Path]::GetExtension($c.DiskFile) -notin '.vhd', '.vhdx' -and -not (Find-QemuImg)) { 'Reading this disk file needs qemu-img.exe: install QEMU for Windows and add its folder to PATH.' }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
                 elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
             }
             1 {
                 if (-not $w.ChkPrepared.IsChecked) { 'Run the prepare command on the reference machine first, then tick the box.' }
+                elseif ($c.Mode -eq 'DiskFile' -and (Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }
                 elseif ($c.Mode -eq 'VM' -and @(Get-ReferenceVMs | Where-Object { $_.Name -eq $c.VM.Name -and $_.State -ne 'Off' }).Count) { "$($c.VM.Name) is still running. Let sysprep shut it down first." }
             }
             2 {
@@ -199,35 +219,41 @@ function Show-CaptureWizard {
                 "VMware VM $($c.Vmx), hands-free: snapshot, the capture agent runs sysprep, capture its disk with the VM off, then revert to the snapshot" +
                 $(if (Test-VmxEncrypted -VmxPath $c.Vmx) { "`r`n               The VM is encrypted (virtual TPM): the capture window asks for its encryption password first." })
             }
+            'DiskFile' {
+                $current = try { Resolve-VmdkCurrentDisk -Path $c.DiskFile } catch { $c.DiskFile }
+                "Disk file $current, copied and captured on this PC" +
+                $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" })
+            }
             'VM'  { "Hyper-V VM $($c.VM.Name): build capture ISO, boot the VM from it, eject when done" }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
         }
         $saveTo = switch ($c.Mode) {
             'Usb'    { 'The USB stick''s DEPLOY partition' }
-            { $_ -in $handsFree } { "$ContentRoot\Images" }
+            { $_ -in $onThisPC } { "$ContentRoot\Images" }
             default  { "$($settings.share.path)\Images" }
         }
         $w.TxtSummary.Text = @(
             "Image name:    $($c.Name).$(if ($c.Split) { 'swm (split)' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
-            $(if ($c.Mode -notin $handsFree) { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
+            $(if ($c.Mode -notin $onThisPC) { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
             $(if ($c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
                 "Existing image: replaced after the capture succeeds; the old one is kept in Images\Previous" })
             ''
             "Media:         $target"
             "Saved to:      $saveTo"
         ) -join "`r`n"
-        # The hands-free capture runs DISM on this PC and saves to the content root: no share, no ADK, no media.
         $issues = @()
-        if ($c.Mode -notin $handsFree) {
+        if ($c.Mode -notin $onThisPC) {
             $issues += @(Get-CaptureReadiness -ContentRoot $ContentRoot -Destination $(if ($c.Mode -eq 'Usb') { 'Usb' } else { 'Network' }))
             # Capture media is built with the ADK on this PC, so check it before Build and start.
             $issues += @((Get-AdkStatus).Problems)
         }
         $w.TxtSummaryIntro.Text = if ($c.Mode -eq 'VmDisk') {
             'Clicking Start opens a window that runs the capture on this PC. It starts the VM only if sysprep has not run yet, and takes a while. The new image appears on the Images tab when it finishes.'
+        } elseif ($c.Mode -eq 'DiskFile') {
+            'Clicking Start opens a window that copies the VM''s disk on this PC and captures it. This takes a while and needs free space on this PC for a copy of the whole disk (VHD and VHDX files are read in place). The new image appears on the Images tab when it finishes.'
         } elseif ($c.Mode -eq 'Vmware') {
             'Clicking Start opens a window that runs the capture on this PC: it starts the VM, waits for sysprep to shut it down, copies the disk and captures it. This takes a while and needs free space on this PC for a copy of the whole VM disk. The new image appears on the Images tab when it finishes.'
         } else {
@@ -249,7 +275,7 @@ function Show-CaptureWizard {
         }
         $w.BtnBack.IsEnabled = $state.Page -gt 0
         $w.BtnNext.IsEnabled = $true
-        $w.BtnNext.Content = if ($state.Page -ne $state.Last) { 'Next' } elseif ($skip) { 'Start' } else { 'Build and start' }
+        $w.BtnNext.Content = if ($state.Page -ne $state.Last) { 'Next' } elseif ((& $getChoice).Mode -in $onThisPC) { 'Start' } else { 'Build and start' }
         if ($state.Page -eq $state.Last) { & $showSummary }
     }
 
@@ -262,6 +288,12 @@ function Show-CaptureWizard {
             # Reads the VM's disk on this PC; no capture media is built and the VM is not started.
             Start-Process powershell.exe -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -VMName $c.VM.Name -Name $c.Name -Description $c.Description -Compression $c.Compression `
+                -Split:$c.Split -NewVersion:$c.NewVersion)
+            return $true
+        }
+        if ($c.Mode -eq 'DiskFile') {
+            Start-Process powershell.exe -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+                -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
                 -Split:$c.Split -NewVersion:$c.NewVersion)
             return $true
         }
@@ -297,6 +329,7 @@ function Show-CaptureWizard {
     $w.RbVmDisk.Add_Unchecked({ & $showPage })
     $w.RbVmware.Add_Checked({ & $showPage })
     $w.RbVmware.Add_Unchecked({ & $showPage })
+    $w.RbDiskFile.Add_Checked({ & $showPage })
     $w.BtnBack.Add_Click({
         if ($state.Page -gt 0) { $state.Page-- }
         if ($state.Page -eq 1 -and (& $skipsPrep)) { $state.Page = 0 }
