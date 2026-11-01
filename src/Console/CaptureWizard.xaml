@@ -83,7 +83,16 @@
             <ComboBox x:Name="CmbVM" DisplayMemberPath="Label"/>
           </DockPanel>
 
-          <RadioButton x:Name="RbVmware" GroupName="Ref" Content="A VMware Workstation VM on this PC (hands-free)" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <RadioButton x:Name="RbDiskFile" GroupName="Ref" Content="A VM's disk file on this PC (VMware, VirtualBox and others)" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
+                     Text="You run the prepare command in the VM once (next page); sysprep shuts the VM down. Then the tool copies the VM's disk on this PC and captures it. No ISO, no password, nothing installed in the VM. VMDK, VDI and qcow2 disks need QEMU's qemu-img on this PC; VHD and VHDX need nothing. For VMware, pick the VM's .vmdk: when it has snapshots, the newest one is read."/>
+          <TextBlock x:Name="TxtDiskFileStatus" Style="{StaticResource Body}" Margin="22,0,0,6" Foreground="#B91C1C" Visibility="Collapsed"/>
+          <DockPanel Margin="22,0,0,12">
+            <Button x:Name="BtnDiskFileBrowse" DockPanel.Dock="Right" Content="Browse..."/>
+            <TextBox x:Name="TxtDiskFile" ToolTip="The VM's disk file: .vmdk, .vhdx, .vhd, .vdi or .qcow2"/>
+          </DockPanel>
+
+          <RadioButton x:Name="RbVmware" GroupName="Ref" Content="A VMware Workstation VM on this PC (hands-free, experimental)" FontWeight="SemiBold" Margin="0,6,0,4"/>
           <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
                      Text="You do not run sysprep or build an ISO. The tool takes a snapshot, starts the VM, has the capture agent in the VM run the sysprep checks and sysprep (which shuts the VM down), copies the VM's disk on this PC and captures it, then reverts the VM to the snapshot. Needs VMware Workstation Pro and QEMU's qemu-img on this PC, and VMware Tools in the VM. The VM must not be sysprepped already."/>
           <TextBlock x:Name="TxtVmwareStatus" Style="{StaticResource Body}" Margin="22,0,0,6" Foreground="#B91C1C" Visibility="Collapsed"/>

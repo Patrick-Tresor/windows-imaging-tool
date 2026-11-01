@@ -709,14 +709,15 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window: a Hyper-V VM by name, or a
-    # VMware Workstation VM by its .vmx file.
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a Hyper-V VM by name, a VMware
+    # Workstation VM by its .vmx file, or a shut-down, sysprepped VM's disk file.
     [CmdletBinding(DefaultParameterSetName = 'HyperV')]
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
         [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
+        [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
@@ -725,7 +726,7 @@ function Get-VMCaptureArguments {
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $vm = if ($VmxPath) { "-VmxPath $(& $quote $VmxPath)" } else { "-VMName $(& $quote $VMName)" }
+    $vm = if ($DiskPath) { "-DiskPath $(& $quote $DiskPath)" } elseif ($VmxPath) { "-VmxPath $(& $quote $VmxPath)" } else { "-VMName $(& $quote $VMName)" }
     $cmd = "& $(& $quote $ScriptPath) $vm -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
