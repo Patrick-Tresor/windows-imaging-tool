@@ -134,6 +134,26 @@ function Update-Answers {
     Update-MediaAnswers
 }
 
+function Update-MediaPacks {
+    # The Media tab's driver pack list: keeps what was unchecked, checks packs that are new since last time.
+    $old = @{}
+    foreach ($i in @($ui.LstMediaPacks.Items)) { $old[$i.Path] = $ui.LstMediaPacks.SelectedItems.Contains($i) }
+    $packs = @(if (Test-ContentRoot $script:root) { Get-MediaDriverPacks -ContentRoot $script:root })
+    $ui.LstMediaPacks.ItemsSource = $packs
+    foreach ($p in $packs) {
+        if (-not $old.ContainsKey($p.Path) -or $old[$p.Path]) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
+    }
+    Update-MediaPackTotal
+}
+
+function Update-MediaPackTotal {
+    $all = @($ui.LstMediaPacks.Items)
+    $picked = @($ui.LstMediaPacks.SelectedItems)
+    $size = [int64](($picked | Measure-Object Size -Sum).Sum)
+    $ui.TxtMediaPacks.Text = if (-not $all) { 'No driver packs in the catalog yet.' }
+                             else { '{0} of {1} packs, {2:N1} GB' -f $picked.Count, $all.Count, ($size / 1GB) }
+}
+
 function Update-MediaAnswers {
     # The Media tab's answer file list: keeps what was unchecked, checks answer files that are new since last time.
     $old = @{}
@@ -155,6 +175,7 @@ function Update-Drivers {
         }
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
+    Update-MediaPacks
     # The count on the button is the nudge to open the report.
     $unknown = 0
     if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root).Count } catch { } }
@@ -674,6 +695,9 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
 
 #region Media
 
+$ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
+$ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() } })
+$ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
@@ -695,11 +719,23 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
             $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
             if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
             $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names -DefaultAnswerFile (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile
+            # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+            $packArgs = @{}
+            $allPacks = @($ui.LstMediaPacks.Items)
+            $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+            if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names -DefaultAnswerFile (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile @packArgs
             if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+            if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
         } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
         if (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
         $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-        if ($ui.ChkCopyContent.IsChecked) { $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ',')) }
+        if ($ui.ChkCopyContent.IsChecked) {
+            $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
+            if ($packArgs.ContainsKey('DriverPacks')) {
+                if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
+            }
+        }
     } else {
         if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
         $buildArgs += @('-Target', $(if ($ui.RbIso.IsChecked) { 'Iso' } else { 'Pxe' }), '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))

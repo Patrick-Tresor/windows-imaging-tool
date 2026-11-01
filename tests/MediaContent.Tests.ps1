@@ -72,6 +72,42 @@ try {
     Assert-Equal $c.Problems.Count 0 'network image: not a problem'
     Assert-Equal ($c.Files -join ';') 'AnswerFiles\Default.xml' 'network image: not copied'
 
+    # Driver packs: the Media tab lists the folders the catalog names, and only the checked ones are copied.
+    Set-Content (Join-Path $root 'config/driver-catalog.json') @'
+{
+  "entries": [
+    { "maker": "Dell", "sku": "0B0B", "path": "Dell\\Latitude 5440" },
+    { "maker": "Dell", "model": "Latitude 5440", "path": "Dell\\Latitude 5440" },
+    { "maker": "HP", "model": "EliteBook 840 G9", "path": "HP\\EliteBook 840 G9" },
+    { "maker": "Lenovo", "machineType": "21HD", "path": "Lenovo\\T14, Gen 4" },
+    { "maker": "Microsoft Corporation", "model": "Virtual Machine", "path": null }
+  ],
+  "fallbacks": { "Dell": "Dell\\_Generic" }
+}
+'@
+    foreach ($d in 'Dell/Latitude 5440', 'HP/EliteBook 840 G9', 'Dell/_Generic', 'Unlisted/Model') {
+        New-Item -ItemType Directory -Path (Join-Path $root "Drivers/$d") -Force | Out-Null
+        Set-Content (Join-Path $root "Drivers/$d/net.inf") 'inf'
+    }
+    $packs = @(Get-MediaDriverPacks -ContentRoot $root)
+    Assert-Equal ($packs.Path -join ';') 'Dell\Latitude 5440;HP\EliteBook 840 G9;Lenovo\T14, Gen 4;Dell\_Generic' 'driver packs: one row per catalog folder, not unlisted folders'
+    Assert-Equal ($packs[0].Models -join ',') 'SKU 0B0B,Latitude 5440' 'driver packs: models that use the pack'
+    Assert-Equal ($packs[0].Size -gt 0) $true 'driver packs: size measured'
+    Assert-Equal $packs[2].Exists $false 'driver packs: missing folder flagged'
+    Assert-Equal ($packs[2].Label -like '*folder missing*') $true 'driver packs: missing folder in label'
+    Assert-Equal $packs[3].Fallback $true 'driver packs: maker fallback flagged'
+    Assert-Equal ($packs[3].Label -like '*Dell fallback for unlisted models*') $true 'driver packs: fallback in label'
+
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default'
+    Assert-Equal ($c.Folders -contains 'Drivers') $true 'no pack choice: whole driver folder'
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default' -DriverPacks 'Dell\Latitude 5440', 'Dell/_Generic', 'Lenovo\T14, Gen 4'
+    Assert-Equal (@($c.Folders | Where-Object { $_ -like 'Drivers*' }) -join ';') 'Drivers\Dell\Latitude 5440;Drivers\Dell\_Generic' 'pack choice: only checked packs that exist'
+    Assert-Equal ($c.Notes -join '' -like '*Driver packs on this stick: 2*') $true 'pack choice: note'
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default' -DriverPacks @()
+    Assert-Equal @($c.Folders | Where-Object { $_ -like 'Drivers*' }).Count 0 'no packs checked: no drivers copied'
+    Assert-Equal ($c.Notes -join '' -like '*inbox drivers only*') $true 'no packs checked: note'
+    Assert-Equal ($c.Folders -contains 'config') $true 'no packs checked: config still copied'
+
     # Unknown answer file, none checked, none at all.
     Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Nope').Problems[0]) "Answer file Nope is not in $root\AnswerFiles." 'unknown answer file'
     $choices = @(Get-MediaAnswerChoices -ContentRoot $root)

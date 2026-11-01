@@ -517,6 +517,9 @@ What the PCs need:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
    (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
    Add `-AnswerFiles Staff-W11,Lab` to put only those answer files and their images on the stick.
+   On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
+   (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
+   pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
 2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
    from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):

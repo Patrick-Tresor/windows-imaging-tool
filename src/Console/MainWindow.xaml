@@ -182,7 +182,7 @@
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -204,13 +204,32 @@
               </ListBox>
             </DockPanel>
 
-            <Label Grid.Row="4" Content="Output folder (ISO/PXE)"/>
-            <TextBox x:Name="TxtOutput" Grid.Row="4" Grid.Column="1"/>
-            <Button x:Name="BtnOutput" Grid.Row="4" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+            <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
+            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
+                         Text="Check the packs for the models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
+              <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
+                <Button x:Name="BtnMediaPacksAll" DockPanel.Dock="Left" Content="Check all"/>
+                <Button x:Name="BtnMediaPacksNone" DockPanel.Dock="Left" Content="Uncheck all" Margin="8,0,0,0"/>
+                <TextBlock x:Name="TxtMediaPacks" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              </DockPanel>
+              <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
+                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
 
-            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
-            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+            <Label Grid.Row="6" Content="Output folder (ISO/PXE)"/>
+            <TextBox x:Name="TxtOutput" Grid.Row="6" Grid.Column="1"/>
+            <Button x:Name="BtnOutput" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+
+            <Label Grid.Row="8" Content="Extra WinPE drivers"/>
+            <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
+            <Button x:Name="BtnPeDrivers" Grid.Row="8" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
           </Grid>
 
           <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">
