@@ -11,6 +11,9 @@
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -AnswerFiles Staff-W11
     Copies only the Staff-W11 answer file and the image it names (not every image in the content root).
 .EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'
+    Puts only those two driver packs on the stick instead of the whole Drivers folder.
+.EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
@@ -26,6 +29,8 @@ param(
     [int]$UsbDiskNumber = -1,
     [string]$ContentSource,          # content root to copy to the USB's DEPLOY partition (answer files, their images, drivers, apps, config)
     [string[]]$AnswerFiles,          # with -ContentSource: only these answer files and the images they name; default all
+    [string[]]$DriverPacks,          # with -ContentSource: only these driver packs (catalog paths, e.g. 'Dell\Latitude 5440'); default all
+    [switch]$NoDriverPacks,          # with -ContentSource: no driver packs at all (PCs get Windows inbox drivers)
     [string]$OutputPath = (Get-Location).Path,
     [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
@@ -55,12 +60,18 @@ if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target P
 if ($AnswerFiles -and -not $ContentSource) { throw '-AnswerFiles needs -ContentSource.' }
 # The console passes the names as one comma-separated argument (powershell.exe -File doesn't take arrays).
 $AnswerFiles = @($AnswerFiles | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if (($DriverPacks -or $NoDriverPacks) -and -not $ContentSource) { throw '-DriverPacks and -NoDriverPacks need -ContentSource.' }
+if ($DriverPacks -and $NoDriverPacks) { throw 'Pass -DriverPacks or -NoDriverPacks, not both.' }
+# Pack folders can contain commas, so the console joins them with | (not allowed in Windows file names).
+$DriverPacks = @($DriverPacks | ForEach-Object { $_ -split '\|' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$packArgs = @{}
+if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
 if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
     $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
-    $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default
+    $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default @packArgs
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
     foreach ($n in $content.Notes) { Write-Warning $n }

@@ -57,8 +57,13 @@ function Get-MediaContent {
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [string[]]$AnswerFiles,
-        [string]$DefaultAnswerFile
+        [string]$DefaultAnswerFile,
+        # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
+        [AllowEmptyCollection()][string[]]$DriverPacks
     )
+    $pickPacks = $PSBoundParameters.ContainsKey('DriverPacks')
+    $packsCopied = @()
+    $packs = @($DriverPacks | ForEach-Object { ConvertTo-MediaRelative $_ } | Where-Object { $_ } | Select-Object -Unique)
     $all = Get-MediaAnswerFileNames -ContentRoot $ContentRoot
     $names = @(if ($AnswerFiles) { $AnswerFiles } else { $all })
     # Plain arrays: everything is added with +=, and paths are deduplicated at the end.
@@ -111,6 +116,14 @@ function Get-MediaContent {
         foreach ($dir in @($a.DriverRoot, $a.AppLocation, $a.Bios.ToolsRoot)) {
             if (-not $dir) { continue }
             if (Test-MediaRooted $dir) { $notes += "Answer file $name reads $dir at deploy time; it is not copied."; continue }
+            if ($pickPacks -and $dir -eq $a.DriverRoot) {
+                # Only the chosen packs; PCs whose pack is left off get the maker fallback if it is on, else inbox drivers.
+                foreach ($p in $packs) {
+                    $packDir = Join-MediaRelative $dir, $p
+                    if (Test-Path (Join-MediaPath $ContentRoot $packDir)) { $folders += $packDir; $packsCopied += $p }
+                }
+                continue
+            }
             if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir }
         }
     }
@@ -122,6 +135,11 @@ function Get-MediaContent {
     $folders = @($folders | Where-Object { -not (Test-MediaWithin $_ $outer) })
     $files = @($files | Where-Object { -not (Test-MediaWithin $_ $outer) })
 
+    if ($pickPacks -and $names) {
+        $copied = @($packsCopied | Select-Object -Unique).Count
+        $notes += $(if ($copied) { "Driver packs on this stick: $copied. Other models get their maker's fallback pack if it is on the stick, otherwise Windows inbox drivers." }
+                    else { 'No driver packs on this stick: PCs get Windows inbox drivers only.' })
+    }
     if ($DefaultAnswerFile -and $names -and $DefaultAnswerFile -notin $names) {
         $notes += "The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use."
     }
@@ -147,4 +165,64 @@ function Get-MediaAnswerChoices {
     }
 }
 
-Export-ModuleMember -Function Get-MediaAnswerFileNames, Get-MediaContent, Get-MediaAnswerChoices
+function Get-MediaDriverPacks {
+    <#
+    .SYNOPSIS
+        One row per driver pack folder the catalog (config\driver-catalog.json) points to, for the Media tab's
+        driver pack list: the catalog path, the models that use it, whether it is a maker fallback, and its size.
+        Folders the catalog doesn't name are left out, since no PC would get them.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [string]$DriverRoot = 'Drivers'
+    )
+    $catalogPath = Join-MediaPath $ContentRoot 'config\driver-catalog.json'
+    if (-not (Test-Path $catalogPath)) { return }
+    $catalog = Get-Content -Raw -Path $catalogPath | ConvertFrom-Json
+    $byPath = [ordered]@{}
+    $add = {
+        param([string]$Path, [string]$Model, [bool]$Fallback)
+        $key = ConvertTo-MediaRelative $Path
+        if (-not $key) { return }
+        if (-not $byPath.Contains($key.ToLowerInvariant())) {
+            $byPath[$key.ToLowerInvariant()] = [pscustomobject]@{ Path = $key; Maker = ''; Models = @(); Fallback = $false }
+        }
+        $row = $byPath[$key.ToLowerInvariant()]
+        if ($Model -and $Model -notin $row.Models) { $row.Models += $Model }
+        if ($Fallback) { $row.Fallback = $true }
+    }
+    foreach ($e in @($catalog.entries)) {
+        if (-not $e.path) { continue }
+        $model = @($e.model, $e.modelPattern, $(if ($e.sku) { "SKU $($e.sku)" }), $(if ($e.machineType) { "type $($e.machineType)" })) |
+            Where-Object { $_ } | Select-Object -First 1
+        & $add $e.path $model $false
+        $byPath[(ConvertTo-MediaRelative $e.path).ToLowerInvariant()].Maker = $e.maker
+    }
+    if ($catalog.fallbacks) {
+        foreach ($p in $catalog.fallbacks.PSObject.Properties) {
+            if (-not $p.Value) { continue }
+            & $add $p.Value '' $true
+            $byPath[(ConvertTo-MediaRelative $p.Value).ToLowerInvariant()].Maker = $p.Name
+        }
+    }
+    foreach ($row in $byPath.Values) {
+        $full = Join-MediaPath $ContentRoot (Join-MediaRelative $DriverRoot, $row.Path)
+        $exists = Test-Path $full
+        $size = [int64]0
+        if ($exists) { $size = [int64](Get-ChildItem -Path $full -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum }
+        $what = @($row.Models | Where-Object { $_ }) -join ', '
+        if ($row.Fallback) { $what = (@("$($row.Maker) fallback for unlisted models") + @($row.Models)) -join ', ' }
+        $state = if (-not $exists) { '  - folder missing, nothing to copy' } else { '  ({0:N1} GB)' -f ($size / 1GB) }
+        [pscustomobject]@{
+            Path     = $row.Path
+            Maker    = $row.Maker
+            Models   = $row.Models
+            Fallback = $row.Fallback
+            Exists   = $exists
+            Size     = $size
+            Label    = "$($row.Path)  ->  $what$state"
+        }
+    }
+}
+
+Export-ModuleMember -Function Get-MediaAnswerFileNames, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks
