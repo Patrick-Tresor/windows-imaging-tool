@@ -113,9 +113,10 @@ try {
     Assert-Equal ($w.Pages[1].Top -ge $w.HwLabel.Bottom) $true 'wizard: pages start under the header'
     Assert-Equal ($w.Pages[1].Bottom -le $w.Error.Top -and $w.Error.Bottom -le $w.Next.Top) $true 'wizard: page, error and buttons stack'
     Assert-Equal ($w.Cancel.Right -le $form.ClientSize.Width -and $w.Back.Left -ge 224) $true 'wizard: buttons are inside the window'
+    $domainDiskTop = $w.DiskLabel.Top; $ouTop = $w.OuLabel.Top
     $w.IsDomain = $false; $w.OuLabel.Visible = $false; $w.OuBox.Visible = $false
     Update-DeployWizardLayout -Wiz $w
-    Assert-Equal ($w.DiskLabel.Top -lt $w.OuLabel.Top) $true 'wizard: a workgroup leaves no gap for the OU'
+    Assert-Equal ($w.DiskLabel.Top -eq $ouTop -and $w.DiskLabel.Top -lt $domainDiskTop) $true 'wizard: a workgroup moves the disk up into the OU rows'
 }
 finally { $form.Close(); $form.Dispose() }
 
