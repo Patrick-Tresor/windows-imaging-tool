@@ -86,6 +86,9 @@ function Copy-MediaContent {
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)][string]$Destination,
         [int]$BufferSize = 8MB,
+        # Bytes written between flushes to the stick: big enough to keep the stick busy, small enough that the
+        # progress shows what is on the stick rather than in the PC's write cache.
+        [int64]$FlushEvery = 256MB,
         # Files at least this big get a text line every 10 percent, so the console never looks stuck on one file.
         [int64]$LineEvery10PercentFrom = 256MB,
         [scriptblock]$OnProgress,
@@ -147,12 +150,16 @@ function Copy-MediaContent {
             $in = $null; $out = $null
             try {
                 $in = New-Object IO.FileStream($item.Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read, 65536, [IO.FileOptions]::SequentialScan)
-                # Write-through: progress counts bytes on the stick, not in the write cache, so 100% means written.
-                $out = New-Object IO.FileStream($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None, 65536, [IO.FileOptions]::WriteThrough)
+                # Cached writes (write-through made every chunk wait for the stick and roughly halved the speed), flushed
+                # to the stick every FlushEvery bytes so the progress never runs far ahead of what is really written.
+                $out = New-Object IO.FileStream($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::None)
+                $sinceFlush = [int64]0
                 $out.SetLength($item.Length)
                 & $show $item 0 $true
                 while (($read = $in.Read($buffer, 0, $buffer.Length)) -gt 0) {
                     $out.Write($buffer, 0, $read)
+                    $sinceFlush += $read
+                    if ($sinceFlush -ge $FlushEvery) { $out.Flush($true); $sinceFlush = 0 }
                     $fileDone += $read
                     $done += $read
                     & $show $item $fileDone $false
@@ -164,7 +171,7 @@ function Copy-MediaContent {
                         }
                     }
                 }
-                $out.Flush()
+                $out.Flush($true)
             } catch {
                 $msg = $_.Exception.Message
                 if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
