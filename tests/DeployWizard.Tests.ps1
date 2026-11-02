@@ -81,6 +81,19 @@ try {
 }
 finally { Remove-Item $pe -Recurse -Force -ErrorAction SilentlyContinue }
 
+# Driver injection: /ForceUnsigned is a bare switch (":No" made DISM fail with error 87 on the Latitude 5521).
+$a = @(Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath 'E:\Drivers\Dell\Latitude 5521')
+Assert-Equal ($a -join '|') '/Image:W:\|/Add-Driver|/Driver:E:\Drivers\Dell\Latitude 5521|/Recurse' 'add-driver: no /ForceUnsigned argument, path with a space is one argument'
+Assert-Equal (@($a | Where-Object { $_ -match '^/ForceUnsigned:' }).Count) 0 'add-driver: never /ForceUnsigned:value'
+Assert-Equal (@(Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath 'E:\Drivers\Dell\Latitude 5521\')[2]) '/Driver:E:\Drivers\Dell\Latitude 5521' 'add-driver: trailing backslash removed'
+Assert-Equal (@(Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath 'E:\' -ForceUnsigned) -join '|') '/Image:W:\|/Add-Driver|/Driver:E:\|/Recurse|/ForceUnsigned' 'add-driver: drive root keeps its backslash; -ForceUnsigned is bare'
+
+# No DISM call anywhere passes a value to a flag-only switch.
+foreach ($f in Get-ChildItem (Join-Path $repo 'src') -Recurse -Include *.ps1, *.psm1) {
+    $bad = @(Select-String -Path $f.FullName -Pattern "'/(ForceUnsigned|Recurse|CheckIntegrity|Verify|Commit|Discard|ResetBase):" -SimpleMatch:$false)
+    Assert-Equal $bad.Count 0 "$($f.Name): no value on a flag-only DISM switch"
+}
+
 # The log line saying which WinPE drivers the boot image has (config\winpe-drivers.json from the build).
 Assert-Equal (Format-WinPEDriverReport $null) 'This boot image has no WinPE driver report: it was built before WinPE drivers were added. Rebuild the media.' 'winpe report: older build'
 $report = [pscustomobject]@{ built = '2026-11-02 10:40'; vmd = $true; problem = $null
