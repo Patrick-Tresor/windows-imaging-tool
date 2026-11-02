@@ -111,6 +111,15 @@ function Get-ProgressView {
     }
 }
 
+function Test-ProgressRaise {
+    # Whether the window should come to the front: when the deployment starts working (the wizard, which runs in
+    # another process, has closed and left the console on top) and when it ends. Not on every tick, so the
+    # operator can still look at the log or a command prompt.
+    param($Previous, [Parameter(Mandatory)]$Current)
+    if (-not $Previous) { return $true }
+    ($Current.Busy -and -not $Previous.Busy) -or ($Current.Finished -and -not $Previous.Finished)
+}
+
 function New-DeployProgressForm {
     # Builds the window. Returns its controls by name; Update-DeployProgressForm fills them from a view.
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -201,8 +210,14 @@ function Show-DeployProgressWindow {
         $p = $script:progress
         try {
             $running = if ($p.Pid) { [bool](Get-Process -Id $p.Pid -ErrorAction SilentlyContinue) } else { $true }
+            $previous = $p.View
             $p.View = Get-ProgressView -Record (Read-ProgressFile -Path $p.Path) -DeployRunning $running
             Update-DeployProgressForm -Ui $p.Ui -View $p.View -LogLines (Get-LogTail -Path $p.Log)
+            if (Test-ProgressRaise -Previous $previous -Current $p.View) {
+                # TopMost for a moment brings it over the console; leaving it on would hide Notepad and cmd.
+                $p.Ui.Form.WindowState = 'Normal'
+                $p.Ui.Form.TopMost = $true; $p.Ui.Form.Activate(); $p.Ui.Form.TopMost = $false
+            }
         } catch { }   # a half-written file or a closing window: the next tick tries again
     }
     $script:progress.Refresh = $refresh
@@ -237,5 +252,5 @@ function Show-DeployProgressWindow {
     $script:progress = $null
 }
 
-Export-ModuleMember -Function Read-ProgressFile, Get-LogTail, Get-ProgressView, New-DeployProgressForm, Update-DeployProgressForm,
+Export-ModuleMember -Function Read-ProgressFile, Get-LogTail, Get-ProgressView, Test-ProgressRaise, New-DeployProgressForm, Update-DeployProgressForm,
     Show-DeployProgressWindow

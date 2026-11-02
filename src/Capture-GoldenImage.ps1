@@ -49,6 +49,7 @@ $staging = $null
 $swapping = $false
 $status = 'FAILED'
 try {
+    Set-DeployConsole -Title 'Capture Windows image'
     # WinPE assigns letters unpredictably: find the volume that holds an offline Windows install.
     # A VM with a second Windows disk attached has two; capture the generalized one.
     $found = @(Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveLetter -ne 'X' } |
