@@ -263,6 +263,31 @@ function Save-WebFile {
     Move-Item $part $Destination -Force
 }
 
+function Get-DownloadKind {
+    # What a downloaded file really is, from its first bytes: Cab, Gzip, Zip, Xml, Html or Unknown.
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = New-Object byte[] 512
+    $fs = [IO.File]::OpenRead($Path)
+    try { $n = $fs.Read($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+    if ($n -ge 4 -and [Text.Encoding]::ASCII.GetString($bytes, 0, 4) -eq 'MSCF') { return 'Cab' }
+    if ($n -ge 2 -and $bytes[0] -eq 0x1F -and $bytes[1] -eq 0x8B) { return 'Gzip' }
+    if ($n -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) { return 'Zip' }
+    $text = [Text.Encoding]::UTF8.GetString($bytes, 0, $n).TrimStart([char]0xFEFF, ' ', "`t", "`r", "`n")
+    if ($text -match '^(?i)<(!doctype html|html)') { return 'Html' }
+    if ($text.StartsWith('<')) { return 'Xml' }
+    'Unknown'
+}
+
+function Expand-GzipFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Destination)
+    $in = [IO.File]::OpenRead($Path)
+    try {
+        $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+        $out = [IO.File]::Create($Destination)
+        try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
+    } finally { $in.Dispose() }
+}
+
 function Update-VendorCatalog {
     # Downloads a vendor catalog into the cache when it is missing or older than MaxAgeHours. Returns the XML path.
     param(
@@ -279,11 +304,30 @@ function Update-VendorCatalog {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $download = Join-Path $dir ([IO.Path]::GetFileName($info.Url))
     Save-WebFile -Url $info.Url -Destination $download -DisplayName "$Maker driver pack catalog"
-    if ($download -like '*.cab') {
-        Expand-CabFile -Cab $download -Destination $dir
-        Remove-Item $download -Force
+    # Check what really came down: expand.exe "succeeds" on a file that is not a cab and leaves no XML behind.
+    # Dell's CDN or a proxy can send the XML itself, a gzip, or an HTML page instead of the cab.
+    $kind = Get-DownloadKind -Path $download
+    switch ($kind) {
+        'Cab'  { Expand-CabFile -Cab $download -Destination $dir }
+        'Gzip' { Expand-GzipFile -Path $download -Destination $xml }
+        'Xml'  { if ($download -ne $xml) { Copy-Item $download $xml -Force } }
+        default {
+            $size = (Get-Item $download).Length
+            Remove-Item $download -Force
+            throw ("The $Maker catalog download from $($info.Url) is not a catalog ($kind, $size bytes). " +
+                $(if ($kind -eq 'Html') { 'A proxy or firewall probably answered instead of the vendor; allow that address.' } else { 'Try again later.' }))
+        }
     }
-    if (-not (Test-Path $xml)) { throw "The $Maker catalog did not contain $($info.Xml)." }
+    if ($download -ne $xml) { Remove-Item $download -Force -ErrorAction SilentlyContinue }
+    if (-not (Test-Path $xml)) {
+        # Use the catalog XML the cab holds, whatever its exact name.
+        $found = Get-ChildItem -Path $dir -Filter *.xml -File | Where-Object Name -ne $info.Xml | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($found) { Move-Item $found.FullName $xml -Force }
+    }
+    if (-not (Test-Path $xml)) {
+        $have = @(Get-ChildItem -Path $dir -File | ForEach-Object Name) -join ', '
+        throw "The $Maker catalog ($kind) did not contain $($info.Xml). The folder $dir has: $(if ($have) { $have } else { 'nothing' })."
+    }
     (Get-Item $xml).LastWriteTime = Get-Date
     $xml
 }
@@ -437,6 +481,6 @@ function Install-VendorDriverPack {
 #endregion
 
 Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpDriverPackCatalog,
-    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Update-VendorCatalog, Get-VendorDriverPacks,
+    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack
