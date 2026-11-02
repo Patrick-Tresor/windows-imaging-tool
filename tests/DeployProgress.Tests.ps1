@@ -89,6 +89,15 @@ Assert-Equal $v.PercentText 'Overall 100 %    Took 20m 00s' 'finished deploy sho
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'restart' })
 Assert-Equal "$($v.ShowPower)|$($v.Detail)" 'False|Restarting into Windows. Setup and the applications finish there.' 'success restarting on its own hides the buttons'
 
+$v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'restart'; removableMedia = $true; removeMedia = 42 })
+Assert-Equal "$($v.ShowPower)|$($v.Detail)" 'False|Remove the USB stick now. The PC restarts into Windows in 42 s, or as soon as the stick is out.' 'restart from a USB stick asks to pull it out first'
+
+$v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'shutdown'; removableMedia = $true; removeMedia = 5 })
+Assert-Equal $v.Detail 'Remove the USB stick now. The PC shuts down in 5 s, or as soon as the stick is out.' 'shutdown from a USB stick asks to pull it out first'
+
+$v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'stay'; removableMedia = $true })
+Assert-Equal "$($v.ShowPower)|$($v.Detail)" 'True|Remove the USB stick, then restart the PC to finish setting up Windows and install the applications.' 'staying in WinPE from a USB stick says to pull it out before Restart'
+
 $v = Get-ProgressView -Record (New-Record @{ state = 'Warning'; whenDone = 'stay'; warnings = @('No driver pack') })
 Assert-Equal "$($v.Color)|$($v.Message)" 'Warning|Finished with warnings: No driver pack' 'warnings are listed'
 
