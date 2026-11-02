@@ -132,6 +132,76 @@ function Test-VmdDriverPresent {
         Where-Object { $_.Name -in $script:VmdDriverNames } | Select-Object -First 1)
 }
 
+function Install-WinPEPackToCache {
+    # Downloads a WinPE driver pack once, checks its hash (or the vendor's signature) and extracts it to Destination.
+    param([Parameter(Mandatory)]$Pack, [Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$CacheDir)
+    if (Test-Path (Join-Path $Destination 'pack.json')) { return }
+    $file = Join-Path $CacheDir "WinPE\$($Pack.FileName)"
+    Write-Host "Downloading the $Source$(if ($Pack.SizeMB) { " ($($Pack.SizeMB) MB)" })..."
+    Save-WebFile -Url $Pack.Url -Destination $file -DisplayName "$Maker WinPE driver pack"
+    if ($Pack.Hash) {
+        $actual = (Get-FileHash $file -Algorithm $Pack.HashType).Hash
+        if ($actual -ne $Pack.Hash) { Remove-Item $file -Force; throw "$($Pack.FileName) failed its $($Pack.HashType) check. Deleted it; build again." }
+    } else {
+        try { Test-VendorSignature -File $file -Maker $Maker } catch { Remove-Item $file -Force; throw }
+    }
+    $staging = "$Destination.new"
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    Expand-VendorDriverPack -File $file -Maker $Maker -Destination $staging
+    if (-not (Get-ChildItem -Path $staging -Filter *.inf -Recurse -File | Select-Object -First 1)) {
+        Remove-Item $staging -Recurse -Force
+        throw "No .inf files in $($Pack.FileName)."
+    }
+    if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force }
+    Move-Item $staging $Destination
+    Remove-Item $file -Force
+    [ordered]@{ maker = $Maker; version = $Pack.Version; url = $Pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
+        ConvertTo-Json | Set-Content -Path (Join-Path $Destination 'pack.json') -Encoding utf8
+}
+
+# HP lists its WinPE 10/11 driver packs (one pack for all HP business models) on this page, newest first.
+# The fallback is the newest one known here: version 3.40, 2026-06-22.
+$script:HpWinPE = @{
+    InfoUrl  = 'https://ftp.ext.hp.com/pub/caps-softpaq/cmit/HP_WinPE_DriverPack.html'
+    Fallback = 'https://ftp.ext.hp.com/pub/softpaq/sp173001-173500/sp173204.exe'
+}
+
+function ConvertFrom-HpWinPEPage {
+    # The newest SoftPaq on HP's WinPE driver pack page (highest sp number), as a pack row; $null when none is linked.
+    param([string]$Html)
+    $links = @([regex]::Matches("$Html", '(?i)https?://[^"''\s>]+/sp(\d+)\.exe') | ForEach-Object {
+        [pscustomobject]@{ Url = ($_.Value -replace '^http://', 'https://'); Number = [int]$_.Groups[1].Value } })
+    $top = $links | Sort-Object Number -Descending | Select-Object -First 1
+    if (-not $top) { return $null }
+    [pscustomobject]@{ Url = $top.Url; Version = "sp$($top.Number)"; Hash = $null; HashType = $null; FileName = "sp$($top.Number).exe"; SizeMB = $null }
+}
+
+function Save-HpWinPEDriverPack {
+    <#
+    .SYNOPSIS
+        HP's WinPE 10/11 driver pack (storage and network for HP business PCs), downloaded once into the cache.
+        Same result shape as Save-WinPEDriverPack.
+    #>
+    param([string]$CacheDir = (Get-DriverPackCacheDir))
+    $pack = $null; $why = $null
+    try {
+        $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+        try { $html = (Invoke-WebRequest -Uri $script:HpWinPE.InfoUrl -UseBasicParsing).Content } finally { $ProgressPreference = $old }
+        $pack = ConvertFrom-HpWinPEPage -Html $html
+        if (-not $pack) { $why = 'the HP page links no WinPE pack' }
+    } catch { $why = "the HP page could not be read ($($_.Exception.Message))" }
+    $fallback = -not $pack
+    if ($fallback) {
+        $pack = ConvertFrom-HpWinPEPage -Html $script:HpWinPE.Fallback
+        Write-Host "HP WinPE page not used ($why); using the built-in link instead." -ForegroundColor DarkGray
+    }
+    $dest = Join-Path $CacheDir "WinPE\HP-WinPE-$($pack.Version)"
+    $source = "HP WinPE driver pack $($pack.Version)"
+    Install-WinPEPackToCache -Pack $pack -Maker HP -Destination $dest -Source $source -CacheDir $CacheDir
+    [pscustomobject]@{ Path = $dest; Source = $source; Version = $pack.Version; HasVmd = Test-VmdDriverPresent -Folder $dest; Fallback = $fallback }
+}
+
 function Save-WinPEDriverPack {
     <#
     .SYNOPSIS
@@ -156,29 +226,7 @@ function Save-WinPEDriverPack {
     }
     $dest = Join-Path $CacheDir "WinPE\Dell-WinPE$($pack.WinPEVersion)-$($pack.Version)"
     $source = "Dell WinPE $($pack.WinPEVersion) driver pack $($pack.Version)"
-    if (-not (Test-Path (Join-Path $dest 'pack.json'))) {
-        $file = Join-Path $CacheDir "WinPE\$($pack.FileName)"
-        Write-Host "Downloading the $source ($($pack.SizeMB) MB)..."
-        Save-WebFile -Url $pack.Url -Destination $file -DisplayName 'Dell WinPE driver pack'
-        if ($pack.Hash) {
-            $actual = (Get-FileHash $file -Algorithm $pack.HashType).Hash
-            if ($actual -ne $pack.Hash) { Remove-Item $file -Force; throw "$($pack.FileName) failed its $($pack.HashType) check. Deleted it; build again." }
-        } else {
-            try { Test-VendorSignature -File $file -Maker Dell } catch { Remove-Item $file -Force; throw }
-        }
-        $staging = "$dest.new"
-        if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
-        Expand-VendorDriverPack -File $file -Maker Dell -Destination $staging
-        if (-not (Get-ChildItem -Path $staging -Filter *.inf -Recurse -File | Select-Object -First 1)) {
-            Remove-Item $staging -Recurse -Force
-            throw "No .inf files in $($pack.FileName)."
-        }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        Move-Item $staging $dest
-        Remove-Item $file -Force
-        [ordered]@{ version = $pack.Version; winpe = $pack.WinPEVersion; url = $pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
-            ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
-    }
+    Install-WinPEPackToCache -Pack $pack -Maker Dell -Destination $dest -Source $source -CacheDir $CacheDir
     [pscustomobject]@{ Path = $dest; Source = $source; Version = $pack.Version; HasVmd = Test-VmdDriverPresent -Folder $dest; Fallback = $fallback }
 }
 
@@ -499,7 +547,7 @@ function Install-VendorDriverPack {
 
 #endregion
 
-Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpDriverPackCatalog,
+Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack

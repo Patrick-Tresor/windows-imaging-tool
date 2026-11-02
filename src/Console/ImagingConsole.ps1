@@ -749,6 +749,8 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         }
     }
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
+    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
+    if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
 
     # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
     $buildArgs = @('-NoExit') + $buildArgs

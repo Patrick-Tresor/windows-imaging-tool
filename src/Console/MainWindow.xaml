@@ -182,7 +182,7 @@
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -230,6 +230,16 @@
             <Label Grid.Row="8" Content="Extra WinPE drivers"/>
             <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
             <Button x:Name="BtnPeDrivers" Grid.Row="8" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+
+            <Label Grid.Row="10" Content="WinPE driver packs"/>
+            <StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2">
+              <StackPanel Orientation="Horizontal">
+                <CheckBox x:Name="ChkPeDell" Content="Dell" IsChecked="True" Margin="0,0,16,0"/>
+                <CheckBox x:Name="ChkPeHp" Content="HP" IsChecked="True"/>
+              </StackPanel>
+              <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
+                         Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Each pack makes WinPE bigger and the build a few minutes longer."/>
+            </StackPanel>
           </Grid>
 
           <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">

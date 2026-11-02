@@ -160,13 +160,19 @@ the log names the disk it measured. When WinPE sees no internal disk at all
 laptops, hides the SSD from plain WinPE), the wizard says so in one line and
 the log has the details.
 
-To avoid that, every media build adds Dell's WinPE driver pack (Intel RST/VMD
-storage, network) to boot.wim. It is downloaded once into the console's cache
-(`%LOCALAPPDATA%\ImagingConsole\VendorCatalogs\WinPE`); the Intel drivers in it
-match the controller, so they work on HP, Lenovo and other PCs too. Skip it
-with `-NoVendorWinPEDrivers`. Drivers in `<content root>\Drivers\_WinPE` are
-also added to boot.wim and, from the stick or share, loaded with drvload when
-WinPE starts, so a new storage driver can be added without rebuilding WinPE.
+To avoid that, every media build adds the vendors' WinPE driver packs (storage
+such as Intel RST/VMD, and network) to boot.wim: Dell's (WinPE 11, from its
+catalog) and HP's (WinPE 10/11, one pack for its business PCs). Each is
+downloaded once into the console's cache
+(`%LOCALAPPDATA%\ImagingConsole\VendorCatalogs\WinPE`) and reused; the same
+driver in two packs goes in once. Lenovo publishes no single WinPE pack, but the
+Intel storage drivers in Dell's pack match the controller, so they cover Lenovo
+and other PCs with VMD too. Choose the vendors on the Media tab (both on by
+default) or with `-WinPEDriverVendors Dell,HP`; `-NoVendorWinPEDrivers` skips
+them. Each pack makes boot.wim bigger and the build a few minutes longer.
+Drivers in `<content root>\Drivers\_WinPE` are also added to boot.wim and, from
+the stick or share, loaded with drvload when WinPE starts, so a new storage
+driver can be added without rebuilding WinPE.
 
 - **Block**: a failed requirement stops the deploy with nothing erased. Fix it
   in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10
