@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployWizard.psm1') -Force
+Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 
 $failures = 0
 function Assert-Equal($Actual, $Expected, $Name) {
@@ -41,6 +42,7 @@ Assert-Equal (Resolve-TargetDisk -Disks $ssd -Requested 5).Reason 'the answer fi
 $none = Resolve-TargetDisk -Disks $stick -Requested 0
 Assert-Equal "$($null -eq $none.Disk)" 'True' 'no internal disk gives no target'
 Assert-Equal "$($none.Reason -like '*no internal disk*WinPE sees: 0: SanDisk Ultra (58 GB, USB).*Intel RST/VMD*')" 'True' 'no internal disk says what WinPE sees and points at RST/VMD'
+Assert-Equal ($none.Short.Length -le 110) $true 'no internal disk: the wizard line is short (details go to the log)'
 
 # Applications: answer file's in its order and ticked, then the rest of the library sorted and unticked.
 $choices = @(Get-AppChoices -Selected 'Office', 'Zoom' -Available 'Zoom', 'Adobe-Reader', 'Office', '7-Zip')
@@ -64,6 +66,20 @@ Assert-Equal $lines[5] 'Joins:        domain corp.example.com (OU=Labs,DC=corp,D
 $withDetails = [pscustomobject]@{ ImagePath = $plan.ImagePath; DriverPack = $null; Details = @('Firmware:     UEFI (GPT disk)') }
 $lines = @(Get-DeploySummary -Answer $answer -Plan $withDetails -ComputerName 'LAB-01' -Disk $disk)
 Assert-Equal "$($lines.Count)|$($lines[6])|$($lines[7])" '8|Firmware:     UEFI (GPT disk)|ERASE disk:   0: NVMe SSD (512 GB, NVMe)' 'plan details go just before the ERASE line'
+
+# WinPE drivers: only the x64 ones from a pack with x86 and x64 folders (Dell's WinPE pack), all of a flat folder.
+$pe = Join-Path ([IO.Path]::GetTempPath()) ("winpe-drivers-" + [guid]::NewGuid())
+try {
+    foreach ($f in 'winpe/x64/storage/iaStorVD.inf', 'winpe/x64/network/e1d.inf', 'winpe/x86/storage/iaStorVD.inf') {
+        $path = Join-Path $pe $f
+        New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+        Set-Content $path 'inf'
+    }
+    Assert-Equal ((Get-WinPEDriverInfs -Folder $pe | ForEach-Object Name) -join ',') 'e1d.inf,iaStorVD.inf' 'winpe drivers: x64 only when the pack has x86 too'
+    Assert-Equal @(Get-WinPEDriverInfs -Folder (Join-Path $pe 'winpe/x86')).Count 1 'winpe drivers: a flat folder gives all its drivers'
+    Assert-Equal @(Get-WinPEDriverInfs -Folder (Join-Path $pe 'missing')).Count 0 'winpe drivers: missing folder gives none'
+}
+finally { Remove-Item $pe -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Sidebar text fits its labels even when the font renders wider than Segoe UI (WinPE cut off "Deploy Win").
 if ($env:OS -eq 'Windows_NT') {

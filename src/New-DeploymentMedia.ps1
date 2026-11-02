@@ -33,6 +33,7 @@ param(
     [switch]$NoDriverPacks,          # with -ContentSource: no driver packs at all (PCs get Windows inbox drivers)
     [string]$OutputPath = (Get-Location).Path,
     [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
+    [switch]$NoVendorWinPEDrivers,   # don't add Dell's WinPE driver pack (Intel RST/VMD storage, network) to boot.wim
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
@@ -46,6 +47,8 @@ Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -109,7 +112,27 @@ try {
         $lang = "$ocs\en-us\$($oc)_en-us.cab"
         if (Test-Path $lang) { Add-WindowsPackage -Path $mount -PackagePath $lang | Out-Null }
     }
-    if ($WinPEDrivers) { Add-WindowsDriver -Path $mount -Driver $WinPEDrivers -Recurse | Out-Null }
+    # Storage and network drivers for WinPE itself. Without the Intel RST/VMD driver, WinPE sees no SSD on PCs that
+    # ship with VMD on (Dell 11th gen and later, and others), and the deploy stops with "No internal disk found".
+    # Dell's WinPE pack is downloaded once into the cache; a build without internet carries on without it.
+    $peDriverDirs = @()
+    if (-not $NoVendorWinPEDrivers) {
+        try { $peDriverDirs += Save-WinPEDriverPack }
+        catch { Write-Warning "Dell WinPE driver pack not added: $($_.Exception.Message) PCs with Intel RST/VMD on may show no internal disk in WinPE." }
+    }
+    if ($WinPEDrivers) { $peDriverDirs += $WinPEDrivers }
+    if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peDriverDirs += "$ContentSource\Drivers\_WinPE" }
+    foreach ($dir in $peDriverDirs) {
+        # x64 drivers only (Dell's pack also has x86); one bad driver must not lose the others.
+        $infs = @(Get-WinPEDriverInfs -Folder $dir)
+        Write-Host "Adding $($infs.Count) WinPE driver(s) from $dir..."
+        $failed = 0
+        foreach ($inf in $infs) {
+            try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null }
+            catch { $failed++; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
+        }
+        if ($failed) { Write-Warning "$failed of $($infs.Count) WinPE driver(s) from $dir could not be added (run with -Verbose to see which)." }
+    }
 
     $deployDir = Join-Path $mount 'Deploy'
     New-Item -ItemType Directory -Path "$deployDir\config" -Force | Out-Null

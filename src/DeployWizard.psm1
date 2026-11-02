@@ -108,10 +108,13 @@ function Resolve-TargetDisk {
     $seen = @($Disks | Where-Object { $_ } | Sort-Object Number | ForEach-Object { Format-DiskChoice $_ })
     [pscustomobject]@{
         Disk   = $null
+        # Short enough for the wizard's two lines; Reason, for the log, says what WinPE sees and how to fix it.
+        Short  = 'No internal disk found, so nothing was erased. WinPE is missing the storage driver; see the log.'
         Reason = ('This PC has no internal disk that WinPE can see, so Windows has nowhere to go. Nothing was erased. ' +
             "WinPE sees: $(if ($seen) { $seen -join '; ' } else { 'no disks at all' }). " +
             'The SSD is usually hidden by Intel RST/VMD (Dell 11th gen and later ship with it on): set SATA/NVMe Operation to AHCI/NVMe in the BIOS, ' +
-            'or add the Intel RST VMD driver under Extra WinPE drivers on the Media tab and rebuild the stick.')
+            'or rebuild the stick: every build now adds the Dell WinPE driver pack (Intel RST/VMD storage, network) to WinPE, ' +
+            'and .inf drivers in <content root>\Drivers\_WinPE are loaded at start.')
     }
 }
 
@@ -175,7 +178,7 @@ function Show-DeployWizard {
     $font = New-Object Drawing.Font('Segoe UI', 10)
 
     $form = New-Object Windows.Forms.Form -Property @{
-        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
+        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 500); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
         TopMost = $true; BackColor = [Drawing.Color]::White
     }
@@ -184,21 +187,12 @@ function Show-DeployWizard {
     }
     $hwText = "$($Hardware.Maker) $($Hardware.Model)   Serial $($Hardware.Serial)$(if ($Hardware.Sku) { "   SKU $($Hardware.Sku)" })"
     $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = [Drawing.Color]::DimGray }
-    # Problems can be long (a failed Windows 11 check says what to fix), so the red text wraps over several
-    # lines and scrolls if it is longer still. A read-only box, so the operator can also select and copy it.
-    $err = New-Object Windows.Forms.TextBox -Property @{
-        Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 76)); Multiline = $true; ReadOnly = $true
-        WordWrap = $true; BorderStyle = 'None'; BackColor = [Drawing.Color]::White; ForeColor = [Drawing.Color]::Firebrick; TabStop = $false
-    }
-    $err.add_TextChanged({
-        param($box)
-        # A scroll bar only when the text needs more than the box.
-        $h = [Windows.Forms.TextRenderer]::MeasureText($box.Text, $box.Font, (New-Object Drawing.Size(($box.Width - 4), 10000)), [Windows.Forms.TextFormatFlags]::WordBreak).Height
-        $box.ScrollBars = if ($h -gt $box.Height) { 'Vertical' } else { 'None' }
-    })
-    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
-    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
-    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
+    # One or two short lines; the details of a problem go to the deploy log. AutoEllipsis ends anything longer
+    # with "..." instead of cutting a line in half or needing a scroll bar.
+    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 42)); ForeColor = [Drawing.Color]::Firebrick; AutoEllipsis = $true }
+    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
+    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
+    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
     $form.CancelButton = $cancel
     $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel))
     $w.Sidebar = New-DeploySidebar -Form $form

@@ -156,9 +156,17 @@ or the disk holding the content: WinPE often numbers the stick disk 0, so when
 the answer file's disk is USB, a card reader or missing, the first internal
 disk (NVMe, then SATA) is used instead and the log says so. The Disk line in
 the log names the disk it measured. When WinPE sees no internal disk at all
-(Dell 11th gen and later ship with Intel RST/VMD on, which hides the SSD from
-plain WinPE), the wizard says so: set SATA/NVMe Operation to AHCI/NVMe in the
-BIOS, or add the Intel RST VMD driver under Extra WinPE drivers.
+(Intel RST/VMD, on by default on Dell 11th gen and later and many other
+laptops, hides the SSD from plain WinPE), the wizard says so in one line and
+the log has the details.
+
+To avoid that, every media build adds Dell's WinPE driver pack (Intel RST/VMD
+storage, network) to boot.wim. It is downloaded once into the console's cache
+(`%LOCALAPPDATA%\ImagingConsole\VendorCatalogs\WinPE`); the Intel drivers in it
+match the controller, so they work on HP, Lenovo and other PCs too. Skip it
+with `-NoVendorWinPEDrivers`. Drivers in `<content root>\Drivers\_WinPE` are
+also added to boot.wim and, from the stick or share, loaded with drvload when
+WinPE starts, so a new storage driver can be added without rebuilding WinPE.
 
 - **Block**: a failed requirement stops the deploy with nothing erased. Fix it
   in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10

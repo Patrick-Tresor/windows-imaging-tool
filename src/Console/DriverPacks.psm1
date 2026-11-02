@@ -96,6 +96,64 @@ function ConvertFrom-DellDriverPackCatalog {
     }
 }
 
+function ConvertFrom-DellWinPEDriverPacks {
+    # The WinPE driver packs in Dell's DriverPackCatalog.xml (type 'winpe'): storage (Intel RST/VMD), network and
+    # other drivers WinPE itself needs. Intel's drivers in them match on the controller, so they work on any maker's PC.
+    # Newest WinPE version first (WinPE 11 before 10), then newest release.
+    param([Parameter(Mandatory)][string]$Path)
+    [xml]$x = Get-Content -Raw -Path $Path
+    $base = $x.DocumentElement.GetAttribute('baseLocation')
+    if (-not $base) { $base = 'downloads.dell.com' }
+    $rows = foreach ($p in $x.SelectNodes("//*[local-name()='DriverPackage']")) {
+        if ($p.GetAttribute('type') -ne 'winpe') { continue }
+        $file = $p.GetAttribute('path')
+        $pe = if ($file -match '(?i)WinPE(\d+(\.\d+)?)') { [double]$Matches[1] } else { 0 }
+        $sha = $p.SelectSingleNode("*[local-name()='Cryptography']/*[local-name()='Hash'][@algorithm='SHA256']")
+        $hash, $hashType = if ($sha) { $sha.InnerText, 'SHA256' } else { $p.GetAttribute('hashMD5'), 'MD5' }
+        $row = New-PackRow -Maker Dell -Model 'WinPE' -Os "WinPE $pe" -Release '' -Version $p.GetAttribute('vendorVersion') `
+            -Released (ConvertTo-Date $p.GetAttribute('dateTime')) -Url ('https://' + $base.TrimEnd('/') + '/' + $file.TrimStart('/')) `
+            -Size $p.GetAttribute('size') -Hash $hash -HashType $hashType -Id $p.GetAttribute('releaseID')
+        $row | Add-Member -NotePropertyName WinPEVersion -NotePropertyValue $pe -PassThru
+    }
+    @($rows | Sort-Object @{ Expression = 'WinPEVersion'; Descending = $true }, @{ Expression = 'Released'; Descending = $true })
+}
+
+function Save-WinPEDriverPack {
+    <#
+    .SYNOPSIS
+        Downloads and extracts Dell's newest WinPE driver pack into the cache (once per version) and returns the
+        folder to add to boot.wim. New-DeploymentMedia.ps1 adds it to every build, so WinPE sees SSDs behind
+        Intel RST/VMD (the default on many 11th gen and later laptops) without changing the BIOS.
+    #>
+    param([string]$CacheDir = (Get-DriverPackCacheDir), [string]$CatalogPath, [switch]$Refresh)
+    if (-not $CatalogPath) { $CatalogPath = Update-VendorCatalog -Maker Dell -CacheDir $CacheDir -Force:$Refresh }
+    $pack = ConvertFrom-DellWinPEDriverPacks -Path $CatalogPath | Select-Object -First 1
+    if (-not $pack) { throw 'The Dell catalog lists no WinPE driver pack.' }
+    $dest = Join-Path $CacheDir "WinPE\Dell-WinPE$($pack.WinPEVersion)-$($pack.Version)"
+    if (Test-Path (Join-Path $dest 'pack.json')) { return $dest }
+
+    $file = Join-Path $CacheDir "WinPE\$($pack.FileName)"
+    Write-Host "Downloading the Dell WinPE $($pack.WinPEVersion) driver pack $($pack.Version) ($($pack.SizeMB) MB)..."
+    Save-WebFile -Url $pack.Url -Destination $file -DisplayName 'Dell WinPE driver pack'
+    if ($pack.Hash) {
+        $actual = (Get-FileHash $file -Algorithm $pack.HashType).Hash
+        if ($actual -ne $pack.Hash) { Remove-Item $file -Force; throw "$($pack.FileName) failed its $($pack.HashType) check. Deleted it; build again." }
+    }
+    $staging = "$dest.new"
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    Expand-VendorDriverPack -File $file -Maker Dell -Destination $staging
+    if (-not (Get-ChildItem -Path $staging -Filter *.inf -Recurse -File | Select-Object -First 1)) {
+        Remove-Item $staging -Recurse -Force
+        throw "No .inf files in $($pack.FileName)."
+    }
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Move-Item $staging $dest
+    Remove-Item $file -Force
+    [ordered]@{ version = $pack.Version; winpe = $pack.WinPEVersion; url = $pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
+        ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
+    $dest
+}
+
 function ConvertFrom-HpDriverPackCatalog {
     # HPClientDriverPackCatalog.xml: ProductOSDriverPack rows (platform + OS -> SoftPaq id) and a SoftPaqList with the files.
     param([Parameter(Mandatory)][string]$Path)
@@ -350,7 +408,7 @@ function Install-VendorDriverPack {
 
 #endregion
 
-Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-HpDriverPackCatalog,
+Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack

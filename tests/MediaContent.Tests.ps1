@@ -107,6 +107,14 @@ try {
     Assert-Equal @($c.Folders | Where-Object { $_ -like 'Drivers*' }).Count 0 'no packs checked: no drivers copied'
     Assert-Equal ($c.Notes -join '' -like '*inbox drivers only*') $true 'no packs checked: note'
     Assert-Equal ($c.Folders -contains 'config') $true 'no packs checked: config still copied'
+    # Drivers\_WinPE (drivers WinPE loads at start) always goes on the stick, whichever packs are checked.
+    New-Item -ItemType Directory -Path (Join-Path $root 'Drivers/_WinPE/x64') -Force | Out-Null
+    Set-Content (Join-Path $root 'Drivers/_WinPE/x64/iaStorVD.inf') 'inf'
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default' -DriverPacks @()
+    Assert-Equal (@($c.Folders | Where-Object { $_ -like 'Drivers*' }) -join ';') 'Drivers\_WinPE' 'no packs checked: WinPE drivers still copied'
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default'
+    Assert-Equal (@($c.Folders | Where-Object { $_ -like 'Drivers*' }) -join ';') 'Drivers' 'whole driver folder covers the WinPE drivers'
+    Remove-Item (Join-Path $root 'Drivers/_WinPE') -Recurse -Force
 
     # Unknown answer file, none checked, none at all.
     Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Nope').Problems[0]) "Answer file Nope is not in $root\AnswerFiles." 'unknown answer file'

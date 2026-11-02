@@ -25,6 +25,11 @@ Assert-Equal "$($d.Version) $($d.SizeMB)" 'A07 1536' 'dell: version and size'
 Assert-Equal (($dell | Where-Object Os -eq 'Windows 10').HashType) 'MD5' 'dell: falls back to MD5'
 Assert-Equal (($dell | Where-Object Model -eq 'Latitude 5540').Skus -join ',') '0B0C' 'dell: second model in the same pack'
 
+# Dell WinPE packs (Intel RST/VMD storage, network) for boot.wim: WinPE 11 before 10, whatever the dates.
+$pe = @(ConvertFrom-DellWinPEDriverPacks -Path (Join-Path $fixtures 'DriverPackCatalog.xml'))
+Assert-Equal ($pe | ForEach-Object { "$($_.WinPEVersion) $($_.Version)" }) '11 A02 10 A33' 'dell winpe: only winpe packs, newest WinPE first'
+Assert-Equal "$($pe[0].Url)|$($pe[0].HashType)|$($pe[0].FileName)" 'https://downloads.dell.com/FOLDER3/1/WinPE11.0-Drivers-A02.CAB|MD5|WinPE11.0-Drivers-A02.CAB' 'dell winpe: url, hash and file name'
+
 # HP: SoftPaq joined by id, SystemId list split, ftp/http rewritten to https, rows with a missing SoftPaq skipped.
 $hp = @(ConvertFrom-HpDriverPackCatalog -Path (Join-Path $fixtures 'HPClientDriverPackCatalog.xml'))
 Assert-Equal $hp.Count 2 'hp: rows without a SoftPaq are skipped'
