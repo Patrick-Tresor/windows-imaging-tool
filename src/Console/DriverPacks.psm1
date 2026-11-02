@@ -118,40 +118,68 @@ function ConvertFrom-DellWinPEDriverPacks {
     @($rows | Sort-Object @{ Expression = 'WinPEVersion'; Descending = $true }, @{ Expression = 'Released'; Descending = $true })
 }
 
+# Used when the catalog lists no WinPE pack or can't be read: Dell's WinPE 11 pack A11 (2026-10-14, 34 MB), with
+# Intel RST (VMD) 17.11 to 21.0 and Intel VROC storage drivers. It has no hash here, so its Dell signature is checked.
+$script:DellWinPEFallback = @{ Url = 'https://downloads.dell.com/FOLDER15124725M/1/WinPE11.0-Drivers-A11-KHF4P.cab'; Version = 'A11'; WinPEVersion = 11 }
+
+# Intel RST/VMD storage drivers: without one of these, WinPE sees no SSD on a PC with VMD on.
+$script:VmdDriverNames = 'iaStorVD.inf', 'iaStorAC.inf', 'iaStorAVC.inf', 'iaVROC.inf', 'iaStorE.inf'
+
+function Test-VmdDriverPresent {
+    # True when a folder of drivers includes an Intel RST/VMD storage driver.
+    param([Parameter(Mandatory)][string]$Folder)
+    [bool](Get-ChildItem -Path $Folder -Filter *.inf -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in $script:VmdDriverNames } | Select-Object -First 1)
+}
+
 function Save-WinPEDriverPack {
     <#
     .SYNOPSIS
-        Downloads and extracts Dell's newest WinPE driver pack into the cache (once per version) and returns the
-        folder to add to boot.wim. New-DeploymentMedia.ps1 adds it to every build, so WinPE sees SSDs behind
-        Intel RST/VMD (the default on many 11th gen and later laptops) without changing the BIOS.
+        Downloads and extracts Dell's newest WinPE driver pack into the cache (once per version). Returns Path,
+        Source and Version, and HasVmd (an Intel RST/VMD driver is in it). New-DeploymentMedia.ps1 adds it to
+        every build, so WinPE sees SSDs behind Intel RST/VMD (the default on many 11th gen and later laptops).
+        Falls back to a known pack when the catalog lists none or can't be read.
     #>
     param([string]$CacheDir = (Get-DriverPackCacheDir), [string]$CatalogPath, [switch]$Refresh)
-    if (-not $CatalogPath) { $CatalogPath = Update-VendorCatalog -Maker Dell -CacheDir $CacheDir -Force:$Refresh }
-    $pack = ConvertFrom-DellWinPEDriverPacks -Path $CatalogPath | Select-Object -First 1
-    if (-not $pack) { throw 'The Dell catalog lists no WinPE driver pack.' }
+    $pack = $null; $why = $null
+    try {
+        if (-not $CatalogPath) { $CatalogPath = Update-VendorCatalog -Maker Dell -CacheDir $CacheDir -Force:$Refresh }
+        $pack = ConvertFrom-DellWinPEDriverPacks -Path $CatalogPath | Select-Object -First 1
+        if (-not $pack) { $why = 'the Dell catalog lists no WinPE pack' }
+    } catch { $why = "the Dell catalog could not be read ($($_.Exception.Message))" }
+    $fallback = -not $pack
+    if ($fallback) {
+        $f = $script:DellWinPEFallback
+        $pack = [pscustomobject]@{ Url = $f.Url; Version = $f.Version; WinPEVersion = $f.WinPEVersion; Hash = $null; HashType = $null
+            FileName = [IO.Path]::GetFileName(([uri]$f.Url).AbsolutePath); SizeMB = 34 }
+        Write-Host "Using the built-in Dell WinPE pack link: $why."
+    }
     $dest = Join-Path $CacheDir "WinPE\Dell-WinPE$($pack.WinPEVersion)-$($pack.Version)"
-    if (Test-Path (Join-Path $dest 'pack.json')) { return $dest }
-
-    $file = Join-Path $CacheDir "WinPE\$($pack.FileName)"
-    Write-Host "Downloading the Dell WinPE $($pack.WinPEVersion) driver pack $($pack.Version) ($($pack.SizeMB) MB)..."
-    Save-WebFile -Url $pack.Url -Destination $file -DisplayName 'Dell WinPE driver pack'
-    if ($pack.Hash) {
-        $actual = (Get-FileHash $file -Algorithm $pack.HashType).Hash
-        if ($actual -ne $pack.Hash) { Remove-Item $file -Force; throw "$($pack.FileName) failed its $($pack.HashType) check. Deleted it; build again." }
+    $source = "Dell WinPE $($pack.WinPEVersion) driver pack $($pack.Version)"
+    if (-not (Test-Path (Join-Path $dest 'pack.json'))) {
+        $file = Join-Path $CacheDir "WinPE\$($pack.FileName)"
+        Write-Host "Downloading the $source ($($pack.SizeMB) MB)..."
+        Save-WebFile -Url $pack.Url -Destination $file -DisplayName 'Dell WinPE driver pack'
+        if ($pack.Hash) {
+            $actual = (Get-FileHash $file -Algorithm $pack.HashType).Hash
+            if ($actual -ne $pack.Hash) { Remove-Item $file -Force; throw "$($pack.FileName) failed its $($pack.HashType) check. Deleted it; build again." }
+        } else {
+            try { Test-VendorSignature -File $file -Maker Dell } catch { Remove-Item $file -Force; throw }
+        }
+        $staging = "$dest.new"
+        if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+        Expand-VendorDriverPack -File $file -Maker Dell -Destination $staging
+        if (-not (Get-ChildItem -Path $staging -Filter *.inf -Recurse -File | Select-Object -First 1)) {
+            Remove-Item $staging -Recurse -Force
+            throw "No .inf files in $($pack.FileName)."
+        }
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        Move-Item $staging $dest
+        Remove-Item $file -Force
+        [ordered]@{ version = $pack.Version; winpe = $pack.WinPEVersion; url = $pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
     }
-    $staging = "$dest.new"
-    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
-    Expand-VendorDriverPack -File $file -Maker Dell -Destination $staging
-    if (-not (Get-ChildItem -Path $staging -Filter *.inf -Recurse -File | Select-Object -First 1)) {
-        Remove-Item $staging -Recurse -Force
-        throw "No .inf files in $($pack.FileName)."
-    }
-    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-    Move-Item $staging $dest
-    Remove-Item $file -Force
-    [ordered]@{ version = $pack.Version; winpe = $pack.WinPEVersion; url = $pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
-        ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
-    $dest
+    [pscustomobject]@{ Path = $dest; Source = $source; Version = $pack.Version; HasVmd = Test-VmdDriverPresent -Folder $dest; Fallback = $fallback }
 }
 
 function ConvertFrom-HpDriverPackCatalog {
@@ -408,7 +436,7 @@ function Install-VendorDriverPack {
 
 #endregion
 
-Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
+Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack

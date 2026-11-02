@@ -113,8 +113,7 @@ function Resolve-TargetDisk {
         Reason = ('This PC has no internal disk that WinPE can see, so Windows has nowhere to go. Nothing was erased. ' +
             "WinPE sees: $(if ($seen) { $seen -join '; ' } else { 'no disks at all' }). " +
             'The SSD is usually hidden by Intel RST/VMD (Dell 11th gen and later ship with it on): set SATA/NVMe Operation to AHCI/NVMe in the BIOS, ' +
-            'or rebuild the stick: every build now adds the Dell WinPE driver pack (Intel RST/VMD storage, network) to WinPE, ' +
-            'and .inf drivers in <content root>\Drivers\_WinPE are loaded at start.')
+            'or check the "WinPE drivers in this boot image" line above: it must say Intel RST/VMD storage driver: yes.')
     }
 }
 

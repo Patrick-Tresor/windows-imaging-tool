@@ -115,30 +115,38 @@ try {
     # Storage and network drivers for WinPE itself. Without the Intel RST/VMD driver, WinPE sees no SSD on PCs that
     # ship with VMD on (Dell 11th gen and later, and others), and the deploy stops with "No internal disk found".
     # Dell's WinPE pack is downloaded once into the cache; a build without internet carries on without it.
-    $peDriverDirs = @()
+    $peSources = @(); $peProblem = $null; $dellPe = $null
     if (-not $NoVendorWinPEDrivers) {
-        try { $peDriverDirs += Save-WinPEDriverPack }
-        catch { Write-Warning "Dell WinPE driver pack not added: $($_.Exception.Message) PCs with Intel RST/VMD on may show no internal disk in WinPE." }
+        try { $dellPe = Save-WinPEDriverPack; $peSources += [pscustomobject]@{ Path = $dellPe.Path; Name = $dellPe.Source } }
+        catch { $peProblem = "Dell WinPE driver pack not added: $($_.Exception.Message)"; Write-Warning "$peProblem PCs with Intel RST/VMD on will show no internal disk in WinPE." }
     }
-    if ($WinPEDrivers) { $peDriverDirs += $WinPEDrivers }
-    if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peDriverDirs += "$ContentSource\Drivers\_WinPE" }
-    foreach ($dir in $peDriverDirs) {
+    if ($WinPEDrivers) { $peSources += [pscustomobject]@{ Path = $WinPEDrivers; Name = 'Extra WinPE drivers' } }
+    if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peSources += [pscustomobject]@{ Path = "$ContentSource\Drivers\_WinPE"; Name = 'Drivers\_WinPE' } }
+    $peReport = @()
+    foreach ($src in $peSources) {
         # x64 drivers only (Dell's pack also has x86); one bad driver must not lose the others.
-        $infs = @(Get-WinPEDriverInfs -Folder $dir)
-        Write-Host "Adding $($infs.Count) WinPE driver(s) from $dir..."
-        $failed = 0
+        $infs = @(Get-WinPEDriverInfs -Folder $src.Path)
+        Write-Host "Adding $($infs.Count) WinPE driver(s) from $($src.Name) ($($src.Path))..."
+        $added = @(); $failed = @()
         foreach ($inf in $infs) {
-            try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null }
-            catch { $failed++; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
+            try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name }
+            catch { $failed += $inf.Name; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
         }
-        if ($failed) { Write-Warning "$failed of $($infs.Count) WinPE driver(s) from $dir could not be added (run with -Verbose to see which)." }
+        if ($failed) { Write-Warning "$($failed.Count) of $($infs.Count) WinPE driver(s) from $($src.Name) could not be added: $(($failed | Select-Object -Unique) -join ', ')" }
+        $peReport += [ordered]@{ name = $src.Name; added = $added.Count; failed = @($failed) ; vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
     }
+    $vmdAdded = @($peReport | ForEach-Object { $_.vmd }).Count -gt 0
+    if ($vmdAdded) { Write-Host "WinPE has the Intel RST/VMD storage driver ($((@($peReport | ForEach-Object { $_.vmd }) | Select-Object -Unique) -join ', '))." -ForegroundColor Green }
+    else { Write-Warning 'WinPE has no Intel RST/VMD storage driver: PCs with VMD on (many 11th gen and later laptops) will show no internal disk.' }
 
     $deployDir = Join-Path $mount 'Deploy'
     New-Item -ItemType Directory -Path "$deployDir\config" -Force | Out-Null
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
+    # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
+    [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
+        ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
     # USMT for answer files that migrate user data (ScanState runs in WinPE, LoadState on the deployed PC).
     $usmt = "$adk\User State Migration Tool\amd64"
     if (Test-Path "$usmt\scanstate.exe") { Copy-Item $usmt "$deployDir\USMT" -Recurse }
@@ -235,6 +243,12 @@ switch ($Target) {
             $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\"
             Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
             if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
+        }
+        # The Dell WinPE pack on the stick too, so WinPE can load it with drvload when boot.wim lacks a driver.
+        if ($dellPe) {
+            $peOnStick = "${dataLetter}:\Drivers\_WinPE\$(Split-Path $dellPe.Path -Leaf)"
+            New-Item -ItemType Directory -Path $peOnStick -Force | Out-Null
+            Copy-Item -Path (Join-Path $dellPe.Path '*') -Destination $peOnStick -Recurse -Force
         }
         Write-Host ''
         Write-Host '==============================================' -ForegroundColor Green

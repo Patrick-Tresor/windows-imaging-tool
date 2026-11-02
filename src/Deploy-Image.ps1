@@ -87,6 +87,8 @@ function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
 
 $script:Mounted = @{}
 $script:DiskNotes = @{}
+$script:PeDriversLoaded = $false
+$script:NoDiskLogged = $false
 $script:Win11Results = @{}
 
 function Get-ContentDiskNumber([string]$Root) {
@@ -116,8 +118,24 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
 
     # The disk Windows goes on: never the USB stick or the disk holding the content, even when the answer file
     # says disk 0 and the stick took that number. The wizard preselects it; the operator can still pick another.
-    $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude @(Get-ContentDiskNumber $Root)
-    if (-not $target.Disk) { Write-DeployLog $target.Reason -Level ERROR; throw $target.Short }
+    $exclude = @(Get-ContentDiskNumber $Root)
+    $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude $exclude
+    if (-not $target.Disk -and -not $script:PeDriversLoaded) {
+        # No internal disk: load the storage drivers on the stick or share (Drivers\_WinPE) and look again, once.
+        $script:PeDriversLoaded = $true
+        if (Import-WinPEDrivers -Folder (Join-Path $Root 'Drivers\_WinPE')) {
+            $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude $exclude
+        }
+    }
+    if (-not $target.Disk) {
+        # Logged once, however often the wizard's Next is pressed; the wizard shows the short line.
+        if (-not $script:NoDiskLogged) {
+            $script:NoDiskLogged = $true
+            Write-DeployLog $target.Reason -Level ERROR
+            foreach ($d in @(Get-DevicesWithoutDriver)) { Write-DeployLog "No driver in WinPE for: $d" -Level WARN }
+        }
+        throw $target.Short
+    }
     if ($target.Disk.Number -ne $Answer.DiskNumber) {
         if ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $($target.Reason)" -Level WARN }
         $Answer.DiskNumber = $target.Disk.Number
@@ -277,9 +295,8 @@ try {
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
     $root = Find-ContentRoot -SettingsPath $SettingsPath
-    # Storage and network drivers on the content root, loaded before any disk is looked at, so a stick can carry
-    # a driver (an Intel RST/VMD controller, a new NIC) that boot.wim was built without.
-    Import-WinPEDrivers -Folder (Join-Path $root 'Drivers\_WinPE')
+    # Which WinPE drivers this boot image was built with, so "no internal disk" can be explained from the log.
+    Write-WinPEDriverReport -Path (Join-Path $PSScriptRoot 'config\winpe-drivers.json')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
 
     # Settings on the content root (edited in the console) win over the copy baked into the media.
