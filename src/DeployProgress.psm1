@@ -13,11 +13,28 @@ function Read-ProgressFile {
     try { Get-Content -Raw -LiteralPath $Path -ErrorAction Stop | ConvertFrom-Json } catch { $null }
 }
 
+function Format-LogTailLine {
+    # A deploy log line as the window shows it: "12:01:05 Partitioning disk 0", "12:01:09 Warning: ...".
+    # Tool output (indented) and the commands themselves ("> dism.exe ...") return $null: they stay in View log.
+    param([string]$Line)
+    if (-not $Line.Trim() -or $Line -match '^\s') { return $null }
+    if ($Line -match '^\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d) \[(INFO|WARN|ERROR)\] (.*)$') {
+        if ($Matches[3].StartsWith('> ')) { return $null }
+        $prefix = @{ INFO = ''; WARN = 'Warning: '; ERROR = 'Error: ' }[$Matches[2]]
+        return "$($Matches[1]) $prefix$($Matches[3])"
+    }
+    $Line
+}
+
 function Get-LogTail {
-    # The last lines of the deploy log, for the window's details box.
+    # The last entries of the deploy log, short, for the window's details box.
     param([Parameter(Mandatory)][string]$Path, [int]$Lines = 14)
     if (-not (Test-Path -LiteralPath $Path)) { return @() }
-    try { @([IO.File]::ReadAllText($Path) -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last $Lines) } catch { @() }
+    try {
+        $fs = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $text = try { (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+        @($text -split "`r?`n" | ForEach-Object { Format-LogTailLine $_ } | Where-Object { $_ } | Select-Object -Last $Lines)
+    } catch { @() }
 }
 
 function Get-ProgressView {
@@ -98,7 +115,7 @@ function Get-ProgressView {
         Detail       = $detail
         Message      = $message
         Percent      = $percent
-        PercentText  = "$percent %$(if ($elapsed) { "    $(if ($finished) { 'Took' } else { 'Elapsed' }) $elapsed" })"
+        PercentText  = "Overall $percent %$(if ($elapsed) { "    $(if ($finished) { 'Took' } else { 'Elapsed' }) $elapsed" })"
         Color        = $color
         Hardware     = if ($Record) { ("$($Record.maker) $($Record.model)".Trim() + $(if ($Record.serial) { "   Serial $($Record.serial)" })) } else { '' }
         Facts        = $facts
@@ -122,28 +139,30 @@ function Test-ProgressRaise {
 
 function New-DeployProgressForm {
     # Builds the window. Returns its controls by name; Update-DeployProgressForm fills them from a view.
+    # FontScale makes every font bigger, so tests can check the layout with a font as tall as WinPE's.
+    param([single]$FontScale = 1)
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-    $font = New-Object Drawing.Font('Segoe UI', 10)
+    $font = New-Object Drawing.Font('Segoe UI', (10 * $FontScale))
     $ui = @{}
     $ui.Form = New-Object Windows.Forms.Form -Property @{
         Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $true
         BackColor = [Drawing.Color]::White
     }
-    $ui.Title = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 34)); Font = New-Object Drawing.Font('Segoe UI', 16) }
+    $ui.Title = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 34)); Font = New-Object Drawing.Font('Segoe UI', (16 * $FontScale)) }
     $ui.Hardware = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 52)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
     $ui.Facts = New-Object Windows.Forms.Label -Property @{
         Location = (New-Object Drawing.Point(224, 84)); Size = (New-Object Drawing.Size(672, 84))
-        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, 10)
+        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, (10 * $FontScale))
     }
-    $ui.Detail = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 174)); Size = (New-Object Drawing.Size(672, 44)); Font = New-Object Drawing.Font('Segoe UI', 11) }
+    $ui.Detail = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 174)); Size = (New-Object Drawing.Size(672, 44)); Font = New-Object Drawing.Font('Segoe UI', (11 * $FontScale)) }
     $ui.Bar = New-Object Windows.Forms.ProgressBar -Property @{ Location = (New-Object Drawing.Point(224, 222)); Size = (New-Object Drawing.Size(672, 26)); Minimum = 0; Maximum = 100; Style = 'Continuous' }
     $ui.Percent = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 252)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
     $ui.Message = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 276)); Size = (New-Object Drawing.Size(672, 44)) }
     $ui.Log = New-Object Windows.Forms.TextBox -Property @{
         Location = (New-Object Drawing.Point(224, 324)); Size = (New-Object Drawing.Size(672, 160)); Multiline = $true; ReadOnly = $true
-        ScrollBars = 'Vertical'; WordWrap = $false; BackColor = [Drawing.Color]::WhiteSmoke
-        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, 8)
+        ScrollBars = 'Vertical'; WordWrap = $true; BackColor = [Drawing.Color]::WhiteSmoke
+        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, (9 * $FontScale))
     }
     $ui.ViewLog  = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(224, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'View log' }
     $ui.Cmd      = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(330, 496)); Size = (New-Object Drawing.Size(150, 32)); Text = 'Command prompt' }
@@ -153,7 +172,35 @@ function New-DeployProgressForm {
     $ui.Form.Controls.AddRange(@($ui.Title, $ui.Hardware, $ui.Facts, $ui.Detail, $ui.Bar, $ui.Percent, $ui.Message, $ui.Log,
         $ui.ViewLog, $ui.Cmd, $ui.Change, $ui.Shutdown, $ui.Restart))
     $ui.Sidebar = New-DeploySidebar -Form $ui.Form
+    Update-DeployProgressLayout -Ui $ui
     $ui
+}
+
+function Update-DeployProgressLayout {
+    # Sizes each text to the font WinPE really has and stacks them, so no line is clipped; the log box takes
+    # what is left above the buttons. Run again when a text changes.
+    param([Parameter(Mandatory)][hashtable]$Ui)
+    $client = $Ui.Form.ClientSize
+    $left = 224; $width = $client.Width - $left - 24
+    foreach ($c in $Ui.Title, $Ui.Hardware, $Ui.Facts, $Ui.Detail, $Ui.Bar, $Ui.Percent, $Ui.Message, $Ui.Log) { $c.Left = $left; $c.Width = $width }
+    Set-FittedHeight -Control $Ui.Title -MaxLines 1
+    Set-FittedHeight -Control $Ui.Hardware -MaxLines 1
+    Set-FittedHeight -Control $Ui.Facts -MinLines 4 -MaxLines 4
+    Set-FittedHeight -Control $Ui.Detail -MaxLines 2
+    $Ui.Bar.Height = [Math]::Max(22, [int]($Ui.Percent.Font.Height * 1.2))
+    Set-FittedHeight -Control $Ui.Percent -MaxLines 1
+    Set-FittedHeight -Control $Ui.Message -MinLines $(if ($Ui.Message.Text) { 1 } else { 0 }) -MaxLines 2
+    if (-not $Ui.Message.Text) { $Ui.Message.Height = 0 }
+    $gaps = @{ $Ui.Hardware = 10; $Ui.Facts = 10; $Ui.Percent = 8 }
+    $top = Set-StackLayout -Controls @($Ui.Title, $Ui.Hardware, $Ui.Facts, $Ui.Detail, $Ui.Bar, $Ui.Percent, $Ui.Message) -Top 12 -Gap 2 -GapAfter $gaps
+
+    $bottom = $client.Height - 12
+    $buttonsTop = Set-ButtonRow -Buttons @($Ui.ViewLog, $Ui.Cmd) -Right $left -Bottom $bottom -FromLeft
+    [void](Set-ButtonRow -Buttons @($Ui.Shutdown, $Ui.Restart) -Right ($client.Width - 24) -Bottom $bottom)
+    [void](Set-ButtonRow -Buttons @($Ui.Change) -Right ($client.Width - 24) -Bottom $bottom)
+    $logTop = $top + 10
+    $Ui.Log.Top = $logTop
+    $Ui.Log.Height = [Math]::Max(40, $buttonsTop - 10 - $logTop)
 }
 
 function Update-DeployProgressForm {
@@ -173,6 +220,8 @@ function Update-DeployProgressForm {
     & $set $Ui.Detail $View.Detail
     & $set $Ui.Percent $View.PercentText
     & $set $Ui.Message $View.Message
+    $layoutKey = "$($View.Title)|$($View.Detail)|$($View.Message)"
+    if ($Ui.LayoutKey -cne $layoutKey) { $Ui.LayoutKey = $layoutKey; Update-DeployProgressLayout -Ui $Ui }
     $Ui.Message.ForeColor = if ($View.Color -eq 'Bad') { $colors.Bad } else { $colors.Warning }
     $Ui.Bar.Value = $View.Percent
     $log = $LogLines -join "`r`n"
@@ -252,5 +301,5 @@ function Show-DeployProgressWindow {
     $script:progress = $null
 }
 
-Export-ModuleMember -Function Read-ProgressFile, Get-LogTail, Get-ProgressView, Test-ProgressRaise, New-DeployProgressForm, Update-DeployProgressForm,
+Export-ModuleMember -Function Read-ProgressFile, Format-LogTailLine, Get-LogTail, Update-DeployProgressLayout, Get-ProgressView, Test-ProgressRaise, New-DeployProgressForm, Update-DeployProgressForm,
     Show-DeployProgressWindow

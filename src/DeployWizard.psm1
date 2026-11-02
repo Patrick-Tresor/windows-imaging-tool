@@ -19,7 +19,7 @@ function New-DeploySidebar {
     Set-FittingFont -Label $panel.Controls[0]
     $labels = for ($i = 0; $i -lt $script:DeploySteps.Count; $i++) {
         $l = New-Object Windows.Forms.Label -Property @{
-            Location = (New-Object Drawing.Point(14, (84 + 34 * $i))); Size = (New-Object Drawing.Size(180, 28))
+            Location = (New-Object Drawing.Point(14, (84 + 34 * $i))); Size = (New-Object Drawing.Size(180, 30))
             Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]
         }
         $panel.Controls.Add($l); $l
@@ -38,6 +38,72 @@ function Set-FittingFont {
         $font = New-Object Drawing.Font($font.FontFamily, ($font.Size - 0.5), $font.Style)
     }
     $Label.Font = $font
+}
+
+function Get-TextHeight {
+    # Pixels the text needs at this width with word wrap, in this font. WinPE has fewer fonts than Windows and
+    # its fallback is taller than Segoe UI, so fixed heights clipped the bottom of every line.
+    param([string]$Text, [Parameter(Mandatory)]$Font, [Parameter(Mandatory)][int]$Width, [int]$MinLines = 1)
+    $flags = [Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::TextBoxControl
+    $line = [Windows.Forms.TextRenderer]::MeasureText('Ag', $Font).Height
+    $h = if ($Text) { [Windows.Forms.TextRenderer]::MeasureText($Text, $Font, (New-Object Drawing.Size([Math]::Max(1, $Width), [int]::MaxValue)), $flags).Height } else { 0 }
+    [Math]::Max($h, $line * $MinLines)
+}
+
+function Set-FittedHeight {
+    <#
+    .SYNOPSIS
+        Makes a label or check box tall enough for its text (wrapped to its width), between MinLines and MaxLines.
+        Beyond MaxLines the text ends with "..." (AutoEllipsis): details belong in the log, not in a scroll bar.
+    #>
+    param([Parameter(Mandatory)]$Control, [int]$MinLines = 1, [int]$MaxLines = 0)
+    $room = $Control.Width - $Control.Padding.Horizontal - $(if ($Control -is [Windows.Forms.CheckBox]) { 24 } else { 2 })
+    $line = [Windows.Forms.TextRenderer]::MeasureText('Ag', $Control.Font).Height
+    $h = Get-TextHeight -Text $Control.Text -Font $Control.Font -Width $room -MinLines $MinLines
+    if ($MaxLines -gt 0 -and $h -gt $line * $MaxLines) {
+        $h = $line * $MaxLines
+        if ($Control -is [Windows.Forms.Label]) { $Control.AutoEllipsis = $true }
+    }
+    $Control.Height = $h + $Control.Padding.Vertical + 4
+}
+
+function Set-FittedButton {
+    # Widens and heightens a button until its text fits ("Command pro" was cut off in WinPE). Never shrinks it.
+    param([Parameter(Mandatory)]$Button, [int]$MinWidth = 100, [int]$MinHeight = 32)
+    $size = [Windows.Forms.TextRenderer]::MeasureText($Button.Text, $Button.Font)
+    $Button.Width = [Math]::Max($MinWidth, $size.Width + 24)
+    $Button.Height = [Math]::Max($MinHeight, $size.Height + 12)
+}
+
+function Set-StackLayout {
+    <#
+    .SYNOPSIS
+        Places controls one under the other from Top, each Gap pixels below the previous one, at their current
+        heights (Set-FittedHeight them first). Returns the bottom of the last one. Pass only the controls that
+        are shown: hidden ones leave no gap.
+    #>
+    param([Parameter(Mandatory)][object[]]$Controls, [int]$Top = 0, [int]$Gap = 4, [hashtable]$GapAfter = @{})
+    $y = $Top
+    foreach ($c in $Controls) {
+        $c.Top = $y
+        $y = $c.Bottom + $(if ($GapAfter.ContainsKey($c)) { $GapAfter[$c] } else { $Gap })
+    }
+    $y - $Gap
+}
+
+function Set-ButtonRow {
+    # Fits each button to its text, then lines them up from the right edge leftwards, bottoms at Bottom.
+    param([Parameter(Mandatory)][object[]]$Buttons, [Parameter(Mandatory)][int]$Right, [Parameter(Mandatory)][int]$Bottom, [int]$Gap = 6, [switch]$FromLeft)
+    foreach ($b in $Buttons) { Set-FittedButton -Button $b }
+    $h = ($Buttons | Measure-Object -Property Height -Maximum).Maximum
+    if ($FromLeft) {
+        $x = $Right
+        foreach ($b in $Buttons) { $b.Height = $h; $b.Top = $Bottom - $h; $b.Left = $x; $x = $b.Right + $Gap }
+    } else {
+        $x = $Right
+        foreach ($b in @($Buttons)[($Buttons.Count - 1)..0]) { $b.Height = $h; $b.Top = $Bottom - $h; $b.Left = $x - $b.Width; $x = $b.Left - $Gap }
+    }
+    $Bottom - $h
 }
 
 function Set-DeploySidebarStep {
@@ -177,7 +243,7 @@ function Show-DeployWizard {
     $font = New-Object Drawing.Font('Segoe UI', 10)
 
     $form = New-Object Windows.Forms.Form -Property @{
-        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 500); Font = $font
+        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
         TopMost = $true; BackColor = [Drawing.Color]::White
     }
@@ -202,7 +268,8 @@ function Show-DeployWizard {
     }
 
     # Page 0: answer file.
-    $pages[0].Controls.Add((New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Answer file' }))
+    $w.ListLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Answer file' }
+    $pages[0].Controls.Add($w.ListLabel)
     $w.List = New-Object Windows.Forms.ListBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(300, 290)); IntegralHeight = $false }
     $w.List.Items.AddRange([object[]]$AnswerFiles)
     $w.About = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(316, 24)); Size = (New-Object Drawing.Size(356, 290)) }
@@ -210,23 +277,21 @@ function Show-DeployWizard {
 
     # Page 1: computer name, OU, disk.
     $w.NameBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(300, 26)); MaxLength = 15; CharacterCasing = 'Upper' }
-    $w.NameHint = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(316, 26)); Size = (New-Object Drawing.Size(356, 40)); ForeColor = [Drawing.Color]::DimGray }
+    # The hint goes under the box: beside it, a second line had no room and was cut off.
+    $w.NameHint = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 54)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
     $w.JoinLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 70)); Size = (New-Object Drawing.Size(672, 22)) }
     $w.OuLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 100)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Organizational unit (empty for the default Computers container)' }
     $w.OuBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(0, 124)); Size = (New-Object Drawing.Size(672, 26)) }
     $w.DiskBox = New-Object Windows.Forms.ComboBox -Property @{ Location = (New-Object Drawing.Point(0, 194)); Size = (New-Object Drawing.Size(672, 26)); DropDownStyle = 'DropDownList' }
     foreach ($d in $Disks) { [void]$w.DiskBox.Items.Add((Format-DiskChoice $d)) }
-    $pages[1].Controls.AddRange(@(
-        (New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(300, 22)); Text = 'Computer name' }),
-        $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox,
-        (New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 170)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Disk to erase and install Windows on' }),
-        $w.DiskBox))
+    $w.NameLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Computer name' }
+    $w.DiskLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 170)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Disk to erase and install Windows on' }
+    $pages[1].Controls.AddRange(@($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox))
 
     # Page 2: applications.
     $w.Apps = New-Object Windows.Forms.CheckedListBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(672, 290)); CheckOnClick = $true; IntegralHeight = $false }
-    $pages[2].Controls.AddRange(@(
-        (New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Applications installed at first boot (ticked ones, top to bottom)' }),
-        $w.Apps))
+    $w.AppsLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Applications installed at first boot (ticked ones, top to bottom)' }
+    $pages[2].Controls.AddRange(@($w.AppsLabel, $w.Apps))
 
     # Page 3: summary and confirmation.
     $w.Summary = New-Object Windows.Forms.TextBox -Property @{
@@ -236,7 +301,9 @@ function Show-DeployWizard {
     $w.Confirm = New-Object Windows.Forms.CheckBox -Property @{ Location = (New-Object Drawing.Point(0, 276)); Size = (New-Object Drawing.Size(672, 26)); ForeColor = [Drawing.Color]::Firebrick }
     $pages[3].Controls.AddRange(@($w.Summary, $w.Confirm))
 
-    $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Form = $form
+    $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Cancel = $cancel; $w.Form = $form
+    $w.HwLabel = $hwLabel; $w.IsDomain = $true
+    $w.Layout = { Update-DeployWizardLayout -Wiz $script:wiz }
 
     $w.Show = {
         $w = $script:wiz
@@ -247,6 +314,7 @@ function Show-DeployWizard {
         $w.Next.Text = if ($w.Page -eq 3) { 'Deploy' } else { 'Next >' }
         $w.Next.Enabled = if ($w.Page -eq 3) { $w.Confirm.Checked } else { $true }
         $w.Error.Text = ''
+        & $w.Layout
     }
 
     $w.List.add_SelectedIndexChanged({
@@ -294,7 +362,7 @@ function Show-DeployWizard {
                     }
                     $isDomain = $a.Membership -eq 'Domain'
                     $w.JoinLabel.Text = if ($isDomain) { "Joins the domain $($a.Domain)" } else { "Joins the workgroup $($a.Workgroup)" }
-                    $w.OuLabel.Visible = $isDomain; $w.OuBox.Visible = $isDomain
+                    $w.OuLabel.Visible = $isDomain; $w.OuBox.Visible = $isDomain; $w.IsDomain = $isDomain
                     $w.OuBox.Text = "$($a.OrganizationalUnit)"
                     if (-not $w.Disks) { throw 'This PC has no internal disk that Windows can be installed on.' }
                     $w.DiskBox.SelectedIndex = 0
@@ -329,7 +397,7 @@ function Show-DeployWizard {
             $w.Page++
             & $w.Show
         }
-        catch { $w.Error.Text = $_.Exception.Message }
+        catch { $w.Error.Text = $_.Exception.Message; Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2 }
         finally { $w.Form.Cursor = [Windows.Forms.Cursors]::Default }
     })
 
@@ -344,10 +412,58 @@ function Show-DeployWizard {
     $result
 }
 
+function Update-DeployWizardLayout {
+    <#
+    .SYNOPSIS
+        Sizes every label, check box and button of the wizard to its text in the font WinPE really has, and
+        stacks them so nothing overlaps or is clipped. Run again whenever texts change (each page).
+    #>
+    param([Parameter(Mandatory)][hashtable]$Wiz)
+    $w = $Wiz
+    $client = $w.Form.ClientSize
+    $left = $w.Title.Left; $width = $client.Width - $left - 24
+    foreach ($c in $w.Title, $w.HwLabel, $w.Error) { $c.Left = $left; $c.Width = $width }
+    Set-FittedHeight -Control $w.Title -MaxLines 1
+    Set-FittedHeight -Control $w.HwLabel -MaxLines 1
+    $headerBottom = Set-StackLayout -Controls @($w.Title, $w.HwLabel) -Top 12 -Gap 2
+
+    $buttonsTop = Set-ButtonRow -Buttons @($w.Back, $w.Next, $w.Cancel) -Right ($client.Width - 24) -Bottom ($client.Height - 12)
+    Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2
+    $w.Error.Top = $buttonsTop - 6 - $w.Error.Height
+
+    $pageTop = $headerBottom + 10
+    $pageHeight = [Math]::Max(120, $w.Error.Top - 6 - $pageTop)
+    foreach ($p in $w.Pages) { $p.SetBounds($left, $pageTop, $width, $pageHeight) }
+
+    # Page 0: label, then the list and what the answer file does side by side.
+    $w.ListLabel.Width = $width; Set-FittedHeight -Control $w.ListLabel -MaxLines 1
+    $top = $w.ListLabel.Bottom + 2
+    $w.List.SetBounds(0, $top, [int]($width * 0.45), $pageHeight - $top)
+    $w.About.SetBounds($w.List.Right + 16, $top, $width - $w.List.Right - 16, $pageHeight - $top)
+
+    # Page 1: one field under the other; the OU only for a domain join.
+    foreach ($c in $w.NameLabel, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.DiskLabel) { $c.Width = $width; Set-FittedHeight -Control $c -MaxLines 2 }
+    $w.OuBox.Width = $width; $w.DiskBox.Width = $width
+    $rows = @($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel)
+    if ($w.IsDomain) { $rows += $w.OuLabel, $w.OuBox }
+    $rows += $w.DiskLabel, $w.DiskBox
+    $gaps = @{}; foreach ($c in $w.NameHint, $w.JoinLabel, $w.OuBox) { $gaps[$c] = 12 }
+    [void](Set-StackLayout -Controls $rows -Top 0 -Gap 2 -GapAfter $gaps)
+
+    # Page 2: label, then the list.
+    $w.AppsLabel.Width = $width; Set-FittedHeight -Control $w.AppsLabel -MaxLines 2
+    $w.Apps.SetBounds(0, $w.AppsLabel.Bottom + 2, $width, $pageHeight - $w.AppsLabel.Bottom - 2)
+
+    # Page 3: summary above the confirmation box.
+    $w.Confirm.Width = $width; Set-FittedHeight -Control $w.Confirm -MaxLines 2
+    $w.Confirm.Top = $pageHeight - $w.Confirm.Height
+    $w.Summary.SetBounds(0, 0, $width, $w.Confirm.Top - 8)
+}
+
 function Test-DeployWizardAvailable {
     # WinForms needs the WinPE-NetFX component. Without it Deploy-Image falls back to console prompts.
     try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
     Show-DeployWizard, Test-DeployWizardAvailable
