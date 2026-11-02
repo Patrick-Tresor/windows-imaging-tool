@@ -48,7 +48,8 @@ function Get-CpuWin11Support {
 
 function Get-Win11ReadinessFacts {
     # Reads the hardware in WinPE. A value is $null when it could not be read.
-    param([int]$DiskNumber = 0, [bool]$IsUefi)
+    # Pass the target disk (Resolve-TargetDisk in DeployWizard.psm1) as -Disk; -DiskNumber is read only without it.
+    param([int]$DiskNumber = 0, [bool]$IsUefi, $Disk)
 
     $tpm = $null; $tpmError = $null
     try { $tpm = Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm -ErrorAction Stop }
@@ -66,7 +67,7 @@ function Get-Win11ReadinessFacts {
     $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
     $memBytes = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum
     if (-not $memBytes) { $memBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory }
-    $disk = Get-Disk -Number $DiskNumber -ErrorAction SilentlyContinue
+    $disk = if ($Disk) { $Disk } else { Get-Disk -Number $DiskNumber -ErrorAction SilentlyContinue }
 
     [pscustomobject]@{
         IsUefi          = $IsUefi
@@ -81,6 +82,7 @@ function Get-Win11ReadinessFacts {
         CpuMHz          = [int]$cpu.MaxClockSpeed
         MemoryGB        = [math]::Round($memBytes / 1GB, 1)
         DiskGB          = if ($disk) { [math]::Round($disk.Size / 1GB) } else { $null }
+        DiskText        = if ($disk) { "disk $($disk.Number), $("$($disk.FriendlyName)".Trim()), $($disk.BusType)" } else { $null }
     }
 }
 
@@ -126,9 +128,11 @@ function Test-Win11Readiness {
     elseif ($f.MemoryGB -lt 3.8) { & $row 'Memory' 'Fail' "$($f.MemoryGB) GB; Windows 11 needs 4 GB." }
     else { & $row 'Memory' 'Pass' "$($f.MemoryGB) GB" }
 
+    # The disk Windows goes on, never the USB stick: DiskText names which one was measured.
+    $diskText = if ($f.PSObject.Properties['DiskText'] -and $f.DiskText) { " ($($f.DiskText))" } else { '' }
     if ($null -eq $f.DiskGB) { & $row 'Disk' 'Warn' 'Could not read the target disk size.' }
-    elseif ($f.DiskGB -lt 64) { & $row 'Disk' 'Fail' "$($f.DiskGB) GB; Windows 11 needs 64 GB." }
-    else { & $row 'Disk' 'Pass' "$($f.DiskGB) GB" }
+    elseif ($f.DiskGB -lt 64) { & $row 'Disk' 'Fail' "The disk Windows would go on$diskText is $($f.DiskGB) GB; Windows 11 needs 64 GB. Fit a bigger SSD or deploy a Windows 10 answer file." }
+    else { & $row 'Disk' 'Pass' "$($f.DiskGB) GB$diskText" }
 }
 
 function Test-Win11Image {

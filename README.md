@@ -151,6 +151,15 @@ on, UEFI boot, Secure Boot, a processor on Microsoft's supported list (Intel
 4 GB of memory and a 64 GB target disk. Each result goes to the deploy log and
 the summary shows `Windows 11: ready` or `NOT READY: TPM 2.0, Processor`.
 
+The target disk is the internal disk Windows will go on, never the USB stick
+or the disk holding the content: WinPE often numbers the stick disk 0, so when
+the answer file's disk is USB, a card reader or missing, the first internal
+disk (NVMe, then SATA) is used instead and the log says so. The Disk line in
+the log names the disk it measured. When WinPE sees no internal disk at all
+(Dell 11th gen and later ship with Intel RST/VMD on, which hides the SSD from
+plain WinPE), the wizard says so: set SATA/NVMe Operation to AHCI/NVMe in the
+BIOS, or add the Intel RST VMD driver under Extra WinPE drivers.
+
 - **Block**: a failed requirement stops the deploy with nothing erased. Fix it
   in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10
   answer file, or run `Deploy-Image.ps1 -IgnoreWindows11Check` to deploy anyway.

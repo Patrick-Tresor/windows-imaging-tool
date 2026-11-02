@@ -86,6 +86,15 @@ function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
 }
 
 $script:Mounted = @{}
+$script:DiskNotes = @{}
+$script:Win11Results = @{}
+
+function Get-ContentDiskNumber([string]$Root) {
+    # The disk the content root is on (the USB stick's DEPLOY partition), or nothing for a network share.
+    if ($Root -notmatch '^([A-Za-z]):') { return }
+    try { (Get-Partition -DriveLetter $Matches[1] -ErrorAction Stop).DiskNumber } catch { }
+}
+
 function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
@@ -105,8 +114,18 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     }
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 
+    # The disk Windows goes on: never the USB stick or the disk holding the content, even when the answer file
+    # says disk 0 and the stick took that number. The wizard preselects it; the operator can still pick another.
+    $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude @(Get-ContentDiskNumber $Root)
+    if (-not $target.Disk) { throw $target.Reason }
+    if ($target.Disk.Number -ne $Answer.DiskNumber) {
+        if ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $($target.Reason)" -Level WARN }
+        $Answer.DiskNumber = $target.Disk.Number
+    } elseif ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $(Format-DiskChoice $target.Disk), $($target.Reason)" }
+    $script:DiskNotes[$Answer.Name] = $target.Reason
+
     # Windows 11 hardware requirements are checked now, before the disk is wiped.
-    $win11 = Invoke-Windows11Check -Answer $Answer -ImagePath $imagePath -Hardware $Hardware -Override $IgnoreWin11
+    $win11 = Invoke-Windows11Check -Answer $Answer -ImagePath $imagePath -Hardware $Hardware -Override $IgnoreWin11 -Disk $target.Disk
 
     $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
     $driverMatch = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
@@ -146,21 +165,30 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     }
 }
 
-function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Override) {
+function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Override, $Disk) {
     # Logs each requirement and throws when the answer file blocks unsupported PCs. Returns the summary line.
+    # The hardware does not change while WinPE runs, so each disk is checked and logged once, however often
+    # the wizard's Next is pressed.
     if ($Answer.Windows11Check -eq 'Off') { return 'not checked (off in the answer file)' }
     $isWin11 = Test-Win11Image -ImagePath $ImagePath -Index $Answer.ImageIndex
     if ($isWin11 -eq $false) { return 'not needed (Windows 10 image)' }
-    $results = @(Test-Win11Readiness -Facts (Get-Win11ReadinessFacts -DiskNumber $Answer.DiskNumber -IsUefi $Hardware.IsUefi))
-    foreach ($r in $results) {
-        $level = @{ Pass = 'INFO'; Warn = 'WARN'; Fail = 'ERROR' }[$r.Result]
-        Write-DeployLog ("Windows 11 {0}: {1} ({2})" -f $r.Check, $r.Result.ToUpperInvariant(), $r.Detail) -Level $level
+    $key = "$($Disk.Number)"
+    $results = $script:Win11Results[$key]
+    if (-not $results) {
+        $results = @(Test-Win11Readiness -Facts (Get-Win11ReadinessFacts -Disk $Disk -DiskNumber $Answer.DiskNumber -IsUefi $Hardware.IsUefi))
+        foreach ($r in $results) {
+            $level = @{ Pass = 'INFO'; Warn = 'WARN'; Fail = 'ERROR' }[$r.Result]
+            Write-DeployLog ("Windows 11 {0}: {1} ({2})" -f $r.Check, $r.Result.ToUpperInvariant(), $r.Detail) -Level $level
+        }
+        $script:Win11Results[$key] = $results
     }
     $decision = Get-Win11ReadinessDecision -Mode $Answer.Windows11Check -IsWin11 $isWin11 -Results $results -Override:$Override
     if ($null -eq $isWin11) { Write-DeployLog 'Could not tell whether the image is Windows 11; requirements are shown but never block.' -Level WARN }
     if ($decision.Action -eq 'Block') {
-        throw "This PC does not meet the Windows 11 requirements ($($decision.Summary -replace '^NOT READY: ')). Nothing was erased. " +
-              'Fix it in the firmware settings, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.'
+        # Say what failed, not only which check: "Disk: The disk Windows would go on (disk 1, ...) is 58 GB; ..."
+        $why = @($results | Where-Object Result -eq 'Fail' | ForEach-Object { "$($_.Check): $($_.Detail)" }) -join ' '
+        throw "This PC does not meet the Windows 11 requirements. $why Nothing was erased. " +
+              'Fix it, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.'
     }
     if ($decision.Failed -and $Override) { Write-DeployLog 'Deploying anyway: -IgnoreWindows11Check' -Level WARN }
     $decision.Summary
@@ -316,7 +344,7 @@ try {
     if (-not $confirmed -and (Test-DeployWizardAvailable)) {
         Set-DeployStatus -Step 'Waiting for the operator' -Percent 5
         $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
-            -ReadAnswer $readAnswer -PreparePlan $preparePlan
+            -ReadAnswer $readAnswer -PreparePlan $preparePlan -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root))
         if (-not $choice) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
         $answer = $choice.Answer; $deployPlan = $choice.Plan; $ComputerName = $choice.ComputerName
         $confirmed = $true

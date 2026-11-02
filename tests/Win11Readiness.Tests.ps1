@@ -68,6 +68,11 @@ Assert-Equal (Test-One @{ CpuCores = 1 } 'Processor') 'Fail' 'single core fails'
 Assert-Equal (Test-One @{ MemoryGB = 3.9 } 'Memory') 'Pass' '4 GB that reads as 3.9 passes'
 Assert-Equal (Test-One @{ MemoryGB = 2 } 'Memory') 'Fail' '2 GB fails'
 Assert-Equal (Test-One @{ DiskGB = 32 } 'Disk') 'Fail' '32 GB disk fails'
+$small = $good.PSObject.Copy(); $small.DiskGB = 58
+$small | Add-Member -NotePropertyName DiskText -NotePropertyValue 'disk 1, KIOXIA 64GB, NVMe'
+Assert-Equal (Test-Win11Readiness -Facts $small | Where-Object Check -eq 'Disk').Detail 'The disk Windows would go on (disk 1, KIOXIA 64GB, NVMe) is 58 GB; Windows 11 needs 64 GB. Fit a bigger SSD or deploy a Windows 10 answer file.' 'small disk fails and names the disk measured'
+$big = $good.PSObject.Copy(); $big | Add-Member -NotePropertyName DiskText -NotePropertyValue 'disk 1, PM9A1, NVMe'
+Assert-Equal (Test-Win11Readiness -Facts $big | Where-Object Check -eq 'Disk').Detail '477 GB (disk 1, PM9A1, NVMe)' 'passing disk check names the disk measured'
 
 # Image detection.
 Assert-Equal (Test-Win11Image -ImagePath 'Images\x.wim' -ImageInfo ([pscustomobject]@{ Version = '10.0.26100.1742'; ImageName = 'Windows Enterprise' })) 'True' 'build 26100 is Windows 11'
