@@ -101,21 +101,44 @@ function Get-WinPEDriverInfs {
 }
 
 function Import-WinPEDrivers {
-    # Loads drivers into the running WinPE with drvload, then rescans storage. Nothing happens without the folder.
+    # Loads drivers into the running WinPE with drvload, then rescans storage. True when at least one loaded.
     param([Parameter(Mandatory)][string]$Folder)
-    if (-not (Test-Path $Folder)) { return }
+    if (-not (Test-Path $Folder)) { Write-DeployLog "No WinPE drivers to load: $Folder does not exist"; return $false }
     $infs = @(Get-WinPEDriverInfs -Folder $Folder)
-    if (-not $infs) { return }
-    Write-DeployLog "Loading $($infs.Count) WinPE driver(s) from $Folder"
+    if (-not $infs) { Write-DeployLog "No WinPE drivers to load in $Folder"; return $false }
     $failed = 0
     foreach ($inf in $infs) {
         & drvload.exe $inf.FullName | Out-Null
-        if ($LASTEXITCODE -ne 0) { $failed++; Write-DeployLog "drvload failed ($LASTEXITCODE): $($inf.FullName)" -Level WARN }
+        if ($LASTEXITCODE -ne 0) { $failed++ }
     }
-    if ($failed -lt $infs.Count) {
-        try { Update-HostStorageCache -ErrorAction Stop } catch { }
-        Start-Sleep -Seconds 2   # a newly loaded storage controller takes a moment to list its disks
-    }
+    Write-DeployLog "Loaded $($infs.Count - $failed) of $($infs.Count) WinPE driver(s) from $Folder" -Level $(if ($failed -eq $infs.Count) { 'WARN' } else { 'INFO' })
+    if ($failed -eq $infs.Count) { return $false }
+    try { Update-HostStorageCache -ErrorAction Stop } catch { }
+    Start-Sleep -Seconds 3   # a newly loaded storage controller takes a moment to list its disks
+    $true
+}
+
+function Format-WinPEDriverReport {
+    # One log line from config\winpe-drivers.json (written by New-DeploymentMedia.ps1); $null Report means an older build.
+    param($Report)
+    if (-not $Report) { return 'This boot image has no WinPE driver report: it was built before WinPE drivers were added. Rebuild the media.' }
+    $parts = @(foreach ($s in @($Report.sources)) { "$($s.name): $($s.added) added$(if (@($s.failed).Count) { ", $(@($s.failed).Count) failed" })" })
+    $text = if ($parts) { "WinPE drivers in this boot image (built $($Report.built)): $($parts -join '; ')." } else { "No extra WinPE drivers in this boot image (built $($Report.built))." }
+    if ($Report.problem) { $text += " $($Report.problem)" }
+    $text + $(if ($Report.vmd) { ' Intel RST/VMD storage driver: yes.' } else { ' Intel RST/VMD storage driver: NO, so an SSD behind VMD stays hidden.' })
+}
+
+function Write-WinPEDriverReport {
+    param([Parameter(Mandatory)][string]$Path)
+    $r = if (Test-Path $Path) { try { Get-Content -Raw $Path | ConvertFrom-Json } catch { $null } } else { $null }
+    Write-DeployLog (Format-WinPEDriverReport $r) -Level $(if ($r -and $r.vmd) { 'INFO' } else { 'WARN' })
+}
+
+function Get-DevicesWithoutDriver {
+    # Devices WinPE found but has no driver for (code 28), storage controllers first: "Name (PCI\VEN_8086&DEV_9A0B)".
+    $devs = @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { $_.ConfigManagerErrorCode -eq 28 })
+    $devs | Sort-Object @{ Expression = { if ("$($_.DeviceID)" -match 'VEN_8086&DEV_(9A0B|467F|A77F|7D0B|AD0B)') { 0 } else { 1 } } } |
+        ForEach-Object { '{0} ({1})' -f $(if ($_.Name) { $_.Name } else { 'unknown device' }), ("$($_.DeviceID)" -replace '&SUBSYS.*$', '') }
 }
 
 function Test-UefiBoot {
@@ -407,5 +430,5 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Get-WinPEDriverInfs, Import-WinPEDrivers, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState

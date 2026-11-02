@@ -81,6 +81,14 @@ try {
 }
 finally { Remove-Item $pe -Recurse -Force -ErrorAction SilentlyContinue }
 
+# The log line saying which WinPE drivers the boot image has (config\winpe-drivers.json from the build).
+Assert-Equal (Format-WinPEDriverReport $null) 'This boot image has no WinPE driver report: it was built before WinPE drivers were added. Rebuild the media.' 'winpe report: older build'
+$report = [pscustomobject]@{ built = '2026-11-02 10:40'; vmd = $true; problem = $null
+    sources = @([pscustomobject]@{ name = 'Dell WinPE 11 driver pack A11'; added = 87; failed = @('bad.inf') }) }
+Assert-Equal (Format-WinPEDriverReport $report) 'WinPE drivers in this boot image (built 2026-11-02 10:40): Dell WinPE 11 driver pack A11: 87 added, 1 failed. Intel RST/VMD storage driver: yes.' 'winpe report: pack added with VMD'
+$report = [pscustomobject]@{ built = '2026-11-02 10:40'; vmd = $false; problem = 'Dell WinPE driver pack not added: no internet.'; sources = @() }
+Assert-Equal (Format-WinPEDriverReport $report) 'No extra WinPE drivers in this boot image (built 2026-11-02 10:40). Dell WinPE driver pack not added: no internet. Intel RST/VMD storage driver: NO, so an SSD behind VMD stays hidden.' 'winpe report: download failed'
+
 # Sidebar text fits its labels even when the font renders wider than Segoe UI (WinPE cut off "Deploy Win").
 if ($env:OS -eq 'Windows_NT') {
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing

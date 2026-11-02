@@ -29,6 +29,15 @@ Assert-Equal (($dell | Where-Object Model -eq 'Latitude 5540').Skus -join ',') '
 $pe = @(ConvertFrom-DellWinPEDriverPacks -Path (Join-Path $fixtures 'DriverPackCatalog.xml'))
 Assert-Equal ($pe | ForEach-Object { "$($_.WinPEVersion) $($_.Version)" }) '11 A02 10 A33' 'dell winpe: only winpe packs, newest WinPE first'
 Assert-Equal "$($pe[0].Url)|$($pe[0].HashType)|$($pe[0].FileName)" 'https://downloads.dell.com/FOLDER3/1/WinPE11.0-Drivers-A02.CAB|MD5|WinPE11.0-Drivers-A02.CAB' 'dell winpe: url, hash and file name'
+$vmdDir = Join-Path ([IO.Path]::GetTempPath()) ("vmd-" + [guid]::NewGuid())
+try {
+    New-Item -ItemType Directory -Path (Join-Path $vmdDir 'x64/network') -Force | Out-Null
+    Set-Content (Join-Path $vmdDir 'x64/network/e1d.inf') 'inf'
+    Assert-Equal (Test-VmdDriverPresent -Folder $vmdDir) $false 'vmd: a pack without iaStorVD has no VMD driver'
+    New-Item -ItemType Directory -Path (Join-Path $vmdDir 'x64/storage/RST') -Force | Out-Null
+    Set-Content (Join-Path $vmdDir 'x64/storage/RST/iaStorVD.inf') 'inf'
+    Assert-Equal (Test-VmdDriverPresent -Folder $vmdDir) $true 'vmd: iaStorVD.inf is the VMD driver'
+} finally { Remove-Item $vmdDir -Recurse -Force -ErrorAction SilentlyContinue }
 
 # HP: SoftPaq joined by id, SystemId list split, ftp/http rewritten to https, rows with a missing SoftPaq skipped.
 $hp = @(ConvertFrom-HpDriverPackCatalog -Path (Join-Path $fixtures 'HPClientDriverPackCatalog.xml'))
