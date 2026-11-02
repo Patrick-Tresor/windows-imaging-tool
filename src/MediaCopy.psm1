@@ -52,18 +52,17 @@ function Get-MediaCopyPlan {
             [void]$dirs.Add((($d.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'))
         }
         foreach ($f in Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
-            [void]$items.Add([pscustomobject]@{
-                Relative = ($f.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'
-                Source   = $f.FullName
-                Length   = [int64]$f.Length
-            })
+            $rel = $f.FullName.Substring($rootFull.Length + 1) -replace '/', '\'
+            $row = [pscustomobject]@{ Relative = $rel; Source = $f.FullName; Length = [int64]$f.Length }
+            [void]$items.Add($row)
         }
     }
     foreach ($file in @($Files | Where-Object { $_ })) {
         $full = Join-CopyPath $ContentRoot $file
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $missing += $file; continue }
         $f = Get-Item -LiteralPath $full -Force
-        [void]$items.Add([pscustomobject]@{ Relative = ($file -replace '/', '\'); Source = $f.FullName; Length = [int64]$f.Length })
+        $row = [pscustomobject]@{ Relative = ($file -replace '/', '\'); Source = $f.FullName; Length = [int64]$f.Length }
+        [void]$items.Add($row)
     }
     $total = [int64]0
     foreach ($i in $items) { $total += $i.Length }
