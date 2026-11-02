@@ -94,6 +94,10 @@ foreach ($f in Get-ChildItem (Join-Path $repo 'src') -Recurse -Include *.ps1, *.
     Assert-Equal $bad.Count 0 "$($f.Name): no value on a flag-only DISM switch"
 }
 
+# Progress while drivers go into boot.wim: number, folder and name, elapsed time.
+Assert-Equal (Format-DriverProgressLine -Index 5 -Total 76 -Path 'C:\Cache\Dell-WinPE11-A11\winpe\x64\storage\iaStorVD.inf' -Root 'C:\Cache\Dell-WinPE11-A11' -Elapsed ([TimeSpan]::FromSeconds(42))) '[ 5/76] storage\iaStorVD.inf  (0:42)' 'driver progress: number, folder, name, time'
+Assert-Equal (Format-DriverProgressLine -Index 1 -Total 1 -Path 'D:\PE\net.inf' -Root 'D:\PE') '[1/1] net.inf  (0:00)' 'driver progress: file at the root has no folder'
+
 # The log line saying which WinPE drivers the boot image has (config\winpe-drivers.json from the build).
 Assert-Equal (Format-WinPEDriverReport $null) 'This boot image has no WinPE driver report: it was built before WinPE drivers were added. Rebuild the media.' 'winpe report: older build'
 $report = [pscustomobject]@{ built = '2026-11-02 10:40'; vmd = $true; problem = $null
