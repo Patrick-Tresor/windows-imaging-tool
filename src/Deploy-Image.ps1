@@ -245,6 +245,19 @@ function Start-ProgressWindow([string]$ProgressPath) {
     }
 }
 
+$script:LastDashboardWrite = [datetime]::MinValue
+function Update-NativeStepStatus([string]$Step, [Nullable[int]]$Percent) {
+    # Progress of a running DISM step. The local window gets every update; the dashboard (a file on a share)
+    # every 15 s, which is also its heartbeat.
+    $update = @{}
+    if ($Step) { $update.Step = $Step }
+    if ($null -ne $Percent) { $update.Percent = $Percent }
+    if (((Get-Date) - $script:LastDashboardWrite).TotalSeconds -ge 15) {
+        $script:LastDashboardWrite = Get-Date
+        Set-DeployStatus @update
+    } else { Set-DeployStatus -LocalOnly @update }
+}
+
 function Connect-StatusFolder([string]$Root, $Settings) {
     # Where this PC reports progress for the console's dashboard (see Resolve-StatusTarget). $null if unreachable.
     $report = if ($Settings.PSObject.Properties['reporting']) { $Settings.reporting.path } else { $null }
@@ -282,6 +295,8 @@ $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null
 $job = $null; $adapters = @(); $progressWindow = $false
 $status = 'FAILED'; $failure = $null
 try {
+    # A wide console whose lines wrap instead of running off the right edge.
+    Set-DeployConsole
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
         $hw.Maker, $hw.Model, $hw.MachineType, $hw.Sku, $hw.Serial, $hw.IsUefi)
@@ -488,19 +503,26 @@ try {
     # Split images (.swm) need /SWMFile.
     $applyArgs = @('/Apply-Image', "/ImageFile:$applyFrom", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
     if ($applyFrom -like '*.swm') { $applyArgs += "/SWMFile:$($applyFrom -replace '\.swm$', '*.swm')" }
-    # The longest step: DISM's percentage maps to 10-70 % overall, and each poll is a heartbeat for the dashboard.
+    # The longest step: DISM's percentage maps to 10-70 % overall. The window on this PC follows every few seconds;
+    # the dashboard gets a write at most every 15 s (Update-NativeStepStatus).
     Set-DeployStatus -Step 'Applying the image' -Percent 10
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $applyArgs -OnProgress {
         param($pct)
-        if ($null -ne $pct) { Set-DeployStatus -Step "Applying the image ($pct %)" -Percent (10 + [int]($pct * 0.6)) }
-        else { Set-DeployStatus }
+        if ($null -ne $pct) { Update-NativeStepStatus -Step "Applying the image: $pct %" -Percent (10 + [int]($pct * 0.6)) }
+        else { Update-NativeStepStatus }
     }
     if ($applyFrom -ne $imagePath) { Remove-Item 'W:\_Multicast' -Recurse -Force }
 
     # 3. Inject the OEM driver pack offline.
     if ($driverPack) {
+        # 72-79 % overall, by the count of drivers DISM has installed.
         Set-DeployStatus -Step 'Injecting drivers' -Percent 72
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack)
+        Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack) -OnProgress {
+            param($pct, $info)
+            if ($info -and $info.Total) {
+                Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
+            } else { Update-NativeStepStatus }
+        }
     }
 
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.

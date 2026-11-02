@@ -2,12 +2,66 @@
 
 $script:LogPath = 'X:\Windows\Temp\Deploy.log'
 
+function Format-ConsoleText {
+    <#
+    .SYNOPSIS
+        Splits a console line into lines that fit the window, at spaces where possible. Continuation lines are
+        indented, so a long error reads as one block instead of running off the right edge.
+    #>
+    param([AllowEmptyString()][string]$Text, [int]$Width = 100, [int]$Indent = 9)
+    if ($Width -lt 20) { $Width = 20 }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $pad = ' ' * $Indent
+    $rest = $Text
+    $first = $true
+    while ($true) {
+        $room = if ($first) { $Width } else { $Width - $Indent }
+        if ($rest.Length -le $room) { $lines.Add($(if ($first) { $rest } else { $pad + $rest })); break }
+        $cut = $rest.LastIndexOf(' ', $room)
+        if ($cut -lt [int]($room / 2)) { $cut = $room }   # no good space: break inside the word
+        $part = $rest.Substring(0, $cut).TrimEnd()
+        $lines.Add($(if ($first) { $part } else { $pad + $part }))
+        $rest = $rest.Substring($cut).TrimStart()
+        $first = $false
+        if (-not $rest) { break }
+    }
+    $lines.ToArray()
+}
+
+function Get-ConsoleWidth {
+    try { $w = $Host.UI.RawUI.WindowSize.Width; if ($w -gt 0) { return $w - 1 } } catch { }
+    100
+}
+
+function Set-DeployConsole {
+    # Makes the WinPE console wide enough for the log (up to 140 columns, as the screen allows), with the buffer
+    # as wide as the window so nothing is cut off at the right edge, and a long history to scroll back in.
+    param([int]$Columns = 140, [int]$Rows = 40, [string]$Title = 'Deploy Windows')
+    try {
+        $raw = $Host.UI.RawUI
+        $raw.WindowTitle = $Title
+        $max = $raw.MaxPhysicalWindowSize
+        $w = [Math]::Min($Columns, $max.Width); $h = [Math]::Min($Rows, $max.Height)
+        if ($w -lt 20 -or $h -lt 10) { return }
+        $buffer = New-Object Management.Automation.Host.Size($w, [Math]::Max(3000, $raw.BufferSize.Height))
+        $window = New-Object Management.Automation.Host.Size($w, $h)
+        # The buffer can never be narrower than the window: shrink the window first, grow the buffer first.
+        if ($w -lt $raw.WindowSize.Width) { $raw.WindowSize = $window; $raw.BufferSize = $buffer }
+        else { $raw.BufferSize = $buffer; $raw.WindowSize = $window }
+    } catch { }   # a host without a resizable console (ISE, CI): keep what it has
+}
+
 function Write-DeployLog {
+    # The log keeps the full line with date and level; the console gets the time and the message, wrapped to fit.
     param([Parameter(Mandatory)][string]$Message, [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO')
-    $line = '{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}' -f (Get-Date), $Level, $Message
+    $now = Get-Date
+    $line = '{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}' -f $now, $Level, $Message
     Add-Content -Path $script:LogPath -Value $line
     $color = @{ INFO = 'Gray'; WARN = 'Yellow'; ERROR = 'Red' }[$Level]
-    Write-Host $line -ForegroundColor $color
+    $prefix = @{ INFO = ''; WARN = 'Warning: '; ERROR = 'ERROR: ' }[$Level]
+    foreach ($l in (Format-ConsoleText -Text ('{0:HH:mm:ss} {1}{2}' -f $now, $prefix, $Message) -Width (Get-ConsoleWidth))) {
+        Write-Host $l -ForegroundColor $color
+    }
 }
 
 function Invoke-Native {
@@ -18,32 +72,69 @@ function Invoke-Native {
     if ($LASTEXITCODE -ne 0) { throw "$FilePath exited with code $LASTEXITCODE" }
 }
 
+function Get-NativeProgress {
+    <#
+    .SYNOPSIS
+        How far a DISM run is, from what it has printed so far. $null before it printed any progress.
+    .DESCRIPTION
+        /Add-Driver prints "Installing 12 of 76 - ...": Percent counts the drivers done, Done/Total give the count.
+        Everything else (/Apply-Image, /Capture-Image) draws a bar "[=====  45.0%  ]": Percent is its last value.
+    #>
+    param([AllowEmptyString()][string]$Text)
+    if (-not $Text) { return $null }
+    $drivers = [regex]::Matches($Text, 'Installing (\d+) of (\d+)')
+    if ($drivers.Count) {
+        $m = $drivers[$drivers.Count - 1]
+        $n = [int]$m.Groups[1].Value; $total = [int]$m.Groups[2].Value
+        if ($total -gt 0) {
+            return [pscustomobject]@{ Percent = [int][Math]::Floor(100 * ($n - 1) / $total); Done = $n - 1; Total = $total }
+        }
+    }
+    $found = [regex]::Matches($Text, '(\d{1,3})(?:[.,]\d+)?\s?%')
+    if (-not $found.Count) { return $null }
+    $pct = [Math]::Min(100, [int]$found[$found.Count - 1].Groups[1].Value)
+    [pscustomobject]@{ Percent = $pct; Done = $null; Total = $null }
+}
+
+function Get-NativeLogLines {
+    # The lines of a tool's output worth keeping in the log: no progress bar redraws ("[==== 45.0% ]", one per
+    # percent when DISM writes to a file), no blank lines.
+    param([AllowEmptyString()][string]$Text)
+    if (-not $Text) { return @() }
+    @($Text -split "[`r`n]+" | Where-Object { $_.Trim() -and $_ -notmatch '^\s*\[[=\s]*\d{1,3}(?:[.,]\d+)?\s?%[=\s]*\]\s*$' })
+}
+
+function Read-SharedText([string]$Path) {
+    # Reads a file another process still writes to. File.ReadAllText asks for FileShare.Read, which fails while
+    # cmd has the file open for writing, so the progress was never seen.
+    try {
+        $fs = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        try { (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+    } catch { '' }
+}
+
 function Invoke-NativeWithProgress {
-    # Like Invoke-Native for long DISM runs: polls the tool's output every few seconds and calls OnProgress with
-    # the last percentage it printed (or $null), so the dashboard shows progress and a live heartbeat.
+    # Like Invoke-Native for long DISM runs: reads the tool's output every few seconds and calls OnProgress with
+    # the last percentage it printed (or $null) and the Get-NativeProgress result, so the progress window and the
+    # dashboard follow along. Only the result lines go to the log, not every progress bar redraw.
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$ArgumentList = @(),
         [Parameter(Mandatory)][scriptblock]$OnProgress,
-        [int]$IntervalSeconds = 15
+        [int]$IntervalSeconds = 2
     )
     Write-DeployLog "> $FilePath $($ArgumentList -join ' ')"
     $out = Join-Path $env:TEMP ("native-{0}.txt" -f [guid]::NewGuid().ToString('N'))
     $quoted = @($FilePath) + $ArgumentList | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }
-    # cmd's redirection keeps the file readable while the tool writes to it.
+    # cmd's redirection keeps the output off the console; Read-SharedText reads it while the tool writes.
     $p = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$($quoted -join ' ') > `"$out`" 2>&1`"" -NoNewWindow -PassThru
     $null = $p.Handle   # PowerShell 5.1 only keeps ExitCode if the handle was read before exit
-    $last = $null
     while (-not $p.WaitForExit($IntervalSeconds * 1000)) {
-        $text = try { [IO.File]::ReadAllText($out) } catch { '' }
-        $found = [regex]::Matches($text, '(\d{1,3})(?:[.,]\d+)?%')
-        if ($found.Count) { $last = [int]$found[$found.Count - 1].Groups[1].Value }
-        try { & $OnProgress $last } catch { }
+        $info = Get-NativeProgress -Text (Read-SharedText $out)
+        try { & $OnProgress $(if ($info) { $info.Percent } else { $null }) $info } catch { }
     }
     if (Test-Path $out) {
-        # Keep the result lines, not every progress bar redraw.
-        [IO.File]::ReadAllText($out) -split "`n" | ForEach-Object { ($_.TrimEnd("`r") -split "`r")[-1] } | Where-Object { $_.Trim() } |
-            ForEach-Object { Add-Content -Path $script:LogPath -Value "  $_" }
+        Get-NativeLogLines -Text (Read-SharedText $out) | ForEach-Object { Add-Content -Path $script:LogPath -Value "  $_" }
         Remove-Item $out -Force -ErrorAction SilentlyContinue
     }
     if ($p.ExitCode -ne 0) { throw "$FilePath exited with code $($p.ExitCode)" }
@@ -446,5 +537,5 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState
