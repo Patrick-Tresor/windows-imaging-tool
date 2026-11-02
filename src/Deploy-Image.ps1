@@ -103,7 +103,8 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
         $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $Root -RelativePath $share.PasswordFile } else { $null }
-        $user = if ($share.Domain -and $share.Username) { "$($share.Domain)\$($share.Username)" } else { $share.Username }
+        # A user name that already names its domain (CORP\svc, svc@corp.example.com) gets no second one in front.
+        $user = if ($share.Domain -and $share.Username -and $share.Username -notmatch '[\\@]') { "$($share.Domain)\$($share.Username)" } else { $share.Username }
         Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
         $script:Mounted[$share.LocalName] = $share.RemoteName
     }
@@ -412,6 +413,11 @@ try {
     })
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
+    if ($answer.Membership -eq 'Domain') {
+        # CORP\svc typed as the user name with another account's domain: the user name wins (Resolve-JoinAccount).
+        $joinNote = (Resolve-JoinAccount -Answer $answer).Note
+        if ($joinNote) { Write-DeployLog $joinNote -Level WARN }
+    }
     $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
     $bl = $answer.BitLocker
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Read-SecretFile -ContentRoot $root -RelativePath $bl.PinFile } else { $null }
@@ -530,7 +536,8 @@ try {
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
     New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword |
         Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
-    Write-DeployLog "Unattend written: name $ComputerName, $($answer.Membership)"
+    $joinText = if ($answer.Membership -eq 'Domain') { "joins $($answer.Domain) as $((Resolve-JoinAccount -Answer $answer).Account)" } else { "workgroup $($answer.Workgroup)" }
+    Write-DeployLog "Unattend written: name $ComputerName, $joinText"
 
     # 5. First boot: applications and FIRSTBOOT tasks run as SYSTEM from SetupComplete.cmd.
     Set-DeployStatus -Step 'Staging applications' -Percent 82

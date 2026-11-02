@@ -75,6 +75,27 @@ Assert-Equal ($null -eq ($r | Where-Object name -eq 'BitLocker')) $true 'BitLock
 Assert-Equal ($null -eq ($r | Where-Object name -eq 'Computer name')) $true 'no expected name, no name check'
 Assert-Equal (Get-Result $r 'App: Zoom') 'Failed' 'an app with no run result did not run'
 
+# Why the join failed, from NetSetup.LOG: the last attempt counts (the log also holds the reference PC's history).
+$netSetup = @(
+    '06/04/2026 18:33:27:722 NetpJoinWorkgroup: joining computer ''WIN-REF'' to workgroup ''WORKGROUP'''
+    '06/04/2026 18:33:27:733 NetpDoDomainJoin: status: 0x0'
+    '11/02/2026 12:05:05:930 NetpJoinDomain'
+    '11/02/2026 12:05:05:930 ' + "`t" + 'MachineAccountOU: (NULL)'
+    '11/02/2026 12:05:05:930 ' + "`t" + 'Account: svc\CORP\svc'
+    '11/02/2026 12:05:05:938 NetUseAdd to \\dc01.corp.example.com\IPC$ returned 87'
+    '11/02/2026 12:05:05:938 NetpDoDomainJoin: status: 0x89A'
+)
+$je = Get-NetSetupJoinError -Lines $netSetup
+Assert-Equal "$($je.Status)|$($je.Account)|$($je.Reason)" '0x89a|svc\CORP\svc|the join account user name is not valid' 'NetSetup.LOG: last failed join, its account and the reason'
+Assert-Equal ($null -eq (Get-NetSetupJoinError -Lines $netSetup[0..1])) $true 'NetSetup.LOG: a last attempt that worked is no error'
+Assert-Equal ($null -eq (Get-NetSetupJoinError -Lines @())) $true 'NetSetup.LOG: an empty log is no error'
+Assert-Equal (Get-NetSetupJoinError -Lines @('x NetpDoDomainJoin: status: 0x1234')).Reason 'Windows could not join the domain' 'NetSetup.LOG: an unknown code still fails'
+$notJoined = $bad.PSObject.Copy(); $notJoined | Add-Member -NotePropertyName JoinError -NotePropertyValue $je -Force
+$r = Invoke-PostDeployCheck -Plan $plan -Facts $notJoined -AppResults $runs
+Assert-Equal (($r | Where-Object name -eq 'Domain join').detail) 'Not joined to corp.example.com: the join account user name is not valid (error 0x89a, account svc\CORP\svc); see C:\Windows\Debug\NetSetup.log' 'a failed join says why'
+$r = Invoke-PostDeployCheck -Plan $plan -Facts $bad -AppResults $runs
+Assert-Equal (($r | Where-Object name -eq 'Domain join').detail) 'Not joined to corp.example.com (in workgroup WORKGROUP); see C:\Windows\Debug\NetSetup.log' 'no NetSetup.LOG reason keeps the workgroup detail'
+
 # Edge cases
 $joined = $good.PSObject.Copy(); $joined.Domain = 'CORP'; $joined.SecureChannel = $false
 $r = Invoke-PostDeployCheck -Plan $plan -Facts $joined -AppResults $appRuns

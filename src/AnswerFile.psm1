@@ -156,6 +156,8 @@ function Test-AnswerFile {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
         if (-not $a.JoinUser) { 'Domain membership needs the join account user name (network/joinCredentials/username).' }
         if (-not $a.JoinPasswordFile) { 'Domain membership needs the join account password file (network/joinCredentials/passwordFile).' }
+        $account = Resolve-JoinAccount -Answer $a
+        if ($account.Problem) { $account.Problem }
     }
     if ($a.MigrateUserData) {
         if ($a.UserDataStore -notin 'Local', 'Share') { "userData/store must be Local or Share, not '$($a.UserDataStore)'." }
@@ -241,6 +243,50 @@ function Read-SecretFile {
 
 function ConvertTo-XmlText([string]$Value) { [Security.SecurityElement]::Escape($Value) }
 
+function Resolve-JoinAccount {
+    <#
+    .SYNOPSIS
+        The account that joins the PC to the domain, split the way unattend.xml needs it (Credentials Domain and Username).
+    .DESCRIPTION
+        Windows signs in as Domain\Username, so a user name that already names its domain must not get a second one:
+          svc                  -> the account's domain, or the domain being joined when that is empty
+          CORP\svc             -> CORP and svc; a different account's domain is ignored (Note says so)
+          svc@corp.example.com -> no domain, the UPN as it is
+        Anything else (two backslashes, a domain with \ or @) is a Problem, which Test-AnswerFile reports
+        before anything is erased. Account is what Windows will sign in as, for the logs.
+    #>
+    param([Parameter(Mandatory)]$Answer)
+    $user = "$($Answer.JoinUser)".Trim()
+    $accountDomain = "$($Answer.JoinDomain)".Trim()
+    $r = [pscustomobject]@{ Domain = ''; User = $user; Account = ''; Problem = $null; ProblemField = $null; Note = $null }
+    if ($accountDomain -match '[\\/@]') {
+        $r.ProblemField = 'Domain'
+        $r.Problem = "The join account's domain '$accountDomain' must be a domain name such as CORP, without \ or @ (network/joinCredentials/domain). Type DOMAIN\user in the user name instead."
+        return $r
+    }
+    if (-not $user) { return $r }
+    if ($user -match '^([^\\@/]+)\\([^\\@/]+)$') {
+        $r.Domain = $Matches[1].Trim(); $r.User = $Matches[2].Trim()
+        if ($accountDomain -and $accountDomain -ne $r.Domain) {
+            $r.Note = "Join account: used $($r.Domain)\$($r.User) from the user name; the account's domain '$accountDomain' was ignored."
+        }
+    }
+    elseif ($user -match '^[^\\@/]+@[^\\@/]+$') {
+        # A UPN is complete on its own: Windows takes it with no domain in front.
+        if ($accountDomain) { $r.Note = "Join account: used $user as typed; the account's domain '$accountDomain' was ignored." }
+    }
+    elseif ($user -match '[\\@/]') {
+        $r.ProblemField = 'User'
+        $r.Problem = "The join account user name '$user' must be user, DOMAIN\user or user@domain (network/joinCredentials/username)."
+        return $r
+    }
+    else {
+        $r.Domain = if ($accountDomain) { $accountDomain } else { "$($Answer.Domain)".Trim() }
+    }
+    $r.Account = if ($r.Domain) { "$($r.Domain)\$($r.User)" } else { $r.User }
+    $r
+}
+
 function New-UnattendXml {
     <#
     .SYNOPSIS
@@ -264,13 +310,15 @@ function New-UnattendXml {
 
     $join = if ($a.Membership -eq 'Domain') {
         $ou = if ($a.OrganizationalUnit) { "`n        <MachineObjectOU>$(& $x $a.OrganizationalUnit)</MachineObjectOU>" } else { '' }
-        $credDomain = if ($a.JoinDomain) { $a.JoinDomain } else { $a.Domain }
+        # Windows signs in as Domain\Username: see Resolve-JoinAccount. A UPN goes in with no Domain.
+        $account = Resolve-JoinAccount -Answer $a
+        if ($account.Problem) { throw $account.Problem }
+        $credDomain = if ($account.Domain) { "`n          <Domain>$(& $x $account.Domain)</Domain>" } else { '' }
         @"
     <component name="Microsoft-Windows-UnattendedJoin" $comp>
       <Identification>
-        <Credentials>
-          <Domain>$(& $x $credDomain)</Domain>
-          <Username>$(& $x $a.JoinUser)</Username>
+        <Credentials>$credDomain
+          <Username>$(& $x $account.User)</Username>
           <Password>$(& $x $JoinPassword)</Password>
         </Credentials>
         <JoinDomain>$(& $x $a.Domain)</JoinDomain>$ou
@@ -661,4 +709,4 @@ function ConvertFrom-SmartDeployAnswerFile {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-SmartDeployAnswerFile
+    Read-SecretFile, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-SmartDeployAnswerFile

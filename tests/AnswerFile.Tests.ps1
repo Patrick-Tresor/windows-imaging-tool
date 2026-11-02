@@ -83,6 +83,26 @@ try {
     [xml]$wg = New-UnattendXml -Answer $default -ComputerName 'PC-02'
     Assert-Equal $wg.SelectSingleNode('//u:JoinWorkgroup', $ns).InnerText 'WORKGROUP' 'workgroup answer file joins the workgroup'
 
+    # Join account. Windows signs in as Credentials Domain\Username: CORP\svc typed as the user name with svc as the
+    # account's domain came out as svc\CORP\svc, and every join attempt failed with 0x89a (bad user name).
+    $j = $d.PSObject.Copy(); $j.JoinUser = 'CORP\svc'; $j.JoinDomain = 'svc'
+    [xml]$uj = New-UnattendXml -Answer $j -ComputerName 'PC-03' -JoinPassword 'x'
+    Assert-Equal "$($uj.SelectSingleNode('//u:Credentials/u:Domain', $ns).InnerText)|$($uj.SelectSingleNode('//u:Credentials/u:Username', $ns).InnerText)" 'CORP|svc' 'DOMAIN\user in the user name wins over a different account domain'
+    Assert-Equal (Resolve-JoinAccount -Answer $j).Note "Join account: used CORP\svc from the user name; the account's domain 'svc' was ignored." 'the ignored account domain is noted for the deploy log'
+    $j.JoinUser = 'svc'; $j.JoinDomain = ''
+    Assert-Equal (Resolve-JoinAccount -Answer $j).Account 'corp.example.com\svc' 'a plain user name signs in to the domain being joined'
+    $j.JoinDomain = 'CORP'
+    Assert-Equal "$((Resolve-JoinAccount -Answer $j).Account)|$((Resolve-JoinAccount -Answer $j).Note)" 'CORP\svc|' 'a plain user name signs in to the account domain'
+    $j.JoinUser = 'svc@corp.example.com'
+    [xml]$uj = New-UnattendXml -Answer $j -ComputerName 'PC-03' -JoinPassword 'x'
+    Assert-Equal "$($null -eq $uj.SelectSingleNode('//u:Credentials/u:Domain', $ns))|$($uj.SelectSingleNode('//u:Credentials/u:Username', $ns).InnerText)" 'True|svc@corp.example.com' 'a UPN goes in as it is, with no domain in front'
+    Assert-Equal @(Test-AnswerFile $j).Count 0 'a UPN join account is valid'
+    $j.JoinUser = 'CORP\svc\x'
+    Assert-Equal @(@(Test-AnswerFile $j) -like '*must be user, DOMAIN\user or user@domain*').Count 1 'a user name with two backslashes is caught before the disk is wiped'
+    Assert-Throws { New-UnattendXml -Answer $j -ComputerName 'PC-03' -JoinPassword 'x' } '*must be user, DOMAIN\user or user@domain*' 'no unattend is written with a bad join account'
+    $j.JoinUser = 'svc'; $j.JoinDomain = 'svc\CORP'
+    Assert-Equal @(@(Test-AnswerFile $j) -like "*account's domain 'svc\CORP'*").Count 1 'an account domain with a backslash is caught before the disk is wiped'
+
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
     Assert-Equal ($plan.tasks -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
 

@@ -216,8 +216,15 @@ try {
     Assert-Equal "$($s.User)|$($s.Domain)" 'svc-join|CORP' 'DOMAIN\user fills in the account domain'
     $s = Split-JoinAccount -User 'svc-join@corp.example.com' -Domain ''
     Assert-Equal "$($s.User)|$($s.Domain)" 'svc-join@corp.example.com|' 'a UPN is kept as typed'
-    $s = Split-JoinAccount -User 'CORP\svc' -Domain 'OTHER'
-    Assert-Equal "$($s.User)|$($s.Domain)" 'CORP\svc|OTHER' 'DOMAIN\user is not split over a different account domain'
+    $s = Split-JoinAccount -User 'CORP\svc' -Domain 'svc'
+    Assert-Equal "$($s.User)|$($s.Domain)" 'svc|CORP' 'DOMAIN\user wins over a different account domain (kept both, Windows signed in as svc\CORP\svc)'
+    $s = Split-JoinAccount -User 'svc-join@corp.example.com' -Domain 'CORP'
+    Assert-Equal "$($s.User)|$($s.Domain)" 'svc-join@corp.example.com|' 'a UPN needs no account domain'
+    $j.JoinUser = 'CORP\svc\x'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true).Control 'TxtJoinUser' 'a user name with two backslashes points at the user name box'
+    $j.JoinUser = 'svc-join'; $j.JoinDomain = 'svc\CORP'
+    Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true).Control 'TxtJoinDomain' 'an account domain with a backslash points at the account domain box'
+    $j.JoinDomain = 'CORP'
     $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
     $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null; $ed.Bios.Enabled = $true
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }

@@ -267,7 +267,7 @@
             <Label Grid.Row="1" Content="Organizational unit"/>
             <TextBox x:Name="TxtOU" Grid.Row="1" Grid.Column="1" ToolTip="OU=Laptops,DC=corp,DC=example,DC=com. Leave empty for the default Computers container."/>
             <Label Grid.Row="2" Content="Join account user name"/>
-            <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="The account that joins PCs to the domain, such as svc-join. CORP\svc-join also works and fills in the account's domain."/>
+            <TextBox x:Name="TxtJoinUser" Grid.Row="2" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="The account that joins PCs to the domain, such as svc-join. CORP\svc-join or svc-join@corp.example.com also work; the account's domain then comes from it."/>
             <Label Grid.Row="3" Content="Account's domain"/>
             <TextBox x:Name="TxtJoinDomain" Grid.Row="3" Grid.Column="1" Width="260" HorizontalAlignment="Left" ToolTip="NetBIOS name such as CORP. Leave empty to use the domain above."/>
             <Label Grid.Row="4" Content="Join account password"/>

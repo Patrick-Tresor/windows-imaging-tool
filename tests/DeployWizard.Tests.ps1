@@ -62,7 +62,7 @@ $domain = $answer.PSObject.Copy()
 $domain.Membership = 'Domain'; $domain.OrganizationalUnit = 'OU=Labs,DC=corp,DC=example,DC=com'
 $lines = @(Get-DeploySummary -Answer $domain -Plan $plan -ComputerName 'LAB-01' -Disk $disk -Applications 'Office', 'Zoom')
 Assert-Equal $lines[3] 'Applications: Office, Zoom' 'summary lists the chosen applications'
-Assert-Equal $lines[5] 'Joins:        domain corp.example.com (OU=Labs,DC=corp,DC=example,DC=com)' 'summary shows the domain and OU'
+Assert-Equal $lines[5] 'Joins:        domain corp.example.com (OU=Labs,DC=corp,DC=example,DC=com) as CORP\svc-join' 'summary shows the domain, OU and the account Windows signs in as'
 $withDetails = [pscustomobject]@{ ImagePath = $plan.ImagePath; DriverPack = $null; Details = @('Firmware:     UEFI (GPT disk)') }
 $lines = @(Get-DeploySummary -Answer $answer -Plan $withDetails -ComputerName 'LAB-01' -Disk $disk)
 Assert-Equal "$($lines.Count)|$($lines[6])|$($lines[7])" '8|Firmware:     UEFI (GPT disk)|ERASE disk:   0: NVMe SSD (512 GB, NVMe)' 'plan details go just before the ERASE line'

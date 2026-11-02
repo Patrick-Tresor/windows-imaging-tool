@@ -52,7 +52,7 @@ function ConvertTo-CheckBool($Value) {
 function Get-PostDeployFacts {
     # Reads what the checks need. Each part is independent: one that cannot be read is $null and its check says so.
     $facts = [ordered]@{
-        ComputerName = $env:COMPUTERNAME; PartOfDomain = $null; Domain = $null; SecureChannel = $null
+        ComputerName = $env:COMPUTERNAME; PartOfDomain = $null; Domain = $null; SecureChannel = $null; JoinError = $null
         ProblemDevices = $null; InstalledPrograms = $null; BitLocker = $null
     }
     try {
@@ -64,6 +64,10 @@ function Get-PostDeployFacts {
     if ($facts.PartOfDomain) {
         # Joined is not enough: the computer account's secure channel must work, or nobody can log on with a domain account.
         try { $facts.SecureChannel = [bool](Test-ComputerSecureChannel -ErrorAction Stop) } catch { $facts.SecureChannel = $false }
+    }
+    elseif ($facts.PartOfDomain -eq $false) {
+        # Why the join during Windows setup failed, so the dashboard says it without anyone opening the PC.
+        try { $facts.JoinError = Get-NetSetupJoinError -Lines (Get-Content -Path (Join-Path $env:windir 'Debug\NetSetup.LOG') -ErrorAction Stop) } catch { }
     }
     try {
         # ConfigManagerErrorCode is the Device Manager error (28 = no driver, 10 = cannot start, 43 = stopped, ...).
@@ -87,6 +91,39 @@ function Get-PostDeployFacts {
         }
     } catch { }
     [pscustomobject]$facts
+}
+
+# Windows' domain join errors in plain words. NetSetup.LOG gives them as hex status codes.
+$script:JoinErrors = @{
+    '0x5'    = 'the join account may not add or change this computer in the domain'
+    '0x35'   = 'the domain controller could not be reached on the network'
+    '0x52e'  = 'the join account user name or password is wrong'
+    '0x532'  = "the join account's password has expired"
+    '0x54b'  = 'no domain controller was found (check the network and DNS)'
+    '0x576'  = "the PC's clock is too far from the domain controller's"
+    '0x6ba'  = 'the domain controller could not be reached (network or firewall)'
+    '0x775'  = 'the join account is locked out'
+    '0x89a'  = 'the join account user name is not valid'
+    '0xaac'  = 'a computer account with this name already exists and Windows will not reuse it (created by another account)'
+    '0x216d' = 'the join account has reached its limit of computers it may add to the domain'
+}
+
+function Get-NetSetupJoinError {
+    <#
+    .SYNOPSIS
+        The last failed domain join in NetSetup.LOG (C:\Windows\Debug), as status code, account used and plain reason.
+        Nothing when the last join attempt worked or there is none. The log also holds the reference PC's history,
+        so only the last attempt counts.
+    #>
+    param([string[]]$Lines = @())
+    $status = $null; $account = $null; $lastAccount = $null
+    foreach ($line in $Lines) {
+        if ($line -match '\sAccount:\s*(.+?)\s*$') { $lastAccount = $Matches[1] }
+        elseif ($line -match 'NetpDoDomainJoin: status:\s*(0x[0-9a-fA-F]+)') { $status = $Matches[1].ToLowerInvariant(); $account = $lastAccount; $lastAccount = $null }
+    }
+    if (-not $status -or $status -eq '0x0') { return $null }
+    $reason = $script:JoinErrors[$status]
+    [pscustomobject]@{ Status = $status; Account = $account; Reason = $(if ($reason) { $reason } else { 'Windows could not join the domain' }) }
 }
 
 #endregion
@@ -115,7 +152,13 @@ function Invoke-PostDeployCheck {
     if ($Plan.membership -eq 'Domain') {
         $short = { param($d) "$d".Split('.')[0] }
         if ($null -eq $Facts.PartOfDomain) { & $add 'Domain join' 'Failed' 'Could not read domain membership' }
-        elseif (-not $Facts.PartOfDomain) { & $add 'Domain join' 'Failed' "Not joined to $($Plan.domain) (in workgroup $($Facts.Domain)); see C:\Windows\Debug\NetSetup.log" }
+        elseif (-not $Facts.PartOfDomain) {
+            $why = if ($Facts.PSObject.Properties['JoinError'] -and $Facts.JoinError) {
+                $e = $Facts.JoinError
+                ": $($e.Reason) (error $($e.Status)$(if ($e.Account) { ", account $($e.Account)" }))"
+            } else { " (in workgroup $($Facts.Domain))" }
+            & $add 'Domain join' 'Failed' "Not joined to $($Plan.domain)$why; see C:\Windows\Debug\NetSetup.log"
+        }
         elseif ($Facts.Domain -ine $Plan.domain -and (& $short $Facts.Domain) -ine (& $short $Plan.domain)) {
             & $add 'Domain join' 'Failed' "Joined to $($Facts.Domain), expected $($Plan.domain)"
         }
@@ -219,5 +262,5 @@ function ConvertTo-CheckWarning {
 
 #endregion
 
-Export-ModuleMember -Function New-PostDeployCheckPlan, Get-PostDeployFacts, Invoke-PostDeployCheck,
+Export-ModuleMember -Function Get-NetSetupJoinError, New-PostDeployCheckPlan, Get-PostDeployFacts, Invoke-PostDeployCheck,
     Get-PostDeployCheckSummary, Start-PostDeployCheck, ConvertTo-CheckWarning
