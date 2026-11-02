@@ -97,6 +97,23 @@ function Get-ContentDiskNumber([string]$Root) {
     try { (Get-Partition -DriveLetter $Matches[1] -ErrorAction Stop).DiskNumber } catch { }
 }
 
+function Assert-JoinAccount($Root, $Answer) {
+    # Signs in to the domain with the join account now (Test-JoinAccount). A refused account stops the deploy before
+    # the disk is wiped; a domain WinPE cannot reach is only logged, and the join is left to Windows as before.
+    if ($Answer.Membership -ne 'Domain' -or -not $Answer.JoinPasswordFile) { return }
+    $account = (Resolve-JoinAccount -Answer $Answer).Account
+    $password = Read-SecretFile -ContentRoot $Root -RelativePath $Answer.JoinPasswordFile
+    $check = Test-JoinAccount -Domain $Answer.Domain -Account $account -Password $password
+    if (-not $check.Cached) {
+        switch ($check.Result) {
+            'Passed'     { Write-DeployLog "Join account $account signed in to $($Answer.Domain)" }
+            'NotChecked' { Write-DeployLog "Join account $account not checked: $($check.Reason)" -Level WARN }
+            default      { Write-DeployLog "The domain $($Answer.Domain) refused the join account $($account): $($check.Reason) (error $($check.Code)). Fix the account or its password in the answer file, then copy it to the media." -Level ERROR }
+        }
+    }
+    if ($check.Result -eq 'Refused') { throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
+}
+
 function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
@@ -145,6 +162,9 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
 
     # Windows 11 hardware requirements are checked now, before the disk is wiped.
     $win11 = Invoke-Windows11Check -Answer $Answer -ImagePath $imagePath -Hardware $Hardware -Override $IgnoreWin11 -Disk $target.Disk
+
+    # So is the domain join account: a wrong password would otherwise only show after the restart.
+    Assert-JoinAccount -Root $Root -Answer $Answer
 
     $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
     $driverMatch = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
