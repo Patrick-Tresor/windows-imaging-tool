@@ -48,7 +48,7 @@ try {
 
     # Small chunks so the image is copied in many steps, and every update is recorded.
     $updates = New-Object System.Collections.ArrayList
-    $result = Copy-MediaContent -Plan $plan -Destination $dst -BufferSize 65536 -Quiet -OnProgress { param($s) [void]$updates.Add($s) }
+    $result = Copy-MediaContent -Plan $plan -Destination $dst -BufferSize 65536 -FlushEvery 100000 -Quiet -OnProgress { param($s) [void]$updates.Add($s) }
     Assert-Equal $result.FileCount 4 'copy: files copied'
     Assert-Equal $result.Bytes $plan.TotalBytes 'copy: bytes copied'
     foreach ($rel in 'config\deploy-settings.json', 'Drivers\Dell\Latitude 5521\a.inf', 'AnswerFiles\Staff.xml', 'Images\Win11-Staff.wim') {
@@ -58,6 +58,9 @@ try {
     Assert-Equal (Test-Path (Join-T $dst 'Images\Unused.wim')) $false 'copy: unused image left off'
     Assert-Equal (Test-Path (Join-T $dst 'Drivers\Empty')) $true 'copy: empty folder created'
     Assert-Equal ([IO.File]::GetLastWriteTimeUtc((Join-T $dst 'Images\Win11-Staff.wim')) -eq [IO.File]::GetLastWriteTimeUtc((Join-T $src 'Images\Win11-Staff.wim'))) $true 'copy: timestamp kept'
+
+    # Write-through made each chunk wait for the stick and halved the copy speed; writes are cached and flushed in batches.
+    Assert-Equal ((Get-Content -Raw (Join-Path $repo 'src/MediaCopy.psm1')) -match 'FileOptions\]::WriteThrough') $false 'copy: no write-through (slow on USB sticks)'
 
     $wim = @($updates | Where-Object { $_.File -eq 'Images\Win11-Staff.wim' })
     Assert-Equal ($wim.Count -ge 2) $true 'progress: the image reports at its start and end'
