@@ -231,7 +231,8 @@ function Show-DeployWizard {
         [string]$ComputerName,                              # from the command line; replaces the suggested name
         [Parameter(Mandatory)][scriptblock]$ReadAnswer,     # { param($Name) } -> answer object, throws when invalid
         [Parameter(Mandatory)][scriptblock]$PreparePlan,    # { param($Answer) } -> ImagePath, DriverPack, AvailableApps, DefaultName
-        [object[]]$Disks = (Get-TargetDisks)
+        [object[]]$Disks = (Get-TargetDisks),
+        [string]$Notice                                     # one line shown on the first page, such as why there was no countdown
     )
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
@@ -406,6 +407,7 @@ function Show-DeployWizard {
     $start = [Array]::IndexOf($AnswerFiles, $Default)
     $w.List.SelectedIndex = if ($start -ge 0) { $start } else { 0 }
     & $w.Show
+    if ($Notice) { $w.Error.Text = $Notice; Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2 }
     $form.Add_Shown({ $script:wiz.Form.Activate() })
     $null = $form.ShowDialog()
     $result = $w.Result

@@ -263,6 +263,104 @@ function Test-UefiBoot {
     (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name PEFirmwareType -ErrorAction SilentlyContinue).PEFirmwareType -eq 2
 }
 
+function Select-WindowsBootEntry {
+    <#
+    .SYNOPSIS
+        Picks the firmware entry that starts the Windows just deployed, from `bcdedit /enum firmware` output.
+    .DESCRIPTION
+        bcdboot /f UEFI writes a Windows Boot Manager entry (\EFI\Microsoft\Boot\bootmgfw.efi). bcdedit's labels are
+        localized, so this reads only identifiers, paths and devices: blocks are split on the dashed lines, and an
+        entry on the system partition just written (partition=S:) wins over another Windows Boot Manager, such as
+        one left by an older Windows on a second disk. Returns {bootmgr}, a {GUID} or $null.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$BcdText,
+        [string]$SystemDrive = 'S:'
+    )
+    $idPattern = '\{(bootmgr|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\}'
+    $candidates = foreach ($b in ($BcdText -split '(?m)^-{5,}\s*$')) {
+        $lines = @($b.Trim() -split "`r?`n" | Where-Object { $_.Trim() })
+        if (-not $lines) { continue }
+        # The block's own identifier is on its first line; {fwbootmgr} lists other entries in displayorder.
+        $id = [regex]::Match($lines[0], $idPattern)
+        if (-not $id.Success) { continue }
+        if ($b -notmatch '(?im)\\EFI\\Microsoft\\Boot\\bootmgfw\.efi\s*$') { continue }
+        $onSystem = $b -match ('(?im)partition=' + [regex]::Escape($SystemDrive.TrimEnd('\')) + '\s*$')
+        [pscustomobject]@{ Id = $id.Value; Rank = $(if ($onSystem) { 1 } elseif ($id.Value -eq '{bootmgr}') { 2 } else { 3 }) }
+    }
+    $best = @($candidates | Sort-Object Rank | Select-Object -First 1)
+    if ($best) { $best[0].Id } else { $null }
+}
+
+function Get-WindowsBootNextArgs {
+    # The two bcdedit calls that make the firmware start Windows: first in the boot order, and the next boot
+    # (BootNext), which the firmware honours even when a USB stick or the network stays above it in its own order.
+    param([Parameter(Mandatory)][string]$Entry)
+    @(@('/set', '{fwbootmgr}', 'displayorder', $Entry, '/addfirst'), @('/set', '{fwbootmgr}', 'bootsequence', $Entry))
+}
+
+function Set-WindowsBootNext {
+    <#
+    .SYNOPSIS
+        After bcdboot on a UEFI PC: makes the next restart start the deployed Windows instead of the USB stick
+        or the network again. Never throws; returns Ok, Entry and Message for the log.
+    #>
+    param([string]$SystemDrive = 'S:', [string]$BcdEdit = 'bcdedit.exe')
+    # bcdedit's error text on stderr must not become a terminating error before its exit code is read.
+    $ErrorActionPreference = 'Continue'
+    try {
+        $text = (& $BcdEdit /enum firmware 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Ok = $false; Entry = $null; Message = "bcdedit /enum firmware failed (exit $LASTEXITCODE): $($text.Trim())" } }
+        $entry = Select-WindowsBootEntry -BcdText $text -SystemDrive $SystemDrive
+        if (-not $entry) { return [pscustomobject]@{ Ok = $false; Entry = $null; Message = 'No Windows Boot Manager entry in the firmware boot list.' } }
+        foreach ($a in (Get-WindowsBootNextArgs -Entry $entry)) {
+            $out = (& $BcdEdit @a 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ Ok = $false; Entry = $entry; Message = "bcdedit $($a -join ' ') failed (exit $LASTEXITCODE): $($out.Trim())" } }
+        }
+        [pscustomobject]@{ Ok = $true; Entry = $entry; Message = "Next boot and first in the boot order: Windows Boot Manager $entry" }
+    } catch {
+        [pscustomobject]@{ Ok = $false; Entry = $null; Message = $_.Exception.Message }
+    }
+}
+
+function New-DeployedMarker {
+    # Written to <Windows drive>\Deploy\deployed.json after a deployment; FirstBoot.ps1 deletes it once Windows runs.
+    # While it is there, WinPE knows this disk holds a Windows that has not started yet.
+    param([Parameter(Mandatory)]$Identity, [string]$AnswerFile, [string]$ComputerName)
+    [pscustomobject]@{
+        serial       = "$($Identity.Serial)"
+        answerFile   = $AnswerFile
+        computerName = $ComputerName
+        deployed     = (Get-Date).ToString('o')
+    }
+}
+
+function Find-UnstartedDeployment {
+    <#
+    .SYNOPSIS
+        Looks on this PC's volumes for a Windows this tool deployed that has never started (\Deploy\deployed.json
+        with this PC's serial). Found means the PC restarted into WinPE again, usually from a USB stick left in,
+        so an Unattended countdown must not wipe it a second time. Returns the marker or $null.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Serial,
+        [string[]]$Roots = @([IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' } | ForEach-Object { $_.RootDirectory.FullName }),
+        [string[]]$ExcludeRoots = @()
+    )
+    $skip = @($ExcludeRoots + 'X:\' | Where-Object { $_ } | ForEach-Object { $_.Substring(0, [Math]::Min(2, $_.Length)).ToUpperInvariant() })
+    foreach ($r in $Roots) {
+        if ($r.Length -ge 2 -and $r.Substring(0, 2).ToUpperInvariant() -in $skip) { continue }
+        $path = Join-Path $r 'Deploy\deployed.json'
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try { $m = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json } catch { continue }
+        if ("$($m.serial)" -eq $Serial) {
+            $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
+            return $m
+        }
+    }
+    $null
+}
+
 function New-DiskpartScript {
     # Wipes the disk and creates Microsoft's recommended layout for the firmware WinPE booted with.
     # Both layouts leave the boot files' partition at S: and Windows at W:.
@@ -548,4 +646,5 @@ function Get-OfflineImageState {
 }
 
 Export-ModuleMember -Function Format-DriverProgressLine, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
-    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState
+    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState,
+    Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

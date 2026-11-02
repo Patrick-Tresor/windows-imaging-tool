@@ -55,6 +55,8 @@ function Get-ProgressView {
     $step = if ($Record) { "$($Record.step)" } else { 'Starting' }
     $percent = if ($Record) { [Math]::Max(0, [Math]::Min(100, [int]$Record.percent)) } else { 0 }
     $whenDone = if ($Record -and $Record.PSObject.Properties['whenDone']) { "$($Record.whenDone)" } else { '' }
+    $removeIn = if ($Record -and $Record.PSObject.Properties['removeMedia']) { [int]$Record.removeMedia } else { 0 }
+    $onStick = [bool]($Record -and $Record.PSObject.Properties['removableMedia'] -and $Record.removableMedia)
     $warnings = @(if ($Record) { @($Record.warnings) | Where-Object { $_ } })
 
     $title = $null; $detail = $step; $message = ''; $color = 'Normal'
@@ -73,10 +75,19 @@ function Get-ProgressView {
             $title = 'Windows is installed'
             $percent = 100
             $color = if ($state -eq 'Warning') { 'Warning' } else { 'Good' }
-            $detail = switch ($whenDone) {
-                'restart'  { 'Restarting into Windows. Setup and the applications finish there.' }
-                'shutdown' { 'Shutting down. Windows finishes setting up the next time the PC starts.' }
-                default    { 'Restart the PC to finish setting up Windows and install the applications.' }
+            $detail = if ($removeIn -gt 0) {
+                # Deploy-Image.ps1 waits for the stick to come out, so the PC cannot start WinPE again.
+                $next = if ($whenDone -eq 'shutdown') { 'shuts down' } else { 'restarts into Windows' }
+                "Remove the USB stick now. The PC $next in $removeIn s, or as soon as the stick is out."
+            } else {
+                switch ($whenDone) {
+                    'restart'  { 'Restarting into Windows. Setup and the applications finish there.' }
+                    'shutdown' { 'Shutting down. Windows finishes setting up the next time the PC starts.' }
+                    default    {
+                        if ($onStick) { 'Remove the USB stick, then restart the PC to finish setting up Windows and install the applications.' }
+                        else { 'Restart the PC to finish setting up Windows and install the applications.' }
+                    }
+                }
             }
             if ($warnings) { $message = 'Finished with warnings: ' + ($warnings -join '; ') }
         }

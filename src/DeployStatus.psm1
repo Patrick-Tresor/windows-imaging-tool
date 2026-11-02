@@ -177,6 +177,8 @@ function Start-LocalProgress {
         message      = ''
         countdown    = 0
         whenDone     = ''
+        removeMedia  = 0
+        removableMedia = $false
         started      = $now
         updated      = $now
         finished     = $null

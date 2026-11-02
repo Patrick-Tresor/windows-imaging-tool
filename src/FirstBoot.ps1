@@ -17,6 +17,8 @@ function Write-Log([string]$Message) { Add-Content -Path $log -Value ('{0:yyyy-M
 $deployDir = $PSScriptRoot
 $plan = Get-Content -Raw (Join-Path $deployDir 'firstboot.json') | ConvertFrom-Json
 Write-Log "First boot for answer file $($plan.answerFile)"
+# Windows has started, so WinPE may wipe this disk again on a later Unattended deploy (see Find-UnstartedDeployment).
+Remove-Item (Join-Path $deployDir 'deployed.json') -Force -ErrorAction SilentlyContinue
 
 $reporting = $false
 if ($plan.PSObject.Properties['status'] -and $plan.status.folder) {

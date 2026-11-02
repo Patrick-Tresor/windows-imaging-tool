@@ -230,6 +230,21 @@ function Wait-Countdown([int]$Seconds) {
     finally { Set-DeployStatus -LocalOnly -Fields @{ countdown = 0 } }
 }
 
+function Wait-MediaRemoval([string]$Root, [int]$Seconds = 60) {
+    # Waits until the USB stick holding the content is pulled out, at most $Seconds. The progress window counts down.
+    try {
+        for ($s = $Seconds; $s -gt 0; $s--) {
+            if (-not (Test-Path -LiteralPath $Root)) { Write-Host ''; Write-DeployLog 'USB stick removed'; return }
+            Write-Host -NoNewline "`rRemove the USB stick now. Continuing in $s s. "
+            Set-DeployStatus -LocalOnly -Fields @{ removeMedia = $s }
+            Start-Sleep -Seconds 1
+        }
+        Write-Host ''
+        Write-DeployLog 'USB stick still in; continuing (the next boot is set to Windows Boot Manager on UEFI PCs)' -Level WARN
+    }
+    finally { Set-DeployStatus -LocalOnly -Fields @{ removeMedia = 0 } }
+}
+
 function Start-ProgressWindow([string]$ProgressPath) {
     # The window on this PC's screen (DeployProgressWindow.ps1), in its own process so it keeps redrawing while DISM runs.
     # Without WinForms (media built without WinPE-NetFX) the console shows the log as before.
@@ -293,7 +308,7 @@ function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
 }
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
-$job = $null; $adapters = @(); $progressWindow = $false
+$job = $null; $adapters = @(); $progressWindow = $false; $onStick = $false
 $status = 'FAILED'; $failure = $null
 try {
     # A wide console whose lines wrap instead of running off the right edge.
@@ -359,11 +374,18 @@ try {
 
     # -NoPrompt, Unattended answer files and remote reimage jobs start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.
-    $deployPlan = $null; $confirmed = $false
+    $deployPlan = $null; $confirmed = $false; $wizardNotice = $null
+    # A Windows deployed here that never started means the PC came back to WinPE after the restart, usually because
+    # the USB stick is still first in the boot order. Ask instead of counting down, or it would be wiped again.
+    $unstarted = if (-not $job -and -not $NoPrompt) { Find-UnstartedDeployment -Serial "$($hw.Serial)" -ExcludeRoots @($root) } else { $null }
+    if ($unstarted) {
+        Write-DeployLog ("Windows was deployed to this PC at {0} ({1}) and has not started yet: no countdown. Remove the USB stick and restart to start Windows." -f $unstarted.deployed, $unstarted.path) -Level WARN
+        $wizardNotice = 'Windows is already installed here but has not started. Remove the USB stick and restart, or deploy again.'
+    }
     if ($AnswerFile) {
         $answer = & $readAnswer $AnswerFile
         if ($NoPrompt) { $confirmed = $true }
-        elseif ($answer.Mode -eq 'Unattended' -or $job) {
+        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted) -or $job) {
             $deployPlan = & $preparePlan $answer
             $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
             Write-Host ''
@@ -379,7 +401,7 @@ try {
     if (-not $confirmed -and (Test-DeployWizardAvailable)) {
         Set-DeployStatus -Step 'Waiting for the operator' -Percent 5
         $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
-            -ReadAnswer $readAnswer -PreparePlan $preparePlan -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root))
+            -ReadAnswer $readAnswer -PreparePlan $preparePlan -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root)) -Notice $wizardNotice
         if (-not $choice) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
         $answer = $choice.Answer; $deployPlan = $choice.Plan; $ComputerName = $choice.ComputerName
         $confirmed = $true
@@ -569,6 +591,14 @@ try {
     Invoke-Phase -Phase 'POSTIMAGE' -Answer $answer -Root $root
     Set-DeployStatus -Step 'Writing boot files' -Percent 88
     Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', $firmware)
+    # bcdboot adds Windows Boot Manager, but many PCs keep the USB stick or the network first in their own boot order
+    # and would start WinPE again. BootNext makes the restart start Windows; it never fails the deployment.
+    if ($firmware -eq 'UEFI') {
+        $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
+        Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
+    }
+    New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
+        ConvertTo-Json | Set-Content -Path 'W:\Deploy\deployed.json' -Encoding utf8
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'
@@ -608,7 +638,9 @@ finally {
     if ($status -eq 'OK') {
         # The dashboard waits for first boot; the window on this PC is done with its part.
         $whenDone = if ($answer.Shutdown) { 'shutdown' } elseif ($answer.Reboot) { 'restart' } else { 'stay' }
-        Set-DeployStatus -LocalOnly -Step 'Image applied' -Percent 100 -State Succeeded -Fields @{ whenDone = $whenDone }
+        # Content on a disk of this PC is the USB stick (a network share has no disk number).
+        $onStick = $null -ne (Get-ContentDiskNumber $root)
+        Set-DeployStatus -LocalOnly -Step 'Image applied' -Percent 100 -State Succeeded -Fields @{ whenDone = $whenDone; removableMedia = $onStick }
     }
     # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
     if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {
@@ -619,8 +651,12 @@ finally {
     }
 }
 
-# Let the window show the result before the screen goes dark.
-if ($status -eq 'OK' -and $progressWindow -and ($answer.Shutdown -or $answer.Reboot)) { Start-Sleep -Seconds 5 }
+# Let the window show the result before the screen goes dark. From a USB stick, give the operator time to pull it
+# out first (WinPE runs from memory, so that is safe now): the next start then cannot come back to WinPE.
+if ($status -eq 'OK' -and ($answer.Shutdown -or $answer.Reboot)) {
+    if ($onStick) { Wait-MediaRemoval -Root $root -Seconds 60 }
+    elseif ($progressWindow) { Start-Sleep -Seconds 5 }
+}
 if ($status -eq 'OK' -and $answer.Shutdown) { & wpeutil.exe shutdown }
 elseif ($status -eq 'OK' -and $answer.Reboot) { & wpeutil.exe reboot }
 if ($status -ne 'OK') { exit 1 }
