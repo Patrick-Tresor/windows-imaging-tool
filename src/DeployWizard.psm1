@@ -13,18 +13,31 @@ function New-DeploySidebar {
     param([Parameter(Mandatory)]$Form, [string]$Heading = 'Deploy Windows')
     $panel = New-Object Windows.Forms.Panel -Property @{ Dock = 'Left'; Width = 200; BackColor = [Drawing.Color]::FromArgb(31, 58, 95) }
     $panel.Controls.Add((New-Object Windows.Forms.Label -Property @{
-        Location = (New-Object Drawing.Point(20, 20)); Size = (New-Object Drawing.Size(170, 34)); Text = $Heading
+        Location = (New-Object Drawing.Point(14, 20)); Size = (New-Object Drawing.Size(180, 34)); Text = $Heading
         Font = New-Object Drawing.Font('Segoe UI', 14); ForeColor = [Drawing.Color]::White
     }))
+    Set-FittingFont -Label $panel.Controls[0]
     $labels = for ($i = 0; $i -lt $script:DeploySteps.Count; $i++) {
         $l = New-Object Windows.Forms.Label -Property @{
-            Location = (New-Object Drawing.Point(20, (84 + 34 * $i))); Size = (New-Object Drawing.Size(170, 28))
+            Location = (New-Object Drawing.Point(14, (84 + 34 * $i))); Size = (New-Object Drawing.Size(180, 28))
             Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]
         }
         $panel.Controls.Add($l); $l
     }
     $Form.Controls.Add($panel)
     $labels
+}
+
+function Set-FittingFont {
+    # Shrinks a label's font until its text fits on one line. WinPE has fewer fonts and some PCs scale the
+    # screen, so text measured for Segoe UI at 96 dpi was cut off ("Deploy Win", "Computer nam").
+    param([Parameter(Mandatory)]$Label, [single]$MinSize = 7)
+    $font = $Label.Font
+    $room = $Label.Width - $Label.Padding.Horizontal - 2
+    while ($font.Size -gt $MinSize -and [Windows.Forms.TextRenderer]::MeasureText($Label.Text, $font).Width -gt $room) {
+        $font = New-Object Drawing.Font($font.FontFamily, ($font.Size - 0.5), $font.Style)
+    }
+    $Label.Font = $font
 }
 
 function Set-DeploySidebarStep {
@@ -35,6 +48,7 @@ function Set-DeploySidebarStep {
         $Labels[$i].ForeColor = if ($i -eq $Current) { [Drawing.Color]::White }
                                 elseif ($i -lt $Current) { [Drawing.Color]::FromArgb(170, 200, 230) }
                                 else { [Drawing.Color]::FromArgb(120, 140, 165) }
+        Set-FittingFont -Label $Labels[$i]
     }
 }
 
@@ -54,9 +68,51 @@ function Format-DiskChoice {
     '{0}: {1} ({2:N0} GB, {3})' -f $Disk.Number, "$($Disk.FriendlyName)".Trim(), ($Disk.Size / 1GB), $Disk.BusType
 }
 
+# Buses Windows is never installed on: the USB stick WinPE booted from, card readers, mounted VHDs.
+$script:RemovableBus = 'USB', 'SD', 'MMC', 'File Backed Virtual'
+
+function Select-TargetDisks {
+    # Disks Windows can go on, from Get-Disk output: internal, not empty, and not the disk holding the content (Exclude).
+    param([object[]]$Disks = @(), [int[]]$Exclude = @())
+    @($Disks | Where-Object { $_ -and "$($_.BusType)" -notin $script:RemovableBus -and $_.Size -gt 0 -and $_.Number -notin $Exclude } | Sort-Object Number)
+}
+
 function Get-TargetDisks {
-    # Disks Windows can go on: not the USB stick WinPE booted from, not empty card readers.
-    @(Get-Disk | Where-Object { $_.BusType -ne 'USB' -and $_.Size -gt 0 } | Sort-Object Number)
+    param([int[]]$Exclude = @())
+    Select-TargetDisks -Disks @(Get-Disk) -Exclude $Exclude
+}
+
+function Resolve-TargetDisk {
+    <#
+    .SYNOPSIS
+        The disk Windows goes on. The answer file's disk number when that is an internal disk; otherwise the first
+        internal disk (NVMe, then SATA, then the rest). USB sticks often take disk 0 in WinPE, so the answer file's
+        default of 0 can point at the stick. Disk is $null when there is no internal disk; Reason says why in plain words.
+    #>
+    param([object[]]$Disks = @(), [int]$Requested = 0, [int[]]$Exclude = @())
+    $targets = @(Select-TargetDisks -Disks $Disks -Exclude $Exclude)
+    $hit = $targets | Where-Object Number -eq $Requested | Select-Object -First 1
+    if ($hit) { return [pscustomobject]@{ Disk = $hit; Reason = "disk $Requested, as the answer file says" } }
+
+    $asked = $Disks | Where-Object { $_ -and $_.Number -eq $Requested } | Select-Object -First 1
+    $why = if (-not $asked) { "there is no disk $Requested" }
+           elseif ($asked.Number -in $Exclude) { "disk $Requested holds the deployment content ($(Format-DiskChoice $asked))" }
+           elseif ("$($asked.BusType)" -in $script:RemovableBus) { "disk $Requested is a $($asked.BusType) disk ($(Format-DiskChoice $asked))" }
+           else { "disk $Requested is empty or unreadable" }
+
+    $rank = @{ NVMe = 0; SATA = 1; ATA = 1; RAID = 2; SAS = 3; SCSI = 4 }
+    $pick = $targets | Sort-Object @{ Expression = { $b = "$($_.BusType)"; if ($rank.ContainsKey($b)) { $rank[$b] } else { 9 } } }, Number |
+        Select-Object -First 1
+    if ($pick) { return [pscustomobject]@{ Disk = $pick; Reason = "the answer file says disk $Requested, but $why; using the internal disk $($pick.Number) instead" } }
+
+    $seen = @($Disks | Where-Object { $_ } | Sort-Object Number | ForEach-Object { Format-DiskChoice $_ })
+    [pscustomobject]@{
+        Disk   = $null
+        Reason = ('This PC has no internal disk that WinPE can see, so Windows has nowhere to go. Nothing was erased. ' +
+            "WinPE sees: $(if ($seen) { $seen -join '; ' } else { 'no disks at all' }). " +
+            'The SSD is usually hidden by Intel RST/VMD (Dell 11th gen and later ship with it on): set SATA/NVMe Operation to AHCI/NVMe in the BIOS, ' +
+            'or add the Intel RST VMD driver under Extra WinPE drivers on the Media tab and rebuild the stick.')
+    }
 }
 
 function Get-AppChoices {
@@ -119,7 +175,7 @@ function Show-DeployWizard {
     $font = New-Object Drawing.Font('Segoe UI', 10)
 
     $form = New-Object Windows.Forms.Form -Property @{
-        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 500); Font = $font
+        Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
         TopMost = $true; BackColor = [Drawing.Color]::White
     }
@@ -128,10 +184,21 @@ function Show-DeployWizard {
     }
     $hwText = "$($Hardware.Maker) $($Hardware.Model)   Serial $($Hardware.Serial)$(if ($Hardware.Sku) { "   SKU $($Hardware.Sku)" })"
     $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = [Drawing.Color]::DimGray }
-    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 40)); ForeColor = [Drawing.Color]::Firebrick }
-    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
-    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
-    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
+    # Problems can be long (a failed Windows 11 check says what to fix), so the red text wraps over several
+    # lines and scrolls if it is longer still. A read-only box, so the operator can also select and copy it.
+    $err = New-Object Windows.Forms.TextBox -Property @{
+        Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 76)); Multiline = $true; ReadOnly = $true
+        WordWrap = $true; BorderStyle = 'None'; BackColor = [Drawing.Color]::White; ForeColor = [Drawing.Color]::Firebrick; TabStop = $false
+    }
+    $err.add_TextChanged({
+        param($box)
+        # A scroll bar only when the text needs more than the box.
+        $h = [Windows.Forms.TextRenderer]::MeasureText($box.Text, $box.Font, (New-Object Drawing.Size(($box.Width - 4), 10000)), [Windows.Forms.TextFormatFlags]::WordBreak).Height
+        $box.ScrollBars = if ($h -gt $box.Height) { 'Vertical' } else { 'None' }
+    })
+    $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
+    $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
+    $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
     $form.CancelButton = $cancel
     $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel))
     $w.Sidebar = New-DeploySidebar -Form $form
@@ -289,5 +356,5 @@ function Test-DeployWizardAvailable {
     try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Get-TargetDisks, Get-AppChoices, Get-DeploySummary,
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
     Show-DeployWizard, Test-DeployWizardAvailable

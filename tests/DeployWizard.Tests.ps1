@@ -24,6 +24,24 @@ Assert-Equal (Test-ComputerNameValue '-PC') 'A computer name cannot start or end
 $disk = [pscustomobject]@{ Number = 0; FriendlyName = 'NVMe SSD '; Size = 512GB; BusType = 'NVMe' }
 Assert-Equal (Format-DiskChoice $disk) '0: NVMe SSD (512 GB, NVMe)' 'disk line shows number, name, size and bus'
 
+# Target disk: a Dell Latitude 5521 booted from a 64 GB stick that WinPE numbered disk 0. The Windows 11 check
+# measured the stick (58 GB) and the answer file's default disk 0 would have been the one erased.
+$stick = [pscustomobject]@{ Number = 0; FriendlyName = 'SanDisk Ultra'; Size = 58GB; BusType = 'USB' }
+$ssd   = [pscustomobject]@{ Number = 1; FriendlyName = 'PM9A1 NVMe Samsung 512GB'; Size = 477GB; BusType = 'NVMe' }
+$sata  = [pscustomobject]@{ Number = 2; FriendlyName = 'ST1000LM'; Size = 931GB; BusType = 'SATA' }
+$card  = [pscustomobject]@{ Number = 3; FriendlyName = 'SD Card Reader'; Size = 0; BusType = 'SD' }
+Assert-Equal ((Select-TargetDisks -Disks $stick, $ssd, $sata, $card) | ForEach-Object Number) '1 2' 'USB sticks and empty card readers are never targets'
+Assert-Equal ((Select-TargetDisks -Disks $ssd, $sata -Exclude 2) | ForEach-Object Number) '1' 'the disk holding the content is never a target'
+$t = Resolve-TargetDisk -Disks $stick, $ssd -Requested 0
+Assert-Equal $t.Disk.Number 1 'answer file disk 0 on the USB stick resolves to the internal SSD'
+Assert-Equal $t.Reason 'the answer file says disk 0, but disk 0 is a USB disk (0: SanDisk Ultra (58 GB, USB)); using the internal disk 1 instead' 'reason names the stick and the disk used'
+Assert-Equal (Resolve-TargetDisk -Disks $stick, $sata, $ssd -Requested 0).Disk.Number 1 'NVMe is picked before SATA'
+Assert-Equal (Resolve-TargetDisk -Disks $stick, $ssd, $sata -Requested 2).Disk.Number 2 'an internal disk the answer file names is kept'
+Assert-Equal (Resolve-TargetDisk -Disks $ssd -Requested 5).Reason 'the answer file says disk 5, but there is no disk 5; using the internal disk 1 instead' 'missing disk number falls back'
+$none = Resolve-TargetDisk -Disks $stick -Requested 0
+Assert-Equal "$($null -eq $none.Disk)" 'True' 'no internal disk gives no target'
+Assert-Equal "$($none.Reason -like '*no internal disk*WinPE sees: 0: SanDisk Ultra (58 GB, USB).*Intel RST/VMD*')" 'True' 'no internal disk says what WinPE sees and points at RST/VMD'
+
 # Applications: answer file's in its order and ticked, then the rest of the library sorted and unticked.
 $choices = @(Get-AppChoices -Selected 'Office', 'Zoom' -Available 'Zoom', 'Adobe-Reader', 'Office', '7-Zip')
 Assert-Equal (($choices | ForEach-Object { "$($_.Name)=$($_.Checked)" }) -join ',') 'Office=True,Zoom=True,7-Zip=False,Adobe-Reader=False' 'app choices keep order and tick the answer file''s'
@@ -46,6 +64,25 @@ Assert-Equal $lines[5] 'Joins:        domain corp.example.com (OU=Labs,DC=corp,D
 $withDetails = [pscustomobject]@{ ImagePath = $plan.ImagePath; DriverPack = $null; Details = @('Firmware:     UEFI (GPT disk)') }
 $lines = @(Get-DeploySummary -Answer $answer -Plan $withDetails -ComputerName 'LAB-01' -Disk $disk)
 Assert-Equal "$($lines.Count)|$($lines[6])|$($lines[7])" '8|Firmware:     UEFI (GPT disk)|ERASE disk:   0: NVMe SSD (512 GB, NVMe)' 'plan details go just before the ERASE line'
+
+# Sidebar text fits its labels even when the font renders wider than Segoe UI (WinPE cut off "Deploy Win").
+if ($env:OS -eq 'Windows_NT') {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $form = New-Object Windows.Forms.Form
+    try {
+        $labels = New-DeploySidebar -Form $form
+        Set-DeploySidebarStep -Labels $labels -Current 4
+        $heading = $form.Controls[0].Controls[0]
+        foreach ($l in @($heading) + @($labels)) {
+            $width = [Windows.Forms.TextRenderer]::MeasureText($l.Text, $l.Font).Width
+            Assert-Equal ($width -le $l.Width) $true "sidebar: '$($l.Text)' fits ($width of $($l.Width) px)"
+        }
+        $wide = New-Object Windows.Forms.Label -Property @{ Width = 120; Text = 'Install Windows on this PC'; Font = New-Object Drawing.Font('Arial', 14) }
+        Set-FittingFont -Label $wide
+        Assert-Equal ($wide.Font.Size -lt 14) $true 'Set-FittingFont shrinks text that is too wide'
+    }
+    finally { $form.Dispose() }
+} else { Write-Host 'SKIP WinForms sidebar (not Windows)' }
 
 # Every script and module still parses (the wizard is only exercised on Windows).
 foreach ($f in Get-ChildItem (Join-Path $repo 'src') -Recurse -Include *.ps1, *.psm1) {
