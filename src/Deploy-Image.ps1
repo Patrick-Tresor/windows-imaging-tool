@@ -500,7 +500,7 @@ try {
     # 3. Inject the OEM driver pack offline.
     if ($driverPack) {
         Set-DeployStatus -Step 'Injecting drivers' -Percent 72
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Image:W:\', '/Add-Driver', "/Driver:$driverPack", '/Recurse', '/ForceUnsigned:No')
+        Invoke-Native -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack)
     }
 
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.

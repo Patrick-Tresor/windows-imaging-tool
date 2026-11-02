@@ -29,6 +29,25 @@ Assert-Equal (($dell | Where-Object Model -eq 'Latitude 5540').Skus -join ',') '
 $pe = @(ConvertFrom-DellWinPEDriverPacks -Path (Join-Path $fixtures 'DriverPackCatalog.xml'))
 Assert-Equal ($pe | ForEach-Object { "$($_.WinPEVersion) $($_.Version)" }) '11 A02 10 A33' 'dell winpe: only winpe packs, newest WinPE first'
 Assert-Equal "$($pe[0].Url)|$($pe[0].HashType)|$($pe[0].FileName)" 'https://downloads.dell.com/FOLDER3/1/WinPE11.0-Drivers-A02.CAB|MD5|WinPE11.0-Drivers-A02.CAB' 'dell winpe: url, hash and file name'
+# What a catalog download really is: expand.exe "succeeds" on a non-cab and leaves no XML (Patrick's build).
+$kindDir = Join-Path ([IO.Path]::GetTempPath()) ("kind-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $kindDir | Out-Null
+try {
+    $samples = [ordered]@{
+        Cab  = [byte[]](0x4D, 0x53, 0x43, 0x46, 0, 0, 0, 0)
+        Gzip = [byte[]](0x1F, 0x8B, 8, 0)
+        Zip  = [byte[]](0x50, 0x4B, 3, 4)
+        Xml  = [Text.Encoding]::UTF8.GetBytes("$([char]0xFEFF)<?xml version=`"1.0`"?><DriverPackManifest/>")
+        Html = [Text.Encoding]::ASCII.GetBytes("`r`n<!DOCTYPE html><html><body>Access denied</body></html>")
+        Unknown = [byte[]](1, 2, 3)
+    }
+    foreach ($k in $samples.Keys) {
+        $f = Join-Path $kindDir "$k.bin"
+        [IO.File]::WriteAllBytes($f, $samples[$k])
+        Assert-Equal (Get-DownloadKind -Path $f) $k "download kind: $k"
+    }
+} finally { Remove-Item $kindDir -Recurse -Force -ErrorAction SilentlyContinue }
+
 $vmdDir = Join-Path ([IO.Path]::GetTempPath()) ("vmd-" + [guid]::NewGuid())
 try {
     New-Item -ItemType Directory -Path (Join-Path $vmdDir 'x64/network') -Force | Out-Null

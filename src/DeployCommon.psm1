@@ -141,6 +141,22 @@ function Get-DevicesWithoutDriver {
         ForEach-Object { '{0} ({1})' -f $(if ($_.Name) { $_.Name } else { 'unknown device' }), ("$($_.DeviceID)" -replace '&SUBSYS.*$', '') }
 }
 
+function Get-AddDriverArgs {
+    <#
+    .SYNOPSIS
+        DISM arguments that inject a driver folder into an offline Windows. Unsigned drivers are refused unless
+        -ForceUnsigned: DISM's /ForceUnsigned is a bare switch, and "/ForceUnsigned:No" fails with error 87.
+        PowerShell quotes an argument with a space ("/Driver:E:\Drivers\Dell\Latitude 5521") as a whole, which DISM
+        reads; a trailing backslash is removed so it can't escape that closing quote.
+    #>
+    param([Parameter(Mandatory)][string]$ImageRoot, [Parameter(Mandatory)][string]$DriverPath, [switch]$ForceUnsigned)
+    $path = $DriverPath.TrimEnd('\', '/')
+    if ($path -match '^[A-Za-z]:$') { $path += '\' }   # a bare drive root keeps its backslash
+    $dismArgs = @("/Image:$ImageRoot", '/Add-Driver', "/Driver:$path", '/Recurse')
+    if ($ForceUnsigned) { $dismArgs += '/ForceUnsigned' }
+    $dismArgs
+}
+
 function Test-UefiBoot {
     # WinPE records the firmware type here: 1 = BIOS, 2 = UEFI.
     (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name PEFirmwareType -ErrorAction SilentlyContinue).PEFirmwareType -eq 2
@@ -430,5 +446,5 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState
