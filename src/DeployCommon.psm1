@@ -536,6 +536,73 @@ function Mount-NetworkShare {
     if ($LASTEXITCODE -ne 0) { throw "Could not map $RemoteName (net use exit code $LASTEXITCODE)." }
 }
 
+# Join account checks already made while WinPE runs (Test-JoinAccount), by domain, account and password hash.
+$script:JoinChecks = @{}
+
+function Get-NetUseErrorCode {
+    # The Windows error number in net use's output: "System error 1326 has occurred." In another language, the first number.
+    param([object[]]$Output = @())
+    $text = (@($Output) | ForEach-Object { "$_" }) -join "`n"
+    if ($text -match 'System error (\d+)') { return [int]$Matches[1] }
+    if ($text -match '\b(\d{1,5})\b') { return [int]$Matches[1] }
+    -1
+}
+
+function Get-JoinCheckResult {
+    # What signing in with the join account returned (Test-JoinAccount). Refused only when the domain answered and
+    # turned the account down; anything else (no network, DNS, NTLM blocked from WinPE) is NotChecked.
+    param([int]$Code)
+    $refused = @{
+        1326 = 'wrong user name or password'
+        1327 = 'the account may not sign in (account restriction)'
+        1330 = 'its password has expired'
+        1331 = 'the account is disabled'
+        1793 = 'the account has expired'
+        1907 = 'its password must be changed first'
+        1909 = 'the account is locked out'
+    }
+    if ($Code -eq 0) { return [pscustomobject]@{ Result = 'Passed'; Code = 0; Reason = 'signed in' } }
+    if ($refused.ContainsKey($Code)) { return [pscustomobject]@{ Result = 'Refused'; Code = $Code; Reason = $refused[$Code] } }
+    $reason = if ($Code -in 53, 64, 67, 121, 1231, 1232, 1311, 1355) { 'could not reach the domain from WinPE (network or DNS)' }
+              elseif ($Code -eq 1219) { 'WinPE is already connected to that server as another account' }
+              elseif ($Code -eq 1937) { 'the domain does not accept NTLM sign-ins from WinPE' }
+              elseif ($Code -lt 0) { 'net use gave no error number' }
+              else { "net use error $Code" }
+    [pscustomobject]@{ Result = 'NotChecked'; Code = $Code; Reason = $reason }
+}
+
+function Test-JoinAccount {
+    <#
+    .SYNOPSIS
+        Signs in to the domain with the join account (net use \\<domain>\IPC$), so a wrong password shows in WinPE
+        before the disk is wiped, not after the restart, when Windows tries it for 15 minutes and the PC stays out of
+        the domain.
+    .DESCRIPTION
+        One sign-in per account and password while WinPE runs: Passed and Refused are kept, so pressing Next again
+        costs no more failed logons (a domain may lock the account). NotChecked is tried again after a minute, in case
+        the network came up late. Cached says the answer is a kept one. Never throws.
+    #>
+    param([Parameter(Mandatory)][string]$Domain, [Parameter(Mandatory)][string]$Account, [string]$Password, [string]$NetExe = 'net.exe')
+    # Without a password net use would ask for one on the console and the deploy would hang.
+    if (-not $Password) { return [pscustomobject]@{ Result = 'NotChecked'; Code = -1; Reason = 'the password file is empty'; Cached = $false } }
+    # net use's error text on stderr must not become a terminating error before its exit code is read.
+    $ErrorActionPreference = 'Continue'
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $key = "$Domain|$Account|" + [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes("$Password")))
+    $kept = $script:JoinChecks[$key]
+    if ($kept -and ($kept.Result -ne 'NotChecked' -or ((Get-Date) - $kept.Time).TotalSeconds -lt 60)) {
+        return [pscustomobject]@{ Result = $kept.Result; Code = $kept.Code; Reason = $kept.Reason; Cached = $true }
+    }
+    $target = '\\' + $Domain + '\IPC$'
+    $code = try {
+        $out = @(& $NetExe use $target $Password "/user:$Account" /persistent:no 2>&1)
+        if ($LASTEXITCODE -eq 0) { & $NetExe use $target /delete /y 2>&1 | Out-Null; 0 } else { Get-NetUseErrorCode -Output $out }
+    } catch { Get-NetUseErrorCode -Output @($_.Exception.Message) }
+    $r = Get-JoinCheckResult -Code $code
+    $script:JoinChecks[$key] = [pscustomobject]@{ Result = $r.Result; Code = $r.Code; Reason = $r.Reason; Time = Get-Date }
+    [pscustomobject]@{ Result = $r.Result; Code = $r.Code; Reason = $r.Reason; Cached = $false }
+}
+
 function Get-ShareCredential {
     # The share account from deploy-settings.json. The password file sits next to config\ on the media (X:\Deploy).
     param([Parameter(Mandatory)][string]$SettingsPath)
@@ -646,5 +713,5 @@ function Get-OfflineImageState {
 }
 
 Export-ModuleMember -Function Format-DriverProgressLine, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
-    Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState,
+    Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

@@ -189,6 +189,15 @@ under the content root, usually `config\secrets\`. Anyone who can read the share
 can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
+**The join account is checked before the disk is wiped.** When WinPE can reach
+the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).
+A wrong password, or a locked, disabled or expired account, stops the deploy
+with the reason; otherwise Windows would retry it for 15 minutes after the
+restart and the PC would stay out of the domain. If WinPE can't reach the
+domain, the check is skipped and noted in `Deploy.log`. Password files can be
+UTF-8 (with or without a BOM), UTF-16 or ANSI, so accented passwords survive
+Notepad.
+
 **Applications** are packs: a folder under `Applications\` with the installer
 (and any files it needs) and an `app.json`. Build them on the **Applications**
 tab, or with **New application...** in the answer file editor:

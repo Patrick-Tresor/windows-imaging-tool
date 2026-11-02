@@ -238,7 +238,21 @@ function Read-SecretFile {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath)
     $p = Join-Path $ContentRoot ($RelativePath -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
     if (-not (Test-Path $p)) { throw "Password file not found: $p" }
-    (Get-Content -Raw $p).Trim()
+    (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($p))).Trim()
+}
+
+function ConvertFrom-SecretBytes {
+    # A password file's text, whatever saved it: the console writes UTF-8 with a BOM, Notepad on Windows 11 UTF-8
+    # without one, older Notepad ANSI. Windows PowerShell 5.1 (WinPE) reads a file without a BOM as ANSI, so an
+    # accented password (e with an acute accent) from a BOM-less UTF-8 file came out as two other characters.
+    param([byte[]]$Bytes = @())
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { return [Text.Encoding]::UTF8.GetString($Bytes, 3, $Bytes.Length - 3) }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) { return [Text.Encoding]::Unicode.GetString($Bytes, 2, $Bytes.Length - 2) }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) { return [Text.Encoding]::BigEndianUnicode.GetString($Bytes, 2, $Bytes.Length - 2) }
+    # No BOM: UTF-8 when the bytes are valid UTF-8 (plain ASCII is too), otherwise ANSI.
+    try { return [Text.UTF8Encoding]::new($false, $true).GetString($Bytes) } catch { }
+    $ansi = try { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage) } catch { [Text.Encoding]::GetEncoding(28591) }
+    $ansi.GetString($Bytes)
 }
 
 function ConvertTo-XmlText([string]$Value) { [Security.SecurityElement]::Escape($Value) }
@@ -709,4 +723,4 @@ function ConvertFrom-SmartDeployAnswerFile {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-SmartDeployAnswerFile
+    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-SmartDeployAnswerFile
