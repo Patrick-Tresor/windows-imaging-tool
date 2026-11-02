@@ -44,6 +44,8 @@ and click **Create folders** the first time. Then:
   boxes and saved to their own files.
 - **Applications**: the application pack builder. Build, edit, test, export and
   import packs (see Applications below).
+- **Tasks**: the task library, scripts to run during or after a deployment
+  (see Tasks below).
 - **Naming List**: one row per PC by BIOS serial, with its computer name, OU
   and answer file (see below). Edit cells, **Import CSV...** to merge a list
   from Excel or an inventory export, **Export CSV...**, then **Save**. Each row
@@ -88,6 +90,7 @@ Updates\       .msu / .cab packages from the Microsoft Update Catalog
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
+Tasks\         Set-Wallpaper\task.json + script.ps1, ... (scripts answer files run)
 config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (password files)
 UserState\     user data backups, one folder per PC serial (only with a folder store)
 Logs\          one log per deployed PC, capture or remote reimage
@@ -119,7 +122,8 @@ the console; the format is documented in the commented
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
-  applications), `FIRSTLOGON` (when the first user logs on).
+  applications), `FIRSTLOGON` (when the first user logs on). A task is a
+  command or a script from the task library (`<task script="name">`).
 - extra **shares** to map in WinPE, **options** (disable System Restore, enable
   the built-in Administrator), and reboot or shut down when done.
 - **BIOS settings** for Dell, HP and Lenovo, applied in WinPE before the disk is
@@ -238,6 +242,41 @@ Old `app.json` files with only `command` and `successCodes` still work.
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
+
+**Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
+script (and any files it needs) and a `task.json`. Make them on the **Tasks** tab,
+or with **New script...** on the answer file editor's Tasks page:
+
+1. Type the script in the editor, or import a file, or a folder when the script
+   needs other files next to it. The file name says how it runs: `.ps1` with
+   Windows PowerShell (`-ExecutionPolicy Bypass`), `.cmd`/`.bat` with cmd, `.exe`
+   as a program.
+2. Choose **when** it runs by default: `POSTIMAGE` (in WinPE before the restart,
+   `%OSDRIVE%` is the new Windows), `FIRSTBOOT` (as SYSTEM after the applications)
+   or `FIRSTLOGON` (as the first user who logs on).
+3. Set its arguments, success exit codes, timeout, and whether a failure stops the
+   deployment (POSTIMAGE only; later a failure is logged and shown as a warning).
+4. Limit **which PCs** run it by maker and model, as for applications.
+
+```json
+{
+  "description": "School wallpaper", "script": "script.ps1", "type": "powershell",
+  "arguments": "-Path C:\\Windows\\Web\\Wallpaper\\School.jpg", "phase": "FIRSTBOOT",
+  "timeoutMinutes": 30, "successCodes": [0], "stopOnFailure": false,
+  "requirements": { "makers": [], "models": [] }
+}
+```
+
+In the answer file editor's **Tasks** page, pick a task and **Add script**: it
+goes in the list with the other commands, in order, and its **Command** column
+takes extra arguments for that answer file. A missing or broken task stops the
+deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
+folder with the answer files. POSTIMAGE and FIRSTBOOT runs are logged to
+`C:\Windows\Temp\Tasks\<name>.log` on the PC (and `Deploy.log` or
+`FirstBoot.log`), and first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`.
+FIRSTLOGON tasks are kept in `C:\ProgramData\ImagingTool\Tasks` and run by
+Windows itself (unattend `FirstLogonCommands`), so only the script's own logging
+records them.
 
 **User data migration** backs up the user profiles of the Windows already on
 the PC with USMT, in WinPE, before the disk is erased, and restores them at first

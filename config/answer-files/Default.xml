@@ -122,11 +122,14 @@
 
   <!-- POSTIMAGE: in WinPE after the image and drivers are applied (%OSDRIVE% = the new Windows drive,
        %DEPLOYROOT% = content root). FIRSTBOOT: on the PC as SYSTEM after the applications.
-       FIRSTLOGON: when the first user logs on. -->
-  <tasks>
+       FIRSTLOGON: when the first user logs on.
+       script="name" runs a task from the task library (<content root>\Tasks\name, the console's Tasks tab) instead
+       of a command; the task's text is then extra arguments for its script. -->
+  <tasks location="Tasks">
     <!-- <task phase="POSTIMAGE">copy %DEPLOYROOT%\Scripts\*.ps1 %OSDRIVE%\Temp\</task> -->
     <!-- <task phase="FIRSTBOOT">powershell -ExecutionPolicy Bypass -File C:\Temp\Setup.ps1</task> -->
     <!-- <task phase="FIRSTLOGON">powershell -ExecutionPolicy Bypass -File C:\Temp\User.ps1</task> -->
+    <!-- <task phase="FIRSTBOOT" script="Set-Wallpaper">-Path C:\Windows\Web\Wallpaper\School.jpg</task> -->
   </tasks>
 
   <!-- Extra shares mapped in WinPE before the deploy, for images or applications kept elsewhere. -->

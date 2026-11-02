@@ -35,6 +35,7 @@ Import-Module (Join-Path $PSScriptRoot 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
 $usmtDir = Join-Path $PSScriptRoot 'USMT'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
@@ -318,12 +319,22 @@ function Connect-StatusFolder([string]$Root, $Settings) {
     }
 }
 
-function Invoke-Phase([string]$Phase, $Answer, [string]$Root) {
+function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
     # POSTIMAGE tasks run here in WinPE with the new Windows at %OSDRIVE% (W:) and content at %DEPLOYROOT%.
+    # Plain commands stop the deployment when they fail; library tasks only when they are set to (stopOnFailure).
     $env:OSDRIVE = 'W:'
     $env:DEPLOYROOT = $Root.TrimEnd('\')
-    foreach ($t in $Answer.Tasks | Where-Object Phase -eq $Phase) {
-        Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', $t.Command)
+    foreach ($t in @($Tasks | Where-Object Phase -eq $Phase)) {
+        if (-not $t.Definition) { Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', $t.Command); continue }
+        Write-DeployLog "Running task $($t.Name)"
+        Set-DeployStatus -Step "Running task $($t.Name)"
+        # The log stays on the new Windows, next to Deploy.log.
+        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\Tasks\$($t.Name).log" -Log { param($m) Write-DeployLog $m } }
+             catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
+        if ($r.Status -eq 'Succeeded') { Write-DeployLog "  task $($t.Name) OK ($($r.Message))"; continue }
+        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\Tasks\$($t.Name).log." }
+        Write-DeployLog "  task $($t.Name) $($r.Status): $($r.Message)" -Level WARN
+        Set-DeployStatus -Warning "Task $($t.Name) $($r.Status.ToLowerInvariant())"
     }
 }
 
@@ -453,6 +464,11 @@ try {
         Write-DeployLog "Skipping application $($_.name): it is for $((@($_.requirements.makers) + @($_.requirements.models)) -join ', ') only"
         $false
     })
+    # So are the task library's scripts: a missing or broken one stops here, not halfway through.
+    $taskRoot = Resolve-ContentPath $root $answer.TaskLocation
+    $deployTasks = @(Resolve-DeployTasks -Answer $answer -TaskRoot $taskRoot -Identity $hw -OnSkip { param($m) Write-DeployLog $m })
+    $libraryTasks = @($deployTasks | Where-Object Definition)
+    if ($libraryTasks) { Write-DeployLog "Tasks: $(($libraryTasks | ForEach-Object { "$($_.Name) ($($_.Phase))" }) -join ', ')" }
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
     if ($answer.Membership -eq 'Domain') {
@@ -576,7 +592,11 @@ try {
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
-    New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword |
+    # FIRSTLOGON library tasks run from C:\ProgramData\ImagingTool\Tasks, which stays after first boot removes C:\Deploy.
+    $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
+        if ($_.Definition) { Get-TaskCommandLine -Definition $_.Definition -Folder (Get-LogonTaskFolder $_.Name) -ExtraArguments $_.Arguments } else { $_.Command }
+    })
+    New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands |
         Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
     $joinText = if ($answer.Membership -eq 'Domain') { "joins $($answer.Domain) as $((Resolve-JoinAccount -Answer $answer).Account)" } else { "workgroup $($answer.Workgroup)" }
     Write-DeployLog "Unattend written: name $ComputerName, $joinText"
@@ -588,12 +608,19 @@ try {
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
     }
+    # Library tasks: FIRSTBOOT ones next to the applications, FIRSTLOGON ones where the first user's logon finds them.
+    foreach ($t in @($libraryTasks | Where-Object Phase -in 'FIRSTBOOT', 'FIRSTLOGON')) {
+        $dest = if ($t.Phase -eq 'FIRSTBOOT') { 'W:\Deploy\Tasks' } else { 'W:\ProgramData\ImagingTool\Tasks' }
+        Write-DeployLog "Staging task $($t.Name) ($($t.Phase))"
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Copy-Item -Path $t.Folder -Destination $dest -Recurse -Force
+    }
     # User data is restored by FirstBoot.ps1 after the applications.
     $userState = if ($migration -and $migration.Mode -ne 'None') { Copy-UserStateForRestore -Plan $migration -Answer $answer -UsmtDir $usmtDir } else { $null }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
-        (Join-Path $PSScriptRoot 'AppPack.psm1') 'W:\Deploy\'
-    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -UserState $userState -BitLockerPin $bitLockerPin
+        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Deploy\'
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -UserState $userState -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
@@ -608,7 +635,7 @@ try {
 
     # 6. POSTIMAGE tasks, then boot files.
     Set-DeployStatus -Step 'Running post-image tasks' -Percent 86
-    Invoke-Phase -Phase 'POSTIMAGE' -Answer $answer -Root $root
+    Invoke-Phase -Phase 'POSTIMAGE' -Tasks $deployTasks -Root $root
     Set-DeployStatus -Step 'Writing boot files' -Percent 88
     Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', $firmware)
     # bcdboot adds Windows Boot Manager, but many PCs keep the USB stick or the network first in their own boot order

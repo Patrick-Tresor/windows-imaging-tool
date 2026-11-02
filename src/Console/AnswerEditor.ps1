@@ -4,6 +4,7 @@
 # Real .NET types so the editable grids can bind two-way.
 class TaskRow {
     [string]$Phase
+    [string]$Script
     [string]$Command
 }
 
@@ -59,6 +60,15 @@ function Show-AnswerEditor {
     $cultures = @([Globalization.CultureInfo]::GetCultures('SpecificCultures') | Sort-Object Name | ForEach-Object Name)
     foreach ($c in 'CmbInputLocale', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
+    $refreshTaskLibrary = {
+        # The Script column offers the library's tasks, plus an empty choice for a plain command, plus any name
+        # the answer file already uses (so a missing one still shows, and Get-AnswerFileIssues reports it).
+        $library = @(Get-TaskList -ContentRoot $ContentRoot)
+        $e.CmbTaskScript.ItemsSource = $library
+        if ($library.Count -and $e.CmbTaskScript.SelectedIndex -lt 0) { $e.CmbTaskScript.SelectedIndex = 0 }
+        $used = @($tasks | Where-Object Script | ForEach-Object Script)
+        $e.GridTasks.Columns[1].ItemsSource = @(@('') + @($library | ForEach-Object Name) + $used | Select-Object -Unique)
+    }
     $e.GridBios.Columns[0].ItemsSource = @('Dell', 'HP', 'Lenovo')
     $e.CmbBiosPreset.ItemsSource = @('Dell', 'HP', 'Lenovo')
     $e.CmbBiosPreset.SelectedIndex = 0
@@ -153,8 +163,13 @@ function Show-AnswerEditor {
     $e.TxtJoinPwState.Text = & $pwState $a.JoinPasswordFile
 
     $tasks = [Collections.ObjectModel.ObservableCollection[TaskRow]]::new()
-    foreach ($t in $a.Tasks) { $r = [TaskRow]::new(); $r.Phase = $t.Phase; $r.Command = $t.Command; $tasks.Add($r) }
+    foreach ($t in $a.Tasks) {
+        $r = [TaskRow]::new(); $r.Phase = $t.Phase; $r.Command = $t.Command
+        $r.Script = if ($t.PSObject.Properties['Script']) { $t.Script } else { '' }
+        $tasks.Add($r)
+    }
     $e.GridTasks.ItemsSource = $tasks
+    & $refreshTaskLibrary
 
     $shares = [Collections.ObjectModel.ObservableCollection[ShareRow]]::new()
     foreach ($s in $a.Shares) {
@@ -245,7 +260,22 @@ function Show-AnswerEditor {
     })
 
     # Tasks
-    $e.BtnTaskAdd.Add_Click({ $r = [TaskRow]::new(); $r.Phase = 'FIRSTBOOT'; $tasks.Add($r); $e.GridTasks.SelectedItem = $r })
+    $e.BtnTaskAdd.Add_Click({ $r = [TaskRow]::new(); $r.Phase = 'FIRSTBOOT'; $r.Script = ''; $tasks.Add($r); $e.GridTasks.SelectedItem = $r })
+    $addScript = {
+        # A library task, at the time it is set to run by default.
+        param($Row)
+        if (-not $Row) { return }
+        $r = [TaskRow]::new(); $r.Script = $Row.Name; $r.Command = ''
+        $r.Phase = if ($Row.Definition -and $Row.Definition.phase) { $Row.Definition.phase } else { 'FIRSTBOOT' }
+        $tasks.Add($r); $e.GridTasks.SelectedItem = $r
+    }
+    $e.BtnTaskAddScript.Add_Click({ & $addScript $e.CmbTaskScript.SelectedItem })
+    $e.BtnTaskNewScript.Add_Click({
+        $name = Show-TaskEditor -Owner $win -ContentRoot $ContentRoot
+        if (-not $name) { return }
+        & $refreshTaskLibrary
+        & $addScript (@($e.CmbTaskScript.ItemsSource) | Where-Object Name -eq $name | Select-Object -First 1)
+    })
     $e.BtnTaskRemove.Add_Click({ $r = $e.GridTasks.SelectedItem; if ($r -is [TaskRow]) { [void]$tasks.Remove($r) } })
     $e.BtnTaskUp.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -gt 0) { $tasks.Move($i, $i - 1) } })
     $e.BtnTaskDown.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -ge 0 -and $i -lt $tasks.Count - 1) { $tasks.Move($i, $i + 1) } })
@@ -323,7 +353,9 @@ function Show-AnswerEditor {
         $a.JoinUser      = $join.User
         $a.JoinDomain    = $join.Domain
         $a.Workgroup     = $e.TxtWorkgroup.Text.Trim()
-        $a.Tasks         = @($tasks | Where-Object { $_.Command } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Command = $_.Command.Trim() } })
+        $a.Tasks         = @($tasks | Where-Object { $_.Command -or $_.Script } | ForEach-Object {
+            [pscustomobject]@{ Phase = $_.Phase; Script = "$($_.Script)".Trim(); Command = "$($_.Command)".Trim() }
+        })
         $a.Shares        = @($shares | Where-Object { $_.RemoteName } | ForEach-Object {
             [pscustomobject]@{ LocalName = "$($_.LocalName)".Trim().ToUpperInvariant(); RemoteName = $_.RemoteName.Trim()
                                Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile }

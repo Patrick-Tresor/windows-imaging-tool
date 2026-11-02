@@ -30,6 +30,7 @@ Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
+Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
@@ -41,6 +42,7 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 . (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
 . (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
+. (Join-Path $PSScriptRoot 'TaskEditor.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -362,6 +364,11 @@ function Update-Apps {
     $ui.TxtAppIssues.Text = ''
 }
 
+function Update-Tasks {
+    $ui.GridTaskLibrary.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-TaskList -ContentRoot $script:root })
+    $ui.TxtTaskIssues.Text = ''
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-DeploymentLogs -ContentRoot $script:root })
     $ui.TxtLog.Text = ''
@@ -396,7 +403,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs; Update-Pcs
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Multicast; Update-Dashboard; Update-Logs; Update-Pcs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -465,7 +472,7 @@ function Set-DefaultAnswerFile([string]$Name) {
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
-    if ($saved) { Update-Answers; Update-Images; Update-Apps; Update-Naming; Set-Status 'Answer file saved' }
+    if ($saved) { Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Set-Status 'Answer file saved' }
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
@@ -585,6 +592,53 @@ $ui.BtnAppDelete.Add_Click({ Invoke-Safely {
     if (-not (Confirm-Action "Delete Applications\$($row.Name) and its installer files?")) { return }
     Remove-Application -ContentRoot $script:root -Name $row.Name
     Update-Apps
+    Set-Status "Deleted $($row.Name)"
+} })
+
+#endregion
+
+#region Tasks
+
+function Get-SelectedTask {
+    $row = $ui.GridTaskLibrary.SelectedItem
+    if (-not $row) { Show-Error 'Select a task first.' }
+    $row
+}
+
+function Edit-Task([string]$Name) {
+    $saved = if ($Name) { Show-TaskEditor -Owner $window -ContentRoot $script:root -Name $Name }
+             else { Show-TaskEditor -Owner $window -ContentRoot $script:root }
+    if ($saved) { Update-Tasks; Update-Answers; Set-Status "Task $saved saved" }
+}
+
+$ui.BtnTasksRefresh.Add_Click({ Invoke-Safely { Update-Tasks; Set-Status 'Tasks refreshed' } })
+$ui.BtnTasksOpen.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dir = Join-Path $script:root 'Tasks'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Invoke-Item $dir
+} })
+$ui.BtnTaskNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-Task } } })
+$ui.BtnTaskEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedTask; if ($row) { Edit-Task $row.Name } } })
+$ui.GridTaskLibrary.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridTaskLibrary.SelectedItem; if ($row) { Edit-Task $row.Name } } })
+
+$ui.GridTaskLibrary.Add_SelectionChanged({
+    $row = $ui.GridTaskLibrary.SelectedItem
+    $ui.TxtTaskIssues.Text = if (-not $row) { '' } else {
+        $lines = @()
+        if ($row.CommandLine) { $lines += "Runs: $($row.CommandLine)" }
+        if ($row.Definition) { $lines += "Timeout $($row.Definition.timeoutMinutes) min, success codes $($row.Definition.successCodes -join ', ')$(if ($row.Definition.stopOnFailure) { ', stops the deployment when it fails' })" }
+        $lines += @($row.Issues | ForEach-Object { "- $_" })
+        $lines -join "`r`n"
+    }
+})
+
+$ui.BtnTaskDelete.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedTask
+    if (-not $row) { return }
+    if (-not (Confirm-Action "Delete Tasks\$($row.Name) and its script files?")) { return }
+    Remove-Task -ContentRoot $script:root -Name $row.Name
+    Update-Tasks
     Set-Status "Deleted $($row.Name)"
 } })
 

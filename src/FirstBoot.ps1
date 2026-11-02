@@ -143,12 +143,33 @@ if ($plan.userState) {
     }
 }
 
+# FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
+# C:\Deploy\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Tasks\<name>.log.
 if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }
-foreach ($cmd in $plan.tasks) {
-    Write-Log "FIRSTBOOT task: $cmd"
-    $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $cmd" -Wait -PassThru -WindowStyle Hidden
-    Write-Log "  exit $($p.ExitCode)"
+Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
+$taskResults = @()
+foreach ($t in @($plan.tasks)) {
+    if ($t -is [string]) { $t = [pscustomobject]@{ name = $t; command = $t; task = $null; arguments = '' } }
+    if (-not $t.task) {
+        Write-Log "FIRSTBOOT task: $($t.command)"
+        $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($t.command)" -Wait -PassThru -WindowStyle Hidden
+        Write-Log "  exit $($p.ExitCode)"
+        $taskResults += [pscustomobject]@{ name = $t.command; status = 'Ran'; ok = $true; exitCode = $p.ExitCode; message = "exit $($p.ExitCode)" }
+        continue
+    }
+    $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
+    Write-Log "FIRSTBOOT task $($def.name)"
+    Set-Progress "Running task $($def.name)" 98
+    $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
+                   -LogPath "$env:WINDIR\Temp\Tasks\$($def.name).log" -Log { param($m) Write-Log $m } }
+         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
+    $ok = $r.Status -eq 'Succeeded'
+    Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+    $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
+    if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
 }
+# Kept after C:\Deploy is removed, next to FirstBoot-apps.json.
+if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
 if ($plan.bitlocker) {
     try { Enable-DeployBitLocker $plan.bitlocker }

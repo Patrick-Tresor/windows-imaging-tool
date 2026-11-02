@@ -5,6 +5,7 @@ $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AnswerFile.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'ImageVersions.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'TaskPack.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 
 function Join-ContentPath {
@@ -34,7 +35,7 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'Tools\BIOS\Dell', 'AnswerFiles', 'Applications', 'Updates', 'Computers', 'Reimage') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'Tools\BIOS\Dell', 'AnswerFiles', 'Applications', 'Tasks', 'Updates', 'Computers', 'Reimage') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
     foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'naming-list.csv') {
@@ -281,6 +282,16 @@ function Get-AnswerFileIssues {
             } catch { "Application ${app}: $($_.Exception.Message)" }
         }
     }
+    $taskLocation = if ($a.PSObject.Properties['TaskLocation'] -and $a.TaskLocation) { $a.TaskLocation } else { 'Tasks' }
+    if (& $local $taskLocation) {
+        $taskRoot = Join-ContentPath $ContentRoot $taskLocation
+        foreach ($name in @($a.Tasks | Where-Object { $_.PSObject.Properties['Script'] -and $_.Script } | ForEach-Object Script | Select-Object -Unique)) {
+            try {
+                $def = Read-TaskPack -TaskRoot $taskRoot -Name $name
+                foreach ($p in Test-TaskPack -Definition $def -Folder (Join-Path $taskRoot $name)) { "Task ${name}: $p" }
+            } catch { "Task ${name}: $($_.Exception.Message)" }
+        }
+    }
     $secrets = @()
     if ($a.Membership -eq 'Domain') { $secrets += $a.JoinPasswordFile }
     if ($a.EnableAdministrator) { $secrets += $a.AdminPasswordFile }
@@ -525,6 +536,68 @@ function Remove-Application {
     if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
     $dir = Join-Path (Join-Path $ContentRoot 'Applications') $Name
     if (-not (Test-Path (Join-Path $dir 'app.json'))) { throw "$Name is not an application folder." }
+    Remove-Item $dir -Recurse -Force
+}
+
+function Get-TaskUsage {
+    # Task library name -> names of the answer files that run it.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        foreach ($n in @($a.Tasks | Where-Object Script | ForEach-Object Script | Select-Object -Unique)) {
+            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
+            $usage[$n] += $f.BaseName
+        }
+    }
+    $usage
+}
+
+function Get-TaskList {
+    # Tasks\<name>\task.json folders, for the Tasks tab and the answer file editor's picker.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $root = Join-Path $ContentRoot 'Tasks'
+    $usage = Get-TaskUsage -ContentRoot $ContentRoot
+    Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'task.json') } | Sort-Object Name | ForEach-Object {
+        $row = [ordered]@{ Name = $_.Name; Description = ''; Script = ''; Type = ''; Phase = ''; For = 'All PCs'; CommandLine = ''
+                           UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
+                           Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
+        try {
+            $d = Read-TaskPack -TaskRoot $root -Name $_.Name
+            $row.Definition = $d
+            $row.Description = $d.description; $row.Script = $d.script; $row.Type = $d.type; $row.Phase = $d.phase
+            $for = @($d.requirements.makers) + @($d.requirements.models)
+            if ($for) { $row.For = $for -join ', ' }
+            if ($d.script -and $d.type) { $row.CommandLine = Get-TaskCommandLine -Definition $d -Folder "<task folder>" }
+            $row.Issues = @(Test-TaskPack -Definition $d -Folder $_.FullName)
+            if ($row.Issues) { $row.Status = "$($row.Issues.Count) problem(s)" }
+        } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
+        [pscustomobject]$row
+    }
+}
+
+function Save-Task {
+    # Creates or updates Tasks\<name>: -Source copies a script file (or a folder's contents), -ScriptText writes the
+    # script typed in the console. -New refuses an existing name.
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)]$Definition,
+        [string]$Source,
+        [AllowNull()][string]$ScriptText,
+        [switch]$New
+    )
+    $save = @{ TaskRoot = (Join-Path $ContentRoot 'Tasks'); Definition = $Definition; Source = $Source; Overwrite = -not $New }
+    if ($PSBoundParameters.ContainsKey('ScriptText')) { $save.ScriptText = $ScriptText }
+    Save-TaskPack @save
+}
+
+function Remove-Task {
+    # Deletes Tasks\<name>. Refuses while an answer file still runs it.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    $usage = Get-TaskUsage -ContentRoot $ContentRoot
+    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
+    $dir = Join-Path (Join-Path $ContentRoot 'Tasks') $Name
+    if (-not (Test-Path (Join-Path $dir 'task.json'))) { throw "$Name is not a task folder." }
     Remove-Item $dir -Recurse -Force
 }
 
@@ -993,6 +1066,7 @@ Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
+    Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
