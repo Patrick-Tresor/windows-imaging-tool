@@ -81,6 +81,13 @@ Assert-Equal "$($v.Title)|$($v.ShowChange)|$($v.SidebarStep)|$($v.Busy)" 'Starti
 
 $v = Get-ProgressView -Record (New-Record @{ step = 'Waiting for the operator'; percent = 5 })
 Assert-Equal "$($v.Title)|$($v.ShowChange)|$($v.Busy)" 'Waiting for your choices|False|False' 'wizard open: waiting for choices'
+Assert-Equal $v.Hidden $true 'wizard open: the progress window hides, so only one Deploy Windows window shows'
+$v = Get-ProgressView -Record (New-Record @{ step = 'Waiting for the operator'; percent = 5; countdown = 9 })
+Assert-Equal $v.Hidden $false 'countdown: the progress window stays, it has the Change settings button'
+$v = Get-ProgressView -Record (New-Record @{ step = 'Applying the image (50 %)'; percent = 40 })
+Assert-Equal $v.Hidden $false 'deploy running: the progress window shows'
+$v = Get-ProgressView -Record (New-Record @{ step = 'Waiting for the operator'; percent = 5 }) -DeployRunning $false
+Assert-Equal $v.Hidden $false 'deploy script stopped while waiting: the window shows that it stopped'
 
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; percent = 90; whenDone = 'stay'; finished = '2026-10-28T10:20:00Z' })
 Assert-Equal "$($v.Title)|$($v.Color)|$($v.Percent)|$($v.ShowPower)|$($v.SidebarStep)" 'Windows is installed|Good|100|True|5' 'success staying in WinPE offers Restart'

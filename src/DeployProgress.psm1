@@ -136,6 +136,9 @@ function Get-ProgressView {
         ShowChange   = $state -eq 'Running' -and $countdown -gt 0
         ShowPower    = $finished -and $whenDone -notin 'restart', 'shutdown'
         Busy         = -not $finished -and $countdown -le 0 -and $step -ne 'Waiting for the operator'
+        # While the wizard (or the console prompt) waits for the operator, this window hides: it has the same
+        # title and sidebar, so two 'Deploy Windows' windows looked like the deployment had started twice.
+        Hidden       = $state -eq 'Running' -and $countdown -le 0 -and $step -eq 'Waiting for the operator'
     }
 }
 
@@ -273,7 +276,13 @@ function Show-DeployProgressWindow {
             $previous = $p.View
             $p.View = Get-ProgressView -Record (Read-ProgressFile -Path $p.Path) -DeployRunning $running
             Update-DeployProgressForm -Ui $p.Ui -View $p.View -LogLines (Get-LogTail -Path $p.Log)
-            if (Test-ProgressRaise -Previous $previous -Current $p.View) {
+            if ($p.View.Hidden) {
+                if ($p.Ui.Form.Visible) { $p.Ui.Form.Hide() }
+                return
+            }
+            $wasHidden = -not $p.Ui.Form.Visible
+            if ($wasHidden) { $p.Ui.Form.Show() }
+            if ($wasHidden -or (Test-ProgressRaise -Previous $previous -Current $p.View)) {
                 # TopMost for a moment brings it over the console; leaving it on would hide Notepad and cmd.
                 $p.Ui.Form.WindowState = 'Normal'
                 $p.Ui.Form.TopMost = $true; $p.Ui.Form.Activate(); $p.Ui.Form.TopMost = $false
@@ -304,7 +313,7 @@ function Show-DeployProgressWindow {
 
     $timer = New-Object Windows.Forms.Timer -Property @{ Interval = 1000 }
     $timer.add_Tick({ & $script:progress.Refresh })
-    $ui.Form.add_Shown({ & $script:progress.Refresh; $script:progress.Ui.Form.Activate() })
+    $ui.Form.add_Shown({ & $script:progress.Refresh; if ($script:progress.Ui.Form.Visible) { $script:progress.Ui.Form.Activate() } })
     $timer.Start()
     [Windows.Forms.Application]::Run($ui.Form)
     $timer.Dispose()
