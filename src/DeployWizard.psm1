@@ -202,7 +202,9 @@ function Get-DeploySummary {
         [string[]]$Applications = @()
     )
     $join = if ($Answer.Membership -eq 'Domain') {
-        "domain $($Answer.Domain)$(if ($Answer.OrganizationalUnit) { " ($($Answer.OrganizationalUnit))" })"
+        # The account Windows will sign in as (AnswerFile.psm1), so a wrong one shows before the disk is wiped and in Deploy.log.
+        $as = if (Get-Command Resolve-JoinAccount -ErrorAction SilentlyContinue) { (Resolve-JoinAccount -Answer $Answer).Account }
+        "domain $($Answer.Domain)$(if ($Answer.OrganizationalUnit) { " ($($Answer.OrganizationalUnit))" })$(if ($as) { " as $as" })"
     } else { "workgroup $($Answer.Workgroup)" }
     "Answer file:  $($Answer.Name)"
     "Image:        $($Plan.ImagePath) (index $($Answer.ImageIndex))"

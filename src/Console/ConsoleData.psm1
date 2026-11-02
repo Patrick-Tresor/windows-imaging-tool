@@ -362,10 +362,16 @@ function Save-SecretFile {
 }
 
 function Split-JoinAccount {
-    # "CORP\svc-join" typed as the join account -> user svc-join, domain CORP. Other forms are left as they are.
+    # "CORP\svc-join" typed as the join account -> user svc-join, domain CORP, whatever the account's domain box held:
+    # Windows signs in as domain\user, so keeping both made CORP\svc-join into OTHER\CORP\svc-join and the join failed.
+    # A UPN (svc-join@corp.example.com) needs no domain, so the box is cleared. Other forms are left for
+    # Get-DomainJoinProblem to point at.
     param([string]$User, [string]$Domain)
     $User = "$User".Trim(); $Domain = "$Domain".Trim()
-    if ($User -match '^([^\\]+)\\([^\\]+)$' -and (-not $Domain -or $Domain -eq $Matches[1])) { $User = $Matches[2]; $Domain = $Matches[1] }
+    if ($Domain -notmatch '[\\/@]') {
+        if ($User -match '^([^\\@/]+)\\([^\\@/]+)$') { $User = $Matches[2].Trim(); $Domain = $Matches[1].Trim() }
+        elseif ($User -match '^[^\\@/]+@[^\\@/]+$') { $Domain = '' }
+    }
     [pscustomobject]@{ User = $User; Domain = $Domain }
 }
 
@@ -387,6 +393,13 @@ function Get-DomainJoinProblem {
     }
     if (-not $Answer.JoinUser) {
         return [pscustomobject]@{ Control = 'TxtJoinUser'; Message = "Type the user name of the account that joins PCs to the domain, such as svc-join, in Join account user name ($page)." }
+    }
+    $account = Resolve-JoinAccount -Answer $Answer
+    if ($account.ProblemField -eq 'Domain') {
+        return [pscustomobject]@{ Control = 'TxtJoinDomain'; Message = "Account's domain must be just a domain name such as CORP, without \ or @. To give the domain with the user, type DOMAIN\user in Join account user name ($page)." }
+    }
+    if ($account.ProblemField -eq 'User') {
+        return [pscustomobject]@{ Control = 'TxtJoinUser'; Message = "Type the join account as svc-join, CORP\svc-join or svc-join@corp.example.com in Join account user name ($page)." }
     }
     if (-not $PasswordTyped -and -not $PasswordSaved) {
         return [pscustomobject]@{ Control = 'PwdJoin'; Message = "Type the join account's password in Password ($page). It is saved in its own file under config\secrets, not in the answer file." }

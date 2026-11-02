@@ -105,6 +105,8 @@
     <workgroup>WORKGROUP</workgroup>
     <domain>corp.example.com</domain>
     <organizationalUnit></organizationalUnit>
+    <!-- The join account: username is svc-join, CORP\svc-join or svc-join@corp.example.com.
+         domain is the account's domain (such as CORP) for a plain user name; empty means the domain above. -->
     <joinCredentials>
       <username>svc-join</username>
       <domain>CORP</domain>
