@@ -22,4 +22,7 @@
     <SupportedOperatingSystems><OperatingSystem osCode="Windows11" osArch="x64"/></SupportedOperatingSystems>
     <SupportedSystems><Brand prefix="LAT"><Display lang="en">Latitude</Display><Model systemID="0B0B" name="5440"><Display lang="en">5440</Display></Model></Brand></SupportedSystems>
   </DriverPackage>
+  <DriverPackage dateTime="2025-11-01T10:00:00-05:00" hashMD5="22222222222222222222222222222222" path="FOLDER4/1/WinPE10.0-Drivers-A33.CAB" releaseID="PE002" size="250000000" type="winpe" vendorVersion="A33">
+    <SupportedOperatingSystems><OperatingSystem osCode="Windows10" osArch="x64"/></SupportedOperatingSystems>
+  </DriverPackage>
 </DriverPackManifest>

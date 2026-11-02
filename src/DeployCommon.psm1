@@ -87,6 +87,37 @@ function Get-HardwareIdentity {
     }
 }
 
+function Get-WinPEDriverInfs {
+    # The .inf files to load in WinPE from a folder: the x64 ones when the folder has per-architecture
+    # subfolders (Dell's WinPE packs have x64 and x86), otherwise all of them.
+    param([Parameter(Mandatory)][string]$Folder)
+    if (-not (Test-Path $Folder)) { return @() }
+    $base = (Resolve-Path $Folder).ProviderPath.TrimEnd('\', '/')
+    $infs = @(Get-ChildItem -Path $base -Filter *.inf -Recurse -File | Sort-Object FullName)
+    # Folder names below the given folder only, so a folder that is itself called x86 still gives its drivers.
+    $below = { param($f) ($f.FullName.Substring($base.Length) -replace '\\', '/').ToLowerInvariant() }
+    $x64 = @($infs | Where-Object { (& $below $_) -match '/(x64|amd64)/' })
+    if ($x64) { $x64 } else { @($infs | Where-Object { (& $below $_) -notmatch '/(x86|arm64)/' }) }
+}
+
+function Import-WinPEDrivers {
+    # Loads drivers into the running WinPE with drvload, then rescans storage. Nothing happens without the folder.
+    param([Parameter(Mandatory)][string]$Folder)
+    if (-not (Test-Path $Folder)) { return }
+    $infs = @(Get-WinPEDriverInfs -Folder $Folder)
+    if (-not $infs) { return }
+    Write-DeployLog "Loading $($infs.Count) WinPE driver(s) from $Folder"
+    $failed = 0
+    foreach ($inf in $infs) {
+        & drvload.exe $inf.FullName | Out-Null
+        if ($LASTEXITCODE -ne 0) { $failed++; Write-DeployLog "drvload failed ($LASTEXITCODE): $($inf.FullName)" -Level WARN }
+    }
+    if ($failed -lt $infs.Count) {
+        try { Update-HostStorageCache -ErrorAction Stop } catch { }
+        Start-Sleep -Seconds 2   # a newly loaded storage controller takes a moment to list its disks
+    }
+}
+
 function Test-UefiBoot {
     # WinPE records the firmware type here: 1 = BIOS, 2 = UEFI.
     (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name PEFirmwareType -ErrorAction SilentlyContinue).PEFirmwareType -eq 2
@@ -376,5 +407,5 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Get-WinPEDriverInfs, Import-WinPEDrivers, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState

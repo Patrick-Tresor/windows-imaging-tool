@@ -117,7 +117,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     # The disk Windows goes on: never the USB stick or the disk holding the content, even when the answer file
     # says disk 0 and the stick took that number. The wizard preselects it; the operator can still pick another.
     $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude @(Get-ContentDiskNumber $Root)
-    if (-not $target.Disk) { throw $target.Reason }
+    if (-not $target.Disk) { Write-DeployLog $target.Reason -Level ERROR; throw $target.Short }
     if ($target.Disk.Number -ne $Answer.DiskNumber) {
         if ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $($target.Reason)" -Level WARN }
         $Answer.DiskNumber = $target.Disk.Number
@@ -185,10 +185,9 @@ function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Ov
     $decision = Get-Win11ReadinessDecision -Mode $Answer.Windows11Check -IsWin11 $isWin11 -Results $results -Override:$Override
     if ($null -eq $isWin11) { Write-DeployLog 'Could not tell whether the image is Windows 11; requirements are shown but never block.' -Level WARN }
     if ($decision.Action -eq 'Block') {
-        # Say what failed, not only which check: "Disk: The disk Windows would go on (disk 1, ...) is 58 GB; ..."
-        $why = @($results | Where-Object Result -eq 'Fail' | ForEach-Object { "$($_.Check): $($_.Detail)" }) -join ' '
-        throw "This PC does not meet the Windows 11 requirements. $why Nothing was erased. " +
-              'Fix it, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.'
+        # Each failed requirement and how to fix it is already in the log (above); the wizard gets one short line.
+        Write-DeployLog 'Fix the failed Windows 11 requirement, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.' -Level ERROR
+        throw "Not ready for Windows 11 ($($decision.Summary -replace '^NOT READY: ')). Nothing was erased; see the log."
     }
     if ($decision.Failed -and $Override) { Write-DeployLog 'Deploying anyway: -IgnoreWindows11Check' -Level WARN }
     $decision.Summary
@@ -278,6 +277,9 @@ try {
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
     $root = Find-ContentRoot -SettingsPath $SettingsPath
+    # Storage and network drivers on the content root, loaded before any disk is looked at, so a stick can carry
+    # a driver (an Intel RST/VMD controller, a new NIC) that boot.wim was built without.
+    Import-WinPEDrivers -Folder (Join-Path $root 'Drivers\_WinPE')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
 
     # Settings on the content root (edited in the console) win over the copy baked into the media.

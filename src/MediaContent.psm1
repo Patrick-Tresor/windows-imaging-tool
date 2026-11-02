@@ -73,7 +73,8 @@ function Get-MediaContent {
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
     # Always: settings, driver catalog, naming list, password files, and the BIOS tools.
-    foreach ($dir in 'config', 'Tools') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
+    # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
+    foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
 
     foreach ($name in $names) {
         $path = Join-MediaPath $ContentRoot "AnswerFiles\$name.xml"
