@@ -33,7 +33,8 @@ param(
     [switch]$NoDriverPacks,          # with -ContentSource: no driver packs at all (PCs get Windows inbox drivers)
     [string]$OutputPath = (Get-Location).Path,
     [string]$WinPEDrivers,           # optional NIC/storage drivers WinPE itself needs on newer hardware
-    [switch]$NoVendorWinPEDrivers,   # don't add Dell's WinPE driver pack (Intel RST/VMD storage, network) to boot.wim
+    [switch]$NoVendorWinPEDrivers,   # don't add any vendor WinPE driver pack (Intel RST/VMD storage, network) to boot.wim
+    [string[]]$WinPEDriverVendors = @('Dell', 'HP'),   # whose WinPE driver packs go into boot.wim: Dell, HP (comma list from the console)
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
@@ -64,6 +65,8 @@ if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target P
 if ($AnswerFiles -and -not $ContentSource) { throw '-AnswerFiles needs -ContentSource.' }
 # The console passes the names as one comma-separated argument (powershell.exe -File doesn't take arrays).
 $AnswerFiles = @($AnswerFiles | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$WinPEDriverVendors = @($WinPEDriverVendors | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+foreach ($v in $WinPEDriverVendors) { if ($v -notin 'Dell', 'HP') { throw "-WinPEDriverVendors: '$v' is not Dell or HP." } }
 if (($DriverPacks -or $NoDriverPacks) -and -not $ContentSource) { throw '-DriverPacks and -NoDriverPacks need -ContentSource.' }
 if ($DriverPacks -and $NoDriverPacks) { throw 'Pass -DriverPacks or -NoDriverPacks, not both.' }
 # Pack folders can contain commas, so the console joins them with | (not allowed in Windows file names).
@@ -114,31 +117,47 @@ try {
     }
     # Storage and network drivers for WinPE itself. Without the Intel RST/VMD driver, WinPE sees no SSD on PCs that
     # ship with VMD on (Dell 11th gen and later, and others), and the deploy stops with "No internal disk found".
-    # Dell's WinPE pack is downloaded once into the cache; a build without internet carries on without it.
-    $peSources = @(); $peProblem = $null; $dellPe = $null
+    # Each vendor's WinPE pack (Dell: Intel RST/VMD, NICs; HP: its business PCs' storage and NICs) is downloaded once
+    # into the cache; a build without internet carries on without it. Lenovo publishes no single WinPE pack, but the
+    # Intel storage drivers in Dell's pack match the controller, so they cover Lenovo PCs with VMD too.
+    $peSources = @(); $peProblem = $null; $vendorPacks = @()
     if (-not $NoVendorWinPEDrivers) {
-        try { $dellPe = Save-WinPEDriverPack; $peSources += [pscustomobject]@{ Path = $dellPe.Path; Name = $dellPe.Source } }
-        catch { $peProblem = "Dell WinPE driver pack not added: $($_.Exception.Message)"; Write-Warning "$peProblem PCs with Intel RST/VMD on will show no internal disk in WinPE." }
+        foreach ($vendor in $WinPEDriverVendors) {
+            try {
+                $pack = if ($vendor -eq 'HP') { Save-HpWinPEDriverPack } else { Save-WinPEDriverPack }
+                $vendorPacks += $pack
+                $peSources += [pscustomobject]@{ Path = $pack.Path; Name = $pack.Source }
+            } catch {
+                $msg = "$vendor WinPE driver pack not added: $($_.Exception.Message)"
+                $peProblem = (@($peProblem, $msg) | Where-Object { $_ }) -join ' '
+                Write-Warning $msg
+            }
+        }
     }
     if ($WinPEDrivers) { $peSources += [pscustomobject]@{ Path = $WinPEDrivers; Name = 'Extra WinPE drivers' } }
     if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peSources += [pscustomobject]@{ Path = "$ContentSource\Drivers\_WinPE"; Name = 'Drivers\_WinPE' } }
     $peReport = @()
+    $seenInfs = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($src in $peSources) {
         # x64 drivers only (Dell's pack also has x86); one bad driver must not lose the others.
         $infs = @(Get-WinPEDriverInfs -Folder $src.Path)
         Write-Host "Adding $($infs.Count) WinPE driver(s) from $($src.Name) ($($src.Path)). Each takes a few seconds:"
-        $added = @(); $failed = @()
+        $added = @(); $failed = @(); $same = 0
         $clock = [Diagnostics.Stopwatch]::StartNew()
         for ($i = 0; $i -lt $infs.Count; $i++) {
             $inf = $infs[$i]
             $line = Format-DriverProgressLine -Index ($i + 1) -Total $infs.Count -Path $inf.FullName -Root $src.Path -Elapsed $clock.Elapsed
             Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Status $line -PercentComplete ([int](100 * $i / [Math]::Max(1, $infs.Count)))
             Write-Host -NoNewline "  $line"
+            # The same driver in two vendors' packs (Intel NICs, Intel RST) goes in once.
+            $key = "$($inf.Name)|$((Get-FileHash $inf.FullName -Algorithm SHA256).Hash)"
+            if ($seenInfs.Contains($key)) { $same++; Write-Host ' already added'; continue }
+            [void]$seenInfs.Add($key)
             try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name; Write-Host ' ok' }
             catch { $failed += $inf.Name; Write-Host ' FAILED' -ForegroundColor Yellow; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
         }
         Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Completed
-        Write-Host ('Done: {0} of {1} WinPE driver(s) added in {2:m\:ss}.' -f $added.Count, $infs.Count, $clock.Elapsed)
+        Write-Host ('Done: {0} of {1} WinPE driver(s) added{2} in {3:m\:ss}.' -f $added.Count, $infs.Count, $(if ($same) { ", $same already in from another pack" } else { '' }), $clock.Elapsed)
         if ($failed) { Write-Warning "$($failed.Count) of $($infs.Count) WinPE driver(s) from $($src.Name) could not be added: $(($failed | Select-Object -Unique) -join ', ')" }
         $peReport += [ordered]@{ name = $src.Name; added = $added.Count; failed = @($failed) ; vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
     }
@@ -251,11 +270,11 @@ switch ($Target) {
             Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
             if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
         }
-        # The Dell WinPE pack on the stick too, so WinPE can load it with drvload when boot.wim lacks a driver.
-        if ($dellPe) {
-            $peOnStick = "${dataLetter}:\Drivers\_WinPE\$(Split-Path $dellPe.Path -Leaf)"
+        # The vendor WinPE packs on the stick too, so WinPE can load them with drvload when boot.wim lacks a driver.
+        foreach ($pack in $vendorPacks) {
+            $peOnStick = "${dataLetter}:\Drivers\_WinPE\$(Split-Path $pack.Path -Leaf)"
             New-Item -ItemType Directory -Path $peOnStick -Force | Out-Null
-            Copy-Item -Path (Join-Path $dellPe.Path '*') -Destination $peOnStick -Recurse -Force
+            Copy-Item -Path (Join-Path $pack.Path '*') -Destination $peOnStick -Recurse -Force
         }
         Write-Host ''
         Write-Host '==============================================' -ForegroundColor Green

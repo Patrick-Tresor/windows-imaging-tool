@@ -48,6 +48,14 @@ try {
     }
 } finally { Remove-Item $kindDir -Recurse -Force -ErrorAction SilentlyContinue }
 
+# HP WinPE pack: the highest SoftPaq linked on HP's page, over https.
+$hpHtml = '<tr><td>3.30</td><td><a href="http://ftp.ext.hp.com/pub/softpaq/sp172001-172500/sp172442.exe">sp172442</a></td></tr>' +
+    '<tr><td>3.40</td><td><a href="https://ftp.ext.hp.com/pub/softpaq/sp173001-173500/sp173204.exe">sp173204</a></td></tr>' +
+    '<a href="https://ftp.ext.hp.com/pub/softpaq/sp173001-173500/sp173204.html">notes</a>'
+$hpPe = ConvertFrom-HpWinPEPage -Html $hpHtml
+Assert-Equal "$($hpPe.Version)|$($hpPe.Url)|$($hpPe.FileName)" 'sp173204|https://ftp.ext.hp.com/pub/softpaq/sp173001-173500/sp173204.exe|sp173204.exe' 'hp winpe: newest softpaq'
+Assert-Equal "$($null -eq (ConvertFrom-HpWinPEPage -Html '<html>maintenance</html>'))" 'True' 'hp winpe: page without softpaqs gives none'
+
 $vmdDir = Join-Path ([IO.Path]::GetTempPath()) ("vmd-" + [guid]::NewGuid())
 try {
     New-Item -ItemType Directory -Path (Join-Path $vmdDir 'x64/network') -Force | Out-Null
