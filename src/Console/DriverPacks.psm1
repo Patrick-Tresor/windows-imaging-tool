@@ -152,7 +152,7 @@ function Save-WinPEDriverPack {
         $f = $script:DellWinPEFallback
         $pack = [pscustomobject]@{ Url = $f.Url; Version = $f.Version; WinPEVersion = $f.WinPEVersion; Hash = $null; HashType = $null
             FileName = [IO.Path]::GetFileName(([uri]$f.Url).AbsolutePath); SizeMB = 34 }
-        Write-Host "Using the built-in Dell WinPE pack link: $why."
+        Write-Host "Dell catalog not used ($why); using the built-in WinPE pack link instead." -ForegroundColor DarkGray
     }
     $dest = Join-Path $CacheDir "WinPE\Dell-WinPE$($pack.WinPEVersion)-$($pack.Version)"
     $source = "Dell WinPE $($pack.WinPEVersion) driver pack $($pack.Version)"
@@ -235,10 +235,22 @@ function Select-LatestDriverPacks {
 #region Vendor catalogs
 
 function Expand-CabFile {
+    # expand.exe can exit 0 and write nothing (Dell's DriverPackCatalog.cab on Patrick's PC, extracted into the
+    # folder it was downloaded to), so check that files came out and try tar.exe (Windows 10 1803 and later) next.
     param([string]$Cab, [string]$Destination)
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    & expand.exe $Cab -F:* $Destination | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "expand.exe failed on $Cab" }
+    $before = @(Get-ChildItem -Path $Destination -Recurse -File | Where-Object FullName -ne $Cab).Count
+    $out = & expand.exe $Cab -F:* $Destination 2>&1
+    $after = @(Get-ChildItem -Path $Destination -Recurse -File | Where-Object FullName -ne $Cab).Count
+    if ($LASTEXITCODE -eq 0 -and $after -gt $before) { return }
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if ($env:SystemRoot -and (Test-Path $tar)) {
+        $tarOut = & $tar -xf $Cab -C $Destination 2>&1
+        $after = @(Get-ChildItem -Path $Destination -Recurse -File | Where-Object FullName -ne $Cab).Count
+        if ($LASTEXITCODE -eq 0 -and $after -gt $before) { return }
+        $out = @($out) + @($tarOut)
+    }
+    throw "Could not extract $([IO.Path]::GetFileName($Cab)): $((@($out) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' ')"
 }
 
 function Save-WebFile {
@@ -308,7 +320,14 @@ function Update-VendorCatalog {
     # Dell's CDN or a proxy can send the XML itself, a gzip, or an HTML page instead of the cab.
     $kind = Get-DownloadKind -Path $download
     switch ($kind) {
-        'Cab'  { Expand-CabFile -Cab $download -Destination $dir }
+        'Cab'  {
+            $unpack = Join-Path $dir 'unpacked'
+            if (Test-Path $unpack) { Remove-Item $unpack -Recurse -Force }
+            Expand-CabFile -Cab $download -Destination $unpack
+            $inner = Get-ChildItem -Path $unpack -Filter *.xml -Recurse -File | Sort-Object Length -Descending | Select-Object -First 1
+            if ($inner) { Move-Item $inner.FullName $xml -Force }
+            Remove-Item $unpack -Recurse -Force -ErrorAction SilentlyContinue
+        }
         'Gzip' { Expand-GzipFile -Path $download -Destination $xml }
         'Xml'  { if ($download -ne $xml) { Copy-Item $download $xml -Force } }
         default {

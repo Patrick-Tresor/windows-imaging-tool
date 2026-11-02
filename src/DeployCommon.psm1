@@ -248,6 +248,16 @@ function Get-AddDriverArgs {
     $dismArgs
 }
 
+function Format-DriverProgressLine {
+    # "[ 5/76] storage\iaStorVD.inf  (0:42)": the driver being added to boot.wim, its folder below Root, elapsed time.
+    param([int]$Index, [int]$Total, [Parameter(Mandatory)][string]$Path, [string]$Root, [TimeSpan]$Elapsed = [TimeSpan]::Zero)
+    $name = Split-Path $Path -Leaf
+    $folder = Split-Path (Split-Path $Path -Parent) -Leaf
+    $shown = if ($folder -and $Root -and (Split-Path $Path -Parent).TrimEnd('\', '/') -ne $Root.TrimEnd('\', '/')) { "$folder\$name" } else { $name }
+    $width = "$Total".Length
+    ('[{0}/{1}] {2}  ({3:m\:ss})' -f "$Index".PadLeft($width), $Total, $shown, $Elapsed)
+}
+
 function Test-UefiBoot {
     # WinPE records the firmware type here: 1 = BIOS, 2 = UEFI.
     (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name PEFirmwareType -ErrorAction SilentlyContinue).PEFirmwareType -eq 2
@@ -537,5 +547,5 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-DriverProgressLine, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState

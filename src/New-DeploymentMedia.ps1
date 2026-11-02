@@ -126,12 +126,19 @@ try {
     foreach ($src in $peSources) {
         # x64 drivers only (Dell's pack also has x86); one bad driver must not lose the others.
         $infs = @(Get-WinPEDriverInfs -Folder $src.Path)
-        Write-Host "Adding $($infs.Count) WinPE driver(s) from $($src.Name) ($($src.Path))..."
+        Write-Host "Adding $($infs.Count) WinPE driver(s) from $($src.Name) ($($src.Path)). Each takes a few seconds:"
         $added = @(); $failed = @()
-        foreach ($inf in $infs) {
-            try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name }
-            catch { $failed += $inf.Name; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        for ($i = 0; $i -lt $infs.Count; $i++) {
+            $inf = $infs[$i]
+            $line = Format-DriverProgressLine -Index ($i + 1) -Total $infs.Count -Path $inf.FullName -Root $src.Path -Elapsed $clock.Elapsed
+            Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Status $line -PercentComplete ([int](100 * $i / [Math]::Max(1, $infs.Count)))
+            Write-Host -NoNewline "  $line"
+            try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name; Write-Host ' ok' }
+            catch { $failed += $inf.Name; Write-Host ' FAILED' -ForegroundColor Yellow; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
         }
+        Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Completed
+        Write-Host ('Done: {0} of {1} WinPE driver(s) added in {2:m\:ss}.' -f $added.Count, $infs.Count, $clock.Elapsed)
         if ($failed) { Write-Warning "$($failed.Count) of $($infs.Count) WinPE driver(s) from $($src.Name) could not be added: $(($failed | Select-Object -Unique) -join ', ')" }
         $peReport += [ordered]@{ name = $src.Name; added = $added.Count; failed = @($failed) ; vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
     }
