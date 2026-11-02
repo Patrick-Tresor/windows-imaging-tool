@@ -753,7 +753,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
     $buildArgs = @('-NoExit') + $buildArgs
     Start-Process powershell.exe -ArgumentList $buildArgs
-    Set-Status 'Media build started in a separate window'
+    Set-Status 'Media build started in a separate window. It shows the copy progress and says USB media ready when done.'
 } })
 
 $ui.BtnWdsCheck.Add_Click({ Invoke-Safely {

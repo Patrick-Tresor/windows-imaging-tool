@@ -45,6 +45,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -75,6 +76,13 @@ if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
     foreach ($n in $content.Notes) { Write-Warning $n }
+}
+$copyPlan = $null
+if ($Target -eq 'Usb' -and $ContentSource) {
+    # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
+    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files }
+                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) }
+    Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
 }
 if ($BootVM) {
     # Check the VM before spending minutes on the build.
@@ -170,7 +178,15 @@ switch ($Target) {
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
         $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
+        if ($copyPlan) {
+            # 2 GB WINPE partition, plus a little for NTFS itself.
+            $room = [int64]$disk.Size - 2GB - [int64]($disk.Size * 0.02)
+            if ($copyPlan.TotalBytes -gt $room) {
+                throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
+            }
+        }
         if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
+        Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
 
         # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
         Reset-UsbDisk -DiskNumber $UsbDiskNumber
@@ -181,34 +197,27 @@ switch ($Target) {
 
         $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
         $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
-        robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL | Out-Null
+        Write-Host "Copying WinPE boot files to ${bootLetter}:..."
+        robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Copying the WinPE boot files to ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
         # Legacy BIOS boot code in the MBR and the partition boot sector, as MakeWinPEMedia writes it.
         $bootsect = "$adk\Deployment Tools\amd64\BCDBoot\bootsect.exe"
         & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
         # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
         New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
-        if ($content) {
-            # The answer files, the image each one names, and what they use. Robocopy exit codes 8 and up are failures.
-            foreach ($dir in $content.Folders) {
-                Write-Host "Copying $dir..."
-                robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" /E /NFL /NDL /NJH /NJS | Out-Null
-                if ($LASTEXITCODE -ge 8) { throw "Copying $dir to the USB stick failed (robocopy exit code $LASTEXITCODE). Is the stick full?" }
-            }
-            foreach ($file in $content.Files) {
-                Write-Host "Copying $file..."
-                $dir = Split-Path $file -Parent
-                robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" (Split-Path $file -Leaf) /NFL /NDL /NJH /NJS | Out-Null
-                if ($LASTEXITCODE -ge 8) { throw "Copying $file to the USB stick failed (robocopy exit code $LASTEXITCODE). Is the stick full?" }
-            }
-            $listed = ($content.AnswerFiles | ForEach-Object Name) -join ', '
-            Write-Host "Answer files on the stick: $listed"
-        } elseif ($ContentSource) {
-            # Capture media: the capture saves to Images and reads its settings from config.
-            foreach ($dir in 'Images', 'Drivers', 'config') {
-                robocopy (Join-Path $ContentSource $dir) "${dataLetter}:\$dir" /E /NFL /NDL | Out-Null
-            }
+        if ($copyPlan) {
+            # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
+            # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
+            $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\"
+            Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
+            if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
         }
-        Write-Host "USB ready: WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)"
+        Write-Host ''
+        Write-Host '==============================================' -ForegroundColor Green
+        Write-Host ' USB media ready' -ForegroundColor Green
+        Write-Host " WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)" -ForegroundColor Green
+        Write-Host ' Eject the stick in Windows before you unplug it.' -ForegroundColor Green
+        Write-Host '==============================================' -ForegroundColor Green
     }
 }
