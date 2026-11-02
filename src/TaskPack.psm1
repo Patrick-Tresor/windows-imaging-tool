@@ -238,22 +238,34 @@ function Invoke-TaskPack {
     $l = Get-TaskLaunch -Definition $d -Folder $Folder -ExtraArguments $ExtraArguments
     & $Log "  > $($l.FilePath) $($l.Arguments)"
     New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force | Out-Null
-    $stdout = "$LogPath.out"; $stderr = "$LogPath.err"
-    $start = @{ FilePath = $l.FilePath; WorkingDirectory = $Folder; PassThru = $true; NoNewWindow = $true
-                RedirectStandardOutput = $stdout; RedirectStandardError = $stderr }
-    if ($l.Arguments) { $start.ArgumentList = $l.Arguments }
-    $p = Start-Process @start
-    $null = $p.Handle   # keeps the handle open, or ExitCode is empty after a timed wait
+    # Console programs (powershell.exe, cmd.exe) write redirected output in the OEM code page, so read it that way
+    # or accented letters in the log come out wrong. Both streams are read while the task runs so neither pipe fills.
+    $oem = try { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage) } catch { [Console]::OutputEncoding }
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $l.FilePath
+    $psi.Arguments = "$($l.Arguments)"
+    $psi.WorkingDirectory = $Folder
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = $oem
+    $psi.StandardErrorEncoding = $oem
+    $p = [Diagnostics.Process]::Start($psi)
+    $stdout = $p.StandardOutput.ReadToEndAsync()
+    $stderr = $p.StandardError.ReadToEndAsync()
     $timedOut = -not $p.WaitForExit($d.timeoutMinutes * 60000)
     if ($timedOut) { try { & taskkill.exe /PID $p.Id /T /F | Out-Null } catch { } }
     else { $p.WaitForExit() }
+    # The pipes close once the task (and anything it started) has ended; don't hang on one that stays open.
+    $null = [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 15000)
 
-    # One log per task: the command, its output, then its errors.
+    # One log per task: the command, its output, then its errors. UTF-8, so accents survive.
     $lines = @("{0:yyyy-MM-dd HH:mm:ss} {1} {2}" -f (Get-Date), $l.FilePath, $l.Arguments)
-    foreach ($f in $stdout, $stderr) {
-        if (Test-Path $f) { $lines += @(Get-Content -Path $f -ErrorAction SilentlyContinue); Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    foreach ($t in $stdout, $stderr) {
+        if ($t.IsCompleted -and -not $t.IsFaulted -and $t.Result) { $lines += @($t.Result -split "\r?\n" | Where-Object { $_ -ne '' }) }
     }
-    Add-Content -Path $LogPath -Value $lines
+    Add-Content -Path $LogPath -Value $lines -Encoding UTF8
     $last = @($lines | Select-Object -Skip 1 | Where-Object { "$_".Trim() } | Select-Object -Last 1)
     $tail = if ($last) { "; last line: $("$($last[0])".Trim())" } else { '' }
 
