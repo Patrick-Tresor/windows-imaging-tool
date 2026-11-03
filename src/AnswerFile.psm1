@@ -5,7 +5,6 @@
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
 $script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
 $script:BitLockerProtectors = 'Tpm', 'TpmPin'
-$script:BiosMakers = 'Dell', 'HP', 'Lenovo'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1')
 
 function Get-XmlText {
@@ -34,19 +33,6 @@ function Read-BitLockerNode($d) {
         BackupToAD        = ConvertTo-Bool (Get-XmlText $d 'bitlocker/backupToAD') $true
         RecoveryKeyFolder = Get-XmlText $d 'bitlocker/recoveryKeyFolder'
         RequireBackup     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/requireBackup') $true
-    }
-}
-
-function Read-BiosNode($d) {
-    # <bios>: firmware settings per maker, applied in WinPE before the disk is wiped. Off when missing.
-    [pscustomobject]@{
-        Enabled      = ConvertTo-Bool (Get-XmlText $d 'bios/enabled') $false
-        PasswordFile = Get-XmlText $d 'bios/passwordFile'
-        ToolsRoot    = Get-XmlText $d 'bios/toolsRoot' 'Tools\BIOS'
-        StopOnError  = ConvertTo-Bool (Get-XmlText $d 'bios/stopOnError') $false
-        Settings     = @($d.SelectNodes('bios/setting') | ForEach-Object {
-            [pscustomobject]@{ Maker = $_.GetAttribute('maker'); Name = $_.GetAttribute('name'); Value = "$($_.InnerText)".Trim() }
-        })
     }
 }
 
@@ -112,7 +98,6 @@ function Read-AnswerFile {
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
         Shutdown             = ConvertTo-Bool (Get-XmlText $d 'completion/shutdown') $false
         BitLocker            = Read-BitLockerNode $d
-        Bios                 = Read-BiosNode $d
     }
 
     $a.Applications = @($d.SelectNodes('applications/application') |
@@ -190,15 +175,6 @@ function Test-AnswerFile {
         if ($bl.BackupToAD -and $a.Membership -ne 'Domain') { 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' }
         if ($bl.RecoveryKeyFolder -and $bl.RecoveryKeyFolder -notmatch '^\\\\[^\\]+\\.+') { "bitlocker/recoveryKeyFolder '$($bl.RecoveryKeyFolder)' must be a \\server\share path." }
         if ($bl.RequireBackup -and -not $bl.BackupToAD -and -not $bl.RecoveryKeyFolder) { 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' }
-    }
-    $bios = $a.Bios
-    if ($bios -and $bios.Enabled) {
-        if (-not $bios.Settings) { 'bios is enabled but has no settings.' }
-        foreach ($s in $bios.Settings) {
-            if ($s.Maker -notin $script:BiosMakers) { "BIOS setting '$($s.Name)': maker must be Dell, HP or Lenovo, not '$($s.Maker)'." }
-            if (-not $s.Name -or -not $s.Value) { "A $($s.Maker) BIOS setting needs a name and a value." }
-            elseif ($s.Maker -eq 'Lenovo' -and "$($s.Name)$($s.Value)" -match '[,;]') { "Lenovo BIOS setting '$($s.Name)': names and values can't contain , or ;." }
-        }
     }
 }
 
@@ -481,8 +457,6 @@ function Export-AnswerFile {
 "@
     }
     $bl = if ($a.BitLocker) { $a.BitLocker } else { Read-BitLockerNode ([xml]'<deployment/>').DocumentElement }
-    $bios = if ($a.Bios) { $a.Bios } else { Read-BiosNode ([xml]'<deployment/>').DocumentElement }
-    $biosSettings = foreach ($s in $bios.Settings) { "    <setting maker=`"$(& $x $s.Maker)`" name=`"$(& $x $s.Name)`">$(& $x $s.Value)</setting>" }
     $text = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
@@ -571,13 +545,6 @@ $($shares -join "`n")
     <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
     <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>
   </bitlocker>
-  <bios>
-    <enabled>$(& $b $bios.Enabled)</enabled>
-    <passwordFile>$(& $x $bios.PasswordFile)</passwordFile>
-    <toolsRoot>$(& $x $bios.ToolsRoot)</toolsRoot>
-    <stopOnError>$(& $b $bios.StopOnError)</stopOnError>
-$($biosSettings -join "`n")
-  </bios>
   <completion>
     <reboot>$(& $b $a.Reboot)</reboot>
     <shutdown>$(& $b $a.Shutdown)</shutdown>
@@ -735,7 +702,6 @@ function ConvertFrom-SmartDeployAnswerFile {
         Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'
         Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
         BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
-        Bios                 = Read-BiosNode ([xml]'<deployment/>').DocumentElement
     }
     if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: put its password in config\secrets\admin.txt.') }
     @{ Answer = $answer; Notes = @($notes) }

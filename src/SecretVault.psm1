@@ -156,8 +156,6 @@ function Get-AnswerSecrets {
     }
     $bl = $Answer.BitLocker
     if ($bl -and $bl.Enabled -and $bl.Protector -eq 'TpmPin') { & $add $bl.PinFile 'BitLocker PIN' }
-    $bios = $Answer.Bios
-    if ($bios -and $bios.Enabled) { & $add $bios.PasswordFile 'BIOS admin password' }
     if ($Answer.MigrateUserData -and $Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
         & $add $Answer.UserDataKeyFile 'User data encryption key'
     }

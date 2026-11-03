@@ -1,5 +1,5 @@
 # What a USB stick's DEPLOY partition needs so it deploys offline: the chosen answer files, the image each one
-# names (its pinned version when it has one), the drivers, applications, tasks and BIOS tools they use, and config.
+# names (its pinned version when it has one), the drivers, applications and tasks they use, and config.
 # Used by New-DeploymentMedia.ps1 and the console's Media tab. PowerShell 5.1 compatible.
 
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
@@ -60,7 +60,7 @@ function Get-MediaContent {
         [string]$DefaultAnswerFile,
         # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
         [AllowEmptyCollection()][string[]]$DriverPacks,
-        # Also copy config\secrets (join, share, Administrator, BIOS passwords) as plain text. Off by default: a lost
+        # Also copy config\secrets (join, share and Administrator passwords) as plain text. Off by default: a lost
         # stick would give them away. WinPE then takes them from the WinPE password's vault, or asks the operator.
         [switch]$IncludeSecrets
     )
@@ -75,7 +75,7 @@ function Get-MediaContent {
     if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
-    # Always: settings, driver catalog, naming list and the BIOS tools (password files only with -IncludeSecrets).
+    # Always: settings, driver catalog, naming list and the tools (password files only with -IncludeSecrets).
     # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
     foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
 
@@ -119,7 +119,7 @@ function Get-MediaContent {
         # The deploy wizard offers every application in the library, so copy the whole folder, not only this file's.
         # The task library is small (scripts), so it goes whole too.
         $taskDir = if ($a.PSObject.Properties['TaskLocation']) { $a.TaskLocation } else { 'Tasks' }
-        foreach ($dir in @($a.DriverRoot, $a.AppLocation, $taskDir, $a.Bios.ToolsRoot)) {
+        foreach ($dir in @($a.DriverRoot, $a.AppLocation, $taskDir)) {
             if (-not $dir) { continue }
             if (Test-MediaRooted $dir) { $notes += "Answer file $name reads $dir at deploy time; it is not copied."; continue }
             if ($pickPacks -and $dir -eq $a.DriverRoot) {

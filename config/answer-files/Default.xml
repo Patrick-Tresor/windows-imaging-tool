@@ -159,24 +159,6 @@
     <requireBackup>true</requireBackup>
   </bitlocker>
 
-  <!-- BIOS/UEFI settings, applied in WinPE before the disk is wiped. Only the settings for this PC's maker are used.
-       Dell: Dell Command | Configure (copy its WinPE x64 folder to <toolsRoot>\Dell); names as in cctk (SecureBoot).
-       HP and Lenovo: the firmware's WMI interface, no tool; names as the BIOS shows them.
-       passwordFile: the current BIOS admin / supervisor password, if one is set. Leave empty if none.
-       stopOnError: true stops the deployment (before the disk is wiped) when a setting fails. -->
-  <bios>
-    <enabled>false</enabled>
-    <passwordFile></passwordFile>
-    <toolsRoot>Tools\BIOS</toolsRoot>
-    <stopOnError>false</stopOnError>
-    <setting maker="Dell" name="SecureBoot">Enabled</setting>
-    <setting maker="Dell" name="TpmSecurity">Enabled</setting>
-    <setting maker="HP" name="Secure Boot">Enable</setting>
-    <setting maker="HP" name="TPM State">Enable</setting>
-    <setting maker="Lenovo" name="SecureBoot">Enable</setting>
-    <setting maker="Lenovo" name="SecurityChip">Enable</setting>
-  </bios>
-
   <completion>
     <reboot>true</reboot>
     <shutdown>false</shutdown>

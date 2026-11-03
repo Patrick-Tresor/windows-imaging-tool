@@ -45,7 +45,6 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | # | Test | Pass when |
 |---|------|-----------|
 | 4.1 | BitLocker (TPM, and TPM+PIN) | Encrypted at first boot; the recovery key is backed up where the answer file says |
-| 4.2 | BIOS settings (Dell, HP, Lenovo) | Settings changed; a BIOS password is used when set |
 | 4.3 | USMT user data (share and local store) | A user's files and settings come back after the reimage |
 | 4.4 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
 

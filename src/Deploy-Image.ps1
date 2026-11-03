@@ -32,7 +32,6 @@ Import-Module (Join-Path $PSScriptRoot 'Win11Readiness.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
 $usmtDir = Join-Path $PSScriptRoot 'USMT'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
@@ -193,12 +192,10 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     $fromList = $Listed -and $Listed.ComputerName
 
     # Extra summary lines, shown before ERASE in the wizard and on the console.
-    $biosCount = @($Answer.Bios.Settings | Where-Object Maker -eq $Hardware.Maker).Count
     $bl = $Answer.BitLocker
     $details = @(
         "Windows 11:   $win11"
         "Firmware:     $Firmware ($(if ($Firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
-        "BIOS:         $(if ($Answer.Bios.Enabled -and $biosCount) { "$biosCount setting(s) for $($Hardware.Maker)" } else { 'unchanged' })"
         "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
     )
     if ($Answer.MigrateUserData) { $details += "User data:    kept ($($Answer.UserDataStore) store), checked once the disk is chosen" }
@@ -598,10 +595,6 @@ try {
     $adminPassword = if ($answer.EnableAdministrator) { Get-DeploySecret -Root $root -RelativePath $answer.AdminPasswordFile -Label 'local Administrator password' } else { $null }
     $bl = $answer.BitLocker
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Label 'BitLocker PIN' } else { $null }
-    $bios = $answer.Bios
-    $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
-    # No password file means the BIOS has no admin password yet.
-    $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Get-DeploySecret -Root $root -RelativePath $bios.PasswordFile -Label 'BIOS admin password' } else { $null }
 
     # User data: find the old Windows on the chosen disk and check the backup can be done, still before anything is erased.
     $migration = $null
@@ -649,15 +642,6 @@ try {
         $summary | ForEach-Object { Write-Host $_ -ForegroundColor $(if ($_ -like 'ERASE*') { 'Red' } elseif ($_ -like 'Windows 11:   NOT READY*') { 'Yellow' } else { 'Gray' }) }
         Set-DeployStatus -Step 'Waiting for the operator'
         if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
-    }
-
-    # 0. BIOS settings, before anything is erased. They take effect on the reboot into Windows.
-    if ($bios.Enabled -and $biosCount) {
-        $biosFailed = try {
-            @(Set-BiosSettings -Maker $hw.Maker -Settings $bios.Settings -Password $biosPassword -ToolsDir (Resolve-ContentPath $root $bios.ToolsRoot) |
-                Where-Object { -not $_.Ok }).Count
-        } catch { Write-DeployLog "BIOS settings not applied: $($_.Exception.Message)" -Level WARN; $biosCount }
-        if ($biosFailed -and $bios.StopOnError) { throw "$biosFailed BIOS setting(s) failed and the answer file says to stop (bios/stopOnError)." }
     }
 
     # 1. Back up the old Windows and the user data, then partition. A failed backup stops here, with the disk untouched.

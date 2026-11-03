@@ -96,17 +96,16 @@ $full = [pscustomobject]@{
     Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\images'; Username = 'svc-read'; PasswordFile = 'config/secrets/share.txt' },
                [pscustomobject]@{ LocalName = 'Z:'; RemoteName = '\\srv\apps'; Username = 'svc-join'; PasswordFile = 'config\secrets\join.txt' })
     BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'TpmPin'; PinFile = 'config\secrets\pin.txt' }
-    Bios = [pscustomobject]@{ Enabled = $true; PasswordFile = 'config\secrets\bios.txt' }
     MigrateUserData = $true; UserDataStore = 'Share'; UserDataEncrypt = $true; UserDataKeyFile = 'config\secrets\usmt.txt'
 }
 $needed = @(Get-AnswerSecrets -Answer $full)
-Assert-Equal (($needed | ForEach-Object Key) -join ',') 'config\secrets\admin.txt,config\secrets\join.txt,config\secrets\share.txt,config\secrets\pin.txt,config\secrets\bios.txt,config\secrets\usmt.txt' 'answer secrets: every password once, the shared join file only once'
+Assert-Equal (($needed | ForEach-Object Key) -join ',') 'config\secrets\admin.txt,config\secrets\join.txt,config\secrets\share.txt,config\secrets\pin.txt,config\secrets\usmt.txt' 'answer secrets: every password once, the shared join file only once'
 Assert-Equal $needed[1].Label 'Join account password (CORP\svc-join)' 'answer secrets: the join account is named'
 Assert-Equal "$($needed[2].Share)|$($needed[0].Share)" 'Y:|' 'answer secrets: share passwords say which drive'
 $bare = [pscustomobject]@{
     EnableAdministrator = $false; AdminPasswordFile = 'config\secrets\admin.txt'; Membership = 'Workgroup'; JoinPasswordFile = 'config\secrets\join.txt'
     Shares = @(); BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'Tpm'; PinFile = 'config\secrets\pin.txt' }
-    Bios = [pscustomobject]@{ Enabled = $false; PasswordFile = 'config\secrets\bios.txt' }; MigrateUserData = $true; UserDataStore = 'Local'; UserDataEncrypt = $true; UserDataKeyFile = 'x.txt'
+    MigrateUserData = $true; UserDataStore = 'Local'; UserDataEncrypt = $true; UserDataKeyFile = 'x.txt'
 }
 Assert-Equal @(Get-AnswerSecrets -Answer $bare).Count 0 'answer secrets: nothing for settings that are off'
 

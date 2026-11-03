@@ -42,7 +42,7 @@ maps the answer file's shares and finds the image, driver pack, application
 library and suggested name (the naming list's, when the PC is listed), and
 runs the Windows 11 check. So a missing image, or a PC that a Block-mode Windows
 11 check refuses, is reported when the answer file is picked, before anything is
-erased. The plan also carries extra summary lines (Windows 11, firmware, BIOS,
+erased. The plan also carries extra summary lines (Windows 11, firmware,
 BitLocker, user data) that the wizard shows before the ERASE line. The choices come back as a copy of the
 answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
 replaced, and the deploy continues exactly as for a command-line run.
@@ -252,23 +252,21 @@ deleted. On failure it falls back to applying from the share unless fallback is 
    requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
    memory, disk), which stop the deploy in Block mode. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
-3. Apply the answer file's BIOS settings for this maker (see below). Nothing is
-   erased yet, so `bios/stopOnError` can still stop the deployment safely.
-4. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
+3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
    firmware WinPE booted with (see below).
-5. `DISM /Apply-Image` the WIM to `W:`.
-6. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
-7. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
+4. `DISM /Apply-Image` the WIM to `W:`.
+5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
+6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
    cached copy after use, and FirstBoot.ps1 deletes it.
-8. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
+7. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
    model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
    and `firstboot.json`, and write `SetupComplete.cmd` to run it.
-9. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
-10. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
-    `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
-    matched), then reboot or shut down.
+8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
+9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
+   `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
+   matched), then reboot or shut down.
 
 ### UEFI and legacy BIOS
 
@@ -301,22 +299,7 @@ switch suggestions, templates (`config\app-templates.json`), export and import a
 .zip, maker and model requirements, and detection rules. The console's builder is
 `src/Console/AppPackEditor.ps1` + `.xaml`.
 
-## BIOS settings and BitLocker
-
-`BiosSettings.psm1` applies firmware settings in WinPE, before the disk is
-wiped, so changes such as turning on the TPM are live after the reboot into
-Windows, when BitLocker needs them. Only the rows for the detected maker run:
-
-| Maker  | How | Password |
-|--------|-----|----------|
-| Dell   | Dell Command \| Configure `cctk.exe --Name=Value ...` from `<toolsRoot>\Dell` (its WinPE x64 folder; the HAPI driver is loaded first) | `--ValSetupPwd` |
-| HP     | WMI `root\HP\InstrumentedBIOS` `HP_BIOSSettingInterface.SetBIOSSetting` | `<utf-16/>password` |
-| Lenovo | WMI `root\wmi` `Lenovo_SetBiosSetting` for each setting, then `Lenovo_SaveBiosSettings` once | `,password,ascii,us` |
-
-Setting names differ by maker and model; the editor's **Add recommended** fills
-in Secure Boot, TPM and virtualization for each maker. Passwords are masked in
-the log. Lenovo PCs set to certificate-based ("secure WMI") BIOS management and
-HP Sure Admin are not supported.
+## BitLocker
 
 BitLocker is turned on by `FirstBoot.ps1` as SYSTEM, after the domain join
 (specialize pass) and the FIRSTBOOT tasks:

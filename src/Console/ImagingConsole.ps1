@@ -28,7 +28,6 @@ Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverReport.psm1') -Force
 Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
-Import-Module (Join-Path $srcDir 'BiosSettings.psm1') -Force
 Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force

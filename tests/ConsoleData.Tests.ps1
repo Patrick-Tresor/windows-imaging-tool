@@ -226,14 +226,14 @@ try {
     Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true).Control 'TxtJoinDomain' 'an account domain with a backslash points at the account domain box'
     $j.JoinDomain = 'CORP'
     $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
-    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null; $ed.Bios.Enabled = $true
+    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null
     $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
     Assert-Equal $msg 'The BitLocker startup PIN must be 6 to 20 digits.' 'editor save rejects a PIN that is not digits'
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -BiosPassword 'B10s' -IsNew
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -IsNew
     $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.BitLocker.PinFile)|$($back.Bios.PasswordFile)" 'config\secrets\Secure-bitlocker-pin.txt|config\secrets\Secure-bios.txt' 'editor save names the PIN and BIOS password files'
-    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))|$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bios.txt'))" '246810|B10s' 'PIN and BIOS password go to their own files'
-    Assert-Equal ((Get-Content -Raw $saved) -match '246810|B10s') $false 'PIN and BIOS password are not in the answer file'
+    Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
+    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))" '246810' 'the PIN goes to its own file'
+    Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file'
     $mig = Get-NewAnswer -Name 'Migrate'
     $mig.MigrateUserData = $true; $mig.UserDataStore = 'Share'; $mig.UserDataEncrypt = $true
     $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $mig -UserDataKey 'K3y!' -IsNew

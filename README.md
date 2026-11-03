@@ -40,7 +40,7 @@ and click **Create folders** the first time. Then:
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares, BIOS settings, BitLocker and User data. Passwords are typed into password
+  Domain or workgroup, Tasks, Network shares, BitLocker and User data. Passwords are typed into password
   boxes and saved to their own files.
 - **Applications**: the application pack builder. Build, edit, test, export and
   import packs (see Applications below).
@@ -126,17 +126,8 @@ the console; the format is documented in the commented
   command or a script from the task library (`<task script="name">`).
 - extra **shares** to map in WinPE, **options** (disable System Restore, enable
   the built-in Administrator), and reboot or shut down when done.
-- **BIOS settings** for Dell, HP and Lenovo, applied in WinPE before the disk is
-  wiped (see below).
 - **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
   the recovery key backed up to AD and/or a share first.
-
-**BIOS settings** are name and value rows per maker; only the rows for the PC's
-maker are used. HP and Lenovo need no tool (the firmware's WMI interface). For
-Dell, copy the WinPE x64 folder of Dell Command | Configure to
-`Tools\BIOS\Dell` on the content root. If the PCs already have a BIOS admin
-password, type it in the editor; it is saved in `config\secrets` like the other
-passwords. Turn on the TPM here if BitLocker needs it.
 
 **BitLocker** needs a TPM that is on and ready, or it is skipped (see
 `C:\Windows\Temp\FirstBoot.log`). Backing the recovery key up to Active
@@ -206,7 +197,7 @@ password before it does anything and shuts down after 5 wrong tries or
 **Shut down**; nothing else is asked. Without a WinPE password, the deploy
 wizard shows a **Passwords** page right after the answer file, with one box for
 each password the answer file needs (join account, share, local Administrator,
-BitLocker PIN, BIOS, user data key). Each is typed once, kept in memory only,
+BitLocker PIN, user data key). Each is typed once, kept in memory only,
 and nothing is asked once Windows starts installing. An unattended answer file
 asks for them in one window before its countdown. A remote reimage cannot ask, so it needs the
 password files on the share, and a PXE image with a WinPE password waits for
@@ -724,7 +715,7 @@ anything is erased. Clear old backups by hand.
    or change the computer name, OU and target disk, tick the applications, then
    review the summary, tick the erase confirmation and click **Deploy**. A PC in
    the naming list starts with its own answer file, name and OU filled in. The
-   tool applies the BIOS settings, wipes the disk, applies the image, injects the
+   tool wipes the disk, applies the image, injects the
    drivers, and reboots. BitLocker, if set, starts at first boot.
    While it works, a progress window shows the current step, a progress bar,
    the elapsed time and the end of the log. At the end it shows the result, with
@@ -739,6 +730,5 @@ anything is erased. Clear old backups by hand.
 ## Status
 
 Untested first draft. It has not yet been run on real hardware or in a VM.
-The console's data layer, the driver matching and the BIOS command building
-(with the firmware interfaces faked) have automated tests; the
+The console's data layer and the driver matching have automated tests; the
 WPF window itself has only been checked for syntax and XAML validity.
