@@ -610,6 +610,14 @@ What the PCs need:
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
    pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
+   To refresh a stick you built before without erasing it, tick **Update a stick this console built
+   before** (`-UpdateOnly`): WinPE is replaced, only files whose size or date changed are copied, and
+   files the new content no longer has are deleted from `AnswerFiles`, `Images`, `Drivers`,
+   `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
+   is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
+   Volume down while it starts.
+   In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
+   on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
    from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):

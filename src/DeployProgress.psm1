@@ -180,11 +180,12 @@ function New-DeployProgressForm {
     }
     $ui.ViewLog  = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(224, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'View log' }
     $ui.Cmd      = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(330, 496)); Size = (New-Object Drawing.Size(150, 32)); Text = 'Command prompt' }
+    $ui.CopyLogs = New-Object Windows.Forms.Button -Property @{ Text = 'Copy logs' }
     $ui.Change   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(646, 496)); Size = (New-Object Drawing.Size(250, 32)); Text = 'Change settings' }
     $ui.Shutdown = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Shut down' }
     $ui.Restart  = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Restart' }
     $ui.Form.Controls.AddRange(@($ui.Title, $ui.Hardware, $ui.Facts, $ui.Detail, $ui.Bar, $ui.Percent, $ui.Message, $ui.Log,
-        $ui.ViewLog, $ui.Cmd, $ui.Change, $ui.Shutdown, $ui.Restart))
+        $ui.ViewLog, $ui.Cmd, $ui.CopyLogs, $ui.Change, $ui.Shutdown, $ui.Restart))
     $ui.Sidebar = New-DeploySidebar -Form $ui.Form
     Update-DeployProgressLayout -Ui $ui
     $ui
@@ -209,7 +210,7 @@ function Update-DeployProgressLayout {
     $top = Set-StackLayout -Controls @($Ui.Title, $Ui.Hardware, $Ui.Facts, $Ui.Detail, $Ui.Bar, $Ui.Percent, $Ui.Message) -Top 12 -Gap 2 -GapAfter $gaps
 
     $bottom = $client.Height - 12
-    $buttonsTop = Set-ButtonRow -Buttons @($Ui.ViewLog, $Ui.Cmd) -Right $left -Bottom $bottom -FromLeft
+    $buttonsTop = Set-ButtonRow -Buttons @($Ui.ViewLog, $Ui.Cmd, $Ui.CopyLogs) -Right $left -Bottom $bottom -FromLeft
     [void](Set-ButtonRow -Buttons @($Ui.Shutdown, $Ui.Restart) -Right ($client.Width - 24) -Bottom $bottom)
     [void](Set-ButtonRow -Buttons @($Ui.Change) -Right ($client.Width - 24) -Bottom $bottom)
     $logTop = $top + 10
@@ -293,6 +294,10 @@ function Show-DeployProgressWindow {
 
     $ui.ViewLog.add_Click({ Start-Process -FilePath 'notepad.exe' -ArgumentList "`"$($script:progress.Log)`"" })
     $ui.Cmd.add_Click({ Start-Process -FilePath 'cmd.exe' })
+    $ui.CopyLogs.add_Click({
+        $r = try { Copy-DeployLogs } catch { $null }
+        [void][Windows.Forms.MessageBox]::Show($(if ($r) { "Logs copied to $($r.Path) ($($r.Count) file(s))." } else { 'No USB stick or share to copy the logs to.' }), 'Copy logs')
+    })
     $ui.Change.add_Click({
         # Deploy-Image.ps1 sees the file at the next tick of its countdown and opens the wizard instead.
         Set-Content -Path (Get-ProgressCancelPath $script:progress.Path) -Value 'change' -Encoding ascii

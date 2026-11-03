@@ -803,8 +803,11 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
             if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
             if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
         } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
-        if (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+        if ($ui.ChkUsbUpdate.IsChecked) {
+            if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
+        } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
         $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
+        if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
         if ($ui.ChkCopyContent.IsChecked) {
             $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
             if ($packArgs.ContainsKey('DriverPacks')) {

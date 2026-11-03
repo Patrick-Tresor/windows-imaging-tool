@@ -269,8 +269,16 @@ function Show-DeployWizard {
     $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
     $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
     $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
+    # Bottom left: a command prompt and the logs, for when an answer file or a disk is not found.
+    $cmdBtn  = New-Object Windows.Forms.Button -Property @{ Text = 'Command prompt' }
+    $logsBtn = New-Object Windows.Forms.Button -Property @{ Text = 'Copy logs' }
+    $cmdBtn.add_Click({ Start-Process -FilePath 'cmd.exe' })
+    $logsBtn.add_Click({
+        $r = try { Copy-DeployLogs -Serial $script:wiz.Serial } catch { $null }
+        $script:wiz.Error.Text = if ($r) { "Logs copied to $($r.Path) ($($r.Count) file(s))." } else { 'No USB stick or share to copy the logs to.' }
+    })
     $form.CancelButton = $cancel
-    $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel))
+    $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel, $cmdBtn, $logsBtn))
     $w.Sidebar = New-DeploySidebar -Form $form
 
     $pages = foreach ($i in 0..3) {
@@ -313,7 +321,7 @@ function Show-DeployWizard {
     $pages[3].Controls.AddRange(@($w.Summary, $w.Confirm))
 
     $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Cancel = $cancel; $w.Form = $form
-    $w.HwLabel = $hwLabel; $w.IsDomain = $true
+    $w.HwLabel = $hwLabel; $w.IsDomain = $true; $w.Cmd = $cmdBtn; $w.CopyLogs = $logsBtn; $w.Serial = $Hardware.Serial
     $w.Layout = { Update-DeployWizardLayout -Wiz $script:wiz }
 
     $w.Show = {
@@ -441,6 +449,7 @@ function Update-DeployWizardLayout {
     $headerBottom = Set-StackLayout -Controls @($w.Title, $w.HwLabel) -Top 12 -Gap 2
 
     $buttonsTop = Set-ButtonRow -Buttons @($w.Back, $w.Next, $w.Cancel) -Right ($client.Width - 24) -Bottom ($client.Height - 12)
+    if ($w.Cmd) { [void](Set-ButtonRow -Buttons @($w.Cmd, $w.CopyLogs) -Right $left -Bottom ($client.Height - 12) -FromLeft) }
     Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2
     $w.Error.Top = $buttonsTop - 6 - $w.Error.Height
 
@@ -515,10 +524,55 @@ function Show-PasswordPrompt {
     if ($result -eq 'OK' -and $text) { $text } else { $null }
 }
 
+# What Copy logs saves: WinPE's own logs and, once Windows is on the disk (W:), its setup and join logs.
+$script:DeployLogSources = @(
+    'X:\Windows\Temp\*.log', 'X:\Windows\Temp\*.json', 'X:\Windows\Logs\DISM\dism.log',
+    'W:\Windows\Panther\setupact.log', 'W:\Windows\Panther\setuperr.log', 'W:\Windows\Panther\UnattendGC\*.log',
+    'W:\Windows\Debug\NetSetup.LOG', 'W:\Windows\Temp\*.log'
+)
+
+function Get-LogCopyTarget {
+    # Where Copy logs writes: the USB stick's DEPLOY volume, else the mapped content share (Z:), else any other
+    # removable volume with a drive letter. $null when there is none.
+    param([object[]]$Volumes)
+    if ($null -eq $Volumes) { $Volumes = @(try { Get-Volume } catch { }) }
+    $deploy = $Volumes | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' } | Select-Object -First 1
+    if ($deploy) { return "$($deploy.DriveLetter):\Logs" }
+    if (Test-Path -LiteralPath 'Z:\') { return 'Z:\Logs' }
+    $usb = $Volumes | Where-Object { $_.DriveLetter -and "$($_.DriveLetter)" -notin 'X', 'W' -and $_.DriveType -eq 'Removable' } | Select-Object -First 1
+    if ($usb) { return "$($usb.DriveLetter):\Logs" }
+    $null
+}
+
+function Copy-DeployLogs {
+    <#
+    .SYNOPSIS
+        Copies the deploy logs to <target>\<serial>-<date-time> (Get-LogCopyTarget) and returns Path and Count.
+        The WinPE wizard's and progress window's Copy logs button; Sources and Destination are for tests.
+    #>
+    param([string]$Serial, [string]$Destination, [string[]]$Sources = $script:DeployLogSources)
+    if (-not $Destination) { $Destination = Get-LogCopyTarget }
+    if (-not $Destination) { throw 'No USB stick or share to copy the logs to.' }
+    if (-not $Serial) { $Serial = try { "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim() } catch { '' } }
+    $name = "$(if ($Serial) { $Serial -replace '[^A-Za-z0-9._-]', '_' } else { 'PC' })-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+    $folder = Join-Path $Destination $name
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    $count = 0
+    foreach ($src in $Sources) {
+        foreach ($f in @(Get-ChildItem -Path $src -File -ErrorAction SilentlyContinue)) {
+            # Same names from two places (X: and W: both have Windows\Temp\Deploy.log): keep both.
+            $target = Join-Path $folder $f.Name
+            if (Test-Path -LiteralPath $target) { $target = Join-Path $folder ("{0}-{1}" -f ($f.FullName.Substring(0, 1)), $f.Name) }
+            try { Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $count++ } catch { }
+        }
+    }
+    [pscustomobject]@{ Path = $folder; Count = $count }
+}
+
 function Test-DeployWizardAvailable {
     # WinForms needs the WinPE-NetFX component. Without it Deploy-Image falls back to console prompts.
     try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable

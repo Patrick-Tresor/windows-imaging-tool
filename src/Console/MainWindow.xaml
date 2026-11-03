@@ -190,6 +190,8 @@
 
             <Label Grid.Row="2" Content="Copy content to USB" VerticalAlignment="Top"/>
             <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+              <CheckBox x:Name="ChkUsbUpdate" DockPanel.Dock="Top" Margin="0,0,0,8"
+                        Content="Update a stick this console built before, without erasing it: new WinPE, and only the files that changed are copied"/>
               <CheckBox x:Name="ChkCopyContent" DockPanel.Dock="Top" IsChecked="True"
                         Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
