@@ -20,7 +20,7 @@ Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 
 $state = Get-Content -Raw $StatePath | ConvertFrom-Json
-$run = Start-PostDeployCheck -Plan $state.checks -AppResults @($state.appResults) -ReportPath (Join-Path $PSScriptRoot 'last-check.json')
+$run = Start-PostDeployCheck -Plan $state.checks -AppResults @($state.appResults) -TaskResults @(if ($state.PSObject.Properties['taskResults']) { $state.taskResults }) -ReportPath (Join-Path $PSScriptRoot 'last-check.json')
 
 $colors = @{ Passed = 'Green'; Failed = 'Red'; Warning = 'Yellow'; Skipped = 'Gray' }
 foreach ($r in $run.Results) {

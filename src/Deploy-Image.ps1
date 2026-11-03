@@ -592,9 +592,12 @@ try {
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
-    # FIRSTLOGON library tasks run from C:\ProgramData\ImagingTool\Tasks, which stays after first boot removes C:\Deploy.
+    # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
+    # first boot removes C:\Deploy, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    $logonPlan = @(New-LogonTaskPlan -Tasks $deployTasks)
+    $logonIndex = 0
     $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
-        if ($_.Definition) { Get-TaskCommandLine -Definition $_.Definition -Folder (Get-LogonTaskFolder $_.Name) -ExtraArguments $_.Arguments } else { $_.Command }
+        if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
     })
     New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands |
         Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
@@ -614,6 +617,11 @@ try {
         Write-DeployLog "Staging task $($t.Name) ($($t.Phase))"
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         Copy-Item -Path $t.Folder -Destination $dest -Recurse -Force
+    }
+    if ($logonPlan) {
+        $logonDir = 'W:\ProgramData\ImagingTool\Tasks'
+        Copy-Item (Join-Path $PSScriptRoot 'Run-LogonTask.ps1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') $logonDir -Force
+        ConvertTo-Json -InputObject $logonPlan -Depth 8 | Set-Content (Join-Path $logonDir 'logon-tasks.json') -Encoding utf8
     }
     # User data is restored by FirstBoot.ps1 after the applications.
     $userState = if ($migration -and $migration.Mode -ne 'None') { Copy-UserStateForRestore -Plan $migration -Answer $answer -UsmtDir $usmtDir } else { $null }

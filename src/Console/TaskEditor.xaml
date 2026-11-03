@@ -60,18 +60,22 @@
     <ScrollViewer x:Name="Page0" VerticalScrollBarVisibility="Auto" Padding="24,18">
       <StackPanel>
         <TextBlock Style="{StaticResource Title}" Text="Task"/>
-        <TextBlock Style="{StaticResource Hint}" Text="A script the deployment runs. It is kept in Tasks\&lt;name&gt; in the content root and goes onto USB sticks with the answer files that use it."/>
+        <TextBlock Style="{StaticResource Hint}" Text="A script the deployment runs. It is kept in Tasks\&lt;name&gt; in the content root and goes onto USB sticks with the answer files that use it. A template fills in a ready-made script for a common job."/>
         <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-          <Label Content="Name"/>
-          <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Folder name under Tasks. Letters, digits, dot, dash and underscore."/>
-          <Label Grid.Row="1" Content="Description"/>
-          <TextBox x:Name="TxtDescription" Grid.Row="1" Grid.Column="1"/>
-          <Label Grid.Row="2" Content="When it runs"/>
-          <ComboBox x:Name="CmbPhase" Grid.Row="2" Grid.Column="1" Width="200" HorizontalAlignment="Left"
+          <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Label Content="Template"/>
+          <ComboBox x:Name="CmbTemplate" Grid.Column="1" ToolTip="Ready-made scripts from config\task-templates.json."/>
+          <Button x:Name="BtnTemplate" Grid.Column="2" Content="Apply" Margin="8,0,0,8"/>
+          <TextBlock x:Name="TxtTemplateNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+          <Label Grid.Row="2" Content="Name"/>
+          <TextBox x:Name="TxtName" Grid.Row="2" Grid.Column="1" ToolTip="Folder name under Tasks. Letters, digits, dot, dash and underscore."/>
+          <Label Grid.Row="3" Content="Description"/>
+          <TextBox x:Name="TxtDescription" Grid.Row="3" Grid.Column="1"/>
+          <Label Grid.Row="4" Content="When it runs"/>
+          <ComboBox x:Name="CmbPhase" Grid.Row="4" Grid.Column="1" Width="200" HorizontalAlignment="Left"
                     ToolTip="The default when an answer file adds this task; the answer file can change it."/>
-          <TextBlock x:Name="TxtPhaseNote" Grid.Row="3" Grid.Column="1" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+          <TextBlock x:Name="TxtPhaseNote" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
         </Grid>
 
         <TextBlock Style="{StaticResource Heading}" Text="Script"/>

@@ -141,6 +141,52 @@ try {
     $m = Get-MediaContent -ContentRoot $root
     Assert-Equal ('Tasks' -in $m.Folders) $true 'the Tasks folder goes on the stick'
 
+    # FIRSTLOGON library tasks go through Run-LogonTask.ps1 with their own entry in logon-tasks.json.
+    $logonPlan = @(New-LogonTaskPlan -Tasks $plan)
+    Assert-Equal (($logonPlan | ForEach-Object name) -join ',') 'Rename' 'logon-tasks.json holds the FIRSTLOGON library tasks only'
+    Assert-Equal (Get-LogonTaskCommand -Index 0) 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\ImagingTool\Tasks\Run-LogonTask.ps1" -Index 0' 'a logon task runs through Run-LogonTask.ps1'
+    $runner = Get-Content -Raw (Join-Path $repo 'src/Run-LogonTask.ps1')
+    Assert-Equal ($runner -match '\$all = Get-Content' -and $runner -match 'Temp\\Task-\$\(\$def\.name\)-\$\(\$env:USERNAME\)\.log') $true 'the logon runner reads the plan safely in 5.1 and logs per user'
+    $runnerErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseInput($runner, [ref]$null, [ref]$runnerErrors)
+    Assert-Equal @($runnerErrors).Count 0 'the logon runner parses'
+
+    # The deploy summary names the tasks.
+    Import-Module (Join-Path $repo 'src/DeployWizard.psm1') -Force
+    $sum = @(Get-DeploySummary -Answer $b -Plan ([pscustomobject]@{ ImagePath = 'x.wim'; DriverPack = $null }) -ComputerName 'PC1' -Disk ([pscustomobject]@{ Number = 0; FriendlyName = 'SSD'; Size = 256GB; BusType = 'NVMe' }))
+    Assert-Equal (@($sum | Where-Object { $_ -like 'Tasks:*' }) -join '') 'Tasks:        Cleanup (POSTIMAGE), Wallpaper (FIRSTBOOT), Rename (FIRSTLOGON), Gone (FIRSTBOOT), 2 commands' 'the summary lists library tasks and counts commands'
+
+    # FIRSTBOOT task results become post-deploy checks; plain commands don't.
+    Import-Module (Join-Path $repo 'src/PostDeployChecks.psm1') -Force
+    $checks = (Invoke-PostDeployCheck -Plan ([pscustomobject]@{ applications = @() }) -Facts ([pscustomobject]@{ ComputerName = 'PC1' }) -TaskResults @(
+        [pscustomobject]@{ name = 'echo hi'; status = 'Ran'; ok = $true; exitCode = 0; message = 'exit 0' }
+        [pscustomobject]@{ name = 'Wallpaper'; status = 'Succeeded'; ok = $true; exitCode = 0; message = 'exit 0' }
+        [pscustomobject]@{ name = 'Cleanup'; status = 'Failed'; ok = $false; exitCode = 2; message = 'exit code 2 is not a success code (0)' }))
+    Assert-Equal (($checks | Where-Object name -like 'Task:*' | ForEach-Object { "$($_.name)=$($_.result)" }) -join '|') 'Task: Wallpaper=Passed|Task: Cleanup=Failed' 'library tasks are checked, commands are not'
+    Assert-Equal (($checks | Where-Object name -eq 'Task: Cleanup').detail -like '*Task-Cleanup.log*') $true 'a failed task check points to its log'
+
+    # Templates: each one makes a valid task whose PowerShell parses; placeholders must be replaced before saving.
+    foreach ($tpl in Get-TaskTemplates) {
+        $made = New-TaskFromTemplate -Template $tpl
+        $problems = @(Test-TaskPack -Definition $made.Definition | Where-Object { $_ -notlike 'Replace REPLACE_*' })
+        Assert-Equal ($problems -join '; ') '' "template $($tpl.name) is valid"
+        if ($made.Definition.type -eq 'powershell') {
+            $pe = $null; [void][Management.Automation.Language.Parser]::ParseInput($made.ScriptText, [ref]$null, [ref]$pe)
+            Assert-Equal @($pe).Count 0 "template $($tpl.name) parses"
+        }
+        Assert-Equal ($made.ScriptText -match '[^\x00-\x7F]') $false "template $($tpl.name) is ASCII"
+    }
+    $logs = New-TaskFromTemplate -Template (Get-TaskTemplates | Where-Object name -eq 'Copy-DeployLogs')
+    Assert-Equal @(Test-TaskPack -Definition $logs.Definition | Where-Object { $_ -like '*REPLACE_SHARE*' }).Count 1 'a template placeholder blocks saving until replaced'
+
+    # Export and import.
+    $zip = Join-Path $root 'Cleanup.zip'
+    Export-TaskPack -TaskRoot $taskRoot -Name 'Cleanup' -Path $zip | Out-Null
+    $other = Join-Path $root 'OtherTasks'
+    Import-TaskPack -TaskRoot $other -Path $zip | Out-Null
+    Assert-Equal "$((Read-TaskPack -TaskRoot $other -Name 'Cleanup').phase)|$(Test-Path (Join-Path $other 'Cleanup/clean.cmd'))" 'POSTIMAGE|True' 'an exported task imports with its script'
+    Assert-Throws { Import-TaskPack -TaskRoot $other -Path $zip } '*already exists*' 'import does not overwrite a task by accident'
+
     # Task logs go straight in C:\Windows\Temp, next to Deploy.log and FirstBoot.log, not in a subfolder.
     foreach ($f in 'FirstBoot.ps1', 'Deploy-Image.ps1') {
         $text = Get-Content -Raw (Join-Path $repo "src/$f")

@@ -1,0 +1,206 @@
+{
+  "_comment": "Starting points for the console task editor (Tasks tab, Template). text is the script, one line per entry. Entries with verify=true: test them on a VM before deploying.",
+  "templates": [
+    {
+      "name": "Sync-Clock",
+      "description": "Sync the clock with the domain (or time.windows.com) right after setup",
+      "phase": "FIRSTBOOT",
+      "script": "sync-clock.cmd",
+      "arguments": "",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": false,
+      "notes": "Domain PCs sync with a domain controller, others with time.windows.com.",
+      "text": [
+        "@echo off",
+        "rem A PC captured before a daylight saving change can start an hour off; Kerberos and the domain join need the right time.",
+        "w32tm /config /syncfromflags:domhier,manual /manualpeerlist:time.windows.com /update",
+        "net stop w32time >nul 2>&1",
+        "net start w32time",
+        "w32tm /resync /force",
+        "exit /b 0"
+      ]
+    },
+    {
+      "name": "Enable-RemoteDesktop",
+      "description": "Turn on Remote Desktop with Network Level Authentication and open the firewall for it",
+      "phase": "FIRSTBOOT",
+      "script": "enable-rdp.ps1",
+      "arguments": "",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": false,
+      "notes": "Who may connect is still set by the Remote Desktop Users group or a GPO.",
+      "text": [
+        "$ErrorActionPreference = 'Stop'",
+        "Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -Value 0",
+        "Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name UserAuthentication -Value 1",
+        "# The group's resource id works in every Windows language, unlike its display name.",
+        "Enable-NetFirewallRule -Group '@FirewallAPI.dll,-28752'",
+        "Write-Output 'Remote Desktop enabled'"
+      ]
+    },
+    {
+      "name": "Power-NoSleepOnAC",
+      "description": "Never sleep on mains power; screen off after 30 minutes",
+      "phase": "FIRSTBOOT",
+      "script": "power.cmd",
+      "arguments": "",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": false,
+      "notes": "Handy for lab and classroom PCs that get updates and remote reimaging at night.",
+      "text": [
+        "@echo off",
+        "powercfg /change standby-timeout-ac 0",
+        "powercfg /change hibernate-timeout-ac 0",
+        "powercfg /change monitor-timeout-ac 30",
+        "exit /b 0"
+      ]
+    },
+    {
+      "name": "Remove-ConsumerApps",
+      "description": "Remove Xbox, Solitaire and other consumer Store apps for new users",
+      "phase": "FIRSTBOOT",
+      "script": "remove-apps.ps1",
+      "arguments": "",
+      "timeoutMinutes": 20,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": true,
+      "notes": "Test on a VM first; better still, remove them from the reference PC before capture.",
+      "text": [
+        "# Removes the provisioned copies, so the apps aren't installed for users who log on later.",
+        "# Edit the list to suit; names are wildcards matched against DisplayName.",
+        "$names = 'Microsoft.XboxApp', 'Microsoft.GamingApp', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxGamingOverlay',",
+        "         'Microsoft.MicrosoftSolitaireCollection', 'Microsoft.BingNews', 'Microsoft.BingWeather', 'Microsoft.ZuneMusic',",
+        "         'Microsoft.ZuneVideo', 'Microsoft.People', 'Microsoft.WindowsFeedbackHub', 'Microsoft.GetHelp', 'Clipchamp.Clipchamp'",
+        "foreach ($p in Get-AppxProvisionedPackage -Online) {",
+        "    if (@($names | Where-Object { $p.DisplayName -like $_ }).Count) {",
+        "        try { Remove-AppxProvisionedPackage -Online -PackageName $p.PackageName -ErrorAction Stop | Out-Null; Write-Output \"Removed $($p.DisplayName)\" }",
+        "        catch { Write-Output \"Could not remove $($p.DisplayName): $($_.Exception.Message)\" }",
+        "    }",
+        "}"
+      ]
+    },
+    {
+      "name": "Copy-DeployLogs",
+      "description": "Copy the deployment logs to a share, in a folder named after the PC",
+      "phase": "FIRSTBOOT",
+      "script": "copy-logs.ps1",
+      "arguments": "-Share REPLACE_SHARE",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": false,
+      "notes": "Put it last in the answer file so the other tasks are in the logs. Replace REPLACE_SHARE in the arguments.",
+      "text": [
+        "param([string]$Share = 'REPLACE_SHARE')",
+        "# Runs as SYSTEM, so the share sees the computer account: give Domain Computers write access to it.",
+        "if ($Share -like 'REPLACE*') { Write-Output 'Set the share in the task arguments: -Share \\\\server\\Logs'; exit 1 }",
+        "$dest = Join-Path $Share $env:COMPUTERNAME",
+        "New-Item -ItemType Directory -Path $dest -Force | Out-Null",
+        "Get-ChildItem \"$env:WINDIR\\Temp\" -File | Where-Object { $_.Name -like '*.log' -or $_.Name -like 'FirstBoot-*.json' } |",
+        "    Copy-Item -Destination $dest -Force",
+        "Copy-Item \"$env:WINDIR\\Panther\\setupact.log\", \"$env:WINDIR\\debug\\NetSetup.LOG\" $dest -Force -ErrorAction SilentlyContinue",
+        "Write-Output \"Logs copied to $dest\""
+      ]
+    },
+    {
+      "name": "Set-DesktopWallpaper",
+      "description": "Set the desktop and lock screen picture for every user (Enterprise and Education)",
+      "phase": "FIRSTBOOT",
+      "script": "set-wallpaper.ps1",
+      "arguments": "-Image wallpaper.jpg",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": true,
+      "notes": "Import a folder holding this script and wallpaper.jpg, or add the picture to the task folder afterwards.",
+      "text": [
+        "param([string]$Image = 'wallpaper.jpg')",
+        "# Put the picture in this task's folder (Import from: Folder...). Uses the PersonalizationCSP keys,",
+        "# which Windows only honours on Enterprise and Education editions.",
+        "$ErrorActionPreference = 'Stop'",
+        "$src = Join-Path $PSScriptRoot $Image",
+        "if (-not (Test-Path $src)) { Write-Output \"$Image is not in the task folder\"; exit 1 }",
+        "$dir = \"$env:WINDIR\\Web\\Wallpaper\\Deploy\"",
+        "New-Item -ItemType Directory -Path $dir -Force | Out-Null",
+        "$dest = Join-Path $dir (Split-Path $src -Leaf)",
+        "Copy-Item $src $dest -Force",
+        "$key = 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PersonalizationCSP'",
+        "New-Item -Path $key -Force | Out-Null",
+        "foreach ($kind in 'Desktop', 'LockScreen') {",
+        "    Set-ItemProperty $key -Name \"${kind}ImagePath\" -Value $dest",
+        "    Set-ItemProperty $key -Name \"${kind}ImageUrl\" -Value $dest",
+        "    Set-ItemProperty $key -Name \"${kind}ImageStatus\" -Value 1 -Type DWord",
+        "}",
+        "Write-Output \"Wallpaper set to $dest\""
+      ]
+    },
+    {
+      "name": "Dell-ApplyUpdates",
+      "description": "Install Dell driver and BIOS updates with Dell Command | Update",
+      "phase": "FIRSTBOOT",
+      "script": "dcu.cmd",
+      "arguments": "",
+      "timeoutMinutes": 60,
+      "successCodes": [
+        0,
+        1,
+        5,
+        500
+      ],
+      "requirements": {
+        "makers": [
+          "Dell"
+        ],
+        "models": []
+      },
+      "verify": true,
+      "notes": "Needs the Dell Command Update application pack in the same answer file; it installs first.",
+      "text": [
+        "@echo off",
+        "set DCU=\"%ProgramFiles%\\Dell\\CommandUpdate\\dcu-cli.exe\"",
+        "if not exist %DCU% set DCU=\"%ProgramFiles(x86)%\\Dell\\CommandUpdate\\dcu-cli.exe\"",
+        "if not exist %DCU% (echo Dell Command Update is not installed & exit /b 1)",
+        "%DCU% /applyUpdates -silent -reboot=disable",
+        "rem 0 = updated, 1 = restart needed, 500 = nothing to update",
+        "exit /b %ERRORLEVEL%"
+      ]
+    }
+  ]
+}

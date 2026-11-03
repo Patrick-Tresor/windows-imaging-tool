@@ -81,6 +81,7 @@ function Test-TaskPack {
     elseif ($d.type -notin $script:TaskTypes) { "Task type must be powershell, cmd or exe, not '$($d.type)'." }
     if ($d.phase -notin $script:TaskPhases) { "When must be POSTIMAGE, FIRSTBOOT or FIRSTLOGON, not '$($d.phase)'." }
     if ($d.timeoutMinutes -lt 1) { 'The timeout must be at least 1 minute.' }
+    if ("$($d.arguments)" -match 'REPLACE_[A-Z_]+') { "Replace $($Matches[0]) in the arguments." }
     if (-not @($d.successCodes).Count) { 'Give at least one success exit code (usually 0).' }
     if ($Folder -and $d.script -and -not (Test-Path (Join-Path $Folder $d.script) -PathType Leaf)) { "The script $($d.script) is not in $Folder." }
 }
@@ -220,6 +221,21 @@ function Resolve-DeployTasks {
 
 function Get-LogonTaskFolder([string]$Name) { "$script:LogonTaskDir\$Name" }
 
+function Get-LogonTaskCommand {
+    # The FirstLogonCommands line for the FIRSTLOGON library task at $Index in logon-tasks.json. Run-LogonTask.ps1
+    # runs it with its timeout and success codes and logs it, like FirstBoot.ps1 does for FIRSTBOOT tasks.
+    param([Parameter(Mandatory)][int]$Index)
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script:LogonTaskDir\Run-LogonTask.ps1`" -Index $Index"
+}
+
+function New-LogonTaskPlan {
+    # What logon-tasks.json holds: the FIRSTLOGON library tasks in order, each with its definition and arguments.
+    param([object[]]$Tasks = @())
+    @($Tasks | Where-Object { $_.Phase -eq 'FIRSTLOGON' -and $_.Definition } | ForEach-Object {
+        [pscustomobject]@{ name = $_.Name; task = $_.Definition; arguments = $_.Arguments }
+    })
+}
+
 function Invoke-TaskPack {
     <#
     .SYNOPSIS
@@ -277,6 +293,63 @@ function Invoke-TaskPack {
 
 #endregion
 
+#region Library
+
+function Export-TaskPack {
+    # Zips Tasks\<name> (script, task.json, other files) into one file to copy to another content root.
+    param([Parameter(Mandatory)][string]$TaskRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
+    $src = Join-Path $TaskRoot $Name
+    [void](Read-TaskPack -TaskRoot $TaskRoot -Name $Name)
+    if (Test-Path $Path) { Remove-Item $Path -Force }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
+    $Path
+}
+
+function Import-TaskPack {
+    # Unzips an exported task into Tasks\<name>; the name comes from the file unless -Name is given.
+    param([Parameter(Mandatory)][string]$TaskRoot, [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
+    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path) }
+    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Task name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $dest = Join-Path $TaskRoot $Name
+    if ((Test-Path $dest) -and -not $Overwrite) { throw "A task named $Name already exists." }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("taskpack-" + [guid]::NewGuid())
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try {
+        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
+        if (-not (Test-Path (Join-Path $tmp 'task.json'))) { throw "$Path is not an exported task (no task.json at the top)." }
+        $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $tmp 'task.json') | ConvertFrom-Json)
+        $problems = @(Test-TaskPack -Definition $def -Folder $tmp)
+        if ($problems) { throw ($problems -join "`n") }
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        New-Item -ItemType Directory -Path $TaskRoot -Force | Out-Null
+        Move-Item $tmp $dest
+    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
+    $dest
+}
+
+function Get-TaskTemplates {
+    # config\task-templates.json: ready-made scripts for common jobs, to start a new task from.
+    param([string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/task-templates.json'))
+    if (-not (Test-Path $Path)) { return @() }
+    @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
+}
+
+function New-TaskFromTemplate {
+    # A definition and script text from a template. Returns @{ Definition; ScriptText }.
+    param([Parameter(Mandatory)]$Template, [string]$Name)
+    $t = $Template
+    if (-not $Name) { $Name = $t.name }
+    $def = ConvertTo-TaskDefinition -Name $Name -Json ([pscustomobject]@{
+        description = $t.description; script = $t.script; arguments = $t.arguments; phase = $t.phase
+        timeoutMinutes = $t.timeoutMinutes; successCodes = $t.successCodes; requirements = $t.requirements
+    })
+    [pscustomobject]@{ Definition = $def; ScriptText = (@($t.text) -join "`r`n") + "`r`n" }
+}
+
+#endregion
+
 Export-ModuleMember -Function Get-TaskTypeFromFile, ConvertTo-TaskDefinition, ConvertTo-TaskJson, Read-TaskPack, Test-TaskPack,
     Write-TaskScriptText, Save-TaskPack, Get-TaskScriptText, Get-TaskLaunch, Get-TaskCommandLine, Test-TaskRequirement,
-    Resolve-DeployTasks, Get-LogonTaskFolder, Invoke-TaskPack
+    Resolve-DeployTasks, Get-LogonTaskFolder, Get-LogonTaskCommand, New-LogonTaskPlan, Invoke-TaskPack,
+    Export-TaskPack, Import-TaskPack, Get-TaskTemplates, New-TaskFromTemplate

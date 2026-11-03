@@ -633,6 +633,27 @@ $ui.GridTaskLibrary.Add_SelectionChanged({
     }
 })
 
+$ui.BtnTaskExport.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedTask
+    if (-not $row) { return }
+    $dlg = [Microsoft.Win32.SaveFileDialog]::new()
+    $dlg.Filter = 'Task (*.zip)|*.zip'
+    $dlg.FileName = "$($row.Name).zip"
+    if (-not $dlg.ShowDialog($window)) { return }
+    Export-TaskPack -TaskRoot (Join-Path $script:root 'Tasks') -Name $row.Name -Path $dlg.FileName | Out-Null
+    Set-Status "Exported $($row.Name) to $($dlg.FileName)"
+} })
+
+$ui.BtnTaskImport.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
+    $dlg.Filter = 'Task (*.zip)|*.zip'
+    if (-not $dlg.ShowDialog($window)) { return }
+    $dest = Import-TaskPack -TaskRoot (Join-Path $script:root 'Tasks') -Path $dlg.FileName
+    Update-Tasks
+    Set-Status "Imported $(Split-Path $dest -Leaf)"
+} })
+
 $ui.BtnTaskDelete.Add_Click({ Invoke-Safely {
     $row = Get-SelectedTask
     if (-not $row) { return }

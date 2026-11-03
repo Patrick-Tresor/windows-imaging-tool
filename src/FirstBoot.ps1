@@ -188,10 +188,11 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
             checks     = $plan.checks
             status     = if ($plan.PSObject.Properties['status']) { $plan.status } else { $null }
             appResults = $appResults
+            taskResults = @($taskResults)
         } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $toolDir 'checks.json') -Encoding utf8
 
         Import-Module (Join-Path $toolDir 'PostDeployChecks.psm1') -Force
-        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -ReportPath (Join-Path $toolDir 'last-check.json')
+        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults -ReportPath (Join-Path $toolDir 'last-check.json')
         foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
         Write-Log "Post-deploy checks: $($run.Summary.Text)"
         if ($reporting) { Set-DeployCheckResult -Results $run.Results -Summary $run.Summary -Warning (ConvertTo-CheckWarning $run.Summary) }

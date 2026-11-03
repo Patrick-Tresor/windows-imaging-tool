@@ -6,7 +6,7 @@ function Get-TaskPhaseNote([string]$Phase) {
     switch ($Phase) {
         'POSTIMAGE'  { 'In WinPE, once the image and drivers are applied and before the PC restarts. The new Windows is %OSDRIVE% ($env:OSDRIVE in PowerShell), the content root %DEPLOYROOT%. WinPE has no .NET Framework programs and no user.' }
         'FIRSTBOOT'  { 'On the new Windows, as SYSTEM, the first time it starts, after the applications and before anyone logs on.' }
-        'FIRSTLOGON' { 'When the first user logs on, as that user. Kept in C:\ProgramData\ImagingTool\Tasks on the PC.' }
+        'FIRSTLOGON' { 'When the first user logs on, as that user (often not an administrator). Kept in C:\ProgramData\ImagingTool\Tasks on the PC, logged to C:\Windows\Temp\Task-<name>-<user>.log.' }
         default      { '' }
     }
 }
@@ -39,17 +39,24 @@ function Show-TaskEditor {
     $list  = { param($text) @($text -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 
     $e.CmbPhase.ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
-    $e.TxtName.Text = $def.name
+    $templates = @(Get-TaskTemplates)
+    $e.CmbTemplate.ItemsSource = @('(none)') + @($templates | ForEach-Object { "$($_.name)$(if ($_.verify) { ' (verify)' })" })
+    $e.CmbTemplate.SelectedIndex = 0
     $e.TxtName.IsReadOnly = -not $isNew
-    $e.TxtDescription.Text = $def.description
-    $e.CmbPhase.SelectedItem = $def.phase
-    $e.CmbScript.Text = $def.script
-    $e.TxtArguments.Text = $def.arguments
-    $e.TxtCodes.Text = $def.successCodes -join ', '
-    $e.TxtTimeout.Text = $def.timeoutMinutes
-    $e.ChkStop.IsChecked = $def.stopOnFailure
-    $e.TxtMakers.Text = @($def.requirements.makers) -join ', '
-    $e.TxtModels.Text = @($def.requirements.models) -join ', '
+    $load = {
+        param($d)
+        $e.TxtName.Text = $d.name
+        $e.TxtDescription.Text = $d.description
+        $e.CmbPhase.SelectedItem = $d.phase
+        $e.CmbScript.Text = $d.script
+        $e.TxtArguments.Text = $d.arguments
+        $e.TxtCodes.Text = $d.successCodes -join ', '
+        $e.TxtTimeout.Text = $d.timeoutMinutes
+        $e.ChkStop.IsChecked = $d.stopOnFailure
+        $e.TxtMakers.Text = @($d.requirements.makers) -join ', '
+        $e.TxtModels.Text = @($d.requirements.models) -join ', '
+    }
+    & $load $def
     if ($folder) {
         $state.LoadedText = Get-TaskScriptText -Definition $def -Folder $folder
         if ($null -ne $state.LoadedText) { $e.TxtScript.Text = $state.LoadedText }
@@ -119,6 +126,22 @@ function Show-TaskEditor {
         $f = [Windows.Forms.FolderBrowserDialog]::new()
         $f.Description = 'Folder with the script and the files it needs'
         if ($f.ShowDialog() -eq 'OK') { $e.TxtSource.Text = $f.SelectedPath; & $afterSource }
+    })
+    $e.CmbTemplate.Add_SelectionChanged({
+        $i = $e.CmbTemplate.SelectedIndex
+        $e.TxtTemplateNote.Text = if ($i -gt 0) { $t = $templates[$i - 1]; "$($t.description). $(if ($t.verify) { 'Best guess, test it on a VM first. ' })$($t.notes)" } else { '' }
+    })
+    $e.BtnTemplate.Add_Click({
+        $i = $e.CmbTemplate.SelectedIndex
+        if ($i -le 0) { return }
+        # Editing keeps the task's name; a new task takes the template's unless one was typed.
+        $typed = $e.TxtName.Text.Trim()
+        $name = if (-not $isNew) { $Name } elseif ($typed -and $typed -ne 'NewTask') { $typed } else { $templates[$i - 1].name }
+        $made = New-TaskFromTemplate -Template $templates[$i - 1] -Name $name
+        & $load $made.Definition
+        $e.TxtScript.Text = $made.ScriptText
+        & $updateNotes
+        $e.TxtProblems.Text = if ($made.ScriptText -match 'REPLACE_[A-Z_]+' -or $made.Definition.arguments -match 'REPLACE_[A-Z_]+') { "Replace $($Matches[0]) before deploying (in Arguments)." } else { '' }
     })
     $e.CmbScript.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ & $loadScript; & $updateNotes }) | Out-Null })
     $e.CmbScript.Add_LostFocus({ & $updateNotes })

@@ -247,7 +247,11 @@ root; **Import...** adds it back.
 script (and any files it needs) and a `task.json`. Make them on the **Tasks** tab,
 or with **New script...** on the answer file editor's Tasks page:
 
-1. Type the script in the editor, or import a file, or a folder when the script
+1. Start from a **template** (`config\task-templates.json`): sync the clock,
+   turn on Remote Desktop, no sleep on mains power, remove consumer Store apps,
+   copy the deployment logs to a share, set the wallpaper (Enterprise/Education),
+   Dell Command | Update. The ones marked *verify* are best guesses to test on a VM.
+   Or type the script in the editor, or import a file, or a folder when the script
    needs other files next to it. The file name says how it runs: `.ps1` with
    Windows PowerShell (`-ExecutionPolicy Bypass`), `.cmd`/`.bat` with cmd, `.exe`
    as a program.
@@ -271,12 +275,15 @@ In the answer file editor's **Tasks** page, pick a task and **Add script**: it
 goes in the list with the other commands, in order, and its **Command** column
 takes extra arguments for that answer file. A missing or broken task stops the
 deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
-folder with the answer files. POSTIMAGE and FIRSTBOOT runs are logged to
+folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
+the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
 `C:\Windows\Temp\Task-<name>.log` on the PC (and `Deploy.log` or
-`FirstBoot.log`), and first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`.
-FIRSTLOGON tasks are kept in `C:\ProgramData\ImagingTool\Tasks` and run by
-Windows itself (unattend `FirstLogonCommands`), so only the script's own logging
-records them.
+`FirstBoot.log`), first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`,
+and each FIRSTBOOT task is a post-deploy check on the Dashboard. FIRSTLOGON tasks
+are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
+`Run-LogonTask.ps1` with the same timeout and success codes, logged to
+`C:\Windows\Temp\Task-<name>-<user>.log`. **Export...** zips a task to copy it to
+another content root; **Import...** adds it back.
 
 **User data migration** backs up the user profiles of the Windows already on
 the PC with USMT, in WinPE, before the disk is erased, and restores them at first

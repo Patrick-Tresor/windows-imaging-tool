@@ -454,6 +454,8 @@
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnTaskEdit" Content="Edit"/>
+            <Button x:Name="BtnTaskExport" Content="Export..."/>
+            <Button x:Name="BtnTaskImport" Content="Import..."/>
             <Button x:Name="BtnTaskDelete" Content="Delete"/>
             <Button x:Name="BtnTasksRefresh" Content="Refresh"/>
             <Button x:Name="BtnTasksOpen" Content="Open folder"/>
