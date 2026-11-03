@@ -10,8 +10,7 @@
     answer file win over the answer file's naming, the answer file's OU and the default answer file.
     Unless -NoPrompt or an Unattended answer file starts it, a graphical wizard
     (DeployWizard.psm1) lets the operator pick the answer file, name, OU, disk and applications.
-    Wipes the target disk (or, when user data is kept on the disk, only its Windows partition) and partitions it
-    to match the firmware WinPE booted with: GPT for UEFI, MBR for legacy BIOS.
+    Wipes the target disk and partitions it GPT for UEFI. WinPE must be booted in UEFI mode.
 .EXAMPLE
     X:\Deploy\Deploy-Image.ps1 -AnswerFile W11-Office-FR -NoPrompt
 #>
@@ -121,7 +120,7 @@ function Assert-JoinAccount($Root, $Answer) {
         throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
 }
 
-function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
+function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
     # Passwords not on the media are asked for here, all in one window, unless the wizard's Passwords page did it.
@@ -191,7 +190,6 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     $bl = $Answer.BitLocker
     $details = @(
         "Windows 11:   $win11"
-        "Firmware:     $Firmware ($(if ($Firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
         "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
     )
 
@@ -437,8 +435,6 @@ try {
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
         $hw.Maker, $hw.Model, $hw.MachineType, $hw.Sku, $hw.Serial, $hw.IsUefi)
-    # The disk layout and boot files follow how WinPE booted. A UEFI PC booted through CSM deploys as BIOS.
-    $firmware = if ($hw.IsUefi) { 'UEFI' } else { 'BIOS' }
 
     # Every Set-DeployStatus from here on also updates the progress window on this PC's screen.
     $progressPath = 'X:\Windows\Temp\DeployProgress.json'
@@ -461,6 +457,12 @@ try {
         $net = Get-PrimaryNetworkAddress
         $statusId = Start-DeployStatus -Folder $statusTarget.Local -Identity $hw -MacAddress $net.MacAddress -IpAddress $net.IpAddress
         Write-DeployLog "Reporting status to $($statusTarget.Local) as $statusId"
+    }
+    # Only UEFI deploys (GPT disk). A PC whose USB stick or network boot started WinPE through CSM/legacy BIOS stops here,
+    # before anything is erased.
+    if (-not $hw.IsUefi) {
+        Write-DeployLog 'Legacy BIOS deploys are not supported. Restart, and in the boot menu pick the UEFI entry for the USB stick or network (or turn off CSM/legacy boot in the firmware settings).' -Level ERROR
+        throw 'WinPE started in legacy BIOS mode. Boot it in UEFI mode.'
     }
 
     $givenName = $ComputerName
@@ -486,7 +488,7 @@ try {
     $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
     $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }
     $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
-    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -Firmware $firmware -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
+    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
 
     # -NoPrompt and Unattended answer files start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.
@@ -570,14 +572,6 @@ try {
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Label 'BitLocker PIN' } else { $null }
 
     $disk = Get-Disk -Number $answer.DiskNumber
-    if ($firmware -eq 'BIOS') {
-        Write-DeployLog 'Legacy BIOS boot: the disk will be MBR. Boot WinPE in UEFI mode instead if this PC supports it.' -Level WARN
-        if ($disk.Size -gt 2TB) { Write-DeployLog ("Disk is {0:N0} GB; MBR can only use the first 2 TB." -f ($disk.Size / 1GB)) -Level WARN }
-        $build = try { [version](Get-WindowsImage -ImagePath $imagePath -Index $answer.ImageIndex).Version } catch { $null }
-        if ($build -and $build.Build -ge 22000) {
-            Write-DeployLog 'This is a Windows 11 image. It installs on legacy BIOS, but Microsoft does not support it there and Windows Update may withhold feature updates.' -Level WARN
-        }
-    }
 
     $summary = @(Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $ComputerName -Disk $disk -Applications @($apps | ForEach-Object name))
     foreach ($line in $summary) { Write-DeployLog $line }
@@ -588,10 +582,10 @@ try {
         if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
-    # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
+    # 1. Partition: EFI, MSR, Windows, Recovery.
     Set-DeployStatus -Step 'Partitioning the disk' -Percent 8
     $dp = Join-Path $env:TEMP 'diskpart.txt'
-    New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
+    New-DiskpartScript -DiskNumber $answer.DiskNumber | Set-Content -Path $dp -Encoding ascii
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
     # 2. Apply the image. Split images (.swm) need /SWMFile.
@@ -672,13 +666,11 @@ try {
     Set-DeployStatus -Step 'Running post-image tasks' -Percent 86
     Invoke-Phase -Phase 'POSTIMAGE' -Tasks $deployTasks -Root $root
     Set-DeployStatus -Step 'Writing boot files' -Percent 88
-    Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', $firmware)
+    Invoke-Native -FilePath 'W:\Windows\System32\bcdboot.exe' -ArgumentList @('W:\Windows', '/s', 'S:', '/f', 'UEFI')
     # bcdboot adds Windows Boot Manager, but many PCs keep the USB stick or the network first in their own boot order
     # and would start WinPE again. BootNext makes the restart start Windows; it never fails the deployment.
-    if ($firmware -eq 'UEFI') {
-        $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
-        Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
-    }
+    $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
+    Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
     New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
         ConvertTo-Json | Set-Content -Path 'W:\Deploy\deployed.json' -Encoding utf8
 

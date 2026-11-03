@@ -480,15 +480,9 @@ function Find-UnstartedDeployment {
 }
 
 function New-DiskpartScript {
-    # Wipes the disk and creates Microsoft's recommended layout for the firmware WinPE booted with.
-    # Both layouts leave the boot files' partition at S: and Windows at W:.
-    param(
-        [Parameter(Mandatory)][int]$DiskNumber,
-        [Parameter(Mandatory)][ValidateSet('UEFI', 'BIOS')][string]$Firmware
-    )
-    if ($Firmware -eq 'UEFI') {
-        # GPT: EFI, MSR, Windows, Recovery.
-        @"
+    # Wipes the disk and creates Microsoft's recommended UEFI layout: GPT with EFI (S:), MSR, Windows (W:), Recovery.
+    param([Parameter(Mandatory)][int]$DiskNumber)
+    @"
 select disk $DiskNumber
 clean
 convert gpt
@@ -506,26 +500,6 @@ set id="de94bba4-06d1-4d40-a16a-bfd50179d6ac"
 gpt attributes=0x8000000000000001
 exit
 "@
-    } else {
-        # MBR: active System, Windows, Recovery (type 27, hidden from Explorer).
-        @"
-select disk $DiskNumber
-clean
-convert mbr
-create partition primary size=100
-format quick fs=ntfs label="System"
-assign letter=S
-active
-create partition primary
-shrink minimum=1024
-format quick fs=ntfs label="Windows"
-assign letter=W
-create partition primary
-format quick fs=ntfs label="Recovery"
-set id=27
-exit
-"@
-    }
 }
 
 function Find-DriverCatalogMatch {
