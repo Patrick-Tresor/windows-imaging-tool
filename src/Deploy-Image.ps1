@@ -39,6 +39,13 @@ Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
+
+# Passwords: from the content root's password files when they are there (network share, or a stick built with
+# -SecretsOnMedia), else from the vault the WinPE password unlocked, else typed by the operator (kept in memory only).
+$script:Vault = @{}
+$script:TypedSecrets = @{}
+$script:CanAskSecrets = $false
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -103,7 +110,7 @@ function Assert-JoinAccount($Root, $Answer) {
     # the disk is wiped; a domain WinPE cannot reach is only logged, and the join is left to Windows as before.
     if ($Answer.Membership -ne 'Domain' -or -not $Answer.JoinPasswordFile) { return }
     $account = (Resolve-JoinAccount -Answer $Answer).Account
-    $password = Read-SecretFile -ContentRoot $Root -RelativePath $Answer.JoinPasswordFile
+    $password = Get-DeploySecret -Root $Root -RelativePath $Answer.JoinPasswordFile -Label "password of the join account $account"
     $check = Test-JoinAccount -Domain $Answer.Domain -Account $account -Password $password
     if (-not $check.Cached) {
         switch ($check.Result) {
@@ -112,7 +119,10 @@ function Assert-JoinAccount($Root, $Answer) {
             default      { Write-DeployLog "The domain $($Answer.Domain) refused the join account $($account): $($check.Reason) (error $($check.Code)). Fix the account or its password in the answer file, then copy it to the media." -Level ERROR }
         }
     }
-    if ($check.Result -eq 'Refused') { throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
+    if ($check.Result -eq 'Refused') {
+        # A typed password is asked again on the next try (the wizard's Next), not reused.
+        $script:TypedSecrets.Remove((ConvertTo-SecretKey $Answer.JoinPasswordFile))
+        throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
 }
 
 function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
@@ -120,7 +130,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
     # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
-        $pw = if ($share.PasswordFile) { Read-SecretFile -ContentRoot $Root -RelativePath $share.PasswordFile } else { $null }
+        $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Label "password for $($share.RemoteName)" } else { $null }
         # A user name that already names its domain (CORP\svc, svc@corp.example.com) gets no second one in front.
         $user = if ($share.Domain -and $share.Username -and $share.Username -notmatch '[\\@]') { "$($share.Domain)\$($share.Username)" } else { $share.Username }
         Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
@@ -233,6 +243,60 @@ function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Ov
     $decision.Summary
 }
 
+function Unlock-DeployMedia {
+    # Media built with a WinPE password carry config\vault.json: nothing runs until the operator types it.
+    # Five wrong tries or Shut down turn the PC off (exit code 3 tells startnet.cmd to shut down too).
+    $path = Join-Path $PSScriptRoot 'config\vault.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $vault = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+    $problem = $null
+    for ($try = 1; $try -le 5; $try++) {
+        $pw = Show-PasswordPrompt -Message 'This deployment media is locked. Type the WinPE password to continue.' -Problem $problem -CancelText 'Shut down'
+        if ($null -eq $pw) { break }
+        $secrets = Unlock-SecretVault -Vault $vault -Password $pw
+        if ($null -ne $secrets) {
+            $script:Vault = $secrets
+            Write-DeployLog "WinPE unlocked; $($secrets.Count) password file(s) in the vault"
+            return
+        }
+        Write-DeployLog "Wrong WinPE password (try $try of 5)" -Level WARN
+        $problem = "Wrong password. $(5 - $try) tries left."
+    }
+    Write-DeployLog 'WinPE password not given: shutting down' -Level ERROR
+    & wpeutil.exe shutdown
+    exit 3
+}
+
+function Get-DeploySecret([string]$Root, [string]$RelativePath, [string]$Label) {
+    # The password in a password file of the answer file, wherever it is (see $script:Vault above). Throws when it
+    # is nowhere and nobody is there to type it, before anything is erased.
+    if (-not $RelativePath) { throw "No password file is set for $Label in the answer file." }
+    $key = ConvertTo-SecretKey $RelativePath
+    if ($Root -and (Test-Path -LiteralPath (Join-Path $Root $RelativePath))) { return Read-SecretFile -ContentRoot $Root -RelativePath $RelativePath }
+    if ($script:Vault.ContainsKey($key)) { return $script:Vault[$key] }
+    if ($script:TypedSecrets.ContainsKey($key)) { return $script:TypedSecrets[$key] }
+    if (-not $script:CanAskSecrets) {
+        throw "The $Label ($RelativePath) is not on this media. Passwords are left off USB sticks: build the stick with a WinPE password (Media tab), or deploy from the network share."
+    }
+    $typed = Show-PasswordPrompt -Message "Type the $Label. It is not on this USB stick, and is kept in memory only for this deployment."
+    if ($null -eq $typed) { throw "The $Label was not typed." }
+    Write-DeployLog "$Label typed by the operator ($RelativePath is not on the media)"
+    $script:TypedSecrets[$key] = $typed
+    $typed
+}
+
+function Get-DeploySecretPath([string]$Root, [string]$RelativePath, [string]$Label) {
+    # A password file's path for tools that read the file themselves (USMT's /keyfile). When the file is not on the
+    # media, the password is written to WinPE's RAM drive, which is gone at the next restart.
+    $onMedia = Join-Path $Root $RelativePath
+    if (Test-Path -LiteralPath $onMedia) { return $onMedia }
+    $value = Get-DeploySecret -Root $Root -RelativePath $RelativePath -Label $Label
+    $tmp = Join-Path $env:TEMP ('Secrets\' + (Split-Path $RelativePath -Leaf))
+    New-Item -ItemType Directory -Path (Split-Path $tmp -Parent) -Force | Out-Null
+    [IO.File]::WriteAllText($tmp, $value)
+    $tmp
+}
+
 function Wait-Countdown([int]$Seconds) {
     # Unattended mode: start after a short countdown that any key, or Change settings in the progress window, cancels.
     try {
@@ -310,6 +374,7 @@ function Connect-StatusFolder([string]$Root, $Settings) {
                 Where-Object { Test-Path $_ } | Select-Object -First 1
             # Without a password net use would stop and prompt, so only pass the account when its password is known.
             if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
+            elseif ($script:Vault.ContainsKey((ConvertTo-SecretKey $Settings.share.passwordFile))) { $user = $Settings.share.user; $pw = $script:Vault[(ConvertTo-SecretKey $Settings.share.passwordFile)] }
         }
         Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
         $target
@@ -338,6 +403,9 @@ function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
     }
 }
 
+# Locked media: the WinPE password first, before the content, the wizard or anything else.
+Unlock-DeployMedia
+
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
 $job = $null; $adapters = @(); $progressWindow = $false; $onStick = $false
 $status = 'FAILED'; $failure = $null
@@ -356,7 +424,7 @@ try {
     $progressWindow = Start-ProgressWindow -ProgressPath $progressPath
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
-    $root = Find-ContentRoot -SettingsPath $SettingsPath
+    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault
     # Which WinPE drivers this boot image was built with, so "no internal disk" can be explained from the log.
     Write-WinPEDriverReport -Path (Join-Path $PSScriptRoot 'config\winpe-drivers.json')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
@@ -383,6 +451,8 @@ try {
         if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
     }
     $givenName = $ComputerName
+    # Someone is at this PC to type a password that is not on the media, unless it was started remotely or -NoPrompt.
+    $script:CanAskSecrets = -not $job -and -not $NoPrompt
 
     # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
     $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
@@ -470,24 +540,28 @@ try {
     $libraryTasks = @($deployTasks | Where-Object Definition)
     if ($libraryTasks) { Write-DeployLog "Tasks: $(($libraryTasks | ForEach-Object { "$($_.Name) ($($_.Phase))" }) -join ', ')" }
 
-    $joinPassword  = if ($answer.Membership -eq 'Domain') { Read-SecretFile -ContentRoot $root -RelativePath $answer.JoinPasswordFile } else { $null }
+    $joinPassword  = if ($answer.Membership -eq 'Domain') { Get-DeploySecret -Root $root -RelativePath $answer.JoinPasswordFile -Label 'join account password' } else { $null }
     if ($answer.Membership -eq 'Domain') {
         # CORP\svc typed as the user name with another account's domain: the user name wins (Resolve-JoinAccount).
         $joinNote = (Resolve-JoinAccount -Answer $answer).Note
         if ($joinNote) { Write-DeployLog $joinNote -Level WARN }
     }
-    $adminPassword = if ($answer.EnableAdministrator) { Read-SecretFile -ContentRoot $root -RelativePath $answer.AdminPasswordFile } else { $null }
+    $adminPassword = if ($answer.EnableAdministrator) { Get-DeploySecret -Root $root -RelativePath $answer.AdminPasswordFile -Label 'local Administrator password' } else { $null }
     $bl = $answer.BitLocker
-    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Read-SecretFile -ContentRoot $root -RelativePath $bl.PinFile } else { $null }
+    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Label 'BitLocker PIN' } else { $null }
     $bios = $answer.Bios
     $biosCount = @($bios.Settings | Where-Object Maker -eq $hw.Maker).Count
     # No password file means the BIOS has no admin password yet.
-    $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Read-SecretFile -ContentRoot $root -RelativePath $bios.PasswordFile } else { $null }
+    $biosPassword  = if ($bios.Enabled -and $bios.PasswordFile) { Get-DeploySecret -Root $root -RelativePath $bios.PasswordFile -Label 'BIOS admin password' } else { $null }
 
     # User data: find the old Windows on the chosen disk and check the backup can be done, still before anything is erased.
     $migration = $null
     if ($answer.MigrateUserData) {
-        $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial `
+        $keyArgs = @{}
+        if ($answer.UserDataStore -eq 'Share' -and $answer.UserDataEncrypt -and $answer.UserDataKeyFile) {
+            $keyArgs.KeyFilePath = Get-DeploySecretPath -Root $root -RelativePath $answer.UserDataKeyFile -Label 'user data encryption key'
+        }
+        $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial @keyArgs `
             -SharePath (Resolve-ContentPath $root $answer.UserDataPath)
         Write-DeployLog "User data: $($migration.Summary)" -Level $(if ($migration.Mode -eq 'None') { 'WARN' } else { 'INFO' })
     }
@@ -554,7 +628,7 @@ try {
     if ($mcPlan) {
         Set-DeployStatus -Step 'Downloading the image by multicast' -Percent 9
         try {
-            $cred = Get-ShareCredential -SettingsPath $SettingsPath
+            $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault
             $applyFrom = Receive-MulticastImage -Plan $mcPlan -Destination (Join-Path 'W:\_Multicast' (Split-Path $imagePath -Leaf)) -User $cred.User -Password $cred.Password
         }
         catch {

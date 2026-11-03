@@ -148,14 +148,15 @@ function Get-UserStatePlan {
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$UsmtDir,
         [Parameter(Mandatory)][string]$Serial,
-        [string]$SharePath                  # the answer file's store path, already resolved against the content root
+        [string]$SharePath,                 # the answer file's store path, already resolved against the content root
+        [string]$KeyFilePath                # the encryption key file when it is not on the content root (WinPE password vault)
     )
     if (-not (Test-Path (Join-Path $UsmtDir 'scanstate.exe'))) {
         throw "User data migration is on, but USMT isn't in this boot image ($UsmtDir). Install the ADK's User State Migration Tool feature and rebuild the media."
     }
     $keyFile = $null
     if ($Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
-        $keyFile = Join-Path $ContentRoot $Answer.UserDataKeyFile
+        $keyFile = if ($KeyFilePath) { $KeyFilePath } else { Join-Path $ContentRoot $Answer.UserDataKeyFile }
         if (-not (Test-Path $keyFile)) { throw "User data encryption key file not found: $keyFile" }
     }
     $rules = @($Answer.UserDataRules | ForEach-Object { Resolve-UsmtRuleFile -Rule $_ -UsmtDir $UsmtDir -ContentRoot $ContentRoot.TrimEnd('\') })

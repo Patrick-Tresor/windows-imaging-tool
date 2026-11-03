@@ -182,7 +182,7 @@
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -240,6 +240,21 @@
               <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
                          Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Each pack makes WinPE bigger and the build a few minutes longer."/>
             </StackPanel>
+
+            <Label Grid.Row="12" Content="WinPE password" VerticalAlignment="Top"/>
+            <StackPanel Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2">
+              <StackPanel Orientation="Horizontal">
+                <PasswordBox x:Name="PwdWinPE" Width="200"/>
+                <TextBlock Text="Again" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                <PasswordBox x:Name="PwdWinPE2" Width="200"/>
+              </StackPanel>
+              <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
+                         Text="WinPE asks for it before it does anything, and the join, share and other passwords go inside the boot image encrypted with it. At least 8 characters. Leave empty for no lock: WinPE then asks the operator for each password it needs. A locked PXE image stops remote reimaging from running unattended."/>
+            </StackPanel>
+
+            <Label Grid.Row="14" Content="Passwords on USB"/>
+            <CheckBox x:Name="ChkSecretsOnMedia" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
+                      Content="Also copy the password files (config\secrets) to the stick as plain text. Not recommended: anyone with the stick can read them."/>
           </Grid>
 
           <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">

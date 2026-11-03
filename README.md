@@ -193,6 +193,18 @@ under the content root, usually `config\secrets\`. Anyone who can read the share
 can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
+**Password files never go on a USB stick in plain text.** The stick gets
+`config` without `config\secrets`. Set a **WinPE password** on the Media tab
+(8 characters or more) and the password files go inside the boot image,
+encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE asks for that
+password before it does anything and shuts down after 5 wrong tries or
+**Shut down**. Without a WinPE password, WinPE asks the operator for each
+password it needs (join account, share, local Administrator, BitLocker PIN,
+BIOS) and keeps it in memory only. A remote reimage cannot ask, so it needs the
+password files on the share, and a PXE image with a WinPE password waits for
+someone to type it. Tick **Passwords on USB** only if you accept that anyone
+holding the stick can read them.
+
 **The join account is checked before the disk is wiped.** When WinPE can reach
 the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).
 A wrong password, or a locked, disabled or expired account, stops the deploy

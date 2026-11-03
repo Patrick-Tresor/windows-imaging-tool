@@ -37,8 +37,16 @@ function Get-MediaCopyPlan {
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [string[]]$Folders,
-        [string[]]$Files
+        [string[]]$Files,
+        # Relative folders or files left out, with everything under them (config\secrets).
+        [string[]]$Exclude
     )
+    $skip = @($Exclude | Where-Object { $_ } | ForEach-Object { ($_ -replace '/', '\').Trim('\') })
+    $isSkipped = {
+        param([string]$Rel)
+        foreach ($x in $skip) { if ($Rel -ieq $x -or $Rel.StartsWith("$x\", [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+        $false
+    }
     $items = New-Object System.Collections.ArrayList
     $dirs = New-Object System.Collections.ArrayList
     $missing = @()
@@ -49,15 +57,18 @@ function Get-MediaCopyPlan {
         [void]$dirs.Add($folder)
         # Sorted so the copy order (and the tests) are the same on every run; -Force includes hidden files like robocopy.
         foreach ($d in Get-ChildItem -LiteralPath $full -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
-            [void]$dirs.Add((($d.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'))
+            $relDir = ($d.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'
+            if (-not (& $isSkipped $relDir)) { [void]$dirs.Add($relDir) }
         }
         foreach ($f in Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
             $rel = $f.FullName.Substring($rootFull.Length + 1) -replace '/', '\'
+            if (& $isSkipped $rel) { continue }
             $row = [pscustomobject]@{ Relative = $rel; Source = $f.FullName; Length = [int64]$f.Length }
             [void]$items.Add($row)
         }
     }
     foreach ($file in @($Files | Where-Object { $_ })) {
+        if (& $isSkipped ($file -replace '/', '\')) { continue }
         $full = Join-CopyPath $ContentRoot $file
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $missing += $file; continue }
         $f = Get-Item -LiteralPath $full -Force

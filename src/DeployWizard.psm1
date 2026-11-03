@@ -473,10 +473,52 @@ function Update-DeployWizardLayout {
     $w.Summary.SetBounds(0, 0, $width, $w.Confirm.Top - 8)
 }
 
+function Show-PasswordPrompt {
+    <#
+    .SYNOPSIS
+        Asks the operator for a password in a small window (WinForms), or on the console without WinForms.
+        Returns the text typed, or $null when they cancel. Message says what the password is for; Problem (red)
+        why the last one was refused.
+    #>
+    param([string]$Title = 'Deploy Windows', [Parameter(Mandatory)][string]$Message, [string]$Problem, [string]$CancelText = 'Cancel')
+    if (-not (Test-DeployWizardAvailable)) {
+        if ($Problem) { Write-Host $Problem -ForegroundColor Red }
+        $secure = Read-Host -AsSecureString $Message
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        if ($text) { return $text } else { return $null }
+    }
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $font = New-Object Drawing.Font('Segoe UI', 10)
+    $form = New-Object Windows.Forms.Form -Property @{
+        Text = $Title; ClientSize = New-Object Drawing.Size(520, 220); Font = $font; StartPosition = 'CenterScreen'
+        FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false; TopMost = $true; BackColor = [Drawing.Color]::White
+    }
+    $width = 520 - 40
+    $msg = New-Object Windows.Forms.Label -Property @{ Text = $Message; Left = 20; Width = $width; Font = $font }
+    $err = New-Object Windows.Forms.Label -Property @{ Text = $Problem; Left = 20; Width = $width; Font = $font; ForeColor = [Drawing.Color]::Firebrick; Visible = [bool]$Problem }
+    $box = New-Object Windows.Forms.TextBox -Property @{ Left = 20; Width = $width; UseSystemPasswordChar = $true; Font = $font }
+    $ok = New-Object Windows.Forms.Button -Property @{ Text = 'OK'; DialogResult = 'OK' }
+    $cancel = New-Object Windows.Forms.Button -Property @{ Text = $CancelText; DialogResult = 'Cancel' }
+    $form.Controls.AddRange(@($msg, $err, $box, $ok, $cancel))
+    $form.AcceptButton = $ok; $form.CancelButton = $cancel
+    # Heights from the text, never fixed: WinPE's fallback font is taller than Segoe UI.
+    Set-FittedHeight -Control $msg -MaxLines 4
+    $shown = @($msg) + @(if ($Problem) { Set-FittedHeight -Control $err -MaxLines 2; $err }) + @($box)
+    $bottom = Set-StackLayout -Controls $shown -Top 16 -Gap 10
+    [void](Set-ButtonRow -Buttons @($ok, $cancel) -Right ($width + 20) -Bottom ($bottom + 60))
+    $form.ClientSize = New-Object Drawing.Size(520, ($bottom + 76))
+    $form.Add_Shown({ $form.Activate(); $box.Focus() })
+    $result = $form.ShowDialog()
+    $text = $box.Text
+    $form.Dispose()
+    if ($result -eq 'OK' -and $text) { $text } else { $null }
+}
+
 function Test-DeployWizardAvailable {
     # WinForms needs the WinPE-NetFX component. Without it Deploy-Image falls back to console prompts.
     try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Test-DeployWizardAvailable

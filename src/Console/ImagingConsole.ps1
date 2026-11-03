@@ -826,6 +826,19 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
     $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
     if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
+    # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
+    # (a command line argument would show in the process list).
+    $pePw = $ui.PwdWinPE.Password
+    if ($pePw -or $ui.PwdWinPE2.Password) {
+        if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; return }
+        if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; return }
+        $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
+        [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
+        $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
+    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkSecretsOnMedia.IsChecked) {
+        if (-not (Confirm-Action 'No WinPE password: anyone with the stick can boot it, and the operator types the join and other passwords on each PC (they are not copied to the stick). Continue?')) { return }
+    }
+    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
 
     # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
     $buildArgs = @('-NoExit') + $buildArgs

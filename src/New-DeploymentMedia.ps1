@@ -14,6 +14,10 @@
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'
     Puts only those two driver packs on the stick instead of the whole Drivers folder.
 .EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
+    WinPE asks for the password in that file before it does anything. The content root's password files go into
+    boot.wim encrypted with it; they are never copied to the stick as plain text (unless -SecretsOnMedia).
+.EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
@@ -39,6 +43,8 @@ param(
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
     [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
+    [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
+    [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
@@ -50,6 +56,7 @@ Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -71,7 +78,19 @@ if (($DriverPacks -or $NoDriverPacks) -and -not $ContentSource) { throw '-Driver
 if ($DriverPacks -and $NoDriverPacks) { throw 'Pass -DriverPacks or -NoDriverPacks, not both.' }
 # Pack folders can contain commas, so the console joins them with | (not allowed in Windows file names).
 $DriverPacks = @($DriverPacks | ForEach-Object { $_ -split '\|' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# The WinPE password: read now, and the console's temporary file removed, so it is not left on disk.
+$winPEPassword = $null
+if ($WinPEPasswordFile) {
+    if (-not (Test-Path -LiteralPath $WinPEPasswordFile)) { throw "WinPE password file not found: $WinPEPasswordFile" }
+    $winPEPassword = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($WinPEPasswordFile))).Trim()
+    $tempFull = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    if ([IO.Path]::GetFullPath($WinPEPasswordFile).StartsWith($tempFull, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $WinPEPasswordFile -Force }
+    if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
+}
+if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
+if ($SecretsOnMedia -and -not $ContentSource) { throw '-SecretsOnMedia needs -ContentSource.' }
 $packArgs = @{}
+if ($SecretsOnMedia) { $packArgs.IncludeSecrets = $true }
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
 if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
@@ -86,8 +105,8 @@ if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
 $copyPlan = $null
 if ($Target -eq 'Usb' -and $ContentSource) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
-    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files }
-                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) }
+    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude }
+                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { 'config\secrets' }) }
     Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
 }
 if ($BootVM) {
@@ -170,6 +189,20 @@ try {
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
+    if ($winPEPassword) {
+        # The password files, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start.
+        $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
+        $secrets = Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath
+        New-SecretVault -Password $winPEPassword -Secrets $secrets | ConvertTo-Json | Set-Content "$deployDir\config\vault.json" -Encoding ascii
+        Write-Host "WinPE password set: WinPE asks for it at start. $($secrets.Count) password file(s) from $secretRoot\config\secrets are inside boot.wim, encrypted with it." -ForegroundColor Green
+        $winPEPassword = $null
+        # cmd /c instead of WinPE's default cmd /k: Ctrl+C at the password prompt ends the shell, and WinPE restarts
+        # instead of leaving a command prompt behind the lock.
+        "[LaunchApps]`r`n%SYSTEMROOT%\System32\cmd.exe, /c %SYSTEMROOT%\System32\startnet.cmd`r`n" |
+            Set-Content "$mount\Windows\System32\winpeshl.ini" -Encoding ascii
+    } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+        Write-Warning 'No WinPE password: anyone with the stick can boot it, and WinPE asks the operator for the join and other passwords (they are not on the stick).'
+    }
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
         ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
