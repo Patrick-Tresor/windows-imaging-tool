@@ -129,7 +129,7 @@ try {
     $broken = $good -replace '<ComputerName>GWHZLG3</ComputerName>', '<ComputerName>1234567</ComputerName>'
     Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*only digits*').Count 1 'an all-digit computer name is caught'
     Assert-Equal @(@(Test-UnattendXml -Xml ($good -replace '</unattend>', '')) -like '*not valid XML*').Count 1 'unattend XML that does not parse is caught'
-    Assert-Throws { New-UnattendXml -Answer $default -ComputerName 'NAME_WITH_UNDERSCORE' } '*letters, digits and dashes*' 'no unattend is built with a bad computer name'
+    Assert-Throws { New-UnattendXml -Answer $default -ComputerName 'PC_01' } '*letters, digits and dashes*' 'no unattend is built with a bad computer name'
 
     # The answer file catches a bad product key or time zone, so the console and WinPE stop before the erase.
     $v = $default.PSObject.Copy(); $v.ProductKey = 'ABCDE-12345'
