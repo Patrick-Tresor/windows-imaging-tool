@@ -137,7 +137,7 @@ function Get-AnswerSecrets {
     <#
     .SYNOPSIS
         Every password file an answer file needs during a deployment, once each (two settings naming the same file
-        give one entry), in the order the deploy wizard shows them. Key is ConvertTo-SecretKey of the path, the
+        give one entry), in the order the deploy wizard shows them; wrap the call in @(). Key is ConvertTo-SecretKey of the path, the
         same key the vault and the typed passwords use. Share is set for a share's password (LocalName), so a
         share that is already mapped can be left out.
     #>
@@ -167,7 +167,7 @@ function Get-AnswerSecrets {
     if ($Answer.MigrateUserData -and $Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
         & $add $Answer.UserDataKeyFile 'User data encryption key'
     }
-    , $list.ToArray()
+    $list.ToArray()
 }
 
 Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Test-SecretPath, Get-AnswerSecrets

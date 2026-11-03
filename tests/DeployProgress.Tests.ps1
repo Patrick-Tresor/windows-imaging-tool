@@ -129,9 +129,9 @@ if ($env:OS -eq 'Windows_NT') {
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{ countdown = 5 })) -LogLines 'a', 'b'
         Assert-Equal "$($ui.Title.Text)|$($ui.Change.Visible)|$($ui.Restart.Visible)|$($ui.Log.Text)" "Starting in 5 s|True|False|a`r`nb" 'window: countdown'
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{}))
-        Assert-Equal "$($ui.Bar.Value)|$($ui.Change.Visible)|$($ui.Sidebar[4].Font.Bold)|$($ui.Sidebar[0].Font.Bold)" '40|False|True|False' 'window: installing'
+        Assert-Equal "$($ui.Bar.Value)|$($ui.Change.Visible)|$($ui.Sidebar[5].Font.Bold)|$($ui.Sidebar[0].Font.Bold)" '40|False|True|False' 'window: installing'
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{ state = 'Failed'; message = 'boom' }))
-        Assert-Equal "$($ui.Title.Text)|$($ui.Message.Text)|$($ui.Restart.Visible)|$($ui.Shutdown.Visible)|$($ui.Sidebar[5].Font.Bold)" 'Deployment failed|boom|True|True|True' 'window: failed'
+        Assert-Equal "$($ui.Title.Text)|$($ui.Message.Text)|$($ui.Restart.Visible)|$($ui.Shutdown.Visible)|$($ui.Sidebar[6].Font.Bold)" 'Deployment failed|boom|True|True|True' 'window: failed'
         # Every control fits inside the window, right of the sidebar.
         foreach ($c in $ui.Form.Controls | Where-Object { $_ -isnot [Windows.Forms.Panel] }) {
             $fits = $c.Left -ge 200 -and $c.Right -le $ui.Form.ClientSize.Width -and $c.Bottom -le $ui.Form.ClientSize.Height
