@@ -71,10 +71,10 @@ try {
     $mi = Get-InstallerInfo $msix
     Assert-Equal "$($mi.Type)|$($mi.PackageName)|$($mi.Version)|$($mi.Publisher)|$($mi.Detection.type) $($mi.Detection.target)" 'msix|MSTeams|24.1.0.0|Microsoft Corporation|appx MSTeams' 'MSIX identity is read from AppxManifest.xml'
 
-    # Templates for the applications in the SmartDeploy answer file.
+    # Templates for the applications in the imported answer file.
     $templates = Get-AppTemplates
     Assert-Equal ((Find-AppTemplate -Installer 'system_update_5.08.03.59.exe' -Templates $templates).name) 'Lenovo-System-Update' 'template found by installer file name'
-    Assert-Equal ((Find-AppTemplate -Name 'Dell-Command-Update' -Templates $templates).name) 'Dell-Command-Update' 'template found by SmartDeploy pack name'
+    Assert-Equal ((Find-AppTemplate -Name 'Dell-Command-Update' -Templates $templates).name) 'Dell-Command-Update' 'template found by imported pack name'
     Assert-Equal ((Find-AppTemplate -Name 'Zoom-Latest' -Templates $templates).name) 'Zoom' 'template found by alias'
     Assert-Equal (Find-AppTemplate -Installer 'unknown.exe' -Templates $templates) $null 'no template for unknown installers'
     $vlc = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Installer 'vlc-3.0.21-win64.exe' -Templates $templates) -Installer 'vlc-3.0.21-win64.exe'

@@ -1,5 +1,5 @@
 # Answer files: one XML per deployment profile (image, apps, disk, regional settings, naming,
-# domain join, tasks, shares), modelled on SmartDeploy's deploy wizard answer files.
+# domain join, tasks, shares).
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
@@ -519,24 +519,24 @@ $($shares -join "`n")
 }
 
 function ConvertTo-LocaleTag([string]$Value) {
-    # SmartDeploy stores display names ("French (Canada)"); unattend wants tags (fr-CA).
+    # Deploy wizard files store display names ("French (Canada)"); unattend wants tags (fr-CA).
     if (-not $Value) { return $null }
     if ($Value -match '^[a-z]{2,3}(-[A-Za-z0-9]+)+$') { return $Value }
     $c = [Globalization.CultureInfo]::GetCultures('SpecificCultures') | Where-Object { $_.EnglishName -eq $Value } | Select-Object -First 1
     if ($c) { $c.Name } else { $null }
 }
 
-function ConvertFrom-SmartDeployAnswerFile {
+function ConvertFrom-DeployWizardAnswerFile {
     <#
     .SYNOPSIS
-        Converts a SmartDeploy deploy wizard answer file (.xml) to this tool's answer object.
+        Converts an existing deploy wizard answer file (.xml) to this tool's answer object.
         Returns @{ Answer; Notes }: Notes lists what needs a manual step. Passwords are never carried over
-        (SmartDeploy encrypts them); each one becomes a passwordFile to fill in.
+        (the source file encrypts them); each one becomes a passwordFile to fill in.
     #>
     param([Parameter(Mandatory)][string]$Path)
     [xml]$xml = Get-Content -Raw -Path $Path
-    $w = $xml.SelectSingleNode('/smartdeploy/deploy_wizard')
-    if (-not $w) { throw "$Path is not a SmartDeploy answer file (no smartdeploy/deploy_wizard)." }
+    $w = $xml.DocumentElement.SelectSingleNode('deploy_wizard')
+    if (-not $w) { throw "$Path is not a deploy wizard answer file (no deploy_wizard element)." }
     $notes = [Collections.Generic.List[string]]::new()
 
     $imageFile = Get-XmlText $w 'select_image/image_file'
@@ -549,11 +549,11 @@ function ConvertFrom-SmartDeployAnswerFile {
     if ($apps) {
         $known = @($apps | Where-Object { Find-AppTemplate -Name $_ })
         $tip = if ($known) { " The builder has templates for $($known -join ', ')." } else { '' }
-        $notes.Add("Applications: SmartDeploy .spk packs can't be read. Rebuild each one on the Applications tab (New..., keeping the same name): $($apps -join ', ').$tip")
+        $notes.Add("Applications: .spk application packs can't be read. Rebuild each one on the Applications tab (New..., keeping the same name): $($apps -join ', ').$tip")
     }
 
     $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
-    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated.") }
+    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (wipe and load / keep user data) isn't converted; the disk will be recreated.") }
 
     $membership = switch (Get-XmlText $w 'network_identification/membership' '1') { '0' { 'Domain' } '2' { 'Workgroup' } default { 'Workgroup' } }
     if ((Get-XmlText $w 'network_identification/membership') -eq '2') { $notes.Add('Azure AD join isn''t supported; set to Workgroup.') }
@@ -564,7 +564,7 @@ function ConvertFrom-SmartDeployAnswerFile {
 
     $wmiQuery = Get-XmlText $w 'advanced_options/identification/wmi_query'
     $scheme = Get-XmlText $w 'advanced_options/identification/custom_naming_scheme'
-    # SmartDeploy tries its naming methods in order (WMI, existing name, custom scheme); a fresh disk has no
+    # The deploy wizard tries its naming methods in order (WMI, existing name, custom scheme); a fresh disk has no
     # existing name, so the WMI query wins when there is one.
     $mode = if ($wmiQuery) { 'WMI' } elseif ($scheme) { 'Custom' } else { 'WMI' }
 
@@ -578,7 +578,7 @@ function ConvertFrom-SmartDeployAnswerFile {
         $cmd = Get-XmlText $_ 'command' ''
         if ($phase -eq 'POSTIMAGE' -and $cmd -match '(?i)\bT:\\') {
             $cmd = $cmd -replace '(?i)\bT:\\', '%OSDRIVE%\'
-            $notes.Add("POSTIMAGE task: SmartDeploy's T: drive was changed to %OSDRIVE%: $cmd")
+            $notes.Add("POSTIMAGE task: the old T: drive was changed to %OSDRIVE%: $cmd")
         }
         if ($phase -in 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON') { [pscustomobject]@{ Phase = $phase; Script = ''; Command = $cmd } }
         else { $notes.Add("Task phase '$phase' isn't supported; skipped: $cmd") }
@@ -610,9 +610,9 @@ function ConvertFrom-SmartDeployAnswerFile {
     })
     if ($shares) { $notes.Add("Shares: put each share's password in its passwordFile ($(($shares.PasswordFile) -join ', ')).") }
     if ($membership -eq 'Domain') { $notes.Add('Domain join: put the join account''s password in config\secrets\join.txt.') }
-    if (Get-XmlText $w 'advanced_options/general/platform_pack') { $notes.Add('Drivers: SmartDeploy platform packs (.ppk) aren''t used; import the OEM driver packs in the Driver Library tab.') }
+    if (Get-XmlText $w 'advanced_options/general/platform_pack') { $notes.Add('Drivers: platform packs (.ppk) aren''t used; import the OEM driver packs in the Driver Library tab.') }
     if ((Get-XmlText $w 'network_tcpip_settings/ipv4/static') -eq '1') { $notes.Add('Static IP settings aren''t supported; the PC will use DHCP.') }
-    if ((Get-XmlText $w 'client/install_during_deployment') -eq 'true') { $notes.Add('The SmartDeploy client agent isn''t installed; add your management agent as an application if needed.') }
+    if ((Get-XmlText $w 'client/install_during_deployment') -eq 'true') { $notes.Add('The old client agent isn''t installed; add your management agent as an application if needed.') }
 
     $answer = [pscustomobject]@{
         Name                 = [IO.Path]::GetFileNameWithoutExtension($Path)
@@ -662,4 +662,4 @@ function ConvertFrom-SmartDeployAnswerFile {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-SmartDeployAnswerFile
+    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile

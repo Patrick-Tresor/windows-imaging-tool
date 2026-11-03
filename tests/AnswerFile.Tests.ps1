@@ -1,5 +1,5 @@
 # Plain-PowerShell tests for answer files: parsing, validation, naming, unattend generation and the
-# SmartDeploy import. Run: pwsh -File tests/AnswerFile.Tests.ps1
+# deploy wizard answer file import. Run: pwsh -File tests/AnswerFile.Tests.ps1
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -33,8 +33,8 @@ try {
     $bad.Shares = @([pscustomobject]@{ LocalName = 'Z:'; RemoteName = 'server'; Username = $null; Domain = $null; PasswordFile = $null })
     $problems = @(Test-AnswerFile $bad)
     Assert-Equal $problems.Count 4 'validation lists every problem (join creds, phase, share letter, share path)'
-    $bad.Shares = @(); $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'SmartMigrate'
-    Assert-Equal (@(Test-AnswerFile $bad) -join '') "disk/option 'SmartMigrate' is not supported yet; only Recreate (wipe the disk and recreate partitions)." 'unsupported disk option is rejected'
+    $bad.Shares = @(); $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'KeepUserData'
+    Assert-Equal (@(Test-AnswerFile $bad) -join '') "disk/option 'KeepUserData' is not supported yet; only Recreate (wipe the disk and recreate partitions)." 'unsupported disk option is rejected'
 
     # Naming.
     $n = $default.PSObject.Copy()
@@ -138,10 +138,10 @@ try {
     $o = Read-AnswerFile -Path $oldPath
     Assert-Equal "$($o.BitLocker.Enabled)" 'False' 'answer files without the bitlocker section still read, with it off'
 
-    # SmartDeploy import.
-    $conv = ConvertFrom-SmartDeployAnswerFile -Path (Join-Path $PSScriptRoot 'fixtures/smartdeploy-sample.xml')
+    # Deploy wizard answer file import.
+    $conv = ConvertFrom-DeployWizardAnswerFile -Path (Join-Path $PSScriptRoot 'fixtures/deploy-wizard-sample.xml')
     $c = $conv.Answer
-    Assert-Equal "$($c.Mode)|$($c.UnattendDelay)|$($c.ImageFile)" 'Unattended|3|Images\W11_Office_FR_EN.wim' 'SmartDeploy mode, delay and image are converted'
+    Assert-Equal "$($c.Mode)|$($c.UnattendDelay)|$($c.ImageFile)" 'Unattended|3|Images\W11_Office_FR_EN.wim' 'deploy wizard mode, delay and image are converted'
     Assert-Equal ($c.Applications -join ',') 'Dell-Command-Update,Zoom-Latest' 'application packs keep their installation order'
     Assert-Equal "$($c.InputLocale)|$($c.TimeZone)" 'fr-CA|Eastern Standard Time' 'regional settings are converted to locale tags'
     Assert-Equal "$($c.Membership)|$($c.Domain)|$($c.JoinUser)|$($c.JoinDomain)" 'Domain|example.local|imaging|EXAMPLE' 'domain join is converted'
@@ -153,7 +153,7 @@ try {
 
     $out = Join-Path $tmp 'Imported.xml'
     Export-AnswerFile -Answer $c -Path $out
-    Assert-Equal ((Get-Content -Raw $out) -match 'DEADBEEF') $false 'no SmartDeploy password reaches the new answer file'
+    Assert-Equal ((Get-Content -Raw $out) -match 'DEADBEEF') $false 'no source password reaches the new answer file'
     Assert-Equal (@(Test-AnswerFile (Read-AnswerFile -Path $out -SkipValidation)).Count) 0 'imported answer file is valid'
 }
 finally {

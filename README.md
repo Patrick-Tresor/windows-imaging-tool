@@ -35,7 +35,7 @@ and click **Create folders** the first time. Then:
   **Update image...** adds Windows updates to the selected image (see
   [Updating an image](#updating-an-image)).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
-  and **Import SmartDeploy XML...** to convert an existing SmartDeploy answer file.
+  and **Import answer file XML...** to convert an existing deploy wizard answer file.
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
@@ -288,9 +288,9 @@ are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `C:\Windows\Temp\Task-<name>-<user>.log`. **Export...** zips a task to copy it to
 another content root; **Import...** adds it back.
 
-**Importing from SmartDeploy** keeps the mode, delay, image name, application
+**Importing a deploy wizard answer file** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
-options. SmartDeploy encrypts its passwords, so they are never carried over; the
+options. The source file encrypts its passwords, so they are never carried over; the
 import lists the password files to create, the `.spk` application packs to
 rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
