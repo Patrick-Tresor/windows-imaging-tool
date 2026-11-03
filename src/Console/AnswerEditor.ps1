@@ -14,6 +14,7 @@ class ShareRow {
     [string]$Username
     [string]$Domain
     [string]$PasswordFile
+    [string]$PasswordEncrypted
 }
 
 function Get-XamlControls($Xaml, $Window) {
@@ -134,8 +135,8 @@ function Show-AnswerEditor {
     $e.CmbUILanguage.Text = $a.UILanguage
     $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
-    $pwState = { param($file) if ((Test-SecretFile -ContentRoot $ContentRoot -RelativePath $file)) { 'A password is saved. Leave empty to keep it.' } else { 'No password saved yet.' } }
-    $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile
+    $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
+    $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
 
     $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
     $e.RbNameCustom.IsChecked = $a.NamingMode -eq 'Custom'
@@ -151,7 +152,7 @@ function Show-AnswerEditor {
     $e.TxtJoinUser.Text = $a.JoinUser
     $e.TxtJoinDomain.Text = $a.JoinDomain
     $e.TxtWorkgroup.Text = $a.Workgroup
-    $e.TxtJoinPwState.Text = & $pwState $a.JoinPasswordFile
+    $e.TxtJoinPwState.Text = & $pwState $a.JoinPasswordFile $a.JoinPasswordEncrypted
 
     $tasks = [Collections.ObjectModel.ObservableCollection[TaskRow]]::new()
     foreach ($t in $a.Tasks) {
@@ -165,7 +166,7 @@ function Show-AnswerEditor {
     $shares = [Collections.ObjectModel.ObservableCollection[ShareRow]]::new()
     foreach ($s in $a.Shares) {
         $r = [ShareRow]::new()
-        foreach ($p in 'LocalName', 'RemoteName', 'Username', 'Domain', 'PasswordFile') { $r.$p = $s.$p }
+        foreach ($p in 'LocalName', 'RemoteName', 'Username', 'Domain', 'PasswordFile', 'PasswordEncrypted') { $r.$p = $s.$p }
         $shares.Add($r)
     }
     $e.GridShares.ItemsSource = $shares
@@ -177,7 +178,7 @@ function Show-AnswerEditor {
     $e.ChkBlUsedSpace.IsChecked = $bl.UsedSpaceOnly
     $e.RbBlTpm.IsChecked = $bl.Protector -ne 'TpmPin'
     $e.RbBlTpmPin.IsChecked = $bl.Protector -eq 'TpmPin'
-    $e.TxtBlPinState.Text = & $pwState $bl.PinFile
+    $e.TxtBlPinState.Text = & $pwState $bl.PinFile $bl.PinEncrypted
     $e.ChkBlAD.IsChecked = $bl.BackupToAD
     $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
     $e.ChkBlRequire.IsChecked = $bl.RequireBackup
@@ -256,7 +257,7 @@ function Show-AnswerEditor {
     $e.GridShares.Add_SelectionChanged({
         $r = $e.GridShares.SelectedItem
         $e.PwdShare.Password = ''
-        $e.TxtSharePwState.Text = if ($r -is [ShareRow]) { if ($state.SharePasswords[$r.LocalName]) { 'New password set.' } else { & $pwState $r.PasswordFile } } else { '' }
+        $e.TxtSharePwState.Text = if ($r -is [ShareRow]) { if ($state.SharePasswords[$r.LocalName]) { 'New password set.' } else { & $pwState $r.PasswordFile $r.PasswordEncrypted } } else { '' }
     })
     $e.PwdShare.Add_PasswordChanged({
         $r = $e.GridShares.SelectedItem
@@ -306,7 +307,7 @@ function Show-AnswerEditor {
         })
         $a.Shares        = @($shares | Where-Object { $_.RemoteName } | ForEach-Object {
             [pscustomobject]@{ LocalName = "$($_.LocalName)".Trim().ToUpperInvariant(); RemoteName = $_.RemoteName.Trim()
-                               Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile }
+                               Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile; PasswordEncrypted = $_.PasswordEncrypted }
         })
         $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
         $a.BitLocker.EncryptionMethod  = "$($e.CmbBlMethod.SelectedItem)"
@@ -330,7 +331,7 @@ function Show-AnswerEditor {
         try {
             & $collect
             # A domain join or Administrator password is required the first time; later it can stay as saved.
-            $joinPwSaved = Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile
+            $joinPwSaved = Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Encrypted $a.JoinPasswordEncrypted
             $joinProblem = Get-DomainJoinProblem -Answer $a -PasswordTyped ([bool]$e.PwdJoin.Password) -PasswordSaved $joinPwSaved
             if ($joinProblem) {
                 # Show the page and put the cursor in the field that is missing.
@@ -339,10 +340,10 @@ function Show-AnswerEditor {
                 [void]$e[$joinProblem.Control].Focus()
                 throw $joinProblem.Message
             }
-            if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile)) {
+            if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Encrypted $a.AdminPasswordEncrypted)) {
                 throw 'Enter the Administrator password (Windows settings).'
             }
-            if ($a.BitLocker.Enabled -and $a.BitLocker.Protector -eq 'TpmPin' -and -not $e.PwdBlPin.Password -and -not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile)) {
+            if ($a.BitLocker.Enabled -and $a.BitLocker.Protector -eq 'TpmPin' -and -not $e.PwdBlPin.Password -and -not (Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Encrypted $a.BitLocker.PinEncrypted)) {
                 throw 'Enter the BitLocker startup PIN (BitLocker).'
             }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `

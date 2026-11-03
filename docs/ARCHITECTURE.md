@@ -304,8 +304,14 @@ minutes as Stalled.
 
 The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through
-`Save-AnswerFromEditor`, which validates it, writes typed passwords to
-`config\secrets\<answer>-*.txt` and exports the XML.
+`Save-AnswerFromEditor`, which validates it, encrypts typed passwords into the
+answer object with the content root's key (`Protect-AnswerPassword`,
+`config\secrets\answer-key.txt`) and exports the XML. The media build runs
+`Sync-AnswerFilePasswords` first (password files into the answer files,
+encrypted) and puts the key in `boot.wim` (in the WinPE password vault when
+there is one). In WinPE, `Read-DeployAnswer` decrypts them (`Find-AnswerKey`,
+`Unprotect-AnswerPassword`) and `Get-DeploySecret` uses them before the vault
+or the Passwords page.
 
 `NamingList.psm1` reads and writes the naming list CSV (comma or semicolon,
 UTF-8 or ANSI, as Excel saves it; header spellings such as `Serial Number` or

@@ -18,7 +18,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.6 | Copy logs and Command prompt in the wizard | A `Logs\<serial>-<date>` folder appears on the stick; cmd opens |
 | 1.7 | Full deploy | Progress window shows percent for apply and drivers; no clipped text; PC restarts into Windows, not WinPE |
 | 1.8 | First boot | PC is in the domain, apps and tasks ran (`C:\Windows\Temp\Task-*.log`), clock right |
-| 1.9 | Stick built **without** a WinPE password | The wizard shows a Passwords page after the answer file with one box per password (join, local Administrator...); after Confirm no password window pops up |
+| 1.9 | Stick built **without** a WinPE password, answer file passwords typed in the editor | No Passwords page and no password window; `Deploy.log` says "encrypted password(s) decrypted"; the PC joins the domain; the answer file on the DEPLOY partition shows only `aes256:...` |
 | 1.10 | Update the stick in place (Media tab) after changing one answer file | Only the changed files are copied, it is much faster than a full build, and the stick still deploys |
 | 1.11 | USB copy speed | Note the MB/s the build prints for the image |
 | 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |

@@ -37,8 +37,10 @@ Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 
 # Passwords: from the content root's password files when they are there (network share, or a stick built with
-# -SecretsOnMedia), else from the vault the WinPE password unlocked, else typed by the operator (kept in memory only).
+# -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
+# else from the vault the WinPE password unlocked, else typed by the operator (kept in memory only).
 $script:Vault = @{}
+$script:AnswerKey = $null
 $script:TypedSecrets = @{}
 $script:CanAskSecrets = $false
 
@@ -76,11 +78,32 @@ function Select-AnswerFile([string[]]$Names, [string]$Default) {
     throw "No answer file number '$pick'."
 }
 
+function Add-AnswerPasswords([string]$Root, $Answer) {
+    # The passwords encrypted in the answer file, decrypted now (key = normalized password file path), as
+    # $Answer.Passwords. One that can't be decrypted is logged and left out: the wizard's Passwords page or
+    # Get-DeploySecret then deals with it as a password that is not on the media.
+    $map = @{}
+    $Answer | Add-Member -NotePropertyName Passwords -NotePropertyValue $map -Force
+    $encrypted = @(Get-AnswerSecrets -Answer $Answer | Where-Object Encrypted)
+    if (-not $encrypted) { return }
+    if (-not $script:AnswerKey) { $script:AnswerKey = Find-AnswerKey -Vault $script:Vault -ScriptRoot $PSScriptRoot -ContentRoot $Root }
+    if (-not $script:AnswerKey) {
+        Write-DeployLog "Answer file $($Answer.Name) has encrypted passwords but this media has no answer file key: rebuild the stick or boot image from the console" -Level WARN
+        return
+    }
+    foreach ($s in $encrypted) {
+        try { $map[$s.Key] = Unprotect-AnswerPassword -Value $s.Encrypted -Key $script:AnswerKey }
+        catch { Write-DeployLog "$($s.Label) in answer file $($Answer.Name) not usable: $($_.Exception.Message)" -Level WARN }
+    }
+    if ($map.Count) { Write-DeployLog "Answer file $($Answer.Name): $($map.Count) encrypted password(s) decrypted" }
+}
+
 function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
     # Reads an answer file; a naming list entry's OU replaces the answer file's (domain joins only).
     $path = Join-Path $Root "AnswerFiles\$Name.xml"
     if (-not (Test-Path $path)) { throw "Answer file $Name not found in $Root\AnswerFiles." }
     $a = Read-AnswerFile -Path $path
+    Add-AnswerPasswords -Root $Root -Answer $a
     if ($Listed -and $Listed.OU) {
         if ($a.Membership -eq 'Domain') { $a.OrganizationalUnit = $Listed.OU }
         else { Write-DeployLog "Naming list OU $($Listed.OU) ignored: answer file $($a.Name) joins a workgroup" -Level WARN }
@@ -105,7 +128,7 @@ function Assert-JoinAccount($Root, $Answer) {
     # the disk is wiped; a domain WinPE cannot reach is only logged, and the join is left to Windows as before.
     if ($Answer.Membership -ne 'Domain' -or -not $Answer.JoinPasswordFile) { return }
     $account = (Resolve-JoinAccount -Answer $Answer).Account
-    $password = Get-DeploySecret -Root $Root -RelativePath $Answer.JoinPasswordFile -Label "password of the join account $account"
+    $password = Get-DeploySecret -Root $Root -RelativePath $Answer.JoinPasswordFile -Answer $Answer -Label "password of the join account $account"
     $check = Test-JoinAccount -Domain $Answer.Domain -Account $account -Password $password
     if (-not $check.Cached) {
         switch ($check.Result) {
@@ -127,7 +150,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) 
     Request-DeploySecrets -Root $Root -Answer $Answer
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
-        $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Label "password for $($share.RemoteName)" } else { $null }
+        $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Answer $Answer -Label "password for $($share.RemoteName)" } else { $null }
         # A user name that already names its domain (CORP\svc, svc@corp.example.com) gets no second one in front.
         $user = if ($share.Domain -and $share.Username -and $share.Username -notmatch '[\\@]') { "$($share.Domain)\$($share.Username)" } else { $share.Username }
         Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
@@ -260,16 +283,17 @@ function Unlock-DeployMedia {
     exit 3
 }
 
-function Get-DeploySecret([string]$Root, [string]$RelativePath, [string]$Label) {
+function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string]$Label) {
     # The password in a password file of the answer file, wherever it is (see $script:Vault above). Throws when it
     # is nowhere and nobody is there to type it, before anything is erased.
     if (-not $RelativePath) { throw "No password file is set for $Label in the answer file." }
     $key = ConvertTo-SecretKey $RelativePath
-    if ($Root -and (Test-Path -LiteralPath (Join-Path $Root $RelativePath))) { return Read-SecretFile -ContentRoot $Root -RelativePath $RelativePath }
+    if ($Root -and [IO.File]::Exists([IO.Path]::Combine($Root, $RelativePath))) { return Read-SecretFile -ContentRoot $Root -RelativePath $RelativePath }
+    if ($Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)) { return $Answer.Passwords[$key] }
     if ($script:Vault.ContainsKey($key)) { return $script:Vault[$key] }
     if ($script:TypedSecrets.ContainsKey($key)) { return $script:TypedSecrets[$key] }
     if (-not $script:CanAskSecrets) {
-        throw "The $Label ($RelativePath) is not on this media. Passwords are left off USB sticks: build the stick with a WinPE password (Media tab), or deploy from the network share."
+        throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
     }
     # Get-AnswerSecrets lists every password up front, so this is only reached for one it does not know about.
     Write-DeployLog "The $Label ($RelativePath) was not asked for with the other passwords" -Level WARN
@@ -280,12 +304,13 @@ function Get-DeploySecret([string]$Root, [string]$RelativePath, [string]$Label) 
     $typed
 }
 
-function Test-DeploySecretKnown([string]$Root, [string]$RelativePath) {
+function Test-DeploySecretKnown([string]$Root, [string]$RelativePath, $Answer) {
     # True when Get-DeploySecret can return this password without asking anyone.
     $key = ConvertTo-SecretKey $RelativePath
     # .NET, not Join-Path: Join-Path throws for a drive letter PowerShell has no drive for (WinPE).
     $onMedia = $Root -and [IO.File]::Exists([IO.Path]::Combine($Root, $RelativePath))
-    $onMedia -or $script:Vault.ContainsKey($key) -or $script:TypedSecrets.ContainsKey($key)
+    $inAnswer = $Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)
+    $onMedia -or $inAnswer -or $script:Vault.ContainsKey($key) -or $script:TypedSecrets.ContainsKey($key)
 }
 
 function Get-MissingDeploySecrets([string]$Root, $Answer) {
@@ -294,7 +319,7 @@ function Get-MissingDeploySecrets([string]$Root, $Answer) {
     # Nothing when nobody is at the PC to type them (Get-DeploySecret then says what is missing).
     if (-not $script:CanAskSecrets) { return @() }
     @(Get-AnswerSecrets -Answer $Answer | Where-Object {
-        -not ($_.Share -and $script:Mounted[$_.Share]) -and -not (Test-DeploySecretKnown -Root $Root -RelativePath $_.RelativePath)
+        -not ($_.Share -and $script:Mounted[$_.Share]) -and -not (Test-DeploySecretKnown -Root $Root -RelativePath $_.RelativePath -Answer $Answer)
     })
 }
 
@@ -561,15 +586,15 @@ try {
     $libraryTasks = @($deployTasks | Where-Object Definition)
     if ($libraryTasks) { Write-DeployLog "Tasks: $(($libraryTasks | ForEach-Object { "$($_.Name) ($($_.Phase))" }) -join ', ')" }
 
-    $joinPassword  = if ($answer.Membership -eq 'Domain') { Get-DeploySecret -Root $root -RelativePath $answer.JoinPasswordFile -Label 'join account password' } else { $null }
+    $joinPassword  = if ($answer.Membership -eq 'Domain') { Get-DeploySecret -Root $root -RelativePath $answer.JoinPasswordFile -Answer $answer -Label 'join account password' } else { $null }
     if ($answer.Membership -eq 'Domain') {
         # CORP\svc typed as the user name with another account's domain: the user name wins (Resolve-JoinAccount).
         $joinNote = (Resolve-JoinAccount -Answer $answer).Note
         if ($joinNote) { Write-DeployLog $joinNote -Level WARN }
     }
-    $adminPassword = if ($answer.EnableAdministrator) { Get-DeploySecret -Root $root -RelativePath $answer.AdminPasswordFile -Label 'local Administrator password' } else { $null }
+    $adminPassword = if ($answer.EnableAdministrator) { Get-DeploySecret -Root $root -RelativePath $answer.AdminPasswordFile -Answer $answer -Label 'local Administrator password' } else { $null }
     $bl = $answer.BitLocker
-    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Label 'BitLocker PIN' } else { $null }
+    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Answer $answer -Label 'BitLocker PIN' } else { $null }
 
     $disk = Get-Disk -Number $answer.DiskNumber
 

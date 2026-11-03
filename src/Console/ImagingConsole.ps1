@@ -779,7 +779,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
     } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkSecretsOnMedia.IsChecked) {
-        if (-not (Confirm-Action 'No WinPE password: anyone with the stick can boot it, and the operator types the join, local Administrator and other passwords on each PC, once, on the wizard''s Passwords page (they are not copied to the stick). Set a WinPE password to type only that one. Continue?')) { return }
+        if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
     if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
 

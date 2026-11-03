@@ -40,7 +40,7 @@ and click **Create folders** the first time. Then:
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
-  boxes and saved to their own files.
+  boxes and saved in the answer file, encrypted (see Passwords below).
 - **Applications**: the application pack builder. Build, edit, test, export and
   import packs (see Applications below).
 - **Tasks**: the task library, scripts to run during or after a deployment
@@ -177,24 +177,36 @@ Secure Boot turned off, a processor the check cannot match (some Celeron,
 Pentium and Xeon models) and an image whose version cannot be read only warn;
 they never block.
 
-**Passwords never go in the answer file.** Each `passwordFile` names a text file
-under the content root, usually `config\secrets\`. Anyone who can read the share
-can read them, so use a join account that can only join computers to one OU, and
+**Passwords are kept in the answer file, encrypted.** The join account, share,
+local Administrator and BitLocker PIN passwords typed in the answer file editor
+are saved in the XML as `aes256:<key id>:<base64>` (AES-256-CBC with an
+HMAC-SHA256, next to each `passwordFile`, which still names the password). The
+key is random, made once in `config\secrets\answer-key.txt` on the content root,
+and never copied to the stick. Each media build puts it inside the boot image,
+so WinPE decrypts the passwords itself and **the deploy asks for nothing**.
+Older answer files that only name password files are filled in by the next
+media build (the build reads each password file and writes it, encrypted, into
+the answer file). Use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
-**Password files never go on a USB stick in plain text.** The stick gets
-`config` without `config\secrets`. Set a **WinPE password** on the Media tab
-(8 characters or more) and the password files go inside the boot image,
-encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE asks for that
-password before it does anything and shuts down after 5 wrong tries or
-**Shut down**; nothing else is asked. Without a WinPE password, the deploy
-wizard shows a **Passwords** page right after the answer file, with one box for
-each password the answer file needs (join account, share, local Administrator,
-BitLocker PIN). Each is typed once, kept in memory only,
-and nothing is asked once Windows starts installing. An unattended answer file
-asks for them in one window before its countdown. A PXE image with a WinPE
-password waits for someone to type it. Tick **Passwords on USB** only if you accept that anyone
-holding the stick can read them.
+How far that protects them, honestly: the answer files on the stick, or a copy
+mailed or left on a share, give nothing away without the key. But without a
+WinPE password the key sits in `boot.wim` on the same stick, so someone who has
+the whole stick and knows where to look can decrypt them. This is still real
+encryption, not the base64 that unattend.xml calls `PlainText=false`, but it is
+only as safe as the stick. Set a **WinPE password** on the Media tab (8
+characters or more) to close that gap: the key and any password files then go
+inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
+asks for that one password before it does anything and shuts down after 5 wrong
+tries or **Shut down**. A PXE image with a WinPE password waits for someone to
+type it.
+
+If a password can't be found or decrypted (an answer file copied from another
+content root with another key), the deploy wizard shows a **Passwords** page
+right after the answer file, with one box for each missing password; an
+unattended answer file asks in one window before its countdown. Tick
+**Passwords on USB** only if you also want the plain password files on the
+stick; it is not needed.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach
 the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).

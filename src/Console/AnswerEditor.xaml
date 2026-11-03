@@ -252,7 +252,7 @@
       <ScrollViewer x:Name="Sec5" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Domain or workgroup"/>
-          <TextBlock Style="{StaticResource Hint}" Text="To join a domain, fill in the domain, the user name of the account that joins PCs to it, and that account's password. The password is saved in its own file under config\secrets, not in the answer file; you don't pick that file. Use an account that can only join computers to the OU."/>
+          <TextBlock Style="{StaticResource Hint}" Text="To join a domain, fill in the domain, the user name of the account that joins PCs to it, and that account's password. The password is saved in the answer file, encrypted with the key in config\secrets\answer-key.txt; WinPE decrypts it without asking. Use an account that can only join computers to the OU."/>
           <StackPanel Orientation="Horizontal">
             <RadioButton x:Name="RbDomain" GroupName="Join" Content="Join a domain"/>
             <RadioButton x:Name="RbWorkgroup" GroupName="Join" Content="Join a workgroup"/>

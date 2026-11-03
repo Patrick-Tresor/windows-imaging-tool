@@ -60,8 +60,8 @@ function Get-MediaContent {
         [string]$DefaultAnswerFile,
         # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
         [AllowEmptyCollection()][string[]]$DriverPacks,
-        # Also copy config\secrets (join, share and Administrator passwords) as plain text. Off by default: a lost
-        # stick would give them away. WinPE then takes them from the WinPE password's vault, or asks the operator.
+        # Also copy config\secrets (join, share and Administrator passwords, the answer file key) as plain text. Off by
+        # default: a lost stick would give them away. WinPE uses the passwords encrypted in the answer files instead.
         [switch]$IncludeSecrets
     )
     $pickPacks = $PSBoundParameters.ContainsKey('DriverPacks')
@@ -153,7 +153,7 @@ function Get-MediaContent {
     if (-not $IncludeSecrets) {
         $exclude += 'config\secrets'
         if ($names -and (Test-Path (Join-MediaPath $ContentRoot 'config\secrets'))) {
-            $notes += 'Password files (config\secrets) are not copied to the stick. WinPE takes them from the WinPE password you set for the build, or asks for them.'
+            $notes += 'Password files (config\secrets) are not copied to the stick. The answer files carry their passwords encrypted, and WinPE decrypts them with the key the build puts in boot.wim.'
         }
     }
     [pscustomobject]@{
