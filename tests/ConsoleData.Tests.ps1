@@ -4,6 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
+Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 
@@ -99,7 +100,7 @@ try {
     Assert-Equal $imp.Name 'deploy-wizard-sample' 'deploy wizard file is imported under its own name'
     Assert-Equal ($imp.Notes.Count -gt 3) $true 'import returns the manual steps'
     $impRow = Get-AnswerFileRows -ContentRoot $root | Where-Object Name -eq 'deploy-wizard-sample'
-    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Password file*' }).Count) 3 'missing join and share password files are reported'
+    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like '*is not saved: type it in the editor.' }).Count) 3 'missing join and share passwords are reported'
     Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Application*' }).Count) 2 'missing application folders are reported'
     Assert-Equal ((Get-ImageUsage -ContentRoot $root)['Win11-Enterprise.wim'] -join ',') 'Default,Lab' 'image usage lists the answer files using it'
 
@@ -142,8 +143,14 @@ try {
     $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -SharePasswords @{ 'Y:' = 'Sh4re' } -IsNew
     $back = Read-AnswerFile -Path $saved
     Assert-Equal "$($back.Membership)|$($back.JoinPasswordFile)|$($back.Shares[0].PasswordFile)|$($back.Applications)" 'Domain|config\secrets\Office-join.txt|config\secrets\Office-share-y.txt|Zoom' 'editor save writes the answer file with password file paths'
-    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Office-join.txt'))|$(Get-Content -Raw (Join-Path $root 'config/secrets/Office-share-y.txt'))" 'J0in!|Sh4re' 'typed passwords go to their own files'
-    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!|Sh4re') $false 'passwords are not in the answer file'
+    $key = Get-AnswerKey -ContentRoot $root
+    Assert-Equal "$(Unprotect-AnswerPassword -Value $back.JoinPasswordEncrypted -Key $key)|$(Unprotect-AnswerPassword -Value $back.Shares[0].PasswordEncrypted -Key $key)" 'J0in!|Sh4re' 'typed passwords are saved encrypted in the answer file'
+    Assert-Equal "$(Test-Path (Join-Path $root 'config/secrets/Office-join.txt'))|$(Test-Path (Join-Path $root 'config/secrets/Office-share-y.txt'))" 'False|False' 'and not in password files'
+    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!|Sh4re') $false 'the answer file holds no password in plain text'
+    Assert-Equal (@(Get-AnswerFileIssues -ContentRoot $root -Answer $back | Where-Object { $_ -like '*password*' }).Count) 0 'encrypted passwords count as saved'
+    $kept = Save-AnswerFromEditor -ContentRoot $root -Answer $back
+    Assert-Equal "$((Read-AnswerFile -Path $kept).JoinPasswordEncrypted)" "$($back.JoinPasswordEncrypted)" 'saving again without typing keeps the encrypted password'
+    Assert-Equal (Test-SavedPassword -ContentRoot $root -RelativePath $back.JoinPasswordFile -Encrypted $back.JoinPasswordEncrypted) $true 'the editor shows the password as saved'
     $threw = $false
     try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'a new answer file cannot overwrite an existing one'
@@ -186,8 +193,8 @@ try {
     $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -IsNew
     $back = Read-AnswerFile -Path $saved
     Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
-    Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))" '246810' 'the PIN goes to its own file'
-    Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file'
+    Assert-Equal (Unprotect-AnswerPassword -Value $back.BitLocker.PinEncrypted -Key (Get-AnswerKey -ContentRoot $root)) '246810' 'the PIN is saved encrypted in the answer file'
+    Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file in plain text'
     $threw = $false
     try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
     Assert-Equal $threw $true 'password files must stay inside the content root'

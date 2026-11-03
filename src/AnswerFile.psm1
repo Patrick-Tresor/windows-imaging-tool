@@ -30,6 +30,7 @@ function Read-BitLockerNode($d) {
         UsedSpaceOnly     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/usedSpaceOnly') $true
         Protector         = Get-XmlText $d 'bitlocker/protector' 'Tpm'
         PinFile           = Get-XmlText $d 'bitlocker/pinFile'
+        PinEncrypted      = Get-XmlText $d 'bitlocker/encryptedPin' ''
         BackupToAD        = ConvertTo-Bool (Get-XmlText $d 'bitlocker/backupToAD') $true
         RecoveryKeyFolder = Get-XmlText $d 'bitlocker/recoveryKeyFolder'
         RequireBackup     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/requireBackup') $true
@@ -80,8 +81,10 @@ function Read-AnswerFile {
         JoinUser             = Get-XmlText $d 'network/joinCredentials/username'
         JoinDomain           = Get-XmlText $d 'network/joinCredentials/domain'
         JoinPasswordFile     = Get-XmlText $d 'network/joinCredentials/passwordFile'
+        JoinPasswordEncrypted = Get-XmlText $d 'network/joinCredentials/encryptedPassword' ''
         EnableAdministrator  = ConvertTo-Bool (Get-XmlText $d 'options/enableAdministrator') $false
         AdminPasswordFile    = Get-XmlText $d 'options/administratorPasswordFile'
+        AdminPasswordEncrypted = Get-XmlText $d 'options/administratorEncryptedPassword' ''
         DisableSystemRestore = ConvertTo-Bool (Get-XmlText $d 'options/disableSystemRestore') $false
         TaskLocation         = Get-XmlText $d 'tasks/@location' 'Tasks'
         Tasks                = @()
@@ -105,6 +108,7 @@ function Read-AnswerFile {
             Username     = Get-XmlText $_ 'username'
             Domain       = Get-XmlText $_ 'domain'
             PasswordFile = Get-XmlText $_ 'passwordFile'
+            PasswordEncrypted = Get-XmlText $_ 'encryptedPassword' ''
         }
     })
 
@@ -194,7 +198,7 @@ function Get-WmiNamingValue {
 }
 
 function Read-SecretFile {
-    # Passwords live in their own files under the content root (see docs), never in the answer file.
+    # A password file under the content root. Answer files also carry each password encrypted (SecretVault.psm1).
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath)
     $p = Join-Path $ContentRoot ($RelativePath -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
     if (-not (Test-Path $p)) { throw "Password file not found: $p" }
@@ -416,6 +420,9 @@ function Export-AnswerFile {
     $a = $Answer
     $x = { param($v) ConvertTo-XmlText "$v" }
     $b = { param([bool]$v) if ($v) { 'true' } else { 'false' } }
+    # An encrypted password (SecretVault's Protect-AnswerPassword) goes next to its passwordFile; no line without one.
+    $e = { param($o, [string]$prop, [string]$tag, [string]$indent)
+        if ($o -and $o.PSObject.Properties[$prop] -and "$($o.$prop)") { "$indent<$tag>$(ConvertTo-XmlText "$($o.$prop)")</$tag>" } else { '' } }
     $i = 0
     $apps = foreach ($n in $a.Applications) { $i++; "    <application order=`"$i`">$(& $x $n)</application>" }
     $tasks = foreach ($t in $a.Tasks) {
@@ -431,6 +438,7 @@ function Export-AnswerFile {
       <username>$(& $x $s.Username)</username>
       <domain>$(& $x $s.Domain)</domain>
       <passwordFile>$(& $x $s.PasswordFile)</passwordFile>
+$(& $e $s 'PasswordEncrypted' 'encryptedPassword' '      ')
     </share>
 "@
     }
@@ -485,12 +493,14 @@ $($apps -join "`n")
       <username>$(& $x $a.JoinUser)</username>
       <domain>$(& $x $a.JoinDomain)</domain>
       <passwordFile>$(& $x $a.JoinPasswordFile)</passwordFile>
+$(& $e $a 'JoinPasswordEncrypted' 'encryptedPassword' '      ')
     </joinCredentials>
   </network>
   <options>
     <disableSystemRestore>$(& $b $a.DisableSystemRestore)</disableSystemRestore>
     <enableAdministrator>$(& $b $a.EnableAdministrator)</enableAdministrator>
     <administratorPasswordFile>$(& $x $a.AdminPasswordFile)</administratorPasswordFile>
+$(& $e $a 'AdminPasswordEncrypted' 'administratorEncryptedPassword' '    ')
   </options>
   <tasks location="$(& $x $taskLocation)">
 $($tasks -join "`n")
@@ -504,6 +514,7 @@ $($shares -join "`n")
     <usedSpaceOnly>$(& $b $bl.UsedSpaceOnly)</usedSpaceOnly>
     <protector>$(& $x $bl.Protector)</protector>
     <pinFile>$(& $x $bl.PinFile)</pinFile>
+$(& $e $bl 'PinEncrypted' 'encryptedPin' '    ')
     <backupToAD>$(& $b $bl.BackupToAD)</backupToAD>
     <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
     <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>

@@ -7,6 +7,7 @@ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'ImageVersions.psm1'
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'TaskPack.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'SecretVault.psm1') -Force
 
 function Join-ContentPath {
     # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
@@ -277,12 +278,14 @@ function Get-AnswerFileIssues {
             } catch { "Task ${name}: $($_.Exception.Message)" }
         }
     }
-    $secrets = @()
-    if ($a.Membership -eq 'Domain') { $secrets += $a.JoinPasswordFile }
-    if ($a.EnableAdministrator) { $secrets += $a.AdminPasswordFile }
-    $secrets += @($a.Shares | ForEach-Object PasswordFile)
-    foreach ($f in $secrets | Where-Object { $_ }) {
-        if (-not (Test-Path (Join-ContentPath $ContentRoot $f))) { "Password file $f is missing." }
+    # Each password the deploy needs: encrypted in the answer file (with this content root's key) or in its file.
+    $key = Get-AnswerKey -ContentRoot $ContentRoot
+    foreach ($s in @(Get-AnswerSecrets -Answer $a)) {
+        if ($s.Encrypted) {
+            if (-not $key) { "$($s.Label) is encrypted, but config\secrets\answer-key.txt is missing: type it again in the editor."; continue }
+            try { $null = Unprotect-AnswerPassword -Value $s.Encrypted -Key $key } catch { "$($s.Label) can't be decrypted ($($_.Exception.Message)): type it again in the editor." }
+        }
+        elseif (-not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $s.RelativePath)) { "$($s.Label) is not saved: type it in the editor." }
     }
 }
 
@@ -346,6 +349,12 @@ function Test-SecretFile {
     [bool]($RelativePath -and (Test-Path (Join-ContentPath $ContentRoot $RelativePath)))
 }
 
+function Test-SavedPassword {
+    # True when a password is saved for this field: encrypted in the answer file, or in its password file.
+    param([Parameter(Mandatory)][string]$ContentRoot, [string]$RelativePath, [string]$Encrypted)
+    [bool]((Test-AnswerPasswordText $Encrypted) -or (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $RelativePath))
+}
+
 function Save-SecretFile {
     # Writes one password to its own file under the content root. See the README on who can read it.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath, [Parameter(Mandatory)][string]$Value)
@@ -396,15 +405,18 @@ function Get-DomainJoinProblem {
         return [pscustomobject]@{ Control = 'TxtJoinUser'; Message = "Type the join account as svc-join, CORP\svc-join or svc-join@corp.example.com in Join account user name ($page)." }
     }
     if (-not $PasswordTyped -and -not $PasswordSaved) {
-        return [pscustomobject]@{ Control = 'PwdJoin'; Message = "Type the join account's password in Password ($page). It is saved in its own file under config\secrets, not in the answer file." }
+        return [pscustomobject]@{ Control = 'PwdJoin'; Message = "Type the join account's password in Password ($page). It is saved encrypted in the answer file." }
     }
 }
 
 function Save-AnswerFromEditor {
     <#
     .SYNOPSIS
-        Saves an answer object edited in the console. Passwords typed in the editor are written to the answer's
-        password files (named after the answer file when it has none). Throws with the problems if it can't be deployed.
+        Saves an answer object edited in the console. Passwords typed in the editor are saved in the answer file,
+        encrypted with the content root's answer file key (SecretVault.psm1; made the first time). Each one keeps a
+        passwordFile name (named after the answer file when it has none), which names the password for the vault and
+        the deploy wizard; an old password file there is removed so it can't override the new password. Throws with
+        the problems if it can't be deployed.
     #>
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -431,12 +443,25 @@ function Save-AnswerFromEditor {
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Can't save yet:`n - " + ($problems -join "`n - ") }
 
-    if ($JoinPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Value $JoinPassword }
-    if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
-    if ($BitLockerPin) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Value $BitLockerPin }
-    foreach ($sh in $a.Shares) {
-        $pw = $SharePasswords[$sh.LocalName]
-        if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }
+    $typed = @($JoinPassword, $AdminPassword, $BitLockerPin) + @($SharePasswords.Values) | Where-Object { $_ }
+    $key = if ($typed) { Get-AnswerKey -ContentRoot $ContentRoot -Create } else { $null }
+    $replaced = New-Object Collections.Generic.List[string]
+    $protect = {
+        param($Object, [string]$Property, [string]$Password, [string]$RelativePath)
+        if (-not $Password) { return }
+        $Object | Add-Member -NotePropertyName $Property -NotePropertyValue (Protect-AnswerPassword -Password $Password -Key $key) -Force
+        if ($RelativePath) { $replaced.Add($RelativePath) }
+    }
+    & $protect $a 'JoinPasswordEncrypted' $JoinPassword $a.JoinPasswordFile
+    & $protect $a 'AdminPasswordEncrypted' $AdminPassword $a.AdminPasswordFile
+    & $protect $a.BitLocker 'PinEncrypted' $BitLockerPin $a.BitLocker.PinFile
+    foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] $sh.PasswordFile }
+    # A password file left from before would win over the new password at deploy time, and the next build would put
+    # it back in the answer file: drop it, once the other answer files that name it carry its password encrypted.
+    $old = @($replaced | Where-Object { Test-SecretFile -ContentRoot $ContentRoot -RelativePath $_ })
+    if ($old) {
+        $null = Sync-AnswerFilePasswords -ContentRoot $ContentRoot
+        foreach ($f in $old) { Remove-Item -LiteralPath (Join-ContentPath $ContentRoot $f) -Force }
     }
     Export-AnswerFile -Answer $a -Path $dest
     $dest
@@ -945,7 +970,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
+    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,

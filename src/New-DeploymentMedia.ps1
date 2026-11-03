@@ -15,8 +15,10 @@
     Puts only those two driver packs on the stick instead of the whole Drivers folder.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
-    WinPE asks for the password in that file before it does anything. The content root's password files go into
-    boot.wim encrypted with it; they are never copied to the stick as plain text (unless -SecretsOnMedia).
+    WinPE asks for the password in that file before it does anything. The content root's password files and the
+    answer file key go into boot.wim encrypted with it; they are never copied to the stick as plain text (unless
+    -SecretsOnMedia). Without a WinPE password the answer files still carry their passwords encrypted, and the key
+    that decrypts them is in boot.wim, so the deploy needs no typing either way.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
     Updates a stick built earlier without erasing it: new WinPE, and only the content files that changed.
@@ -98,6 +100,10 @@ if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
     $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
+    # Each password file the answer files name goes into the answer file itself, encrypted (SecretVault.psm1),
+    # so the stick deploys hands-free without the password files.
+    try { foreach ($line in @(Sync-AnswerFilePasswords -ContentRoot $ContentSource -Names $AnswerFiles)) { Write-Host $line } }
+    catch { Write-Warning "Passwords not put into the answer files ($($_.Exception.Message)): WinPE asks for those not in them." }
     $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default @packArgs
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
@@ -212,9 +218,12 @@ try {
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
+    # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
+    $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
+    $answerKey = Get-AnswerKey -ContentRoot $secretRoot
     if ($winPEPassword) {
-        # The password files, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start.
-        $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
+        # The password files (the answer file key among them), encrypted with the WinPE password, inside boot.wim.
+        # WinPE asks for it at start.
         $secrets = Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath
         New-SecretVault -Password $winPEPassword -Secrets $secrets | ConvertTo-Json | Set-Content "$deployDir\config\vault.json" -Encoding ascii
         Write-Host "WinPE password set: WinPE asks for it at start. $($secrets.Count) password file(s) from $secretRoot\config\secrets are inside boot.wim, encrypted with it." -ForegroundColor Green
@@ -223,9 +232,19 @@ try {
         # instead of leaving a command prompt behind the lock.
         "[LaunchApps]`r`n%SYSTEMROOT%\System32\cmd.exe, /c %SYSTEMROOT%\System32\startnet.cmd`r`n" |
             Set-Content "$mount\Windows\System32\winpeshl.ini" -Encoding ascii
+    } elseif ($answerKey) {
+        # No WinPE password: the key goes into boot.wim as it is, so the passwords in the answer files decrypt
+        # without anyone typing. The answer files on the DEPLOY partition alone give nothing away, but someone with
+        # the whole stick can take the key out of boot.wim.
+        [IO.File]::WriteAllText("$deployDir\config\answer-key.txt", $answerKey, [Text.Encoding]::ASCII)
+        Write-Host "Answer file key $(Get-AnswerKeyId $answerKey) is in boot.wim: the passwords encrypted in the answer files are used without typing." -ForegroundColor Green
+        if ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+            Write-Warning 'No WinPE password: anyone with the stick can boot it, and could take the answer file key out of boot.wim to decrypt the passwords. Set a WinPE password to lock it.'
+        }
     } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
-        Write-Warning 'No WinPE password: anyone with the stick can boot it, and the deploy wizard asks the operator for the join and other passwords on its Passwords page (they are not on the stick).'
+        Write-Warning 'No answer file key in config\secrets: no answer file has an encrypted password, so the deploy wizard asks for the passwords on its Passwords page.'
     }
+    $answerKey = $null
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
         ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
