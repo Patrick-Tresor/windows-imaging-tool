@@ -36,7 +36,7 @@ try {
     $c = Get-MediaContent -ContentRoot $root
     Assert-Equal $c.Problems.Count 0 'no problems once the image exists'
     Assert-Equal ($c.Files -join ';') 'AnswerFiles\Default.xml;Images\Win11-Enterprise.wim;Images\Win11-Enterprise.updates.json' 'answer file, its image and history are copied'
-    Assert-Equal ($c.Folders -join ';') 'config;Tools;Drivers;Applications' 'config, tools, drivers and applications are copied'
+    Assert-Equal ($c.Folders -join ';') 'config;Tools;Drivers;Applications;Tasks' 'config, tools, drivers, applications and tasks are copied'
     Assert-Equal ($c.AnswerFiles[0].Image) 'Images\Win11-Enterprise.wim' 'answer file row shows its image'
 
     # Two answer files: only the checked one and its image go on the stick.

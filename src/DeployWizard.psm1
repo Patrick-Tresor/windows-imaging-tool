@@ -210,6 +210,14 @@ function Get-DeploySummary {
     "Image:        $($Plan.ImagePath) (index $($Answer.ImageIndex))"
     "Drivers:      $(if ($Plan.DriverPack) { $Plan.DriverPack } else { 'inbox only' })"
     "Applications: $(if ($Applications) { $Applications -join ', ' } else { 'none' })"
+    # Tasks from the Tasks tab by name and when they run; plain commands only counted.
+    $taskRows = @($Answer.Tasks | Where-Object { $_ })
+    if ($taskRows) {
+        $named = @($taskRows | Where-Object { $_.PSObject.Properties['Script'] -and $_.Script } | ForEach-Object { "$($_.Script) ($($_.Phase))" })
+        $plain = $taskRows.Count - $named.Count
+        if ($plain) { $named += "$plain command$(if ($plain -gt 1) { 's' })" }
+        "Tasks:        $($named -join ', ')"
+    }
     "Name:         $ComputerName"
     "Joins:        $join"
     # Deploy-Image adds its own lines (Windows 11 check, firmware, BIOS, BitLocker, user data) to the plan.
@@ -332,6 +340,7 @@ function Show-DeployWizard {
                 "Naming: $($a.NamingMode)$(if ($a.Prefix) { ", prefix $($a.Prefix)" })",
                 $(if ($a.Membership -eq 'Domain') { "Joins domain $($a.Domain)" } else { "Workgroup $($a.Workgroup)" }),
                 "Applications: $(if ($a.Applications) { $a.Applications.Count } else { 'none' })",
+                "Tasks: $(if (@($a.Tasks).Count) { @($a.Tasks).Count } else { 'none' })",
                 "Regional: $($a.UILanguage), $($a.TimeZone)",
                 "When done: $(if ($a.Shutdown) { 'shut down' } elseif ($a.Reboot) { 'restart' } else { 'stay in WinPE' })"
             ) -join "`n")

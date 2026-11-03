@@ -143,12 +143,33 @@ if ($plan.userState) {
     }
 }
 
+# FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
+# C:\Deploy\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
 if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }
-foreach ($cmd in $plan.tasks) {
-    Write-Log "FIRSTBOOT task: $cmd"
-    $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $cmd" -Wait -PassThru -WindowStyle Hidden
-    Write-Log "  exit $($p.ExitCode)"
+Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
+$taskResults = @()
+foreach ($t in @($plan.tasks)) {
+    if ($t -is [string]) { $t = [pscustomobject]@{ name = $t; command = $t; task = $null; arguments = '' } }
+    if (-not $t.task) {
+        Write-Log "FIRSTBOOT task: $($t.command)"
+        $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($t.command)" -Wait -PassThru -WindowStyle Hidden
+        Write-Log "  exit $($p.ExitCode)"
+        $taskResults += [pscustomobject]@{ name = $t.command; status = 'Ran'; ok = $true; exitCode = $p.ExitCode; message = "exit $($p.ExitCode)" }
+        continue
+    }
+    $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
+    Write-Log "FIRSTBOOT task $($def.name)"
+    Set-Progress "Running task $($def.name)" 98
+    $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
+                   -LogPath "$env:WINDIR\Temp\Task-$($def.name).log" -Log { param($m) Write-Log $m } }
+         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
+    $ok = $r.Status -eq 'Succeeded'
+    Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+    $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
+    if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
 }
+# Kept after C:\Deploy is removed, next to FirstBoot-apps.json.
+if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
 if ($plan.bitlocker) {
     try { Enable-DeployBitLocker $plan.bitlocker }
@@ -167,10 +188,11 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
             checks     = $plan.checks
             status     = if ($plan.PSObject.Properties['status']) { $plan.status } else { $null }
             appResults = $appResults
+            taskResults = @($taskResults)
         } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $toolDir 'checks.json') -Encoding utf8
 
         Import-Module (Join-Path $toolDir 'PostDeployChecks.psm1') -Force
-        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -ReportPath (Join-Path $toolDir 'last-check.json')
+        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults -ReportPath (Join-Path $toolDir 'last-check.json')
         foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
         Write-Log "Post-deploy checks: $($run.Summary.Text)"
         if ($reporting) { Set-DeployCheckResult -Results $run.Results -Summary $run.Summary -Warning (ConvertTo-CheckWarning $run.Summary) }

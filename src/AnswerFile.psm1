@@ -106,6 +106,7 @@ function Read-AnswerFile {
         EnableAdministrator  = ConvertTo-Bool (Get-XmlText $d 'options/enableAdministrator') $false
         AdminPasswordFile    = Get-XmlText $d 'options/administratorPasswordFile'
         DisableSystemRestore = ConvertTo-Bool (Get-XmlText $d 'options/disableSystemRestore') $false
+        TaskLocation         = Get-XmlText $d 'tasks/@location' 'Tasks'
         Tasks                = @()
         Shares               = @()
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
@@ -120,8 +121,9 @@ function Read-AnswerFile {
     $a.UserDataRules = @($d.SelectNodes('userData/rules/rule') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
     if (-not $d.SelectSingleNode('userData/rules')) { $a.UserDataRules = @('MigDocs.xml', 'MigApp.xml') }
     $a.UserDataExclude = @($d.SelectNodes('userData/excludeUsers/user') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
+    # A task is a plain command, or a script from the task library (script="name") whose text is extra arguments.
     $a.Tasks = @($d.SelectNodes('tasks/task') | ForEach-Object {
-        [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Command = "$($_.InnerText)".Trim() }
+        [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Script = $_.GetAttribute('script').Trim(); Command = "$($_.InnerText)".Trim() }
     })
     $a.Shares = @($d.SelectNodes('shares/share') | ForEach-Object {
         [pscustomobject]@{
@@ -170,7 +172,9 @@ function Test-AnswerFile {
     if ($a.EnableAdministrator -and -not $a.AdminPasswordFile) { 'options/enableAdministrator needs options/administratorPasswordFile.' }
     foreach ($t in $a.Tasks) {
         if ($t.Phase -notin $script:Phases) { "Task phase '$($t.Phase)' must be one of $($script:Phases -join ', ')." }
-        if (-not $t.Command) { "A $($t.Phase) task has no command." }
+        $taskScript = if ($t.PSObject.Properties['Script']) { "$($t.Script)" } else { '' }
+        if ($taskScript -and $taskScript -notmatch '^[A-Za-z0-9._-]+$') { "Task '$taskScript' isn't a task library name (letters, digits, dot, dash and underscore)." }
+        elseif (-not $taskScript -and -not $t.Command) { "A $($t.Phase) task has no command." }
     }
     foreach ($s in $a.Shares) {
         if ($s.LocalName -notmatch '^[D-WY]:$') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y: (W: and X: are used by the deploy, Z: by the content share)." }
@@ -310,7 +314,10 @@ function New-UnattendXml {
         [Parameter(Mandatory)]$Answer,
         [Parameter(Mandatory)][string]$ComputerName,
         [string]$JoinPassword,
-        [string]$AdminPassword
+        [string]$AdminPassword,
+        # FIRSTLOGON command lines in order, with library tasks already turned into commands (Deploy-Image.ps1).
+        # Not passed: the answer file's plain FIRSTLOGON commands.
+        [string[]]$LogonCommands
     )
     $a = $Answer
     $x = { param($v) ConvertTo-XmlText $v }
@@ -367,13 +374,14 @@ function New-UnattendXml {
 "@
     }
 
-    $logon = @($a.Tasks | Where-Object Phase -eq 'FIRSTLOGON')
+    $logon = if ($PSBoundParameters.ContainsKey('LogonCommands')) { @($LogonCommands | Where-Object { $_ }) }
+             else { @($a.Tasks | Where-Object { $_.Phase -eq 'FIRSTLOGON' -and -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object Command) }
     $logonBlock = ''
     if ($logon) {
         $i = 0
-        $cmds = foreach ($t in $logon) {
+        $cmds = foreach ($c in $logon) {
             $i++
-            "        <SynchronousCommand wcm:action=`"add`">`n          <Order>$i</Order>`n          <CommandLine>$(& $x $t.Command)</CommandLine>`n        </SynchronousCommand>"
+            "        <SynchronousCommand wcm:action=`"add`">`n          <Order>$i</Order>`n          <CommandLine>$(& $x $c)</CommandLine>`n        </SynchronousCommand>"
         }
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
@@ -408,15 +416,21 @@ function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
     # userState (Copy-UserStateForRestore) is restored after the applications, so their settings apply.
     # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), $UserState = $null, [string]$BitLockerPin)
+    # -Tasks: Resolve-DeployTasks rows (library tasks read, other PCs' tasks left out). Not passed: the plain commands.
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), $UserState = $null, [string]$BitLockerPin, [object[]]$Tasks)
     $bl = $Answer.BitLocker
+    $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
+            else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
+    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Deploy\Tasks\<name>.
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
         userState            = $UserState
-        tasks                = @($Answer.Tasks | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object Command)
+        tasks                = @($rows | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object {
+            [pscustomobject]@{ name = $_.Name; command = $_.Command; task = $_.Definition; arguments = $_.Arguments }
+        })
         bitlocker            = if ($bl -and $bl.Enabled) {
             [pscustomobject]@{
                 encryptionMethod  = $bl.EncryptionMethod
@@ -450,7 +464,11 @@ function Export-AnswerFile {
     $apps = foreach ($n in $a.Applications) { $i++; "    <application order=`"$i`">$(& $x $n)</application>" }
     $rules = foreach ($r in $a.UserDataRules) { "      <rule>$(& $x $r)</rule>" }
     $excluded = foreach ($u in $a.UserDataExclude) { "      <user>$(& $x $u)</user>" }
-    $tasks = foreach ($t in $a.Tasks) { "    <task phase=`"$($t.Phase)`">$(& $x $t.Command)</task>" }
+    $tasks = foreach ($t in $a.Tasks) {
+        $scriptAttr = if ($t.PSObject.Properties['Script'] -and $t.Script) { " script=`"$(& $x $t.Script)`"" } else { '' }
+        "    <task phase=`"$($t.Phase)`"$scriptAttr>$(& $x $t.Command)</task>"
+    }
+    $taskLocation = if ($a.PSObject.Properties['TaskLocation'] -and $a.TaskLocation) { $a.TaskLocation } else { 'Tasks' }
     $shares = foreach ($s in $a.Shares) {
         @"
     <share>
@@ -537,7 +555,7 @@ $($apps -join "`n")
     <enableAdministrator>$(& $b $a.EnableAdministrator)</enableAdministrator>
     <administratorPasswordFile>$(& $x $a.AdminPasswordFile)</administratorPasswordFile>
   </options>
-  <tasks>
+  <tasks location="$(& $x $taskLocation)">
 $($tasks -join "`n")
   </tasks>
   <shares>
@@ -632,7 +650,7 @@ function ConvertFrom-SmartDeployAnswerFile {
             $cmd = $cmd -replace '(?i)\bT:\\', '%OSDRIVE%\'
             $notes.Add("POSTIMAGE task: SmartDeploy's T: drive was changed to %OSDRIVE%: $cmd")
         }
-        if ($phase -in 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON') { [pscustomobject]@{ Phase = $phase; Command = $cmd } }
+        if ($phase -in 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON') { [pscustomobject]@{ Phase = $phase; Script = ''; Command = $cmd } }
         else { $notes.Add("Task phase '$phase' isn't supported; skipped: $cmd") }
     })
     foreach ($t in $tasks | Where-Object { $_.Phase -ne 'POSTIMAGE' -and $_.Command -match '(?i)\bT:\\' }) {
@@ -711,6 +729,7 @@ function ConvertFrom-SmartDeployAnswerFile {
         EnableAdministrator  = [bool]$props['ENABLE_ADMINISTRATOR_ACCOUNT']
         AdminPasswordFile    = 'config\secrets\admin.txt'
         DisableSystemRestore = [bool]$props['DISABLE_SYSTEM_RESTORE']
+        TaskLocation         = 'Tasks'
         Tasks                = $tasks
         Shares               = $shares
         Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'

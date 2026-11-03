@@ -104,7 +104,7 @@ try {
     Assert-Equal @(@(Test-AnswerFile $j) -like "*account's domain 'svc\CORP'*").Count 1 'an account domain with a backslash is caught before the disk is wiped'
 
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
-    Assert-Equal ($plan.tasks -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
+    Assert-Equal (($plan.tasks | ForEach-Object command) -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
 
     # Applications.
     $apps = Join-Path $tmp 'Applications'

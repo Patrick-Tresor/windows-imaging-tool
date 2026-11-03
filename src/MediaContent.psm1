@@ -1,5 +1,5 @@
 # What a USB stick's DEPLOY partition needs so it deploys offline: the chosen answer files, the image each one
-# names (its pinned version when it has one), the drivers, applications and BIOS tools they use, and config.
+# names (its pinned version when it has one), the drivers, applications, tasks and BIOS tools they use, and config.
 # Used by New-DeploymentMedia.ps1 and the console's Media tab. PowerShell 5.1 compatible.
 
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
@@ -114,7 +114,9 @@ function Get-MediaContent {
         $rows += [pscustomobject]@{ Name = $name; Image = $image; Version = $a.ImageVersion; Size = $size }
 
         # The deploy wizard offers every application in the library, so copy the whole folder, not only this file's.
-        foreach ($dir in @($a.DriverRoot, $a.AppLocation, $a.Bios.ToolsRoot)) {
+        # The task library is small (scripts), so it goes whole too.
+        $taskDir = if ($a.PSObject.Properties['TaskLocation']) { $a.TaskLocation } else { 'Tasks' }
+        foreach ($dir in @($a.DriverRoot, $a.AppLocation, $taskDir, $a.Bios.ToolsRoot)) {
             if (-not $dir) { continue }
             if (Test-MediaRooted $dir) { $notes += "Answer file $name reads $dir at deploy time; it is not copied."; continue }
             if ($pickPacks -and $dir -eq $a.DriverRoot) {

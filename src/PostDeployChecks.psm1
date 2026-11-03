@@ -133,10 +133,12 @@ function Get-NetSetupJoinError {
 function Invoke-PostDeployCheck {
     # Compares the facts with the plan. One result per check: Passed, Failed, Warning (a Report-only check that
     # did not pass, or something worth a look) or Skipped. AppResults are FirstBoot.ps1's install exit codes.
+    # TaskResults are its FIRSTBOOT task results; library tasks (Tasks tab) get a check each, plain commands don't.
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Facts,
-        [object[]]$AppResults = @()
+        [object[]]$AppResults = @(),
+        [object[]]$TaskResults = @()
     )
     $results = [Collections.Generic.List[object]]::new()
     $add = { param($name, $result, $detail) $results.Add([pscustomobject]@{ name = $name; result = $result; detail = $detail }) }
@@ -207,6 +209,12 @@ function Invoke-PostDeployCheck {
         else { & $add $name 'Failed' 'Did not run' }
     }
 
+    # Library tasks: the result FirstBoot.ps1 recorded (success code, timeout).
+    foreach ($t in @($TaskResults | Where-Object { $_ -and $_.status -ne 'Ran' })) {
+        if ($t.ok) { & $add "Task: $($t.name)" 'Passed' "$($t.message)" }
+        else { & $add "Task: $($t.name)" 'Failed' "$($t.status): $($t.message). See C:\Windows\Temp\Task-$($t.name).log" }
+    }
+
     # BitLocker on the Windows drive. Encryption still running counts once a protector is in place.
     if ($Plan.bitLocker -and $Plan.bitLocker -ne 'Off') {
         $b = $Facts.BitLocker
@@ -241,8 +249,8 @@ function Get-PostDeployCheckSummary {
 
 function Start-PostDeployCheck {
     # Reads the PC, runs the checks and saves the report next to the state file. Used by FirstBoot.ps1 and Test-Deployment.ps1.
-    param([Parameter(Mandatory)]$Plan, [object[]]$AppResults = @(), [string]$ReportPath)
-    $results = Invoke-PostDeployCheck -Plan $Plan -Facts (Get-PostDeployFacts) -AppResults $AppResults
+    param([Parameter(Mandatory)]$Plan, [object[]]$AppResults = @(), [object[]]$TaskResults = @(), [string]$ReportPath)
+    $results = Invoke-PostDeployCheck -Plan $Plan -Facts (Get-PostDeployFacts) -AppResults $AppResults -TaskResults $TaskResults
     $summary = Get-PostDeployCheckSummary -Results $results
     if ($ReportPath) {
         try {
