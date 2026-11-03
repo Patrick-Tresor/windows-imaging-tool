@@ -203,9 +203,12 @@ restrict who can read `config\secrets`.
 (8 characters or more) and the password files go inside the boot image,
 encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE asks for that
 password before it does anything and shuts down after 5 wrong tries or
-**Shut down**. Without a WinPE password, WinPE asks the operator for each
-password it needs (join account, share, local Administrator, BitLocker PIN,
-BIOS) and keeps it in memory only. A remote reimage cannot ask, so it needs the
+**Shut down**; nothing else is asked. Without a WinPE password, the deploy
+wizard shows a **Passwords** page right after the answer file, with one box for
+each password the answer file needs (join account, share, local Administrator,
+BitLocker PIN, BIOS, user data key). Each is typed once, kept in memory only,
+and nothing is asked once Windows starts installing. An unattended answer file
+asks for them in one window before its countdown. A remote reimage cannot ask, so it needs the
 password files on the share, and a PXE image with a WinPE password waits for
 someone to type it. Tick **Passwords on USB** only if you accept that anyone
 holding the stick can read them.

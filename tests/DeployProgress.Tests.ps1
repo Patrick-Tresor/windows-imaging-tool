@@ -71,7 +71,7 @@ $v = Get-ProgressView -Record $null
 Assert-Equal "$($v.Title)|$($v.Percent)|$($v.Finished)|$($v.ShowPower)" 'Getting ready|0|False|False' 'no record yet: getting ready'
 
 $v = Get-ProgressView -Record (New-Record @{}) -Now $now
-Assert-Equal "$($v.Title)|$($v.Detail)|$($v.Percent)|$($v.SidebarStep)|$($v.Busy)" 'Installing Windows|Applying the image (50 %)|40|4|True' 'running deploy shows the step and percent'
+Assert-Equal "$($v.Title)|$($v.Detail)|$($v.Percent)|$($v.SidebarStep)|$($v.Busy)" 'Installing Windows|Applying the image (50 %)|40|5|True' 'running deploy shows the step and percent'
 Assert-Equal $v.PercentText 'Overall 40 %    Elapsed 5m 30s' 'running deploy shows elapsed time'
 Assert-Equal $v.Hardware 'Dell Inc. Latitude 7440   Serial ABC123' 'hardware line'
 Assert-Equal ($v.Facts -join '|') 'Computer name:  LAB-01|Answer file:    W11-Office|Image:          Win11.wim|Drivers:        Dell\Latitude 7440' 'facts list what is deployed'
@@ -90,7 +90,7 @@ $v = Get-ProgressView -Record (New-Record @{ step = 'Waiting for the operator'; 
 Assert-Equal $v.Hidden $false 'deploy script stopped while waiting: the window shows that it stopped'
 
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; percent = 90; whenDone = 'stay'; finished = '2026-10-28T10:20:00Z' })
-Assert-Equal "$($v.Title)|$($v.Color)|$($v.Percent)|$($v.ShowPower)|$($v.SidebarStep)" 'Windows is installed|Good|100|True|5' 'success staying in WinPE offers Restart'
+Assert-Equal "$($v.Title)|$($v.Color)|$($v.Percent)|$($v.ShowPower)|$($v.SidebarStep)" 'Windows is installed|Good|100|True|6' 'success staying in WinPE offers Restart'
 Assert-Equal $v.PercentText 'Overall 100 %    Took 20m 00s' 'finished deploy shows how long it took'
 
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'restart' })

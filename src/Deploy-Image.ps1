@@ -129,6 +129,8 @@ function Assert-JoinAccount($Root, $Answer) {
 function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [bool]$IgnoreWin11) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
+    # Passwords not on the media are asked for here, all in one window, unless the wizard's Passwords page did it.
+    Request-DeploySecrets -Root $Root -Answer $Answer
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
         $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Label "password for $($share.RemoteName)" } else { $null }
@@ -279,11 +281,50 @@ function Get-DeploySecret([string]$Root, [string]$RelativePath, [string]$Label) 
     if (-not $script:CanAskSecrets) {
         throw "The $Label ($RelativePath) is not on this media. Passwords are left off USB sticks: build the stick with a WinPE password (Media tab), or deploy from the network share."
     }
+    # Get-AnswerSecrets lists every password up front, so this is only reached for one it does not know about.
+    Write-DeployLog "The $Label ($RelativePath) was not asked for with the other passwords" -Level WARN
     $typed = Show-PasswordPrompt -Message "Type the $Label. It is not on this USB stick, and is kept in memory only for this deployment."
     if ($null -eq $typed) { throw "The $Label was not typed." }
     Write-DeployLog "$Label typed by the operator ($RelativePath is not on the media)"
     $script:TypedSecrets[$key] = $typed
     $typed
+}
+
+function Test-DeploySecretKnown([string]$Root, [string]$RelativePath) {
+    # True when Get-DeploySecret can return this password without asking anyone.
+    $key = ConvertTo-SecretKey $RelativePath
+    # .NET, not Join-Path: Join-Path throws for a drive letter PowerShell has no drive for (WinPE).
+    $onMedia = $Root -and [IO.File]::Exists([IO.Path]::Combine($Root, $RelativePath))
+    $onMedia -or $script:Vault.ContainsKey($key) -or $script:TypedSecrets.ContainsKey($key)
+}
+
+function Get-MissingDeploySecrets([string]$Root, $Answer) {
+    # The passwords this answer file needs that are not on the media, in the vault or typed already: the wizard's
+    # Passwords page asks for exactly these, all at once, so nothing pops up once Windows starts installing.
+    # Nothing when nobody is at the PC to type them (Get-DeploySecret then says what is missing).
+    if (-not $script:CanAskSecrets) { return @() }
+    @(Get-AnswerSecrets -Answer $Answer | Where-Object {
+        -not ($_.Share -and $script:Mounted[$_.Share]) -and -not (Test-DeploySecretKnown -Root $Root -RelativePath $_.RelativePath)
+    })
+}
+
+function Save-TypedSecrets([hashtable]$Values, [object[]]$Secrets) {
+    # Keeps what the operator typed (key -> text) in memory for this deployment only; never written anywhere.
+    foreach ($s in $Secrets) {
+        if (-not $Values.ContainsKey($s.Key) -or -not $Values[$s.Key]) { continue }
+        $script:TypedSecrets[$s.Key] = $Values[$s.Key]
+        Write-DeployLog "$($s.Label) typed by the operator ($($s.RelativePath) is not on the media)"
+    }
+}
+
+function Request-DeploySecrets([string]$Root, $Answer) {
+    # Without the wizard (unattended answer file, no WinForms): every missing password in one window, before the
+    # countdown and before anything is erased. With the wizard its Passwords page has asked already: nothing to do.
+    $missing = @(Get-MissingDeploySecrets -Root $Root -Answer $Answer)
+    if (-not $missing) { return }
+    $typed = Show-SecretsPrompt -Secrets $missing
+    if ($null -eq $typed) { throw 'The passwords were not typed.' }
+    Save-TypedSecrets -Values $typed -Secrets $missing
 }
 
 function Get-DeploySecretPath([string]$Root, [string]$RelativePath, [string]$Label) {
@@ -472,6 +513,8 @@ try {
         elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
     }
     $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
+    $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }
+    $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
     $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -Firmware $firmware -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
 
     # -NoPrompt, Unattended answer files and remote reimage jobs start without the wizard. A key pressed during
@@ -508,7 +551,7 @@ try {
     if (-not $confirmed -and (Test-DeployWizardAvailable)) {
         Set-DeployStatus -Step 'Waiting for the operator' -Percent 5
         $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
-            -ReadAnswer $readAnswer -PreparePlan $preparePlan -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root)) -Notice $wizardNotice
+            -ReadAnswer $readAnswer -PreparePlan $preparePlan -MissingSecrets $missingSecrets -SaveSecrets $saveSecrets -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root)) -Notice $wizardNotice
         if (-not $choice) { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
         $answer = $choice.Answer; $deployPlan = $choice.Plan; $ComputerName = $choice.ComputerName
         $confirmed = $true

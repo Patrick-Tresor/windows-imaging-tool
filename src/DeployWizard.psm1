@@ -1,10 +1,10 @@
-# Graphical deploy wizard shown in WinPE before a deployment: answer file, computer name, OU, target disk,
-# applications, then a summary to confirm. WinForms, because WinPE-NetFX has no WPF.
+# Graphical deploy wizard shown in WinPE before a deployment: answer file, the passwords that are not on the
+# media (all at once, never later), computer name, OU, target disk, applications, then a summary to confirm. WinForms, because WinPE-NetFX has no WPF.
 # Deploy-Image.ps1 passes in the hardware and two script blocks that read an answer file and prepare its
 # plan (map shares, find the image, driver pack and applications), so all deploy logic stays there.
 
 # Steps listed down the left of the wizard and of the progress window (DeployProgress.psm1).
-$script:DeploySteps = 'Answer file', 'Computer name', 'Applications', 'Confirm', 'Install Windows', 'Finish'
+$script:DeploySteps = 'Answer file', 'Passwords', 'Computer name', 'Applications', 'Confirm', 'Install Windows', 'Finish'
 
 function Get-DeploySteps { $script:DeploySteps }
 
@@ -239,6 +239,8 @@ function Show-DeployWizard {
         [string]$ComputerName,                              # from the command line; replaces the suggested name
         [Parameter(Mandatory)][scriptblock]$ReadAnswer,     # { param($Name) } -> answer object, throws when invalid
         [Parameter(Mandatory)][scriptblock]$PreparePlan,    # { param($Answer) } -> ImagePath, DriverPack, AvailableApps, DefaultName
+        [scriptblock]$MissingSecrets = { @() },             # { param($Answer) } -> Key, Label of each password to type now
+        [scriptblock]$SaveSecrets = { },                    # { param($Values, $Secrets) } keeps the typed passwords (Key -> text)
         [object[]]$Disks = (Get-TargetDisks),
         [string]$Notice                                     # one line shown on the first page, such as why there was no countdown
     )
@@ -249,6 +251,7 @@ function Show-DeployWizard {
     $script:wiz = @{
         Page = 0; Answer = $null; Plan = $null; Disks = $Disks; Result = $null
         ReadAnswer = $ReadAnswer; PreparePlan = $PreparePlan; ComputerName = $ComputerName
+        MissingSecrets = $MissingSecrets; SaveSecrets = $SaveSecrets; Secrets = @(); SecretRows = @()
     }
     $w = $script:wiz
     $font = New-Object Drawing.Font('Segoe UI', 10)
@@ -281,7 +284,7 @@ function Show-DeployWizard {
     $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel, $cmdBtn, $logsBtn))
     $w.Sidebar = New-DeploySidebar -Form $form
 
-    $pages = foreach ($i in 0..3) {
+    $pages = foreach ($i in 0..4) {
         $p = New-Object Windows.Forms.Panel -Property @{ Location = (New-Object Drawing.Point(224, 84)); Size = (New-Object Drawing.Size(672, 320)); Visible = $false }
         $form.Controls.Add($p); $p
     }
@@ -294,7 +297,14 @@ function Show-DeployWizard {
     $w.About = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(316, 24)); Size = (New-Object Drawing.Size(356, 290)) }
     $pages[0].Controls.AddRange(@($w.List, $w.About))
 
-    # Page 1: computer name, OU, disk.
+    # Page 1: the passwords that are not on the media, one box each (filled in by Set-SecretRows). Skipped when
+    # none is missing, such as with a WinPE password or from the network share.
+    $w.SecretIntro = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 44))
+        Text = 'These passwords are not on this USB stick. Type them once here: they are kept in memory for this deployment only, and nothing else is asked once Windows starts installing.' }
+    $pages[1].AutoScroll = $true
+    $pages[1].Controls.Add($w.SecretIntro)
+
+    # Page 2: computer name, OU, disk.
     $w.NameBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(300, 26)); MaxLength = 15; CharacterCasing = 'Upper' }
     # The hint goes under the box: beside it, a second line had no room and was cut off.
     $w.NameHint = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 54)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
@@ -305,20 +315,20 @@ function Show-DeployWizard {
     foreach ($d in $Disks) { [void]$w.DiskBox.Items.Add((Format-DiskChoice $d)) }
     $w.NameLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Computer name' }
     $w.DiskLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 170)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Disk to erase and install Windows on' }
-    $pages[1].Controls.AddRange(@($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox))
+    $pages[2].Controls.AddRange(@($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox))
 
-    # Page 2: applications.
+    # Page 3: applications.
     $w.Apps = New-Object Windows.Forms.CheckedListBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(672, 290)); CheckOnClick = $true; IntegralHeight = $false }
     $w.AppsLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Applications installed at first boot (ticked ones, top to bottom)' }
-    $pages[2].Controls.AddRange(@($w.AppsLabel, $w.Apps))
+    $pages[3].Controls.AddRange(@($w.AppsLabel, $w.Apps))
 
-    # Page 3: summary and confirmation.
+    # Page 4: summary and confirmation.
     $w.Summary = New-Object Windows.Forms.TextBox -Property @{
         Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 260)); Multiline = $true; ReadOnly = $true; ScrollBars = 'Vertical'
         Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, 10); BackColor = [Drawing.Color]::WhiteSmoke
     }
     $w.Confirm = New-Object Windows.Forms.CheckBox -Property @{ Location = (New-Object Drawing.Point(0, 276)); Size = (New-Object Drawing.Size(672, 26)); ForeColor = [Drawing.Color]::Firebrick }
-    $pages[3].Controls.AddRange(@($w.Summary, $w.Confirm))
+    $pages[4].Controls.AddRange(@($w.Summary, $w.Confirm))
 
     $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Cancel = $cancel; $w.Form = $form
     $w.HwLabel = $hwLabel; $w.IsDomain = $true; $w.Cmd = $cmdBtn; $w.CopyLogs = $logsBtn; $w.Serial = $Hardware.Serial
@@ -327,13 +337,41 @@ function Show-DeployWizard {
     $w.Show = {
         $w = $script:wiz
         for ($i = 0; $i -lt $w.Pages.Count; $i++) { $w.Pages[$i].Visible = $i -eq $w.Page }
-        $w.Title.Text = @('Choose an answer file', 'Name this computer', 'Choose applications', 'Ready to deploy')[$w.Page]
+        $w.Title.Text = @('Choose an answer file', 'Type the passwords', 'Name this computer', 'Choose applications', 'Ready to deploy')[$w.Page]
         Set-DeploySidebarStep -Labels $w.Sidebar -Current $w.Page
         $w.Back.Enabled = $w.Page -gt 0
-        $w.Next.Text = if ($w.Page -eq 3) { 'Deploy' } else { 'Next >' }
-        $w.Next.Enabled = if ($w.Page -eq 3) { $w.Confirm.Checked } else { $true }
+        $w.Next.Text = if ($w.Page -eq 4) { 'Deploy' } else { 'Next >' }
+        $w.Next.Enabled = if ($w.Page -eq 4) { $w.Confirm.Checked } else { $true }
         $w.Error.Text = ''
         & $w.Layout
+        if ($w.Page -eq 1) {
+            $first = @($w.SecretRows | Where-Object { -not $_.Box.Text } | Select-Object -First 1)
+            if ($first) { [void]$first[0].Box.Focus() }
+        }
+    }
+
+    # After the answer file (and its passwords): map its shares, check the image, fill in the next pages.
+    $w.Prepare = {
+        $w = $script:wiz
+        $w.Plan = & $w.PreparePlan $w.Answer
+        $a = $w.Answer
+        $w.NameBox.Text = if ($w.ComputerName) { $w.ComputerName } else { $w.Plan.DefaultName }
+        $w.NameHint.Text = switch ($a.NamingMode) {
+            'WMI'    { 'Suggested from the hardware. You can change it.' }
+            'Custom' { "Suggested from the scheme $($a.CustomScheme). You can change it." }
+            'Prompt' { 'Type the name for this PC.' }
+        }
+        $isDomain = $a.Membership -eq 'Domain'
+        $w.JoinLabel.Text = if ($isDomain) { "Joins the domain $($a.Domain)" } else { "Joins the workgroup $($a.Workgroup)" }
+        $w.OuLabel.Visible = $isDomain; $w.OuBox.Visible = $isDomain; $w.IsDomain = $isDomain
+        $w.OuBox.Text = "$($a.OrganizationalUnit)"
+        if (-not $w.Disks) { throw 'This PC has no internal disk that Windows can be installed on.' }
+        $w.DiskBox.SelectedIndex = 0
+        for ($i = 0; $i -lt $w.Disks.Count; $i++) { if ($w.Disks[$i].Number -eq $a.DiskNumber) { $w.DiskBox.SelectedIndex = $i } }
+        $w.Apps.Items.Clear()
+        foreach ($c in Get-AppChoices -Selected $a.Applications -Available $w.Plan.AvailableApps) {
+            [void]$w.Apps.Items.Add($c.Name, $c.Checked)
+        }
     }
 
     $w.List.add_SelectedIndexChanged({
@@ -361,7 +399,13 @@ function Show-DeployWizard {
 
     $w.Confirm.add_CheckedChanged({ $script:wiz.Next.Enabled = $script:wiz.Confirm.Checked })
 
-    $back.add_Click({ $script:wiz.Page--; & $script:wiz.Show })
+    $back.add_Click({
+        $w = $script:wiz
+        $w.Page--
+        # The Passwords page only when the answer file needed some.
+        if ($w.Page -eq 1 -and -not $w.SecretRows) { $w.Page = 0 }
+        & $w.Show
+    })
 
     $next.add_Click({
         $w = $script:wiz
@@ -371,33 +415,30 @@ function Show-DeployWizard {
             switch ($w.Page) {
                 0 {
                     if (-not $w.Answer) { throw 'Pick an answer file that has no problems.' }
+                    # Passwords that are not on the media: asked for on the next page, all at once.
+                    $w.Secrets = @(& $w.MissingSecrets $w.Answer)
+                    Set-SecretRows -Wiz $w -Secrets $w.Secrets
+                    if ($w.Secrets) { $w.Page = 1; & $w.Show; return }
                     # Maps the answer file's shares and checks the image before going further.
-                    $w.Plan = & $w.PreparePlan $w.Answer
-                    $a = $w.Answer
-                    $w.NameBox.Text = if ($w.ComputerName) { $w.ComputerName } else { $w.Plan.DefaultName }
-                    $w.NameHint.Text = switch ($a.NamingMode) {
-                        'WMI'    { 'Suggested from the hardware. You can change it.' }
-                        'Custom' { "Suggested from the scheme $($a.CustomScheme). You can change it." }
-                        'Prompt' { 'Type the name for this PC.' }
-                    }
-                    $isDomain = $a.Membership -eq 'Domain'
-                    $w.JoinLabel.Text = if ($isDomain) { "Joins the domain $($a.Domain)" } else { "Joins the workgroup $($a.Workgroup)" }
-                    $w.OuLabel.Visible = $isDomain; $w.OuBox.Visible = $isDomain; $w.IsDomain = $isDomain
-                    $w.OuBox.Text = "$($a.OrganizationalUnit)"
-                    if (-not $w.Disks) { throw 'This PC has no internal disk that Windows can be installed on.' }
-                    $w.DiskBox.SelectedIndex = 0
-                    for ($i = 0; $i -lt $w.Disks.Count; $i++) { if ($w.Disks[$i].Number -eq $a.DiskNumber) { $w.DiskBox.SelectedIndex = $i } }
-                    $w.Apps.Items.Clear()
-                    foreach ($c in Get-AppChoices -Selected $a.Applications -Available $w.Plan.AvailableApps) {
-                        [void]$w.Apps.Items.Add($c.Name, $c.Checked)
-                    }
+                    & $w.Prepare
+                    $w.Page = 1
                 }
                 1 {
+                    $values = @{}
+                    foreach ($r in $w.SecretRows) {
+                        if (-not $r.Box.Text) { [void]$r.Box.Focus(); throw "Type every password. Still empty: $($r.Label.Text)." }
+                        $values[$r.Key] = $r.Box.Text
+                    }
+                    & $w.SaveSecrets $values $w.Secrets
+                    # Signs in with the join account and maps the shares: a refused password shows here, on this page.
+                    & $w.Prepare
+                }
+                2 {
                     $problem = Test-ComputerNameValue $w.NameBox.Text.Trim()
                     if ($problem) { [void]$w.NameBox.Focus(); throw $problem }
                     if ($w.DiskBox.SelectedIndex -lt 0) { throw 'Pick the disk to install Windows on.' }
                 }
-                2 {
+                3 {
                     $w.Disk = $w.Disks[$w.DiskBox.SelectedIndex]
                     $a = $w.Answer.PSObject.Copy()
                     $a.DiskNumber = $w.Disk.Number
@@ -408,7 +449,7 @@ function Show-DeployWizard {
                     $w.Confirm.Checked = $false
                     $w.Confirm.Text = "Erase disk $($w.Disk.Number) and everything on it, then deploy"
                 }
-                3 {
+                4 {
                     $w.Result = [pscustomobject]@{ Answer = $w.Chosen; Plan = $w.Plan; ComputerName = $w.NameBox.Text.Trim() }
                     $w.Form.DialogResult = 'OK'
                     return
@@ -431,6 +472,23 @@ function Show-DeployWizard {
     $form.Dispose()
     $script:wiz = $null
     $result
+}
+
+function Set-SecretRows {
+    <#
+    .SYNOPSIS
+        Puts one label and one password box per missing password on the wizard's Passwords page (Wiz.Pages[1]),
+        replacing the previous answer file's. Wiz.SecretRows holds Key, Label and Box of each.
+    #>
+    param([Parameter(Mandatory)][hashtable]$Wiz, [object[]]$Secrets = @())
+    $page = $Wiz.Pages[1]
+    foreach ($r in @($Wiz.SecretRows)) { $page.Controls.Remove($r.Label); $page.Controls.Remove($r.Box); $r.Label.Dispose(); $r.Box.Dispose() }
+    $Wiz.SecretRows = @(foreach ($s in @($Secrets | Where-Object { $_ })) {
+        $label = New-Object Windows.Forms.Label -Property @{ Text = $s.Label; Size = (New-Object Drawing.Size(400, 22)) }
+        $box = New-Object Windows.Forms.TextBox -Property @{ UseSystemPasswordChar = $true; Size = (New-Object Drawing.Size(400, 26)) }
+        $page.Controls.AddRange(@($label, $box))
+        [pscustomobject]@{ Key = $s.Key; Label = $label; Box = $box }
+    })
 }
 
 function Update-DeployWizardLayout {
@@ -463,7 +521,21 @@ function Update-DeployWizardLayout {
     $w.List.SetBounds(0, $top, [int]($width * 0.45), $pageHeight - $top)
     $w.About.SetBounds($w.List.Right + 16, $top, $width - $w.List.Right - 16, $pageHeight - $top)
 
-    # Page 1: one field under the other; the OU only for a domain join.
+    # Page 1 (Passwords): the note, then a label and a box per password.
+    if ($w.SecretIntro) {
+        $w.SecretIntro.Width = $width - 20; Set-FittedHeight -Control $w.SecretIntro -MaxLines 3
+        $rows = @($w.SecretIntro)
+        $gaps = @{ $w.SecretIntro = 12 }
+        foreach ($r in @($w.SecretRows)) {
+            $r.Label.Width = $width - 20; Set-FittedHeight -Control $r.Label -MaxLines 2
+            $r.Box.Width = [Math]::Min(420, $width - 20)
+            $rows += $r.Label, $r.Box
+            $gaps[$r.Box] = 10
+        }
+        [void](Set-StackLayout -Controls $rows -Top 0 -Gap 2 -GapAfter $gaps)
+    }
+
+    # Page 2: one field under the other; the OU only for a domain join.
     foreach ($c in $w.NameLabel, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.DiskLabel) { $c.Width = $width; Set-FittedHeight -Control $c -MaxLines 2 }
     $w.OuBox.Width = $width; $w.DiskBox.Width = $width
     $rows = @($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel)
@@ -472,11 +544,11 @@ function Update-DeployWizardLayout {
     $gaps = @{}; foreach ($c in $w.NameHint, $w.JoinLabel, $w.OuBox) { $gaps[$c] = 12 }
     [void](Set-StackLayout -Controls $rows -Top 0 -Gap 2 -GapAfter $gaps)
 
-    # Page 2: label, then the list.
+    # Page 3: label, then the list.
     $w.AppsLabel.Width = $width; Set-FittedHeight -Control $w.AppsLabel -MaxLines 2
     $w.Apps.SetBounds(0, $w.AppsLabel.Bottom + 2, $width, $pageHeight - $w.AppsLabel.Bottom - 2)
 
-    # Page 3: summary above the confirmation box.
+    # Page 4: summary above the confirmation box.
     $w.Confirm.Width = $width; Set-FittedHeight -Control $w.Confirm -MaxLines 2
     $w.Confirm.Top = $pageHeight - $w.Confirm.Height
     $w.Summary.SetBounds(0, 0, $width, $w.Confirm.Top - 8)
@@ -522,6 +594,73 @@ function Show-PasswordPrompt {
     $text = $box.Text
     $form.Dispose()
     if ($result -eq 'OK' -and $text) { $text } else { $null }
+}
+
+function Show-SecretsPrompt {
+    <#
+    .SYNOPSIS
+        Asks for several passwords in one window (WinForms), or one after the other on the console without WinForms.
+        Secrets: Key and Label of each. Returns a hashtable Key -> text, or $null when the operator cancels.
+        Used when the deploy starts without the wizard (unattended answer file); the wizard has its Passwords page.
+    #>
+    param([Parameter(Mandatory)][object[]]$Secrets, [string]$Title = 'Deploy Windows')
+    $intro = 'These passwords are not on this USB stick. Type them once here: they are kept in memory for this deployment only, and nothing else is asked once Windows starts installing.'
+    if (-not (Test-DeployWizardAvailable)) {
+        Write-Host $intro
+        $values = @{}
+        foreach ($s in $Secrets) {
+            $secure = Read-Host -AsSecureString $s.Label
+            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+            if (-not $text) { return $null }
+            $values[$s.Key] = $text
+        }
+        return $values
+    }
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $font = New-Object Drawing.Font('Segoe UI', 10)
+    $form = New-Object Windows.Forms.Form -Property @{
+        Text = $Title; ClientSize = New-Object Drawing.Size(560, 300); Font = $font; StartPosition = 'CenterScreen'
+        FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false; TopMost = $true; BackColor = [Drawing.Color]::White
+    }
+    $width = 560 - 40
+    $msg = New-Object Windows.Forms.Label -Property @{ Text = $intro; Left = 20; Width = $width; Font = $font }
+    $err = New-Object Windows.Forms.Label -Property @{ Text = 'Type every password.'; Left = 20; Width = $width; Font = $font; ForeColor = [Drawing.Color]::Firebrick; Visible = $false }
+    $form.Controls.AddRange(@($msg, $err))
+    Set-FittedHeight -Control $msg -MaxLines 4
+    Set-FittedHeight -Control $err -MaxLines 1
+    $shown = @($msg); $gaps = @{ $msg = 12 }
+    $boxes = @{}
+    foreach ($s in $Secrets) {
+        $l = New-Object Windows.Forms.Label -Property @{ Text = $s.Label; Left = 20; Width = $width; Font = $font }
+        $b = New-Object Windows.Forms.TextBox -Property @{ Left = 20; Width = $width; UseSystemPasswordChar = $true; Font = $font }
+        $form.Controls.AddRange(@($l, $b))
+        Set-FittedHeight -Control $l -MaxLines 2
+        $shown += $l, $b; $gaps[$b] = 10
+        $boxes[$s.Key] = $b
+    }
+    $shown += $err
+    $ok = New-Object Windows.Forms.Button -Property @{ Text = 'OK' }
+    $cancel = New-Object Windows.Forms.Button -Property @{ Text = 'Cancel'; DialogResult = 'Cancel' }
+    $form.Controls.AddRange(@($ok, $cancel))
+    $form.AcceptButton = $ok; $form.CancelButton = $cancel
+    # Heights from the text, never fixed: WinPE's fallback font is taller than Segoe UI.
+    $bottom = Set-StackLayout -Controls $shown -Top 16 -Gap 2 -GapAfter $gaps
+    [void](Set-ButtonRow -Buttons @($ok, $cancel) -Right ($width + 20) -Bottom ($bottom + 52))
+    $form.ClientSize = New-Object Drawing.Size(560, ($bottom + 64))
+    $state = @{ Form = $form; Boxes = $boxes; Error = $err }
+    $ok.add_Click({
+        $empty = @($state.Boxes.Values | Where-Object { -not $_.Text })
+        if ($empty) { $state.Error.Visible = $true; [void]$empty[0].Focus(); return }
+        $state.Form.DialogResult = 'OK'
+    }.GetNewClosure())
+    $first = $boxes[$Secrets[0].Key]
+    $form.Add_Shown({ $form.Activate(); [void]$first.Focus() }.GetNewClosure())
+    $result = $form.ShowDialog()
+    $values = @{}
+    foreach ($k in $boxes.Keys) { $values[$k] = $boxes[$k].Text }
+    $form.Dispose()
+    if ($result -eq 'OK') { $values } else { $null }
 }
 
 # What Copy logs saves: WinPE's own logs and, once Windows is on the disk (W:), its setup and join logs.
@@ -575,4 +714,4 @@ function Test-DeployWizardAvailable {
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable

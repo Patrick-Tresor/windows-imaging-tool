@@ -133,4 +133,41 @@ function Test-SecretPath {
     (ConvertTo-SecretKey $RelativePath) -like 'config\secrets\*' -or (ConvertTo-SecretKey $RelativePath) -eq 'config\secrets'
 }
 
-Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Test-SecretPath
+function Get-AnswerSecrets {
+    <#
+    .SYNOPSIS
+        Every password file an answer file needs during a deployment, once each (two settings naming the same file
+        give one entry), in the order the deploy wizard shows them. Key is ConvertTo-SecretKey of the path, the
+        same key the vault and the typed passwords use. Share is set for a share's password (LocalName), so a
+        share that is already mapped can be left out.
+    #>
+    param([Parameter(Mandatory)]$Answer)
+    $seen = @{}
+    $list = New-Object Collections.Generic.List[object]
+    $add = {
+        param([string]$Path, [string]$Label, [string]$Share)
+        if (-not $Path) { return }
+        $key = ConvertTo-SecretKey $Path
+        if ($seen.ContainsKey($key)) { return }
+        $seen[$key] = $true
+        $list.Add([pscustomobject]@{ Key = $key; RelativePath = $Path; Label = $Label; Share = $Share })
+    }
+    if ($Answer.EnableAdministrator) { & $add $Answer.AdminPasswordFile 'Local Administrator password' }
+    if ($Answer.Membership -eq 'Domain') {
+        $account = try { (Resolve-JoinAccount -Answer $Answer).Account } catch { $null }
+        & $add $Answer.JoinPasswordFile $(if ($account) { "Join account password ($account)" } else { 'Join account password' })
+    }
+    foreach ($share in @($Answer.Shares | Where-Object { $_ })) {
+        & $add $share.PasswordFile "Password for $($share.RemoteName)$(if ($share.Username) { " ($($share.Username))" })" $share.LocalName
+    }
+    $bl = $Answer.BitLocker
+    if ($bl -and $bl.Enabled -and $bl.Protector -eq 'TpmPin') { & $add $bl.PinFile 'BitLocker PIN' }
+    $bios = $Answer.Bios
+    if ($bios -and $bios.Enabled) { & $add $bios.PasswordFile 'BIOS admin password' }
+    if ($Answer.MigrateUserData -and $Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
+        & $add $Answer.UserDataKeyFile 'User data encryption key'
+    }
+    , $list.ToArray()
+}
+
+Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Test-SecretPath, Get-AnswerSecrets

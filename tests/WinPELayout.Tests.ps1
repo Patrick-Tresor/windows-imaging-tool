@@ -92,14 +92,20 @@ $w = @{
     AppsLabel = (& $lbl 'Applications installed at first boot (ticked ones, top to bottom)'); Apps = New-Object Windows.Forms.CheckedListBox
     Summary = New-Object Windows.Forms.TextBox -Property @{ Multiline = $true }
     Confirm = New-Object Windows.Forms.CheckBox -Property @{ Text = 'Erase disk 0 and everything on it, then deploy' }
+    SecretIntro = (& $lbl 'These passwords are not on this USB stick. Type them once here: they are kept in memory for this deployment only, and nothing else is asked once Windows starts installing.')
+    SecretRows = @()
 }
 $w.Title.Font = New-Object Drawing.Font('Segoe UI', 20)
-$w.Pages = foreach ($i in 0..3) { New-Object Windows.Forms.Panel }
+$w.Pages = foreach ($i in 0..4) { New-Object Windows.Forms.Panel }
 $form.Controls.AddRange(@($w.Title, $w.HwLabel, $w.Error, $w.Back, $w.Next, $w.Cancel) + $w.Pages)
 $w.Pages[0].Controls.AddRange(@($w.ListLabel, $w.List, $w.About))
-$w.Pages[1].Controls.AddRange(@($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox))
-$w.Pages[2].Controls.AddRange(@($w.AppsLabel, $w.Apps))
-$w.Pages[3].Controls.AddRange(@($w.Summary, $w.Confirm))
+$w.Pages[1].Controls.Add($w.SecretIntro)
+$w.Pages[2].Controls.AddRange(@($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox))
+$w.Pages[3].Controls.AddRange(@($w.AppsLabel, $w.Apps))
+$w.Pages[4].Controls.AddRange(@($w.Summary, $w.Confirm))
+Set-SecretRows -Wiz $w -Secrets @(
+    [pscustomobject]@{ Key = 'config\secrets\admin.txt'; Label = 'Local Administrator password' },
+    [pscustomobject]@{ Key = 'config\secrets\join.txt'; Label = 'Join account password (CORP\svc-join)' })
 $form.Show()
 try {
     Update-DeployWizardLayout -Wiz $w
@@ -109,10 +115,24 @@ try {
     Test-NoOverlap @($w.Title, $w.HwLabel) 'wizard header:'
     Test-NoOverlap @($w.NameLabel, $w.NameBox, $w.NameHint, $w.JoinLabel, $w.OuLabel, $w.OuBox, $w.DiskLabel, $w.DiskBox) 'wizard name page:'
     Test-NoOverlap @($w.Summary, $w.Confirm) 'wizard confirm page:'
-    Assert-Equal ($w.DiskBox.Bottom -le $w.Pages[1].Height) $true 'wizard: the disk box is inside the page'
-    Assert-Equal ($w.Pages[1].Top -ge $w.HwLabel.Bottom) $true 'wizard: pages start under the header'
-    Assert-Equal ($w.Pages[1].Bottom -le $w.Error.Top -and $w.Error.Bottom -le $w.Next.Top) $true 'wizard: page, error and buttons stack'
+    Assert-Equal ($w.DiskBox.Bottom -le $w.Pages[2].Height) $true 'wizard: the disk box is inside the page'
+    Assert-Equal ($w.Pages[2].Top -ge $w.HwLabel.Bottom) $true 'wizard: pages start under the header'
+    Assert-Equal ($w.Pages[2].Bottom -le $w.Error.Top -and $w.Error.Bottom -le $w.Next.Top) $true 'wizard: page, error and buttons stack'
     Assert-Equal ($w.Cancel.Right -le $form.ClientSize.Width -and $w.Back.Left -ge 224) $true 'wizard: buttons are inside the window'
+    # Passwords page: the note, then a label and a box per password, all on the page and none overlapping.
+    Assert-Equal @($w.SecretRows).Count 2 'wizard passwords: one row per password'
+    Assert-Equal (@($w.SecretRows | Where-Object { $_.Box.UseSystemPasswordChar }).Count) 2 'wizard passwords: the boxes hide what is typed'
+    $secretControls = @($w.SecretIntro) + @($w.SecretRows | ForEach-Object { $_.Label; $_.Box })
+    Test-NoOverlap $secretControls 'wizard passwords page:'
+    foreach ($r in $w.SecretRows) { Test-Fits $r.Label 'wizard passwords:' }
+    Assert-Equal ($w.SecretRows[-1].Box.Bottom -le $w.Pages[1].Height) $true 'wizard passwords: the last box is inside the page'
+    # Another answer file replaces the rows instead of adding to them.
+    Set-SecretRows -Wiz $w -Secrets @([pscustomobject]@{ Key = 'config\secrets\pin.txt'; Label = 'BitLocker PIN' })
+    Assert-Equal "$(@($w.SecretRows).Count)|$($w.Pages[1].Controls.Count)" '1|3' 'wizard passwords: rows replaced for the next answer file'
+    Set-SecretRows -Wiz $w -Secrets @()
+    Assert-Equal "$(@($w.SecretRows).Count)|$($w.Pages[1].Controls.Count)" '0|1' 'wizard passwords: none missing leaves only the note'
+    Update-DeployWizardLayout -Wiz $w
+
     $domainDiskTop = $w.DiskLabel.Top; $ouTop = $w.OuLabel.Top
     $w.IsDomain = $false; $w.OuLabel.Visible = $false; $w.OuBox.Visible = $false
     Update-DeployWizardLayout -Wiz $w
