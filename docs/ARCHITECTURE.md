@@ -15,9 +15,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
-| **Multicast** (`src/Set-WdsMulticast.ps1`) | Admin workstation or the WDS server | Creates a WDS multicast namespace over the content root so a room of PCs downloads an image once, together. |
-| **Remote reimage** (`src/Start-RemoteReimage.ps1` + `src/RemoteReimage.psm1`) | Admin workstation | Queues reimage jobs, wakes PCs with Wake-on-LAN, restarts running PCs into a one-time PXE boot. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, multicast, remote reimage, deploy settings, a live deployment dashboard, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
 
@@ -42,14 +40,12 @@ maps the answer file's shares and finds the image, driver pack, application
 library and suggested name (the naming list's, when the PC is listed), and
 runs the Windows 11 check. So a missing image, or a PC that a Block-mode Windows
 11 check refuses, is reported when the answer file is picked, before anything is
-erased. The plan also carries extra summary lines (Windows 11, firmware,
-BitLocker, user data) that the wizard shows before the ERASE line. The choices come back as a copy of the
+erased. The plan also carries extra summary lines (Windows 11,
+BitLocker) that the wizard shows before the ERASE line. The choices come back as a copy of the
 answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
 replaced, and the deploy continues exactly as for a command-line run.
-`-NoPrompt`, an `Unattended` countdown and a remote reimage job skip the window;
-a key pressed during the countdown opens it. User data migration is checked
-after the window closes, once the disk is known, and still before anything is
-erased. Without WinForms the console prompts are used instead.
+`-NoPrompt` and an `Unattended` countdown skip the window;
+a key pressed during the countdown opens it. Without WinForms the console prompts are used instead.
 
 Both the wizard and the progress window list the steps (answer file, computer
 name, applications, confirm, install, finish) down a sidebar.
@@ -81,13 +77,15 @@ compression, split, unattended) and calls `New-DeploymentMedia.ps1
 `Capture-GoldenImage.ps1 -ConfigPath` when that file exists, and runs the deploy
 otherwise, so capture media and deploy media share one build path.
 
-For a Hyper-V VM (`-BootVM`), the ISO is built with `efisys_noprompt.bin` and
-without `boot\bootfix.bin`, so it boots without a key press on UEFI and BIOS.
-The script checks the VM is off, attaches the ISO, puts the DVD first in the boot
-order (boot device on generation 2, startup order on generation 1) and starts the VM. It then
-waits for the unattended capture to shut the VM down, ejects the ISO and sets
-the boot order back to the disk. The ISO is kept under `%ProgramData%` because
-Hyper-V cannot mount one from a share without delegation.
+Capture ISOs are built with `efisys_noprompt.bin` and without `boot\bootfix.bin`,
+so an unattended VM boots them without a key press.
+
+For a VM's disk file, the wizard runs `Capture-VMImage.ps1 -DiskPath` on the admin
+PC instead: no media is built. A VHD or VHDX is mounted read-only; a VMDK, VDI,
+qcow2 or raw disk is first converted to a temporary VHD with qemu-img or
+VirtualBox (`Get-DiskConversionCommand`). A VMware disk with snapshots is read at
+the newest delta (`Resolve-VmdkCurrentDisk` in `VMwareVM.psm1`). The VM, its
+disk and its snapshots are not changed.
 
 ## Image versions
 
@@ -140,38 +138,9 @@ discards the mount and leaves the original alone. `Add-ImageServicingRecord`
 appends the packages, results and resulting builds to `Images\<name>.updates.json`,
 which the Images tab reads.
 
-## Remote reimage
-
-The pieces meet on the content root, so the admin PC and WinPE never talk directly:
-
-- `Computers\<MAC>.json`: one per PC. Written by the console (manual, CSV, or
-  read over WinRM) and by `Deploy-Image.ps1` at the end of every deploy.
-- `Reimage\<MAC>.json`: a pending job (answer file, name to keep, expiry).
-  `Deploy-Image.ps1` matches it against the MACs of its adapters with an IP
-  (`Win32_NetworkAdapterConfiguration`), then moves it to `Reimage\Started\`. The
-  move is what `Start-RemoteReimage.ps1` waits for, and it means a PC that network
-  boots again later finds no job and gets the normal deploy menu.
-
-Forcing the network boot on a running PC uses the firmware boot manager:
-`bcdedit /enum firmware` lists the firmware's boot entries, the network one is
-picked by its firmware description (PXE, IPv4, Network, NIC...; IPv4 before IPv6),
-and `bcdedit /set {fwbootmgr} bootsequence {id}` makes it the next boot only.
-bcdedit's labels are localized (`identifier` / `identificateur`), so the parser
-only reads GUIDs, dashed separators and the firmware's own descriptions.
-
-A PC that is off gets a Wake-on-LAN magic packet (6 x `FF`, then the MAC 16 times)
-on UDP port 9 (`remote.wakePort`), sent to 255.255.255.255, to its subnet's
-directed broadcast when its IP is known, and from its relay PC over WinRM when it
-has one. A PC whose firmware boots the network first goes straight to WinPE;
-otherwise Windows starts, WinRM answers and it gets the one-time PXE restart.
-
-To skip the F12 prompt only for these PCs, the PC is prestaged in WDS with
-`New-WdsClient -DeviceID <MAC> -PxePromptPolicy NoPrompt` and removed with
-`Remove-WdsClient` when its job is taken or the wait times out.
-
 ## Why the golden image is hardware-independent
 
-Build the reference image in a **VM** (Hyper-V or VMware Workstation), not on real hardware, so it
+Build the reference image in a **VM** (VMware Workstation, VirtualBox, Hyper-V...), not on real hardware, so it
 contains no OEM drivers. Run `sysprep /generalize /oobe /shutdown` before
 capture. All hardware specifics arrive at deploy time from the driver library.
 This is the same idea SmartDeploy's "Platform Packs" use.
@@ -199,7 +168,8 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    `Drivers\`, `Applications\`, `Tools\` and `config\` (`src/MediaContent.psm1` decides what goes).
    Two partitions because UEFI needs FAT32 to boot and a WIM is usually over 4 GB.
    The stick is MBR with the FAT32 partition active and `bootsect /nt60 /mbr`
-   boot code, so it also boots legacy BIOS PCs.
+   boot code, so it also boots legacy BIOS machines (a capture VM, say); deploys
+   still need UEFI.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
 3. **PXE**: the same `boot.wim` is published to WDS by `Publish-WdsBootImage.ps1`
@@ -213,32 +183,11 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    It reads server state from the WDSServer service, the `REMINST` share and the
    WDS cmdlets, never from `wdsutil` text, which is localized.
 
-Every medium boots both UEFI and legacy BIOS. The ISO carries both
+Every medium boots both UEFI and legacy BIOS, so capture media start on BIOS VMs;
+the deploy itself stops on a PC that started WinPE in legacy BIOS mode. The ISO carries both
 `etfsboot.com` and `efisys.bin` (`efisys_noprompt.bin` for capture media), taken
 from the ADK's `Deployment Tools\amd64\Oscdimg` folder (newer copype versions
 no longer create `fwfiles`).
-
-### Multicast
-
-`Set-WdsMulticast.ps1` creates a WDS namespace with the built-in `WDS` content
-provider whose config string is the content root's local folder on the server
-(`wdsutil /New-Namespace /ContentProvider:WDS /ConfigString:D:\Deploy`), as AutoCast
-or ScheduledCast (client count and/or start time), and sets the transport server's
-slow-client policy (`/Set-TransportServer /MulticastSessionPolicy`). It runs on the
-server like the WDS publisher, and judges `wdsutil` by exit code only.
-The room monitor (`-Action Monitor`) reads the WDS transport COM API
-(`WdsTptMgmt.WdsTransportManager`: namespace > contents > sessions > clients) for
-each PC's percent complete, address and join time, so it doesn't parse localized
-text; `ConvertTo-MulticastView` (ConsoleData) turns that into the console's rows and
-summary. `-Action Disconnect` calls `DisconnectClient` with the *fail* type, so
-`wdsmcast` exits with an error and the deploy falls back to the share by itself.
-
-In WinPE, `Get-MulticastPlan` (DeployCommon) decides per deploy: multicast is on,
-the content came from the share, the image is under the content root and is not
-split. After partitioning, `Receive-MulticastImage` runs
-`wdsmcast /Transfer-File /Namespace:<name> /SourceFile:Images\<image>.wim` with the
-share account into `W:\_Multicast`, DISM applies from there, and the folder is
-deleted. On failure it falls back to applying from the share unless fallback is off.
 
 ## Deploy sequence
 
@@ -252,8 +201,7 @@ deleted. On failure it falls back to applying from the share unless fallback is 
    requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
    memory, disk), which stop the deploy in Block mode. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
-3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the layout for the
-   firmware WinPE booted with (see below).
+3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the GPT layout (see below).
 4. `DISM /Apply-Image` the WIM to `W:`.
 5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
 6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
@@ -263,32 +211,25 @@ deleted. On failure it falls back to applying from the share unless fallback is 
 7. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
    model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
    and `firstboot.json`, and write `SetupComplete.cmd` to run it.
-8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI` (or `/f BIOS`).
+8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
 9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
    `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
    matched), then reboot or shut down.
 
-### UEFI and legacy BIOS
+### UEFI only
 
-The deploy reads `PEFirmwareType` to see how WinPE booted and partitions to match,
-because a PC can only boot Windows the way its firmware starts it:
+The deploy reads `PEFirmwareType` to see how WinPE booted. Only UEFI is
+supported: a PC that started WinPE in legacy BIOS mode (CSM) stops with an error
+before anything is erased, telling the operator to pick the UEFI boot entry.
 
-| Firmware | Disk | Partitions | Boot files |
-|---|---|---|---|
-| UEFI | GPT | EFI 260 MB FAT32 (S:), MSR 16 MB, Windows (W:), Recovery 1 GB | `bcdboot /f UEFI` |
-| Legacy BIOS | MBR | System 100 MB NTFS, active (S:), Windows (W:), Recovery 1 GB, type 27 | `bcdboot /f BIOS` |
-
-So the firmware mode the operator boots the USB stick or PXE in decides the
-result. A UEFI PC booted through CSM/legacy deploys as MBR; the log warns about
-it. The image is the same either way: a WIM captured on UEFI deploys to BIOS and
-the other way round. On BIOS the log also warns when the disk is over 2 TB (MBR
-only uses the first 2 TB) and when the image is Windows 11, which installs on
-BIOS but is not supported there by Microsoft.
+| Disk | Partitions | Boot files |
+|---|---|---|
+| GPT | EFI 260 MB FAT32 (S:), MSR 16 MB, Windows (W:), Recovery 1 GB | `bcdboot /f UEFI` |
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order through `Invoke-AppInstall` (detect, skip if present, run
 with a timeout, check exit code, detect again), writes the results to
-`C:\Windows\Temp\FirstBoot-apps.json`, applies the options, restores user data,
+`C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
 post-deploy checks and removes `C:\Deploy`.
 
@@ -378,43 +319,6 @@ files that do not exist.
 SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
 
-## User data migration
-
-`UserState.psm1` backs up and restores user profiles with USMT from the Windows
-ADK, when the answer file's `userData/migrate` is on. `New-DeploymentMedia.ps1`
-copies `User State Migration Tool\amd64` from the ADK to `X:\Deploy\USMT`.
-
-1. **Plan, before the summary** (`Get-UserStatePlan`): gives each data partition
-   on the target disk a letter and looks for `Windows\System32\config\SOFTWARE`,
-   or a `UserState\USMT` store from an earlier attempt. It stops the deploy, with
-   nothing erased, when USMT, a rule file or the key file is missing, or when the
-   partition is locked by BitLocker. No Windows on the disk means a new PC: it is
-   deployed without user data.
-2. **Backup, before partitioning** (`Backup-UserState`): `scanstate /offlineWinDir`
-   against the old Windows. A failed ScanState stops the deploy.
-   - **Local store**: `/hardlink /nocompress` into `<old Windows>\UserState`. The
-     disk is not repartitioned: `Clear-WindowsPartition` gives that partition W:
-     and the EFI partition S:, then deletes everything on W: except `UserState`
-     (`rd /s /q`, which doesn't follow junctions, with `takeown`/`icacls` for
-     TrustedInstaller files). GPT only, and the partition must not be encrypted.
-   - **Share store**: compressed (AES-256 with `/keyfile` when encrypted) into
-     `<storePath>\<serial>`, then the disk is recreated as usual. The copy is kept
-     there as a backup; if the deploy fails after the wipe, the next attempt finds
-     it and restores it.
-3. **Staging, after the image** (`Copy-UserStateForRestore`): the store goes to
-   `W:\UserState` (copied from the share for a Share store), USMT and the rule
-   files to `W:\Deploy\USMT`, the key to `W:\Deploy\usmt.key`, and the LoadState
-   command line into `firstboot.json`.
-4. **Restore, at first boot**: `FirstBoot.ps1` runs LoadState as SYSTEM after the
-   applications (so application settings apply to installed applications) and
-   before FIRSTBOOT tasks. On success it deletes `C:\UserState` unless `keepStore`
-   is set; on failure it keeps it and logs to `C:\Windows\Temp\FirstBoot.log`.
-   USMT's own logs are `ScanState.log` and `LoadState.log` in `C:\Windows\Temp`.
-
-The domain join happens in the specialize pass, before LoadState, so domain
-profiles are restored for their accounts. Local accounts are only recreated with
-`createLocalAccounts`, disabled and without a password.
-
 ## Driver packs
 
 The driver pack builder (`src/Console/DriverPacks.psm1`, the console's
@@ -474,5 +378,4 @@ pack on them by other means, once it is in the library.
 ## Not in v1
 
 BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
-migrating user data from one PC to a different PC (only the same PC is supported, see User data migration),
-SmartDeploy's wipe-and-load / SmartMigrate disk options, static IP, display settings, Azure AD join, and a management agent.
+user data migration (USMT), multicast, remote reimage, SmartDeploy's wipe-and-load / SmartMigrate disk options, static IP, display settings, Azure AD join, and a management agent.

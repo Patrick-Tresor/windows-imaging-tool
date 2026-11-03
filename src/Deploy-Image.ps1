@@ -5,7 +5,7 @@
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
-    domain join, tasks, extra shares, BIOS settings and BitLocker.
+    domain join, tasks, extra shares and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
     answer file win over the answer file's naming, the answer file's OU and the default answer file.
     Unless -NoPrompt or an Unattended answer file starts it, a graphical wizard

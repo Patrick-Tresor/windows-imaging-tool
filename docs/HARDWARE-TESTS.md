@@ -21,6 +21,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.9 | Stick built **without** a WinPE password | The wizard shows a Passwords page after the answer file with one box per password (join, local Administrator...); after Confirm no password window pops up |
 | 1.10 | Update the stick in place (Media tab) after changing one answer file | Only the changed files are copied, it is much faster than a full build, and the stick still deploys |
 | 1.11 | USB copy speed | Note the MB/s the build prints for the image |
+| 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |
 
 ## 2. Network (LAN share, PXE)
 
@@ -28,31 +29,20 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 |---|------|-----------|
 | 2.1 | ISO or PXE boot.wim reaching the share | WinPE maps the share (password from the WinPE password vault or the share's password file) |
 | 2.2 | Publish to WDS, PXE boot a PC | WinPE starts with F12 (or without, when prestaged) |
-| 2.3 | Multicast with 2+ PCs | Room monitor shows both; both deploy |
-| 2.4 | Dashboard | Each PC shows live progress, then the post-deploy checks |
+| 2.3 | Dashboard | Each PC shows live progress, then the post-deploy checks |
 
-## 3. Remote reimage
-
-| # | Test | Pass when |
-|---|------|-----------|
-| 3.1 | PC on, PXE method | Restarts into PXE once, deploys, does not loop |
-| 3.2 | PC off, Wake-on-LAN | Wakes and reimages (check Deep Sleep Control on Dell) |
-| 3.3 | **No PXE** (boot.wim from the PC's own disk) | PC restarts straight into WinPE from C:, deploys; works with BitLocker on |
-| 3.4 | **Back up the old Windows first** | `Backups\<serial>-<date>.wim` on the share, and it mounts with `dism /Mount-Image` |
-
-## 4. Features on the deployed PC
+## 3. Features on the deployed PC
 
 | # | Test | Pass when |
 |---|------|-----------|
-| 4.1 | BitLocker (TPM, and TPM+PIN) | Encrypted at first boot; the recovery key is backed up where the answer file says |
-| 4.3 | USMT user data (share and local store) | A user's files and settings come back after the reimage |
-| 4.4 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
+| 3.1 | BitLocker (TPM, and TPM+PIN) | Encrypted at first boot; the recovery key is backed up where the answer file says |
+| 3.2 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
 
-## 5. Capture and image upkeep
+## 4. Capture and image upkeep
 
 | # | Test | Pass when |
 |---|------|-----------|
-| 5.1 | Hands-free Hyper-V capture | Image in `Images`, VM rolled back to its checkpoint |
-| 5.2 | VMware disk file capture | Same |
-| 5.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
-| 5.5 | Roll back a version | Answer files deploy the older image |
+| 4.1 | VMware disk file capture | Image in `Images`, VM and its snapshots unchanged |
+| 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
+| 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
+| 4.4 | Roll back a version | Answer files deploy the older image |
