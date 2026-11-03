@@ -456,30 +456,6 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
         Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
     }
 } })
-$ui.BtnImageSchedule.Add_Click({ Invoke-Safely {
-    # Monthly offline patching (ImageUpdateSchedule.psm1): the selected image goes on or off the list; the
-    # scheduled task on this PC is there while the list has an image.
-    if (-not (Test-RootReady)) { return }
-    $image = $ui.GridImages.SelectedItem
-    if (-not $image) { Show-Error 'Select an image first.'; return }
-    Import-Module (Join-Path $srcDir 'ImageUpdateSchedule.psm1') -Force
-    $s = Get-ImageUpdateSchedule -ContentRoot $script:root
-    $rel = "Images\$($image.Name)"
-    if ($s.images -contains $rel) {
-        if (-not (Confirm-Action "Stop updating $($image.Name) every month?")) { return }
-        $s.images = @($s.images | Where-Object { $_ -ne $rel })
-    } else {
-        $text = "Update $($image.Name) every month, $($s.daysAfterPatchTuesday) day(s) after Patch Tuesday at $($s.time), from this PC?`n`n" +
-            "Each month, put the new .msu files from the Microsoft Update Catalog in $(Join-Path $script:root $s.updateFolder) (or a subfolder named $([IO.Path]::GetFileNameWithoutExtension($image.Name)) for this image only). " +
-            'Files the image already has are skipped. The previous version is kept, so a bad month can be rolled back with Versions. This PC must be on and reach the content root.'
-        if (-not (Confirm-Action $text)) { return }
-        $s.images = @($s.images) + $rel
-    }
-    $s.enabled = @($s.images).Count -gt 0
-    Save-ImageUpdateSchedule -ContentRoot $script:root -Schedule $s
-    if ($s.enabled) { Register-ImageUpdateSchedule -ContentRoot $script:root -Time $s.time; Set-Status "Monthly update on for: $(($s.images | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')" }
-    else { Unregister-ImageUpdateSchedule; Set-Status 'Monthly image update off' }
-} })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion

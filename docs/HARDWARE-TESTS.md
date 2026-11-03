@@ -48,7 +48,6 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.2 | BIOS settings (Dell, HP, Lenovo) | Settings changed; a BIOS password is used when set |
 | 4.3 | USMT user data (share and local store) | A user's files and settings come back after the reimage |
 | 4.4 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
-| 4.5 | Autopilot-HardwareHash task | `Autopilot-<serial>.csv` on the share; Merge-AutopilotCsv output imports in Intune |
 
 ## 5. Capture and image upkeep
 
@@ -57,5 +56,4 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 5.1 | Hands-free Hyper-V capture | Image in `Images`, VM rolled back to its checkpoint |
 | 5.2 | VMware disk file capture | Same |
 | 5.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
-| 5.4 | Monthly update schedule | The day after Patch Tuesday a `SERVICE-*` log appears; running it again the same month does nothing |
 | 5.5 | Roll back a version | Answer files deploy the older image |

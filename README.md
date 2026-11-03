@@ -396,28 +396,6 @@ PCs. Without the console:
 This updates Windows itself, not the applications in the image or its recovery
 environment (`winre.wim`); refresh those with a new capture from time to time.
 
-### Every month, on a schedule
-
-Select an image and click **Monthly update...** on the Images tab. A scheduled
-task on this PC (`Imaging - monthly image update`, as SYSTEM) runs
-`src\Invoke-ScheduledImageUpdate.ps1` each day; from the day after Patch Tuesday
-it applies, once a month, the .msu/.cab files in `Updates\` (or
-`Updates\<image name>\` for that image only) that the image has not had yet,
-with cleanup, keeping the previous version for rollback. It does not download
-anything: put the month's files from the Microsoft Update Catalog in the folder
-before that day. Settings: `config\image-update-schedule.json` (`daysAfterPatchTuesday`,
-`time`, `cleanup`). Run it now with `Invoke-ScheduledImageUpdate.ps1 -ContentRoot D:\DeployShare -Force`.
-
-## Windows Autopilot (Intune)
-
-Add the **Autopilot-HardwareHash** task (Tasks tab, Template) to an answer file
-at FIRSTBOOT and replace `REPLACE_SHARE` with a folder on the share, for example
-`\\server\Deploy\Autopilot` (Domain Computers need write access). Each PC saves
-`Autopilot-<serial>.csv` there with its hardware hash (`-GroupTag Staff` adds a
-group tag). Merge them into one file and import it in Intune (Devices > Windows
-enrollment > Devices > Import):
-`Import-Module .\src\Autopilot.psm1; Merge-AutopilotCsv -Folder \\server\Deploy\Autopilot -OutFile C:\Temp\autopilot.csv`.
-
 ## Testing on real hardware
 
 [docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md) lists what still needs a real PC,

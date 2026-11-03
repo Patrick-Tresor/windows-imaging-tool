@@ -78,7 +78,6 @@
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
-            <Button x:Name="BtnImageSchedule" Content="Monthly update..." ToolTip="Apply new update files from the Updates folder to the selected image each month after Patch Tuesday (scheduled task on this PC)."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
