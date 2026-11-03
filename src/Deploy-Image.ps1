@@ -596,6 +596,21 @@ try {
     $bl = $answer.BitLocker
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Answer $answer -Label 'BitLocker PIN' } else { $null }
 
+    # The unattend is built and checked now, before the disk is wiped: a setting Windows Setup rejects would only show
+    # after the restart, as "could not parse or process the unattend answer file" at Getting ready.
+    # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
+    # first boot removes C:\Deploy, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    $logonIndex = 0
+    $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
+        if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
+    })
+    $unattendXml = New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands
+    $unattendProblems = @(Test-UnattendXml -Xml $unattendXml)
+    if ($unattendProblems) {
+        foreach ($up in $unattendProblems) { Write-DeployLog "Windows settings (unattend.xml): $up" -Level ERROR }
+        throw "Windows would reject these settings: $($unattendProblems[0]) Nothing was erased."
+    }
+
     $disk = Get-Disk -Number $answer.DiskNumber
 
     $summary = @(Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $ComputerName -Disk $disk -Applications @($apps | ForEach-Object name))
@@ -640,15 +655,8 @@ try {
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
-    # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
-    # first boot removes C:\Deploy, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
     $logonPlan = @(New-LogonTaskPlan -Tasks $deployTasks)
-    $logonIndex = 0
-    $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
-        if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
-    })
-    New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands |
-        Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
+    $unattendXml | Set-Content -Path 'W:\Windows\Panther\unattend.xml' -Encoding utf8
     $joinText = if ($answer.Membership -eq 'Domain') { "joins $($answer.Domain) as $((Resolve-JoinAccount -Answer $answer).Account)" } else { "workgroup $($answer.Workgroup)" }
     Write-DeployLog "Unattend written: name $ComputerName, $joinText"
 

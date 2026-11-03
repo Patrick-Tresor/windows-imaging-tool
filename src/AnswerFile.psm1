@@ -151,6 +151,15 @@ function Test-AnswerFile {
         if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
     if ($a.Prefix -and $a.Prefix.Length -gt 14) { 'identification/naming/prefix is longer than a computer name allows.' }
+    # Windows Setup reads these in the specialize pass; a bad one stops it at "Getting ready" with
+    # "could not parse or process the unattend answer file for pass [specialize]" (Microsoft-Windows-Shell-Setup).
+    $keyProblem = Test-ProductKeyValue $a.ProductKey
+    if ($keyProblem) { $keyProblem }
+    $tzProblem = Test-TimeZoneId $a.TimeZone
+    if ($tzProblem) { $tzProblem }
+    foreach ($pair in @(@('userInformation/fullName', $a.FullName), @('userInformation/organization', $a.Organization))) {
+        if ("$($pair[1])".Length -gt 256) { "$($pair[0]) is longer than the 256 characters Windows allows." }
+    }
     $bl = $a.BitLocker
     if ($bl -and $bl.Enabled) {
         if ($bl.EncryptionMethod -notin $script:BitLockerMethods) { "bitlocker/encryptionMethod must be one of $($script:BitLockerMethods -join ', '), not '$($bl.EncryptionMethod)'." }
@@ -183,9 +192,52 @@ function Resolve-ComputerName {
         }
         'Prompt' { if ($Typed) { $Typed } else { $WmiValue } }
     }
-    $name = ("$($Answer.Prefix)$body" -replace '[^A-Za-z0-9-]', '').ToUpperInvariant()
+    $name = ("$($Answer.Prefix)$body" -replace '[^A-Za-z0-9-]', '').ToUpperInvariant().Trim('-')
     if (-not $name) { $name = "PC-$($Random.Next(100000, 999999))" }
-    $name.Substring(0, [Math]::Min(15, $name.Length))
+    # Windows rejects a name that is only digits (a numeric serial or asset tag), so it gets a PC- prefix.
+    if ($name -match '^[0-9]+$') { $name = "PC-$name" }
+    $name.Substring(0, [Math]::Min(15, $name.Length)).TrimEnd('-')
+}
+
+function Test-UnattendComputerName {
+    # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid.
+    param([string]$Name)
+    if (-not $Name) { return 'The computer name is empty.' }
+    if ($Name.Length -gt 15) { return "Computer name '$Name' is longer than 15 characters." }
+    if ($Name -notmatch '^[A-Za-z0-9-]+$') { return "Computer name '$Name' may only contain letters, digits and dashes." }
+    if ($Name -match '^[0-9]+$') { return "Computer name '$Name' cannot be only digits." }
+    if ($Name.StartsWith('-') -or $Name.EndsWith('-')) { return "Computer name '$Name' cannot start or end with a dash." }
+}
+
+function Test-ProductKeyValue {
+    # A product key must be five groups of five; empty keeps the image's activation. A key for another edition
+    # passes this check but still fails in Windows Setup, so the message says so.
+    param([string]$Key)
+    if (-not $Key) { return }
+    if ($Key -notmatch '^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$') {
+        "productKey '$Key' must be five groups of five letters or digits (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX), or empty to keep the image's activation."
+    }
+}
+
+$script:TimeZoneIds = $null
+function Get-WindowsTimeZoneIds {
+    # Windows time zone IDs (tzutil /l) from the registry; empty where there is no list to check against.
+    if ($null -eq $script:TimeZoneIds) {
+        $script:TimeZoneIds = @(try {
+            $k = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion\Time Zones')
+            if ($k) { try { $k.GetSubKeyNames() } finally { $k.Close() } }
+        } catch { })
+    }
+    $script:TimeZoneIds
+}
+
+function Test-TimeZoneId {
+    # Unattend takes a Windows time zone ID such as Eastern Standard Time, not a display name or an IANA name.
+    param([string]$Id)
+    if (-not $Id) { return }
+    $known = @(Get-WindowsTimeZoneIds)
+    if ($known.Count -lt 10) { return }   # no list here (WinPE without the key, or not Windows): nothing to check
+    if ($known -notcontains $Id) { "regional/timeZone '$Id' is not a Windows time zone ID (tzutil /l lists them, for example Eastern Standard Time)." }
 }
 
 function Get-WmiNamingValue {
@@ -193,7 +245,14 @@ function Get-WmiNamingValue {
     param([Parameter(Mandatory)][string]$Query)
     $r = Get-CimInstance -Query $Query | Select-Object -First 1
     if (-not $r) { return $null }
-    $prop = $r.CimInstanceProperties | Where-Object { $_.Value -and $_.Name -notlike 'PS*' } | Select-Object -First 1
+    # WMI can also return the class's key properties (Win32_BIOS Name is the BIOS version, 1.25.0), so the
+    # property the query names comes first.
+    $prop = $null
+    if ($Query -match '(?i)^\s*SELECT\s+([A-Za-z0-9_]+)\s') {
+        $selected = $Matches[1]
+        $prop = $r.CimInstanceProperties | Where-Object { $_.Name -eq $selected -and $_.Value } | Select-Object -First 1
+    }
+    if (-not $prop) { $prop = $r.CimInstanceProperties | Where-Object { $_.Value -and $_.Name -notlike 'PS*' } | Select-Object -First 1 }
     if ($prop) { "$($prop.Value)".Trim() }
 }
 
@@ -280,6 +339,8 @@ function New-UnattendXml {
         [string[]]$LogonCommands
     )
     $a = $Answer
+    $nameProblem = Test-UnattendComputerName $ComputerName
+    if ($nameProblem) { throw $nameProblem }
     $x = { param($v) ConvertTo-XmlText $v }
     $comp = 'processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"'
 
@@ -372,6 +433,67 @@ $accounts$logonBlock    </component>
   </settings>
 </unattend>
 "@
+}
+
+# What each pass and component of the generated unattend.xml may hold. Windows Setup stops with "could not parse or
+# process the unattend answer file for pass [...]" on a setting in a pass that doesn't take it.
+$script:UnattendSettings = @{
+    'specialize|Microsoft-Windows-Shell-Setup'          = 'ComputerName', 'TimeZone', 'RegisteredOwner', 'RegisteredOrganization', 'ProductKey'
+    'specialize|Microsoft-Windows-UnattendedJoin'       = @('Identification')
+    'oobeSystem|Microsoft-Windows-International-Core'   = 'InputLocale', 'SystemLocale', 'UILanguage', 'UserLocale'
+    'oobeSystem|Microsoft-Windows-Shell-Setup'          = 'OOBE', 'UserAccounts', 'FirstLogonCommands'
+}
+
+function Test-UnattendXml {
+    <#
+    .SYNOPSIS
+        Problems Windows Setup would stop on, checked in WinPE before the disk is erased: XML that doesn't parse,
+        a component twice or in the wrong pass, a setting its pass doesn't take, and the specialize values Setup
+        rejects (computer name, product key, time zone). Empty when the unattend is good.
+    #>
+    param([Parameter(Mandatory)][string]$Xml)
+    $doc = $null
+    try { $doc = [xml]$Xml } catch { return "unattend.xml is not valid XML: $($_.Exception.Message)" }
+    $ns = 'urn:schemas-microsoft-com:unattend'
+    $root = $doc.DocumentElement
+    if ($root.LocalName -ne 'unattend' -or $root.NamespaceURI -ne $ns) { return "unattend.xml's root must be <unattend xmlns=`"$ns`">." }
+    $seen = @{}
+    foreach ($settings in @($root.ChildNodes | Where-Object { $_.NodeType -eq 'Element' })) {
+        $pass = $settings.GetAttribute('pass')
+        foreach ($c in @($settings.ChildNodes | Where-Object { $_.NodeType -eq 'Element' })) {
+            $name = $c.GetAttribute('name')
+            $key = "$pass|$name"
+            if ($seen[$key]) { "Component $name is in the $pass pass twice."; continue }
+            $seen[$key] = $true
+            $allowed = $script:UnattendSettings[$key]
+            if (-not $allowed) { "Component $name doesn't belong in the $pass pass."; continue }
+            if ($c.GetAttribute('processorArchitecture') -ne 'amd64' -or $c.GetAttribute('publicKeyToken') -ne '31bf3856ad364e35') {
+                "Component $name in the $pass pass needs processorArchitecture amd64 and publicKeyToken 31bf3856ad364e35."
+            }
+            foreach ($s in @($c.ChildNodes | Where-Object { $_.NodeType -eq 'Element' })) {
+                if ($s.NamespaceURI -ne $ns) { "$name setting $($s.Name) in the $pass pass is outside the unattend namespace." }
+                elseif ($allowed -cnotcontains $s.LocalName) { "$name setting $($s.LocalName) doesn't belong in the $pass pass." }
+            }
+        }
+    }
+    $nsm = [Xml.XmlNamespaceManager]::new($doc.NameTable)
+    $nsm.AddNamespace('u', $ns)
+    $shell = $doc.SelectSingleNode("/u:unattend/u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-Shell-Setup']", $nsm)
+    if (-not $shell) { return 'unattend.xml has no specialize Microsoft-Windows-Shell-Setup component (the computer name goes there).' }
+    $value = { param($n) $node = $shell.SelectSingleNode("u:$n", $nsm); if ($node) { $node.InnerText } }
+    $nameProblem = Test-UnattendComputerName (& $value 'ComputerName')
+    if ($nameProblem) { $nameProblem }
+    if ($shell.SelectSingleNode('u:ProductKey', $nsm)) {
+        $keyProblem = Test-ProductKeyValue (& $value 'ProductKey')
+        if ($keyProblem) { $keyProblem } elseif (-not (& $value 'ProductKey')) { 'ProductKey is empty; leave it out instead.' }
+    }
+    $tzProblem = Test-TimeZoneId (& $value 'TimeZone')
+    if ($tzProblem) { $tzProblem }
+    foreach ($n in 'TimeZone', 'RegisteredOwner', 'RegisteredOrganization') {
+        $node = $shell.SelectSingleNode("u:$n", $nsm)
+        if ($node -and -not $node.InnerText.Trim()) { "$n is empty; leave it out instead." }
+        elseif ($node -and $node.InnerText.Length -gt 256) { "$n is longer than 256 characters." }
+    }
 }
 
 function New-FirstBootPlan {
@@ -673,4 +795,5 @@ function ConvertFrom-DeployWizardAnswerFile {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile
+    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
+    Test-ProductKeyValue, Test-TimeZoneId, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile
