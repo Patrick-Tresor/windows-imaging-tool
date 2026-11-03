@@ -1,6 +1,6 @@
 # Architecture
 
-A SmartDeploy-style imaging tool built on Microsoft's own tooling (Windows ADK,
+A hardware-independent imaging tool built on Microsoft's own tooling (Windows ADK,
 WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 
 ## The four pieces
@@ -143,7 +143,7 @@ which the Images tab reads.
 Build the reference image in a **VM** (VMware Workstation, VirtualBox, Hyper-V...), not on real hardware, so it
 contains no OEM drivers. Run `sysprep /generalize /oobe /shutdown` before
 capture. All hardware specifics arrive at deploy time from the driver library.
-This is the same idea SmartDeploy's "Platform Packs" use.
+One golden image serves every model; only the driver pack changes.
 
 ## Model detection
 
@@ -316,7 +316,7 @@ duplicate serials or names, OUs that are not distinguished names, and answer
 files that do not exist.
 
 `AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
-SmartDeploy import. It has no WinPE dependencies, so it is unit tested and shared
+deploy wizard answer file import. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
 
 ## Driver packs
@@ -378,4 +378,4 @@ pack on them by other means, once it is in the library.
 ## Not in v1
 
 BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
-user data migration (USMT), multicast, remote reimage, SmartDeploy's wipe-and-load / SmartMigrate disk options, static IP, display settings, Azure AD join, and a management agent.
+user data migration (USMT), multicast, remote reimage, wipe-and-load / keep-user-data disk options, static IP, display settings, Azure AD join, and a management agent.

@@ -1,12 +1,12 @@
-<smartdeploy version="3.0">
-  <!-- Made-up values in the shape of a real SmartDeploy deploy wizard answer file. -->
+<answers version="3.0">
+  <!-- Made-up values in the shape of a real deploy wizard answer file. -->
   <deploy_wizard mode="Unattended">
     <select_image skip="0">
       <image_file>\\DEPLOYSRV\SDShare\Images\W11_Office_FR_EN.wim</image_file>
       <image_name>W11_Office_FR_EN</image_name>
     </select_image>
     <application_packs skip="0">
-      <location>\\DEPLOYSRV\C$\SmartDeploy\Application Packs</location>
+      <location>\\DEPLOYSRV\C$\Deploy\Application Packs</location>
       <application_pack installation_order="2">Zoom-Latest.spk</application_pack>
       <application_pack installation_order="1">Dell-Command-Update.spk</application_pack>
     </application_packs>
@@ -36,7 +36,7 @@
     <client skip="0"><install_during_deployment>true</install_during_deployment></client>
     <advanced_options>
       <general>
-        <platform_pack skip="0">\\DEPLOYSRV\C$\SmartDeploy\Platform Packs</platform_pack>
+        <platform_pack skip="0">\\DEPLOYSRV\C$\Deploy\Platform Packs</platform_pack>
         <system_properties>
           <system_property enabled="1">DISABLE_SYSTEM_RESTORE</system_property>
           <system_property enabled="0">ENABLE_ADMINISTRATOR_ACCOUNT</system_property>
@@ -77,4 +77,4 @@
       <unattend_delay>3</unattend_delay>
     </settings>
   </deploy_wizard>
-</smartdeploy>
+</answers>

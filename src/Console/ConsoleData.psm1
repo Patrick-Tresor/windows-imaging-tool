@@ -318,10 +318,10 @@ function New-AnswerFileFromSample {
     $dest
 }
 
-function Import-SmartDeployAnswerFile {
-    # Converts a SmartDeploy deploy wizard XML into AnswerFiles\<name>.xml. Returns the notes to show the user.
+function Import-DeployWizardAnswerFile {
+    # Converts a deploy wizard answer file XML into AnswerFiles\<name>.xml. Returns the notes to show the user.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Path, [string]$Name)
-    $result = ConvertFrom-SmartDeployAnswerFile -Path $Path
+    $result = ConvertFrom-DeployWizardAnswerFile -Path $Path
     if (-not $Name) { $Name = $result.Answer.Name -replace '[^A-Za-z0-9._-]', '_' }
     $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
     if (Test-Path $dest) { throw "An answer file named $Name already exists. Rename or delete it first." }
@@ -944,7 +944,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
-    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
+    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,

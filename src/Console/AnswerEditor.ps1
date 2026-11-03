@@ -1,4 +1,4 @@
-# Answer file editor window: every setting of an answer file as a form, like SmartDeploy's answer file wizard.
+# Answer file editor window: every setting of an answer file as a form.
 # Dot-sourced by ImagingConsole.ps1, which loads WPF, ConsoleData.psm1 and AnswerFile.psm1.
 
 # Real .NET types so the editable grids can bind two-way.
@@ -214,7 +214,7 @@ function Show-AnswerEditor {
     $e.BtnAppUp.Add_Click({ $i = $e.LstSelected.SelectedIndex; if ($i -gt 0) { $selected.Move($i, $i - 1); $e.LstSelected.SelectedIndex = $i - 1 } })
     $e.BtnAppDown.Add_Click({ $i = $e.LstSelected.SelectedIndex; if ($i -ge 0 -and $i -lt $selected.Count - 1) { $selected.Move($i, $i + 1); $e.LstSelected.SelectedIndex = $i + 1 } })
     $e.BtnNewApp.Add_Click({
-        # With a missing app selected in the install order (e.g. from a SmartDeploy import), build that one.
+        # With a missing app selected in the install order (e.g. from an answer file import), build that one.
         $sel = $e.LstSelected.SelectedItem
         $missing = if ($sel -and -not (Test-Path (Join-Path $ContentRoot "Applications\$sel\app.json"))) { $sel }
         $name = if ($missing) { Show-AppPackEditor -Owner $win -ContentRoot $ContentRoot -SuggestedName $missing }

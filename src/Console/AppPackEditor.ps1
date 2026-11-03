@@ -91,7 +91,7 @@ function Show-AppPackEditor {
     $e.TxtName.IsEnabled = $isNew
     $e.CmbInstaller.ItemsSource = @(& $folderFiles)
     if ($isNew -and $SuggestedName) {
-        # Rebuilding a SmartDeploy pack by name: preselect its template.
+        # Rebuilding an imported .spk pack by name: preselect its template.
         $t = Find-AppTemplate -Name $SuggestedName -Templates $templates
         if ($t) { $e.CmbTemplate.SelectedIndex = [array]::IndexOf(@($templates), $t) + 1 }
     }

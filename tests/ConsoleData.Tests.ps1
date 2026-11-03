@@ -95,10 +95,10 @@ try {
     try { New-AnswerFileFromSample -ContentRoot $root -Name 'Lab' | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'answer file names cannot be reused'
 
-    $imp = Import-SmartDeployAnswerFile -ContentRoot $root -Path (Join-Path $PSScriptRoot 'fixtures/smartdeploy-sample.xml')
-    Assert-Equal $imp.Name 'smartdeploy-sample' 'SmartDeploy file is imported under its own name'
+    $imp = Import-DeployWizardAnswerFile -ContentRoot $root -Path (Join-Path $PSScriptRoot 'fixtures/deploy-wizard-sample.xml')
+    Assert-Equal $imp.Name 'deploy-wizard-sample' 'deploy wizard file is imported under its own name'
     Assert-Equal ($imp.Notes.Count -gt 3) $true 'import returns the manual steps'
-    $impRow = Get-AnswerFileRows -ContentRoot $root | Where-Object Name -eq 'smartdeploy-sample'
+    $impRow = Get-AnswerFileRows -ContentRoot $root | Where-Object Name -eq 'deploy-wizard-sample'
     Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Password file*' }).Count) 3 'missing join and share password files are reported'
     Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Application*' }).Count) 2 'missing application folders are reported'
     Assert-Equal ((Get-ImageUsage -ContentRoot $root)['Win11-Enterprise.wim'] -join ',') 'Default,Lab' 'image usage lists the answer files using it'

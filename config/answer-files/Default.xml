@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Answer file: everything one deployment needs, like a SmartDeploy deploy wizard answer file.
+  Answer file: everything one deployment needs.
   Paths are relative to the content root unless absolute (Y:\..., \\server\share\...).
   Passwords never go in this file: each *PasswordFile points to a text file under the content root
   (for example config\secrets\join.txt). Anyone who can read the share can read those files, so use
@@ -28,7 +28,7 @@
     <option>Recreate</option>
   </disk>
 
-  <!-- Driver library root (SmartDeploy: Platform Packs). Matching uses config\driver-catalog.json. -->
+  <!-- Driver library root (one OEM driver pack per model). Matching uses config\driver-catalog.json. -->
   <drivers>
     <root>Drivers</root>
   </drivers>
