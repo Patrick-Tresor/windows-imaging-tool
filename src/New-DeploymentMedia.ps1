@@ -234,7 +234,7 @@ try {
         "[LaunchApps]`r`n%SYSTEMROOT%\System32\cmd.exe, /c %SYSTEMROOT%\System32\startnet.cmd`r`n" |
             Set-Content "$mount\Windows\System32\winpeshl.ini" -Encoding ascii
     } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
-        Write-Warning 'No WinPE password: anyone with the stick can boot it, and WinPE asks the operator for the join and other passwords (they are not on the stick).'
+        Write-Warning 'No WinPE password: anyone with the stick can boot it, and the deploy wizard asks the operator for the join and other passwords on its Passwords page (they are not on the stick).'
     }
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |

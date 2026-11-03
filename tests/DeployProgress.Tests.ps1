@@ -71,7 +71,7 @@ $v = Get-ProgressView -Record $null
 Assert-Equal "$($v.Title)|$($v.Percent)|$($v.Finished)|$($v.ShowPower)" 'Getting ready|0|False|False' 'no record yet: getting ready'
 
 $v = Get-ProgressView -Record (New-Record @{}) -Now $now
-Assert-Equal "$($v.Title)|$($v.Detail)|$($v.Percent)|$($v.SidebarStep)|$($v.Busy)" 'Installing Windows|Applying the image (50 %)|40|4|True' 'running deploy shows the step and percent'
+Assert-Equal "$($v.Title)|$($v.Detail)|$($v.Percent)|$($v.SidebarStep)|$($v.Busy)" 'Installing Windows|Applying the image (50 %)|40|5|True' 'running deploy shows the step and percent'
 Assert-Equal $v.PercentText 'Overall 40 %    Elapsed 5m 30s' 'running deploy shows elapsed time'
 Assert-Equal $v.Hardware 'Dell Inc. Latitude 7440   Serial ABC123' 'hardware line'
 Assert-Equal ($v.Facts -join '|') 'Computer name:  LAB-01|Answer file:    W11-Office|Image:          Win11.wim|Drivers:        Dell\Latitude 7440' 'facts list what is deployed'
@@ -90,7 +90,7 @@ $v = Get-ProgressView -Record (New-Record @{ step = 'Waiting for the operator'; 
 Assert-Equal $v.Hidden $false 'deploy script stopped while waiting: the window shows that it stopped'
 
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; percent = 90; whenDone = 'stay'; finished = '2026-10-28T10:20:00Z' })
-Assert-Equal "$($v.Title)|$($v.Color)|$($v.Percent)|$($v.ShowPower)|$($v.SidebarStep)" 'Windows is installed|Good|100|True|5' 'success staying in WinPE offers Restart'
+Assert-Equal "$($v.Title)|$($v.Color)|$($v.Percent)|$($v.ShowPower)|$($v.SidebarStep)" 'Windows is installed|Good|100|True|6' 'success staying in WinPE offers Restart'
 Assert-Equal $v.PercentText 'Overall 100 %    Took 20m 00s' 'finished deploy shows how long it took'
 
 $v = Get-ProgressView -Record (New-Record @{ state = 'Succeeded'; whenDone = 'restart' })
@@ -129,9 +129,9 @@ if ($env:OS -eq 'Windows_NT') {
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{ countdown = 5 })) -LogLines 'a', 'b'
         Assert-Equal "$($ui.Title.Text)|$($ui.Change.Visible)|$($ui.Restart.Visible)|$($ui.Log.Text)" "Starting in 5 s|True|False|a`r`nb" 'window: countdown'
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{}))
-        Assert-Equal "$($ui.Bar.Value)|$($ui.Change.Visible)|$($ui.Sidebar[4].Font.Bold)|$($ui.Sidebar[0].Font.Bold)" '40|False|True|False' 'window: installing'
+        Assert-Equal "$($ui.Bar.Value)|$($ui.Change.Visible)|$($ui.Sidebar[5].Font.Bold)|$($ui.Sidebar[0].Font.Bold)" '40|False|True|False' 'window: installing'
         Update-DeployProgressForm -Ui $ui -View (Get-ProgressView -Record (New-Record @{ state = 'Failed'; message = 'boom' }))
-        Assert-Equal "$($ui.Title.Text)|$($ui.Message.Text)|$($ui.Restart.Visible)|$($ui.Shutdown.Visible)|$($ui.Sidebar[5].Font.Bold)" 'Deployment failed|boom|True|True|True' 'window: failed'
+        Assert-Equal "$($ui.Title.Text)|$($ui.Message.Text)|$($ui.Restart.Visible)|$($ui.Shutdown.Visible)|$($ui.Sidebar[6].Font.Bold)" 'Deployment failed|boom|True|True|True' 'window: failed'
         # Every control fits inside the window, right of the sidebar.
         foreach ($c in $ui.Form.Controls | Where-Object { $_ -isnot [Windows.Forms.Panel] }) {
             $fits = $c.Left -ge 200 -and $c.Right -le $ui.Form.ClientSize.Width -and $c.Bottom -le $ui.Form.ClientSize.Height

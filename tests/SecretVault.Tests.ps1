@@ -90,5 +90,37 @@ Assert-Equal ($startnet.IndexOf('if errorlevel 3') -lt $startnet.IndexOf('Deploy
 $build = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($build -match 'winpeshl\.ini') $true 'locked media start the shell with cmd /c'
 
+# Get-AnswerSecrets: every password an answer file needs, once each, so the wizard asks for all of them on one
+# page before Confirm and nothing pops up while Windows installs.
+$full = [pscustomobject]@{
+    EnableAdministrator = $true; AdminPasswordFile = 'config\secrets\admin.txt'
+    Membership = 'Domain'; Domain = 'corp.example.com'; JoinUser = 'CORP\svc-join'; JoinDomain = ''; JoinPasswordFile = 'config\secrets\Join.txt'
+    Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\images'; Username = 'svc-read'; PasswordFile = 'config/secrets/share.txt' },
+               [pscustomobject]@{ LocalName = 'Z:'; RemoteName = '\\srv\apps'; Username = 'svc-join'; PasswordFile = 'config\secrets\join.txt' })
+    BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'TpmPin'; PinFile = 'config\secrets\pin.txt' }
+    Bios = [pscustomobject]@{ Enabled = $true; PasswordFile = 'config\secrets\bios.txt' }
+    MigrateUserData = $true; UserDataStore = 'Share'; UserDataEncrypt = $true; UserDataKeyFile = 'config\secrets\usmt.txt'
+}
+$needed = @(Get-AnswerSecrets -Answer $full)
+Assert-Equal (($needed | ForEach-Object Key) -join ',') 'config\secrets\admin.txt,config\secrets\join.txt,config\secrets\share.txt,config\secrets\pin.txt,config\secrets\bios.txt,config\secrets\usmt.txt' 'answer secrets: every password once, the shared join file only once'
+Assert-Equal $needed[1].Label 'Join account password (CORP\svc-join)' 'answer secrets: the join account is named'
+Assert-Equal "$($needed[2].Share)|$($needed[0].Share)" 'Y:|' 'answer secrets: share passwords say which drive'
+$bare = [pscustomobject]@{
+    EnableAdministrator = $false; AdminPasswordFile = 'config\secrets\admin.txt'; Membership = 'Workgroup'; JoinPasswordFile = 'config\secrets\join.txt'
+    Shares = @(); BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'Tpm'; PinFile = 'config\secrets\pin.txt' }
+    Bios = [pscustomobject]@{ Enabled = $false; PasswordFile = 'config\secrets\bios.txt' }; MigrateUserData = $true; UserDataStore = 'Local'; UserDataEncrypt = $true; UserDataKeyFile = 'x.txt'
+}
+Assert-Equal @(Get-AnswerSecrets -Answer $bare).Count 0 'answer secrets: nothing for settings that are off'
+
+# Wiring: the wizard gets the missing passwords up front, the plan asks for any left in one window, and
+# every password the deploy reads is one Get-AnswerSecrets knows about.
+Assert-Equal ($deploy -match '-MissingSecrets \$missingSecrets -SaveSecrets \$saveSecrets') $true 'wizard is given the missing passwords'
+$planAt = $deploy.IndexOf('function Get-DeployPlan(')
+Assert-Equal ($deploy.IndexOf('Request-DeploySecrets -Root $Root -Answer $Answer', $planAt) -lt $deploy.IndexOf('foreach ($share in $Answer.Shares)', $planAt)) $true 'plan asks for missing passwords before mapping shares'
+foreach ($m in [regex]::Matches($deploy, 'Get-DeploySecret(?:Path)? -Root \$\w+ -RelativePath \$(\w+(?:\.\w+)+)')) {
+    $field = ($m.Groups[1].Value -split '\.')[-1]
+    Assert-Equal ((Get-Content -Raw (Join-Path $repo 'src/SecretVault.psm1')) -match [regex]::Escape(".$field")) $true "answer secrets cover $($m.Groups[1].Value)"
+}
+
 if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All secret vault checks passed' -ForegroundColor Green

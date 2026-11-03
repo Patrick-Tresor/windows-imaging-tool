@@ -252,12 +252,12 @@
                 <PasswordBox x:Name="PwdWinPE2" Width="200"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
-                         Text="WinPE asks for it before it does anything, and the join, share and other passwords go inside the boot image encrypted with it. At least 8 characters. Leave empty for no lock: WinPE then asks the operator for each password it needs. A locked PXE image stops remote reimaging from running unattended."/>
+                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm. A locked PXE image stops remote reimaging from running unattended."/>
             </StackPanel>
 
             <Label Grid.Row="14" Content="Passwords on USB"/>
             <CheckBox x:Name="ChkSecretsOnMedia" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
-                      Content="Also copy the password files (config\secrets) to the stick as plain text. Not recommended: anyone with the stick can read them."/>
+                      Content="Copy the password files (config\secrets) to the stick as plain text, so WinPE asks for no password at all. Not recommended: anyone with the stick can read them."/>
           </Grid>
 
           <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">

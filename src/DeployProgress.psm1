@@ -131,8 +131,8 @@ function Get-ProgressView {
         Hardware     = if ($Record) { ("$($Record.maker) $($Record.model)".Trim() + $(if ($Record.serial) { "   Serial $($Record.serial)" })) } else { '' }
         Facts        = $facts
         Finished     = $finished
-        # Sidebar step: 4 Install Windows while it runs, 5 Finish once it ended (well or not).
-        SidebarStep  = if ($finished) { 5 } elseif ($step -eq 'Waiting for the operator' -or $countdown -gt 0) { 0 } else { 4 }
+        # Sidebar step: Install Windows while it runs, Finish once it ended (well or not).
+        SidebarStep  = if ($finished) { [Array]::IndexOf(@(Get-DeploySteps), 'Finish') } elseif ($step -eq 'Waiting for the operator' -or $countdown -gt 0) { 0 } else { [Array]::IndexOf(@(Get-DeploySteps), 'Install Windows') }
         ShowChange   = $state -eq 'Running' -and $countdown -gt 0
         ShowPower    = $finished -and $whenDone -notin 'restart', 'shutdown'
         Busy         = -not $finished -and $countdown -le 0 -and $step -ne 'Waiting for the operator'
