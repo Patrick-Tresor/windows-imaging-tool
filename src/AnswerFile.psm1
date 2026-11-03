@@ -341,8 +341,10 @@ function New-UnattendXml {
         }
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
-    # Without a password for the built-in Administrator, OOBE has to ask for a local account.
-    $hideLocal = if ($a.EnableAdministrator) { 'true' } else { 'false' }
+    # The local account page is skipped when someone can still sign in without it: the built-in Administrator has a
+    # password, or the PC joins a domain and users sign in with domain accounts (local accounts already in the image
+    # are left as they are). Only a workgroup PC with no Administrator still has OOBE ask for an account.
+    $hideLocal = if ($a.EnableAdministrator -or $a.Membership -eq 'Domain') { 'true' } else { 'false' }
 
     @"
 <?xml version="1.0" encoding="utf-8"?>
