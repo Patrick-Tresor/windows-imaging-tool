@@ -144,7 +144,7 @@ if ($plan.userState) {
 }
 
 # FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
-# C:\Deploy\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Tasks\<name>.log.
+# C:\Deploy\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
 if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }
 Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
 $taskResults = @()
@@ -161,7 +161,7 @@ foreach ($t in @($plan.tasks)) {
     Write-Log "FIRSTBOOT task $($def.name)"
     Set-Progress "Running task $($def.name)" 98
     $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
-                   -LogPath "$env:WINDIR\Temp\Tasks\$($def.name).log" -Log { param($m) Write-Log $m } }
+                   -LogPath "$env:WINDIR\Temp\Task-$($def.name).log" -Log { param($m) Write-Log $m } }
          catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
     $ok = $r.Status -eq 'Succeeded'
     Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"

@@ -141,6 +141,12 @@ try {
     $m = Get-MediaContent -ContentRoot $root
     Assert-Equal ('Tasks' -in $m.Folders) $true 'the Tasks folder goes on the stick'
 
+    # Task logs go straight in C:\Windows\Temp, next to Deploy.log and FirstBoot.log, not in a subfolder.
+    foreach ($f in 'FirstBoot.ps1', 'Deploy-Image.ps1') {
+        $text = Get-Content -Raw (Join-Path $repo "src/$f")
+        Assert-Equal ($text -match '\\Temp\\Task-\$\(' -and $text -notmatch '\\Temp\\Tasks\\') $true "$f logs tasks to C:\Windows\Temp\Task-<name>.log"
+    }
+
     # Running tasks for real needs Windows (powershell.exe, cmd.exe).
     if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
         $logDir = Join-Path $root 'logs'

@@ -272,7 +272,7 @@ goes in the list with the other commands, in order, and its **Command** column
 takes extra arguments for that answer file. A missing or broken task stops the
 deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. POSTIMAGE and FIRSTBOOT runs are logged to
-`C:\Windows\Temp\Tasks\<name>.log` on the PC (and `Deploy.log` or
+`C:\Windows\Temp\Task-<name>.log` on the PC (and `Deploy.log` or
 `FirstBoot.log`), and first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`.
 FIRSTLOGON tasks are kept in `C:\ProgramData\ImagingTool\Tasks` and run by
 Windows itself (unattend `FirstLogonCommands`), so only the script's own logging

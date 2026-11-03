@@ -449,7 +449,7 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Tasks"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Scripts to run during or after a deployment: PowerShell (.ps1), batch (.cmd, .bat) or a program (.exe), with its arguments, timeout, success exit codes and the PCs it is for. Write the script here or import a file or folder. Answer files pick which tasks run (Tasks page), in order with their other commands. POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Tasks on the PC."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Scripts to run during or after a deployment: PowerShell (.ps1), batch (.cmd, .bat) or a program (.exe), with its arguments, timeout, success exit codes and the PCs it is for. Write the script here or import a file or folder. Answer files pick which tasks run (Tasks page), in order with their other commands. POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Task-&lt;name&gt;.log on the PC, next to Deploy.log and FirstBoot.log."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>

@@ -329,10 +329,10 @@ function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
         Write-DeployLog "Running task $($t.Name)"
         Set-DeployStatus -Step "Running task $($t.Name)"
         # The log stays on the new Windows, next to Deploy.log.
-        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\Tasks\$($t.Name).log" -Log { param($m) Write-DeployLog $m } }
+        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\Task-$($t.Name).log" -Log { param($m) Write-DeployLog $m } }
              catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
         if ($r.Status -eq 'Succeeded') { Write-DeployLog "  task $($t.Name) OK ($($r.Message))"; continue }
-        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\Tasks\$($t.Name).log." }
+        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\Task-$($t.Name).log." }
         Write-DeployLog "  task $($t.Name) $($r.Status): $($r.Message)" -Level WARN
         Set-DeployStatus -Warning "Task $($t.Name) $($r.Status.ToLowerInvariant())"
     }
