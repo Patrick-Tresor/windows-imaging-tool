@@ -303,6 +303,7 @@ function New-ReimageJob {
         [Parameter(Mandatory)][string]$Mac,
         [Parameter(Mandatory)][string]$AnswerFile,
         [string]$ComputerName,          # keep this name instead of the answer file's naming
+        [switch]$Backup,                # WinPE captures the old Windows to Backups\ on the share before it wipes the disk
         [int]$ExpiresHours = 12,
         [datetime]$Now = (Get-Date)
     )
@@ -317,6 +318,7 @@ function New-ReimageJob {
         requestedBy  = "$env:USERDOMAIN\$env:USERNAME".Trim('\')
         requestedAt  = $Now.ToString('o')
         expiresAt    = $Now.AddHours($ExpiresHours).ToString('o')
+        backup       = [bool]$Backup
     }
     $job | ConvertTo-Json | Set-Content -Path (Join-Path $dir "$key.json") -Encoding utf8
     $job
@@ -465,7 +467,95 @@ function Save-DeployedComputer {
 
 #endregion
 
-Export-ModuleMember -Function ConvertTo-MacKey, Format-MacAddress, New-MagicPacket, Get-BroadcastAddress, Get-WakeTargets,
+function Get-BcdGuid {
+    # The {GUID} in bcdedit /create's output ("The entry {...} was successfully created."), in any language.
+    param([AllowEmptyString()][string]$Text)
+    if ($Text -match '\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}') { return $Matches[0] }
+    $null
+}
+
+function Get-LocalBootCommands {
+    <#
+    .SYNOPSIS
+        The bcdedit commands that boot WinPE once from a boot.wim on the PC's own disk (a RAM disk, as WDS does
+        over the network). RamdiskId and LoaderId are the GUIDs bcdedit /create gave. Each item is one argument list.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RamdiskId,
+        [Parameter(Mandatory)][string]$LoaderId,
+        [string]$Drive = 'C:',
+        [string]$Folder = '\_ImagingBoot',
+        [ValidateSet('UEFI', 'BIOS')][string]$Firmware = 'UEFI'
+    )
+    $wim = "ramdisk=[$Drive]$Folder\boot.wim,$RamdiskId"
+    $loader = if ($Firmware -eq 'UEFI') { '\windows\system32\boot\winload.efi' } else { '\windows\system32\boot\winload.exe' }
+    @(
+        , @('/set', $RamdiskId, 'ramdisksdidevice', "partition=$Drive")
+        , @('/set', $RamdiskId, 'ramdisksdipath', "$Folder\boot.sdi")
+        , @('/set', $LoaderId, 'device', $wim)
+        , @('/set', $LoaderId, 'osdevice', $wim)
+        , @('/set', $LoaderId, 'path', $loader)
+        , @('/set', $LoaderId, 'systemroot', '\windows')
+        , @('/set', $LoaderId, 'winpe', 'yes')
+        , @('/set', $LoaderId, 'detecthal', 'yes')
+        , @('/bootsequence', $LoaderId)
+    )
+}
+
+function Invoke-LocalDiskBoot {
+    <#
+    .SYNOPSIS
+        Reimages a running PC without PXE: copies boot.wim to C:\_ImagingBoot over PowerShell remoting, adds a
+        one-time RAM disk boot entry for it, suspends BitLocker for one restart (the boot manager must read C:),
+        and restarts. WinPE then finds the content on the network share, takes the job and deploys.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ComputerName,
+        [Parameter(Mandatory)][string]$BootWim,
+        [int]$DelaySeconds = 60,
+        [string]$Message = 'This PC is being reimaged by IT. Save your work: it restarts shortly.'
+    )
+    if (-not (Test-Path -LiteralPath $BootWim)) {
+        throw "No boot image at $BootWim. Build one on the Media tab (PXE boot.wim) with that folder as the output folder."
+    }
+    $info = Get-RemoteComputerInfo -ComputerName $ComputerName
+    $session = New-PSSession -ComputerName $ComputerName -ErrorAction Stop
+    try {
+        Invoke-Command -Session $session -ScriptBlock {
+            $free = (Get-PSDrive C).Free
+            if ($free -lt 2GB) { throw "Only $([int]($free / 1MB)) MB free on C:." }
+            New-Item -ItemType Directory -Path 'C:\_ImagingBoot' -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $BootWim -Destination 'C:\_ImagingBoot\boot.wim' -ToSession $session -Force
+        $commands = Invoke-Command -Session $session -ArgumentList $info.Firmware -ScriptBlock {
+            param($Firmware)
+            $sdi = if ($Firmware -eq 'UEFI') { 'C:\Windows\Boot\DVD\EFI\boot.sdi' } else { 'C:\Windows\Boot\DVD\PCAT\boot.sdi' }
+            if (-not (Test-Path $sdi)) { throw "$sdi is missing on this PC." }
+            Copy-Item $sdi 'C:\_ImagingBoot\boot.sdi' -Force
+            $ram = (& bcdedit.exe /create /d 'Imaging RAM disk' /device) -join ' '
+            $ldr = (& bcdedit.exe /create /d 'Reimage (WinPE)' /application osloader) -join ' '
+            @($ram, $ldr)
+        }
+        $ramId = Get-BcdGuid $commands[0]; $loaderId = Get-BcdGuid $commands[1]
+        if (-not $ramId -or -not $loaderId) { throw "bcdedit could not create the boot entries on ${ComputerName}: $($commands -join ' | ')" }
+        $steps = Get-LocalBootCommands -RamdiskId $ramId -LoaderId $loaderId -Firmware $info.Firmware
+        Invoke-Command -Session $session -ArgumentList $steps, $DelaySeconds, $Message -ScriptBlock {
+            param($Steps, $Delay, $Message)
+            foreach ($a in $Steps) {
+                & bcdedit.exe @a | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "bcdedit $($a -join ' ') failed (exit $LASTEXITCODE)." }
+            }
+            # The boot manager cannot read an encrypted C:. One restart with the key in the clear; the deploy wipes it.
+            $bl = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue
+            if ($bl -and $bl.ProtectionStatus -eq 'On') { Suspend-BitLocker -MountPoint 'C:' -RebootCount 1 | Out-Null }
+            & shutdown.exe /r /t $Delay /c $Message /d p:4:1
+            if ($LASTEXITCODE -ne 0) { throw "shutdown.exe failed (exit $LASTEXITCODE)." }
+        }
+        [pscustomobject]@{ ComputerName = $ComputerName; BootEntry = $loaderId; Info = $info }
+    } finally { Remove-PSSession $session -ErrorAction SilentlyContinue }
+}
+
+Export-ModuleMember -Function Get-BcdGuid, Get-LocalBootCommands, Invoke-LocalDiskBoot, ConvertTo-MacKey, Format-MacAddress, New-MagicPacket, Get-BroadcastAddress, Get-WakeTargets,
     Send-MagicPacket, Send-WakeOnLan, Select-PxeBootEntry, Get-PrefixLength, Get-RemoteComputerInfo, Invoke-PxeRestart,
     Test-WinRMReachable, Get-KnownComputers, Get-KnownComputer, Save-KnownComputer, Remove-KnownComputer,
     Import-KnownComputerCsv, Update-KnownComputerFromInfo, New-ReimageJob, Test-JobExpired, Get-ReimageJob,

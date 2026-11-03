@@ -37,8 +37,16 @@ function Get-MediaCopyPlan {
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [string[]]$Folders,
-        [string[]]$Files
+        [string[]]$Files,
+        # Relative folders or files left out, with everything under them (config\secrets).
+        [string[]]$Exclude
     )
+    $skip = @($Exclude | Where-Object { $_ } | ForEach-Object { ($_ -replace '/', '\').Trim('\') })
+    $isSkipped = {
+        param([string]$Rel)
+        foreach ($x in $skip) { if ($Rel -ieq $x -or $Rel.StartsWith("$x\", [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+        $false
+    }
     $items = New-Object System.Collections.ArrayList
     $dirs = New-Object System.Collections.ArrayList
     $missing = @()
@@ -49,15 +57,18 @@ function Get-MediaCopyPlan {
         [void]$dirs.Add($folder)
         # Sorted so the copy order (and the tests) are the same on every run; -Force includes hidden files like robocopy.
         foreach ($d in Get-ChildItem -LiteralPath $full -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
-            [void]$dirs.Add((($d.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'))
+            $relDir = ($d.FullName.Substring($rootFull.Length + 1)) -replace '/', '\'
+            if (-not (& $isSkipped $relDir)) { [void]$dirs.Add($relDir) }
         }
         foreach ($f in Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
             $rel = $f.FullName.Substring($rootFull.Length + 1) -replace '/', '\'
+            if (& $isSkipped $rel) { continue }
             $row = [pscustomobject]@{ Relative = $rel; Source = $f.FullName; Length = [int64]$f.Length }
             [void]$items.Add($row)
         }
     }
     foreach ($file in @($Files | Where-Object { $_ })) {
+        if (& $isSkipped ($file -replace '/', '\')) { continue }
         $full = Join-CopyPath $ContentRoot $file
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $missing += $file; continue }
         $f = Get-Item -LiteralPath $full -Force
@@ -299,4 +310,74 @@ function Copy-MediaContent {
     }
 }
 
-Export-ModuleMember -Function Format-MediaSize, Format-MediaDuration, Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy
+# Folders the build manages on the DEPLOY partition. An update deletes files in them that the new content no
+# longer has (an old image, a driver pack left off, password files from a stick built before they were left off).
+# Logs (copied from WinPE) and anything else on the stick are never touched.
+$script:ManagedFolders = 'AnswerFiles', 'Images', 'Drivers', 'Applications', 'Tasks', 'Tools', 'config'
+
+function Get-MediaUpdatePlan {
+    <#
+    .SYNOPSIS
+        What updating a stick in place has to do: the files of Plan (Get-MediaCopyPlan) missing on Destination or
+        different there (size, or modified time more than 2 s apart: FAT and NTFS round times differently), and
+        the files on the stick to delete. Copy is a plan for Copy-MediaContent.
+    #>
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string]$Destination, [string[]]$Keep = @('Drivers\_WinPE'))
+    $wanted = @{}
+    $copy = New-Object System.Collections.ArrayList
+    $same = 0; $sameBytes = [int64]0; $replacedBytes = [int64]0
+    foreach ($i in @($Plan.Items)) {
+        $wanted[$i.Relative.ToLowerInvariant()] = $true
+        $target = Join-CopyPath $Destination $i.Relative
+        $existing = if (Test-Path -LiteralPath $target -PathType Leaf) { Get-Item -LiteralPath $target -Force } else { $null }
+        if ($existing -and $existing.Length -eq $i.Length -and
+            [Math]::Abs(($existing.LastWriteTimeUtc - [IO.File]::GetLastWriteTimeUtc($i.Source)).TotalSeconds) -le 2) {
+            $same++; $sameBytes += $i.Length; continue
+        }
+        if ($existing) { $replacedBytes += $existing.Length }
+        [void]$copy.Add($i)
+    }
+    $destFull = (Get-Item -LiteralPath $Destination).FullName.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $stale = New-Object System.Collections.ArrayList
+    $staleBytes = [int64]0
+    $keepAll = @($Keep | Where-Object { $_ } | ForEach-Object { ($_ -replace '/', '\').Trim('\').ToLowerInvariant() })
+    foreach ($folder in $script:ManagedFolders) {
+        $full = Join-CopyPath $Destination $folder
+        if (-not (Test-Path -LiteralPath $full -PathType Container)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
+            $rel = $f.FullName.Substring($destFull.Length + 1) -replace '/', '\'
+            $low = $rel.ToLowerInvariant()
+            if ($wanted.ContainsKey($low)) { continue }
+            if (@($keepAll | Where-Object { $low -eq $_ -or $low.StartsWith("$_\") }).Count) { continue }
+            [void]$stale.Add([pscustomobject]@{ Relative = $rel; Length = [int64]$f.Length })
+            $staleBytes += $f.Length
+        }
+    }
+    $total = [int64]0
+    foreach ($i in $copy) { $total += $i.Length }
+    [pscustomobject]@{
+        Copy           = [pscustomobject]@{ Items = @($copy); Directories = @($Plan.Directories); TotalBytes = $total; FileCount = $copy.Count; Missing = @($Plan.Missing) }
+        Stale          = @($stale)
+        StaleBytes     = $staleBytes
+        Unchanged      = $same
+        UnchangedBytes = $sameBytes
+        ReplacedBytes  = $replacedBytes
+        # Extra room the update needs on the stick: what it copies, less what it overwrites or deletes.
+        NeededBytes    = [int64]($total - $replacedBytes - $staleBytes)
+    }
+}
+
+function Remove-StaleMediaFiles {
+    # Deletes Get-MediaUpdatePlan's Stale files, then the folders they leave empty.
+    param([Parameter(Mandatory)]$UpdatePlan, [Parameter(Mandatory)][string]$Destination)
+    foreach ($f in @($UpdatePlan.Stale)) { Remove-Item -LiteralPath (Join-CopyPath $Destination $f.Relative) -Force -ErrorAction SilentlyContinue }
+    foreach ($folder in $script:ManagedFolders) {
+        $full = Join-CopyPath $Destination $folder
+        if (-not (Test-Path -LiteralPath $full)) { continue }
+        Get-ChildItem -LiteralPath $full -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending |
+            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue) } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Export-ModuleMember -Function Format-MediaSize, Format-MediaDuration, Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy, Get-MediaUpdatePlan, Remove-StaleMediaFiles

@@ -456,6 +456,30 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
         Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
     }
 } })
+$ui.BtnImageSchedule.Add_Click({ Invoke-Safely {
+    # Monthly offline patching (ImageUpdateSchedule.psm1): the selected image goes on or off the list; the
+    # scheduled task on this PC is there while the list has an image.
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    Import-Module (Join-Path $srcDir 'ImageUpdateSchedule.psm1') -Force
+    $s = Get-ImageUpdateSchedule -ContentRoot $script:root
+    $rel = "Images\$($image.Name)"
+    if ($s.images -contains $rel) {
+        if (-not (Confirm-Action "Stop updating $($image.Name) every month?")) { return }
+        $s.images = @($s.images | Where-Object { $_ -ne $rel })
+    } else {
+        $text = "Update $($image.Name) every month, $($s.daysAfterPatchTuesday) day(s) after Patch Tuesday at $($s.time), from this PC?`n`n" +
+            "Each month, put the new .msu files from the Microsoft Update Catalog in $(Join-Path $script:root $s.updateFolder) (or a subfolder named $([IO.Path]::GetFileNameWithoutExtension($image.Name)) for this image only). " +
+            'Files the image already has are skipped. The previous version is kept, so a bad month can be rolled back with Versions. This PC must be on and reach the content root.'
+        if (-not (Confirm-Action $text)) { return }
+        $s.images = @($s.images) + $rel
+    }
+    $s.enabled = @($s.images).Count -gt 0
+    Save-ImageUpdateSchedule -ContentRoot $script:root -Schedule $s
+    if ($s.enabled) { Register-ImageUpdateSchedule -ContentRoot $script:root -Time $s.time; Set-Status "Monthly update on for: $(($s.images | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')" }
+    else { Unregister-ImageUpdateSchedule; Set-Status 'Monthly image update off' }
+} })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion
@@ -803,8 +827,11 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
             if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
             if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
         } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
-        if (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+        if ($ui.ChkUsbUpdate.IsChecked) {
+            if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
+        } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
         $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
+        if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
         if ($ui.ChkCopyContent.IsChecked) {
             $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
             if ($packArgs.ContainsKey('DriverPacks')) {
@@ -826,6 +853,19 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
     $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
     if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
+    # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
+    # (a command line argument would show in the process list).
+    $pePw = $ui.PwdWinPE.Password
+    if ($pePw -or $ui.PwdWinPE2.Password) {
+        if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; return }
+        if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; return }
+        $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
+        [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
+        $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
+    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkSecretsOnMedia.IsChecked) {
+        if (-not (Confirm-Action 'No WinPE password: anyone with the stick can boot it, and the operator types the join and other passwords on each PC (they are not copied to the stick). Continue?')) { return }
+    }
+    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
 
     # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
     $buildArgs = @('-NoExit') + $buildArgs
@@ -1032,6 +1072,12 @@ $ui.BtnPcReimage.Add_Click({ Invoke-Safely {
         '-ContentRoot', (ConvertTo-Arg $script:root), '-AnswerFile', (ConvertTo-Arg $answer), '-Mac', (($rows | ForEach-Object { ConvertTo-MacKey $_.Mac }) -join ','))
     if ($ui.ChkKeepNames.IsChecked) { $reimageArgs += '-KeepNames' }
     if ($ui.ChkSkipF12.IsChecked) { $reimageArgs += '-SkipPxePrompt' }
+    if ($ui.ChkLocalBoot.IsChecked) {
+        $bootWim = Join-Path $script:root 'Boot\boot.wim'
+        if (-not (Test-Path -LiteralPath $bootWim)) { Show-Error "No boot image at $bootWim. On the Media tab, build a PXE boot.wim with $(Split-Path $bootWim -Parent) as the output folder."; return }
+        $reimageArgs += @('-BootMethod', 'LocalDisk')
+    }
+    if ($ui.ChkBackupFirst.IsChecked) { $reimageArgs += '-BackupFirst' }
     # Its own window: it waits up to 20 minutes for the PCs to start their deploy.
     Start-Process powershell.exe -ArgumentList $reimageArgs
     Start-Sleep -Milliseconds 1500   # let it write the jobs so the list shows them

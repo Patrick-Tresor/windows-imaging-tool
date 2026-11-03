@@ -59,7 +59,10 @@ function Get-MediaContent {
         [string[]]$AnswerFiles,
         [string]$DefaultAnswerFile,
         # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
-        [AllowEmptyCollection()][string[]]$DriverPacks
+        [AllowEmptyCollection()][string[]]$DriverPacks,
+        # Also copy config\secrets (join, share, Administrator, BIOS passwords) as plain text. Off by default: a lost
+        # stick would give them away. WinPE then takes them from the WinPE password's vault, or asks the operator.
+        [switch]$IncludeSecrets
     )
     $pickPacks = $PSBoundParameters.ContainsKey('DriverPacks')
     $packsCopied = @()
@@ -72,7 +75,7 @@ function Get-MediaContent {
     if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
-    # Always: settings, driver catalog, naming list, password files, and the BIOS tools.
+    # Always: settings, driver catalog, naming list and the BIOS tools (password files only with -IncludeSecrets).
     # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
     foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
 
@@ -146,10 +149,18 @@ function Get-MediaContent {
     if ($DefaultAnswerFile -and $names -and $DefaultAnswerFile -notin $names) {
         $notes += "The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use."
     }
+    $exclude = @()
+    if (-not $IncludeSecrets) {
+        $exclude += 'config\secrets'
+        if ($names -and (Test-Path (Join-MediaPath $ContentRoot 'config\secrets'))) {
+            $notes += 'Password files (config\secrets) are not copied to the stick. WinPE takes them from the WinPE password you set for the build, or asks for them.'
+        }
+    }
     [pscustomobject]@{
         AnswerFiles = $rows
         Folders     = $folders
         Files       = $files
+        Exclude     = $exclude
         Problems    = $problems
         Notes       = $notes
     }

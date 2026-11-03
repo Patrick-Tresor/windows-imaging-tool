@@ -201,6 +201,40 @@
         "rem 0 = updated, 1 = restart needed, 500 = nothing to update",
         "exit /b %ERRORLEVEL%"
       ]
+    },
+    {
+      "name": "Autopilot-HardwareHash",
+      "description": "Collect the Windows Autopilot hardware hash for Intune and save it to the share",
+      "phase": "FIRSTBOOT",
+      "script": "autopilot-hash.ps1",
+      "arguments": "-Share REPLACE_SHARE",
+      "timeoutMinutes": 10,
+      "successCodes": [
+        0
+      ],
+      "requirements": {
+        "makers": [],
+        "models": []
+      },
+      "verify": true,
+      "notes": "Replace REPLACE_SHARE with a folder such as \\\\server\\Deploy\\Autopilot (Domain Computers need write access, as for Status); add -GroupTag Staff to tag the PCs. A copy always stays in C:\\Windows\\Temp. Merge the files with Merge-AutopilotCsv (src\\Autopilot.psm1) and import the CSV in Intune > Devices > Windows enrollment > Devices.",
+      "text": [
+        "param([string]$Share, [string]$GroupTag = '')",
+        "$ErrorActionPreference = 'Stop'",
+        "# The same hash Get-WindowsAutopilotInfo reads: Windows 10 1703 or later, run as SYSTEM or an administrator.",
+        "$dev = Get-CimInstance -Namespace root/cimv2/mdm/dmmap -ClassName MDM_DevDetail_Ext01 -Filter \"InstanceID='Ext' AND ParentID='./DevDetail'\"",
+        "if (-not $dev.DeviceHardwareData) { throw 'No hardware hash from WMI (MDM_DevDetail_Ext01).' }",
+        "$serial = \"$((Get-CimInstance Win32_BIOS).SerialNumber)\".Trim()",
+        "$lines = @('Device Serial Number,Windows Product ID,Hardware Hash' + $(if ($GroupTag) { ',Group Tag' } else { '' }))",
+        "$lines += \"$serial,,$($dev.DeviceHardwareData)\" + $(if ($GroupTag) { \",$GroupTag\" } else { '' })",
+        "$name = 'Autopilot-' + ($serial -replace '[^A-Za-z0-9._-]', '_') + '.csv'",
+        "$lines | Set-Content -Path (Join-Path $env:windir \"Temp\\$name\") -Encoding ascii",
+        "if ($Share) {",
+        "    New-Item -ItemType Directory -Path $Share -Force | Out-Null",
+        "    $lines | Set-Content -Path (Join-Path $Share $name) -Encoding ascii",
+        "    Write-Output \"Autopilot hash for $serial saved to $Share\"",
+        "} else { Write-Output \"Autopilot hash for $serial saved to $env:windir\\Temp\\$name\" }"
+      ]
     }
   ]
 }

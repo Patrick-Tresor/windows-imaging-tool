@@ -193,6 +193,18 @@ under the content root, usually `config\secrets\`. Anyone who can read the share
 can read them, so use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
+**Password files never go on a USB stick in plain text.** The stick gets
+`config` without `config\secrets`. Set a **WinPE password** on the Media tab
+(8 characters or more) and the password files go inside the boot image,
+encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE asks for that
+password before it does anything and shuts down after 5 wrong tries or
+**Shut down**. Without a WinPE password, WinPE asks the operator for each
+password it needs (join account, share, local Administrator, BitLocker PIN,
+BIOS) and keeps it in memory only. A remote reimage cannot ask, so it needs the
+password files on the share, and a PXE image with a WinPE password waits for
+someone to type it. Tick **Passwords on USB** only if you accept that anyone
+holding the stick can read them.
+
 **The join account is checked before the disk is wiped.** When WinPE can reach
 the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).
 A wrong password, or a locked, disabled or expired account, stops the deploy
@@ -375,6 +387,33 @@ PCs. Without the console:
 
 This updates Windows itself, not the applications in the image or its recovery
 environment (`winre.wim`); refresh those with a new capture from time to time.
+
+### Every month, on a schedule
+
+Select an image and click **Monthly update...** on the Images tab. A scheduled
+task on this PC (`Imaging - monthly image update`, as SYSTEM) runs
+`src\Invoke-ScheduledImageUpdate.ps1` each day; from the day after Patch Tuesday
+it applies, once a month, the .msu/.cab files in `Updates\` (or
+`Updates\<image name>\` for that image only) that the image has not had yet,
+with cleanup, keeping the previous version for rollback. It does not download
+anything: put the month's files from the Microsoft Update Catalog in the folder
+before that day. Settings: `config\image-update-schedule.json` (`daysAfterPatchTuesday`,
+`time`, `cleanup`). Run it now with `Invoke-ScheduledImageUpdate.ps1 -ContentRoot D:\DeployShare -Force`.
+
+## Windows Autopilot (Intune)
+
+Add the **Autopilot-HardwareHash** task (Tasks tab, Template) to an answer file
+at FIRSTBOOT and replace `REPLACE_SHARE` with a folder on the share, for example
+`\\server\Deploy\Autopilot` (Domain Computers need write access). Each PC saves
+`Autopilot-<serial>.csv` there with its hardware hash (`-GroupTag Staff` adds a
+group tag). Merge them into one file and import it in Intune (Devices > Windows
+enrollment > Devices > Import):
+`Import-Module .\src\Autopilot.psm1; Merge-AutopilotCsv -Folder \\server\Deploy\Autopilot -OutFile C:\Temp\autopilot.csv`.
+
+## Testing on real hardware
+
+[docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md) lists what still needs a real PC,
+in order, with what a pass looks like.
 
 ## PXE with WDS
 
@@ -588,6 +627,24 @@ What the PCs need:
   set as **WDS server** on the tab (empty = this PC). From the command line:
   `.\src\Start-RemoteReimage.ps1 -ContentRoot \\server\Deploy -Mac 00155D0A1B2C,00155D0A1B2D -AnswerFile Lab-W11 -KeepNames -SkipPxePrompt`
 
+**Without PXE.** Tick **No PXE** to reimage running PCs without WDS: the window
+copies `Boot\boot.wim` from the content root to the PC's `C:\_ImagingBoot` over
+PowerShell remoting, adds a one-time RAM disk boot entry for it with `bcdedit`,
+suspends BitLocker for that one restart (the boot manager has to read C:) and
+restarts. WinPE then reaches the share in Deploy Settings and takes the job as
+above. Build that boot image on the Media tab: **PXE boot.wim** with
+`<content root>\Boot` as the output folder (rebuild it when you change WinPE).
+PCs that are off still need PXE, since nothing can copy a file to them. Command
+line: `-BootMethod LocalDisk` (and `-BootWim` for another file). A boot image with
+a WinPE password waits at the PC for someone to type it.
+
+**Backup first.** Tick **Back up each PC's old Windows** (`-BackupFirst`, or
+`Deploy-Image.ps1 -BackupFirst`) and WinPE captures the old Windows partition to
+`Backups\<serial>-<date>.wim` on the share before it erases the disk (DISM, fast
+compression; restore files with `dism /Mount-Image` or deploy it back). Only to the
+share, not to a USB stick; a PC whose Windows is locked by BitLocker stops before
+anything is erased. Clear old backups by hand.
+
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
@@ -598,6 +655,14 @@ What the PCs need:
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
    pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
+   To refresh a stick you built before without erasing it, tick **Update a stick this console built
+   before** (`-UpdateOnly`): WinPE is replaced, only files whose size or date changed are copied, and
+   files the new content no longer has are deleted from `AnswerFiles`, `Images`, `Drivers`,
+   `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
+   is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
+   Volume down while it starts.
+   In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
+   on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
    from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):

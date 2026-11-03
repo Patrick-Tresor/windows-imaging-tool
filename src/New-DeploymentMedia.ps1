@@ -14,6 +14,13 @@
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'
     Puts only those two driver packs on the stick instead of the whole Drivers folder.
 .EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
+    WinPE asks for the password in that file before it does anything. The content root's password files go into
+    boot.wim encrypted with it; they are never copied to the stick as plain text (unless -SecretsOnMedia).
+.EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
+    Updates a stick built earlier without erasing it: new WinPE, and only the content files that changed.
+.EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
@@ -39,6 +46,9 @@ param(
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
     [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
+    [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
+    [switch]$SecretsOnMedia,
+    [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
@@ -50,6 +60,7 @@ Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -71,7 +82,20 @@ if (($DriverPacks -or $NoDriverPacks) -and -not $ContentSource) { throw '-Driver
 if ($DriverPacks -and $NoDriverPacks) { throw 'Pass -DriverPacks or -NoDriverPacks, not both.' }
 # Pack folders can contain commas, so the console joins them with | (not allowed in Windows file names).
 $DriverPacks = @($DriverPacks | ForEach-Object { $_ -split '\|' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# The WinPE password: read now, and the console's temporary file removed, so it is not left on disk.
+$winPEPassword = $null
+if ($WinPEPasswordFile) {
+    if (-not (Test-Path -LiteralPath $WinPEPasswordFile)) { throw "WinPE password file not found: $WinPEPasswordFile" }
+    $winPEPassword = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($WinPEPasswordFile))).Trim()
+    $tempFull = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    if ([IO.Path]::GetFullPath($WinPEPasswordFile).StartsWith($tempFull, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $WinPEPasswordFile -Force }
+    if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
+}
+if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
+if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
+if ($SecretsOnMedia -and -not $ContentSource) { throw '-SecretsOnMedia needs -ContentSource.' }
 $packArgs = @{}
+if ($SecretsOnMedia) { $packArgs.IncludeSecrets = $true }
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
 if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
@@ -86,9 +110,14 @@ if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
 $copyPlan = $null
 if ($Target -eq 'Usb' -and $ContentSource) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
-    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files }
-                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) }
+    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude }
+                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { 'config\secrets' }) }
     Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
+}
+if ($UpdateOnly) {
+    # Check the stick is one of ours before spending minutes on the build.
+    if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk).' }
+    $null = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
 }
 if ($BootVM) {
     # Check the VM before spending minutes on the build.
@@ -170,6 +199,20 @@ try {
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
+    if ($winPEPassword) {
+        # The password files, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start.
+        $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
+        $secrets = Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath
+        New-SecretVault -Password $winPEPassword -Secrets $secrets | ConvertTo-Json | Set-Content "$deployDir\config\vault.json" -Encoding ascii
+        Write-Host "WinPE password set: WinPE asks for it at start. $($secrets.Count) password file(s) from $secretRoot\config\secrets are inside boot.wim, encrypted with it." -ForegroundColor Green
+        $winPEPassword = $null
+        # cmd /c instead of WinPE's default cmd /k: Ctrl+C at the password prompt ends the shell, and WinPE restarts
+        # instead of leaving a command prompt behind the lock.
+        "[LaunchApps]`r`n%SYSTEMROOT%\System32\cmd.exe, /c %SYSTEMROOT%\System32\startnet.cmd`r`n" |
+            Set-Content "$mount\Windows\System32\winpeshl.ini" -Encoding ascii
+    } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+        Write-Warning 'No WinPE password: anyone with the stick can boot it, and WinPE asks the operator for the join and other passwords (they are not on the stick).'
+    }
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
         ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
@@ -235,41 +278,64 @@ switch ($Target) {
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
         $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
-        if ($copyPlan) {
-            # 2 GB WINPE partition, plus a little for NTFS itself.
-            $room = [int64]$disk.Size - 2GB - [int64]($disk.Size * 0.02)
-            if ($copyPlan.TotalBytes -gt $room) {
-                throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
+        $update = $null
+        if ($UpdateOnly) {
+            # A stick built before: keep its partitions, refresh WinPE, copy only what changed, delete what was dropped.
+            $sticks = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
+            $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
+            if ($copyPlan) {
+                $update = Get-MediaUpdatePlan -Plan $copyPlan -Destination "${dataLetter}:\"
+                Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-MediaSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
+                if ($update.NeededBytes -gt ($sticks.Data.FreeBytes - 64MB)) {
+                    throw ('The update needs {0} more but the stick''s DEPLOY partition has {1} free. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $update.NeededBytes), (Format-MediaSize $sticks.Data.FreeBytes))
+                }
+            }
+            Write-Host "Updating WinPE on ${bootLetter}:..."
+            robocopy "$WorkDir\media" "${bootLetter}:\" /MIR /NFL /NDL /NJH /NJS | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Updating the WinPE boot files on ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
+            if ($update) {
+                Remove-StaleMediaFiles -UpdatePlan $update -Destination "${dataLetter}:\"
+                $copied = Copy-MediaContent -Plan $update.Copy -Destination "${dataLetter}:\"
+                Write-Host ('Copied {0} files, {1}, in {2}; {3} file(s) were already up to date' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), $update.Unchanged)
             }
         }
-        if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
-        Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
+        if (-not $UpdateOnly) {
+            if ($copyPlan) {
+                # 2 GB WINPE partition, plus a little for NTFS itself.
+                $room = [int64]$disk.Size - 2GB - [int64]($disk.Size * 0.02)
+                if ($copyPlan.TotalBytes -gt $room) {
+                    throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
+                }
+            }
+            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
+            Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
 
-        # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
-        Reset-UsbDisk -DiskNumber $UsbDiskNumber
-        $boot = New-Partition -DiskNumber $UsbDiskNumber -Size 2GB -IsActive -AssignDriveLetter
-        Format-Volume -Partition $boot -FileSystem FAT32 -NewFileSystemLabel 'WINPE' -Confirm:$false | Out-Null
-        $data = New-Partition -DiskNumber $UsbDiskNumber -UseMaximumSize -AssignDriveLetter
-        Format-Volume -Partition $data -FileSystem NTFS -NewFileSystemLabel 'DEPLOY' -Confirm:$false | Out-Null
+            # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
+            Reset-UsbDisk -DiskNumber $UsbDiskNumber
+            $boot = New-Partition -DiskNumber $UsbDiskNumber -Size 2GB -IsActive -AssignDriveLetter
+            Format-Volume -Partition $boot -FileSystem FAT32 -NewFileSystemLabel 'WINPE' -Confirm:$false | Out-Null
+            $data = New-Partition -DiskNumber $UsbDiskNumber -UseMaximumSize -AssignDriveLetter
+            Format-Volume -Partition $data -FileSystem NTFS -NewFileSystemLabel 'DEPLOY' -Confirm:$false | Out-Null
 
-        $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
-        $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
-        Write-Host "Copying WinPE boot files to ${bootLetter}:..."
-        robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "Copying the WinPE boot files to ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
-        # Legacy BIOS boot code in the MBR and the partition boot sector, as MakeWinPEMedia writes it.
-        $bootsect = "$adk\Deployment Tools\amd64\BCDBoot\bootsect.exe"
-        & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
-        # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
-        New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
-        if ($copyPlan) {
-            # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
-            # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
-            $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\"
-            Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
-            if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
+            $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
+            $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
+            Write-Host "Copying WinPE boot files to ${bootLetter}:..."
+            robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Copying the WinPE boot files to ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
+            # Legacy BIOS boot code in the MBR and the partition boot sector, as MakeWinPEMedia writes it.
+            $bootsect = "$adk\Deployment Tools\amd64\BCDBoot\bootsect.exe"
+            & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
+            # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
+            New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
+            if ($copyPlan) {
+                # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
+                # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
+                $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\"
+                Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
+            }
         }
+        if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
         # The vendor WinPE packs on the stick too, so WinPE can load them with drvload when boot.wim lacks a driver.
         foreach ($pack in $vendorPacks) {
             $peOnStick = "${dataLetter}:\Drivers\_WinPE\$(Split-Path $pack.Path -Leaf)"
@@ -281,6 +347,7 @@ switch ($Target) {
         Write-Host ' USB media ready' -ForegroundColor Green
         Write-Host " WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)" -ForegroundColor Green
         Write-Host ' Eject the stick in Windows before you unplug it.' -ForegroundColor Green
+        Write-Host ' Boot menu key: Dell F12, HP F9, Lenovo F12 (or the Novo button), Microsoft Surface: hold Volume down' -ForegroundColor Green
         Write-Host '==============================================' -ForegroundColor Green
     }
 }

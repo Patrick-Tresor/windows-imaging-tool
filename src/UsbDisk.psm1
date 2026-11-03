@@ -23,4 +23,28 @@ function Reset-UsbDisk {
     elseif ($style -ne 'MBR') { Set-Disk -Number $DiskNumber -PartitionStyle MBR }
 }
 
-Export-ModuleMember -Function Get-UsbTargetDisk, Reset-UsbDisk
+function Get-UsbStickVolumes {
+    <#
+    .SYNOPSIS
+        The WINPE (FAT32) and DEPLOY (NTFS) partitions of a stick this tool built, with drive letters (one is
+        assigned when Windows gave none), for updating it in place. Throws when the stick is not one of ours.
+    #>
+    param([Parameter(Mandatory)][int]$DiskNumber)
+    $null = Get-UsbTargetDisk -DiskNumber $DiskNumber
+    $found = @{}
+    foreach ($p in @(Get-Partition -DiskNumber $DiskNumber -ErrorAction SilentlyContinue)) {
+        $v = $p | Get-Volume -ErrorAction SilentlyContinue
+        if (-not $v -or $v.FileSystemLabel -notin 'WINPE', 'DEPLOY') { continue }
+        if (-not $p.DriveLetter -or $p.DriveLetter -eq [char]0) {
+            $p | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction Stop
+            $p = Get-Partition -DiskNumber $DiskNumber -PartitionNumber $p.PartitionNumber
+        }
+        $found[$v.FileSystemLabel] = [pscustomobject]@{ Letter = "$($p.DriveLetter)"; Partition = $p; FreeBytes = [int64]$v.SizeRemaining; SizeBytes = [int64]$v.Size }
+    }
+    if (-not $found.WINPE -or -not $found.DEPLOY) {
+        throw "USB disk $DiskNumber has no WINPE and DEPLOY partitions, so it was not built by this tool. Build it without Update (that erases it)."
+    }
+    [pscustomobject]@{ Boot = $found.WINPE; Data = $found.DEPLOY }
+}
+
+Export-ModuleMember -Function Get-UsbTargetDisk, Reset-UsbDisk, Get-UsbStickVolumes

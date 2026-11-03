@@ -500,7 +500,8 @@ function Write-DriverReport {
 
 function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
-    param([string]$SettingsPath)
+    # Vault: the password files the WinPE password unlocked (SecretVault.psm1), for the share account.
+    param([string]$SettingsPath, [hashtable]$Vault = @{})
     foreach ($vol in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' }) {
         $root = "$($vol.DriveLetter):\"
         if (Test-Path (Join-Path $root 'Images')) { Write-DeployLog "Using USB content at $root"; return $root }
@@ -513,7 +514,7 @@ function Find-ContentRoot {
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
 
-    $cred = Get-ShareCredential -SettingsPath $SettingsPath
+    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault
     Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $cred.User -Password $cred.Password
     Write-DeployLog "Using network content at Z:\"
     'Z:\'
@@ -605,12 +606,15 @@ function Test-JoinAccount {
 
 function Get-ShareCredential {
     # The share account from deploy-settings.json. The password file sits next to config\ on the media (X:\Deploy).
-    param([Parameter(Mandatory)][string]$SettingsPath)
+    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them).
+    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{})
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
     $password = $null
     if ($settings.share.user -and $settings.share.passwordFile) {
         $pwFile = Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $settings.share.passwordFile
+        $key = ($settings.share.passwordFile -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
         if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
+        elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
     }
     [pscustomobject]@{ User = $settings.share.user; Password = $password }
 }

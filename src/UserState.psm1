@@ -148,14 +148,15 @@ function Get-UserStatePlan {
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$UsmtDir,
         [Parameter(Mandatory)][string]$Serial,
-        [string]$SharePath                  # the answer file's store path, already resolved against the content root
+        [string]$SharePath,                 # the answer file's store path, already resolved against the content root
+        [string]$KeyFilePath                # the encryption key file when it is not on the content root (WinPE password vault)
     )
     if (-not (Test-Path (Join-Path $UsmtDir 'scanstate.exe'))) {
         throw "User data migration is on, but USMT isn't in this boot image ($UsmtDir). Install the ADK's User State Migration Tool feature and rebuild the media."
     }
     $keyFile = $null
     if ($Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
-        $keyFile = Join-Path $ContentRoot $Answer.UserDataKeyFile
+        $keyFile = if ($KeyFilePath) { $KeyFilePath } else { Join-Path $ContentRoot $Answer.UserDataKeyFile }
         if (-not (Test-Path $keyFile)) { throw "User data encryption key file not found: $keyFile" }
     }
     $rules = @($Answer.UserDataRules | ForEach-Object { Resolve-UsmtRuleFile -Rule $_ -UsmtDir $UsmtDir -ContentRoot $ContentRoot.TrimEnd('\') })
@@ -287,6 +288,40 @@ function Copy-UserStateForRestore {
 
 #endregion
 
-Export-ModuleMember -Function Get-UserStateStoreName, Resolve-UsmtRuleFile, Get-ScanStateArguments, Get-LoadStateArguments,
+function Get-WindowsBackupArgs {
+    # DISM arguments that capture the old Windows partition into one WIM before the disk is wiped.
+    param([Parameter(Mandatory)][string]$Drive, [Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Name)
+    @('/Capture-Image', "/ImageFile:$ImagePath", "/CaptureDir:$($Drive.TrimEnd('\'))\", "/Name:$Name", '/Compress:fast', '/CheckIntegrity')
+}
+
+function Get-WindowsBackupPlan {
+    <#
+    .SYNOPSIS
+        Checks, before anything is erased, that the old Windows on the target disk can be backed up to
+        <content root>\Backups\<serial>-<date>.wim. Only to a network share: a USB stick is rarely big enough.
+        Throws when the backup was asked for and cannot be done; returns Mode None when there is no Windows.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$DiskNumber,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$Serial,
+        [bool]$IsNetworkRoot = $true,
+        [datetime]$Now = (Get-Date),
+        $Source                      # Find-UserStateSource result (tests); found on the disk when not given
+    )
+    if (-not $IsNetworkRoot) { throw 'Backing up the old Windows needs the network share as content (a remote reimage or PXE/LAN boot), not a USB stick.' }
+    if (-not $Source) { $Source = Find-UserStateSource -DiskNumber $DiskNumber }
+    $vol = $Source.Volume
+    if (-not $vol -or -not $vol.HasWindows) {
+        if ($vol -and $vol.Encryption -eq 'Locked') { throw "The old Windows ($($vol.Drive)) is locked by BitLocker, so it can't be backed up. Unlock it or turn the backup off." }
+        return [pscustomobject]@{ Mode = 'None'; Drive = $null; ImagePath = $null; Summary = 'no Windows on the disk, nothing to back up' }
+    }
+    $safe = ($Serial -replace '[^A-Za-z0-9._-]', '_')
+    # Not Join-Path: it fails on a drive this PC does not have (Z: of WinPE, in tests).
+    $path = [IO.Path]::Combine($ContentRoot, 'Backups', ("{0}-{1}.wim" -f $safe, $Now.ToString('yyyyMMdd-HHmm')))
+    [pscustomobject]@{ Mode = 'Backup'; Drive = $vol.Drive; ImagePath = $path; Name = "Backup of $Serial $($Now.ToString('yyyy-MM-dd HH:mm'))"; Summary = "old Windows on $($vol.Drive) to $path" }
+}
+
+Export-ModuleMember -Function Get-WindowsBackupArgs, Get-WindowsBackupPlan, Get-UserStateStoreName, Resolve-UsmtRuleFile, Get-ScanStateArguments, Get-LoadStateArguments,
     Test-UsmtExitCode, Get-VolumeEncryption, Find-UserStateSource, Get-UserStatePlan, Invoke-Usmt, Backup-UserState,
     Clear-WindowsPartition, Copy-UserStateForRestore
