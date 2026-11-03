@@ -140,6 +140,26 @@ try {
     try { Install-VendorDriverPack -ContentRoot $root -Pack $zipPack -DownloadDir (Join-Path $root 'nowhere') 6>$null 3>$null } catch { $threw = $true }
     Assert-Equal $threw $true 'a failed download stops the install'
     Assert-Equal (Test-Path (Join-Path $root 'Drivers/Lenovo/ThinkPad X1 Carbon Gen 12/net/e1d.inf')) $true 'a failed update keeps the old drivers'
+
+    # Vendor .exe extraction. HP's sp173204.exe (WinPE pack) exited 1168 for /s /e /f: the drivers that came out
+    # count, then HP's CMSL form (-e -f <folder> -s) is tried, and only no drivers at all fails.
+    $ex = Join-Path $root 'extract'
+    $calls = [Collections.ArrayList]@()
+    $writeInf = { param($Exe, $Arguments) [void]$calls.Add($Arguments -join ' '); New-Item -ItemType Directory -Path $ex -Force | Out-Null; Set-Content (Join-Path $ex 'x.inf') '[Version]'; 1168 }
+    Invoke-VendorExtract -File 'C:\x\sp173204.exe' -Maker HP -Destination $ex -Runner $writeInf 6>$null
+    Assert-Equal $calls.Count 1 'HP: an error exit with drivers extracted is accepted'
+    Remove-Item $ex -Recurse -Force
+    $calls.Clear()
+    $secondWorks = { param($Exe, $Arguments) [void]$calls.Add($Arguments -join ' '); if ($Arguments[0] -eq '-e') { New-Item -ItemType Directory -Path $ex -Force | Out-Null; Set-Content (Join-Path $ex 'x.inf') '[Version]'; 0 } else { 1168 } }
+    Invoke-VendorExtract -File 'C:\x\sp173204.exe' -Maker HP -Destination $ex -Runner $secondWorks 6>$null
+    Assert-Equal ($calls -join '|') "/s /e /f `"$ex`"|-e -f `"$ex`" -s" 'HP: 1168 with nothing extracted retries with -e -f <folder> -s'
+    Remove-Item $ex -Recurse -Force
+    $msg = $null
+    try { Invoke-VendorExtract -File 'C:\x\sp173204.exe' -Maker HP -Destination $ex -Runner { 1168 } 6>$null } catch { $msg = $_.Exception.Message }
+    Assert-Equal $msg 'sp173204.exe exited with code 1168, then 1168 while extracting.' 'HP: no drivers after both tries fails with both codes'
+    $msg = $null
+    try { Invoke-VendorExtract -File 'C:\x\dell.exe' -Maker Dell -Destination $ex -Runner { 2 } 6>$null } catch { $msg = $_.Exception.Message }
+    Assert-Equal $msg 'dell.exe exited with code 2 while extracting.' 'Dell: one try, its exit code reported'
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }

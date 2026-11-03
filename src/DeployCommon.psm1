@@ -350,9 +350,14 @@ function Find-UnstartedDeployment {
     $skip = @($ExcludeRoots + 'X:\' | Where-Object { $_ } | ForEach-Object { $_.Substring(0, [Math]::Min(2, $_.Length)).ToUpperInvariant() })
     foreach ($r in $Roots) {
         if ($r.Length -ge 2 -and $r.Substring(0, 2).ToUpperInvariant() -in $skip) { continue }
-        $path = Join-Path $r 'Deploy\deployed.json'
-        if (-not (Test-Path -LiteralPath $path)) { continue }
-        try { $m = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json } catch { continue }
+        # .NET calls, not Join-Path/Test-Path/Get-Content: a volume PowerShell has no drive for (the old Windows
+        # partition at C: on a BitLocker or not-yet-ready disk) makes those throw "A drive with the name 'C' does
+        # not exist", which stopped the deploy before the wizard opened.
+        try {
+            $path = [IO.Path]::Combine($r, 'Deploy', 'deployed.json')
+            if (-not [IO.File]::Exists($path)) { continue }
+            $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+        } catch { continue }
         if ("$($m.serial)" -eq $Serial) {
             $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
             return $m

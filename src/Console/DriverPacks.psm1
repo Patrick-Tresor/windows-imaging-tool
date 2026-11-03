@@ -487,13 +487,41 @@ function Expand-VendorDriverPack {
     if ($ext -ne '.exe') { throw "Don't know how to extract $ext files." }
 
     Test-VendorSignature -File $File -Maker $Maker
-    $switches = @(switch ($Maker) {
-        'Dell'   { '/s', "/e=`"$Destination`"" }
-        'HP'     { '/s', '/e', '/f', "`"$Destination`"" }
-        'Lenovo' { '/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES' }
-    })
-    $proc = Start-Process -FilePath $File -ArgumentList $switches -Wait -PassThru -WindowStyle Hidden
-    if ($proc.ExitCode -ne 0) { throw "$([IO.Path]::GetFileName($File)) exited with code $($proc.ExitCode) while extracting." }
+    Invoke-VendorExtract -File $File -Maker $Maker -Destination $Destination
+}
+
+function Get-VendorExtractSwitches {
+    # The command lines that extract a vendor .exe, tried in order. HP's newer SoftPaq extractor can exit with an
+    # error (1168, "element not found") for /s /e /f; HP's own CMSL extracts with -e -f <folder> -s and ignores the
+    # exit code, so that form is the second try.
+    param([Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination)
+    switch ($Maker) {
+        'Dell'   { ,@('/s', "/e=`"$Destination`"") }
+        'HP'     { ,@('/s', '/e', '/f', "`"$Destination`""); ,@('-e', '-f', "`"$Destination`"", '-s') }
+        'Lenovo' { ,@('/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES') }
+    }
+}
+
+function Invoke-VendorExtract {
+    # Runs the vendor's extractor. A non-zero exit code only fails when nothing usable came out: HP SoftPaqs can
+    # report an error after extracting every file, and the drivers (.inf files) are what counts.
+    param(
+        [Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination,
+        [scriptblock]$Runner = { param($Exe, $Arguments) (Start-Process -FilePath $Exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden).ExitCode }
+    )
+    $name = [IO.Path]::GetFileName($File)
+    $codes = @()
+    foreach ($switches in @(Get-VendorExtractSwitches -Maker $Maker -Destination $Destination)) {
+        $code = & $Runner $File $switches
+        $hasInf = [bool](Get-ChildItem -LiteralPath $Destination -Filter *.inf -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($code -eq 0) { return }
+        if ($hasInf) {
+            Write-Host "$name exited with code $code but its drivers were extracted; using them." -ForegroundColor DarkGray
+            return
+        }
+        $codes += $code
+    }
+    throw "$name exited with code $($codes -join ', then ') while extracting."
 }
 
 function Install-VendorDriverPack {
@@ -547,7 +575,7 @@ function Install-VendorDriverPack {
 
 #endregion
 
-Export-ModuleMember -Function Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
+Export-ModuleMember -Function Invoke-VendorExtract, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack
