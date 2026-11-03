@@ -288,6 +288,39 @@ function Copy-UserStateForRestore {
 
 #endregion
 
-Export-ModuleMember -Function Get-UserStateStoreName, Resolve-UsmtRuleFile, Get-ScanStateArguments, Get-LoadStateArguments,
+function Get-WindowsBackupArgs {
+    # DISM arguments that capture the old Windows partition into one WIM before the disk is wiped.
+    param([Parameter(Mandatory)][string]$Drive, [Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Name)
+    @('/Capture-Image', "/ImageFile:$ImagePath", "/CaptureDir:$($Drive.TrimEnd('\'))\", "/Name:$Name", '/Compress:fast', '/CheckIntegrity')
+}
+
+function Get-WindowsBackupPlan {
+    <#
+    .SYNOPSIS
+        Checks, before anything is erased, that the old Windows on the target disk can be backed up to
+        <content root>\Backups\<serial>-<date>.wim. Only to a network share: a USB stick is rarely big enough.
+        Throws when the backup was asked for and cannot be done; returns Mode None when there is no Windows.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$DiskNumber,
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$Serial,
+        [bool]$IsNetworkRoot = $true,
+        [datetime]$Now = (Get-Date),
+        $Source                      # Find-UserStateSource result (tests); found on the disk when not given
+    )
+    if (-not $IsNetworkRoot) { throw 'Backing up the old Windows needs the network share as content (a remote reimage or PXE/LAN boot), not a USB stick.' }
+    if (-not $Source) { $Source = Find-UserStateSource -DiskNumber $DiskNumber }
+    $vol = $Source.Volume
+    if (-not $vol -or -not $vol.HasWindows) {
+        if ($vol -and $vol.Encryption -eq 'Locked') { throw "The old Windows ($($vol.Drive)) is locked by BitLocker, so it can't be backed up. Unlock it or turn the backup off." }
+        return [pscustomobject]@{ Mode = 'None'; Drive = $null; ImagePath = $null; Summary = 'no Windows on the disk, nothing to back up' }
+    }
+    $safe = ($Serial -replace '[^A-Za-z0-9._-]', '_')
+    $path = Join-Path (Join-Path $ContentRoot 'Backups') ("{0}-{1}.wim" -f $safe, $Now.ToString('yyyyMMdd-HHmm'))
+    [pscustomobject]@{ Mode = 'Backup'; Drive = $vol.Drive; ImagePath = $path; Name = "Backup of $Serial $($Now.ToString('yyyy-MM-dd HH:mm'))"; Summary = "old Windows on $($vol.Drive) to $path" }
+}
+
+Export-ModuleMember -Function Get-WindowsBackupArgs, Get-WindowsBackupPlan, Get-UserStateStoreName, Resolve-UsmtRuleFile, Get-ScanStateArguments, Get-LoadStateArguments,
     Test-UsmtExitCode, Get-VolumeEncryption, Find-UserStateSource, Get-UserStatePlan, Invoke-Usmt, Backup-UserState,
     Clear-WindowsPartition, Copy-UserStateForRestore

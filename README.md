@@ -600,6 +600,24 @@ What the PCs need:
   set as **WDS server** on the tab (empty = this PC). From the command line:
   `.\src\Start-RemoteReimage.ps1 -ContentRoot \\server\Deploy -Mac 00155D0A1B2C,00155D0A1B2D -AnswerFile Lab-W11 -KeepNames -SkipPxePrompt`
 
+**Without PXE.** Tick **No PXE** to reimage running PCs without WDS: the window
+copies `Boot\boot.wim` from the content root to the PC's `C:\_ImagingBoot` over
+PowerShell remoting, adds a one-time RAM disk boot entry for it with `bcdedit`,
+suspends BitLocker for that one restart (the boot manager has to read C:) and
+restarts. WinPE then reaches the share in Deploy Settings and takes the job as
+above. Build that boot image on the Media tab: **PXE boot.wim** with
+`<content root>\Boot` as the output folder (rebuild it when you change WinPE).
+PCs that are off still need PXE, since nothing can copy a file to them. Command
+line: `-BootMethod LocalDisk` (and `-BootWim` for another file). A boot image with
+a WinPE password waits at the PC for someone to type it.
+
+**Backup first.** Tick **Back up each PC's old Windows** (`-BackupFirst`, or
+`Deploy-Image.ps1 -BackupFirst`) and WinPE captures the old Windows partition to
+`Backups\<serial>-<date>.wim` on the share before it erases the disk (DISM, fast
+compression; restore files with `dism /Mount-Image` or deploy it back). Only to the
+share, not to a USB stick; a PC whose Windows is locked by BitLocker stops before
+anything is erased. Clear old backups by hand.
+
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's

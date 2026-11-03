@@ -1048,6 +1048,12 @@ $ui.BtnPcReimage.Add_Click({ Invoke-Safely {
         '-ContentRoot', (ConvertTo-Arg $script:root), '-AnswerFile', (ConvertTo-Arg $answer), '-Mac', (($rows | ForEach-Object { ConvertTo-MacKey $_.Mac }) -join ','))
     if ($ui.ChkKeepNames.IsChecked) { $reimageArgs += '-KeepNames' }
     if ($ui.ChkSkipF12.IsChecked) { $reimageArgs += '-SkipPxePrompt' }
+    if ($ui.ChkLocalBoot.IsChecked) {
+        $bootWim = Join-Path $script:root 'Boot\boot.wim'
+        if (-not (Test-Path -LiteralPath $bootWim)) { Show-Error "No boot image at $bootWim. On the Media tab, build a PXE boot.wim with $(Split-Path $bootWim -Parent) as the output folder."; return }
+        $reimageArgs += @('-BootMethod', 'LocalDisk')
+    }
+    if ($ui.ChkBackupFirst.IsChecked) { $reimageArgs += '-BackupFirst' }
     # Its own window: it waits up to 20 minutes for the PCs to start their deploy.
     Start-Process powershell.exe -ArgumentList $reimageArgs
     Start-Sleep -Milliseconds 1500   # let it write the jobs so the list shows them

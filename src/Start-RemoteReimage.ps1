@@ -23,6 +23,9 @@ param(
     [Parameter(Mandatory)][string]$AnswerFile,
     [switch]$KeepNames,             # each PC keeps the name it has in the computer list
     [switch]$SkipPxePrompt,         # prestage the PCs in WDS so they boot without F12
+    [ValidateSet('Pxe', 'LocalDisk')][string]$BootMethod = 'Pxe',   # LocalDisk: copy boot.wim to the PC and boot it from there (no PXE/WDS)
+    [string]$BootWim,               # LocalDisk: the boot image to copy; default <content root>\Boot\boot.wim
+    [switch]$BackupFirst,           # WinPE captures each PC's old Windows to <content root>\Backups before the wipe
     [int]$RestartDelay = 60,        # seconds of warning for anyone logged on
     [int]$TimeoutMinutes = 20,      # how long to wait for each PC to start its deploy
     [int]$ExpiresHours = 12
@@ -43,6 +46,10 @@ function Write-Log([string]$Message, [string]$Color = 'Gray') {
     Write-Host $line -ForegroundColor $Color
 }
 
+if (-not $BootWim) { $BootWim = Join-Path $ContentRoot 'Boot\boot.wim' }
+if ($BootMethod -eq 'LocalDisk' -and -not (Test-Path -LiteralPath $BootWim)) {
+    throw "No boot image at $BootWim. On the Media tab build a PXE boot.wim with $(Split-Path $BootWim -Parent) as the output folder."
+}
 $settings = Get-Content -Raw (Join-Path $ContentRoot 'config\deploy-settings.json') | ConvertFrom-Json
 $wdsServer = Get-WdsServerName $settings
 $wakePort = if ($settings.remote -and $settings.remote.wakePort) { [int]$settings.remote.wakePort } else { 9 }
@@ -62,7 +69,7 @@ Write-Log "Reimaging $($pcs.Count) PC(s) with answer file $AnswerFile" 'Cyan'
 foreach ($p in $pcs) {
     try {
         $job = New-ReimageJob -ContentRoot $ContentRoot -Mac $p.Pc.mac -AnswerFile $AnswerFile `
-            -ComputerName $(if ($KeepNames) { $p.Name } else { '' }) -ExpiresHours $ExpiresHours
+            -ComputerName $(if ($KeepNames) { $p.Name } else { '' }) -ExpiresHours $ExpiresHours -Backup:$BackupFirst
         Write-Log "$($p.Name): job queued until $($job.expiresAt)"
     } catch { $p.State = 'Failed'; $p.Detail = $_.Exception.Message; Write-Log "$($p.Name): $($p.Detail)" 'Red'; continue }
 
@@ -77,10 +84,17 @@ foreach ($p in $pcs) {
 
 function Start-PxeBoot($p) {
     try {
-        $r = Invoke-PxeRestart -ComputerName $p.Address -DelaySeconds $RestartDelay
+        if ($BootMethod -eq 'LocalDisk') {
+            Write-Log "$($p.Name): copying $BootWim to C:\_ImagingBoot..."
+            $r = Invoke-LocalDiskBoot -ComputerName $p.Address -BootWim $BootWim -DelaySeconds $RestartDelay
+            $how = "WinPE from its own disk (boot entry $($r.BootEntry))"
+        } else {
+            $r = Invoke-PxeRestart -ComputerName $p.Address -DelaySeconds $RestartDelay
+            $how = "network entry $($r.BootEntry)"
+        }
         [void](Update-KnownComputerFromInfo -ContentRoot $ContentRoot -Info $r.Info -Existing $p.Pc)
         $p.Restarted = $true; $p.State = 'Restarting'
-        Write-Log "$($p.Name): next boot set to network entry $($r.BootEntry); restarting in $RestartDelay s"
+        Write-Log "$($p.Name): next boot set to $how; restarting in $RestartDelay s"
     } catch {
         $p.State = 'Failed'; $p.Detail = $_.Exception.Message
         Write-Log "$($p.Name): $($p.Detail)" 'Red'

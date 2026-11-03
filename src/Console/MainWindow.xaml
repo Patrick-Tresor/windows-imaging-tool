@@ -570,7 +570,11 @@
                   <Label Content="Answer file"/>
                   <ComboBox x:Name="CmbReimageAnswer" Grid.Column="1"/>
                   <CheckBox x:Name="ChkKeepNames" Grid.Row="2" Grid.ColumnSpan="2" IsChecked="True" Content="Keep each PC's name (instead of the answer file's naming)"/>
-                  <CheckBox x:Name="ChkSkipF12" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="True" Content="Boot without F12: prestage these PCs in WDS until their deploy starts"/>
+                  <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
+                    <CheckBox x:Name="ChkSkipF12" IsChecked="True" Content="Boot without F12: prestage these PCs in WDS until their deploy starts"/>
+                    <CheckBox x:Name="ChkLocalBoot" Margin="0,4,0,0" Content="No PXE: copy WinPE to each running PC and boot it from its own disk (Boot\boot.wim on the content root)"/>
+                    <CheckBox x:Name="ChkBackupFirst" Margin="0,4,0,0" Content="Back up each PC's old Windows to Backups on the share before it is erased"/>
+                  </StackPanel>
                   <Label Grid.Row="6" Content="WDS server"/>
                   <TextBox x:Name="TxtReimageWds" Grid.Row="6" Grid.Column="1" ToolTip="Empty = this PC (or the WDS server in the PXE settings). Saved to deploy-settings.json."/>
                   <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal">

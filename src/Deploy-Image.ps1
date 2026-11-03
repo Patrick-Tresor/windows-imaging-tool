@@ -21,7 +21,8 @@ param(
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
     [string]$ComputerName,      # overrides the naming list and the answer file's naming (the wizard still lets the operator change it)
     [switch]$NoPrompt,          # no wizard, countdown or confirmation, whatever the answer file's mode
-    [switch]$IgnoreWindows11Check   # deploy even when a Windows 11 requirement fails in Block mode
+    [switch]$IgnoreWindows11Check,  # deploy even when a Windows 11 requirement fails in Block mode
+    [switch]$BackupFirst            # capture the old Windows to <share>\Backups before the wipe (a remote reimage job can ask too)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -565,6 +566,12 @@ try {
             -SharePath (Resolve-ContentPath $root $answer.UserDataPath)
         Write-DeployLog "User data: $($migration.Summary)" -Level $(if ($migration.Mode -eq 'None') { 'WARN' } else { 'INFO' })
     }
+    # The old Windows as a WIM on the share, checked now (needs the share, not locked by BitLocker).
+    $windowsBackup = $null
+    if ($BackupFirst -or ($job -and $job.PSObject.Properties['backup'] -and $job.backup)) {
+        $windowsBackup = Get-WindowsBackupPlan -DiskNumber $answer.DiskNumber -ContentRoot $root -Serial "$($hw.Serial)" -IsNetworkRoot ($null -eq (Get-ContentDiskNumber $root))
+        Write-DeployLog "Backup: $($windowsBackup.Summary)"
+    }
     $keepPartitions = $migration -and $migration.Store -eq 'Local' -and $migration.Mode -ne 'None'
     if ($keepPartitions -and $firmware -ne 'UEFI') {
         throw 'Keeping user data on the disk keeps its GPT partitions, which only boot in UEFI mode, but WinPE booted in legacy BIOS mode. Boot WinPE in UEFI mode, or store the user data on a share.'
@@ -587,6 +594,7 @@ try {
         $summary += "User data:    $($migration.Summary)"
         $summary += if ($keepPartitions) { "ERASE:        everything on $($migration.Volume.Drive) except the user data, disk $(Format-DiskChoice $disk)" } else { "ERASE disk:   $(Format-DiskChoice $disk)" }
     }
+    if ($windowsBackup) { $summary = @($summary | Where-Object { $_ -notlike 'ERASE*' }) + @("Backup:       $($windowsBackup.Summary)") + @($summary | Where-Object { $_ -like 'ERASE*' }) }
     foreach ($line in $summary) { Write-DeployLog $line }
     if (-not $confirmed) {
         Write-Host ''
@@ -604,7 +612,16 @@ try {
         if ($biosFailed -and $bios.StopOnError) { throw "$biosFailed BIOS setting(s) failed and the answer file says to stop (bios/stopOnError)." }
     }
 
-    # 1. Back up the user data, then partition. A failed backup stops here, with the disk untouched.
+    # 1. Back up the old Windows and the user data, then partition. A failed backup stops here, with the disk untouched.
+    if ($windowsBackup -and $windowsBackup.Mode -eq 'Backup') {
+        Set-DeployStatus -Step 'Backing up the old Windows' -Percent 7
+        New-Item -ItemType Directory -Path (Split-Path $windowsBackup.ImagePath -Parent) -Force | Out-Null
+        Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-WindowsBackupArgs -Drive $windowsBackup.Drive -ImagePath $windowsBackup.ImagePath -Name $windowsBackup.Name) -OnProgress {
+            param($pct)
+            if ($null -ne $pct) { Update-NativeStepStatus -Step "Backing up the old Windows: $pct %" }
+        }
+        Write-DeployLog "Old Windows backed up to $($windowsBackup.ImagePath)"
+    }
     if ($migration -and $migration.Mode -eq 'Backup') {
         Set-DeployStatus -Step 'Backing up user data' -Percent 7
         Backup-UserState -Plan $migration -Answer $answer -UsmtDir $usmtDir
