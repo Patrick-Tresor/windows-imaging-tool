@@ -131,6 +131,15 @@ exit 0
     Assert-Equal "$(Find-UnstartedDeployment -Serial 'ABC123' -Roots @($stick))" '' 'no marker: nothing found'
     Set-Content -LiteralPath (Join-Path $stick 'Deploy\deployed.json') -Value 'not json'
     Assert-Equal "$(Find-UnstartedDeployment -Serial 'ABC123' -Roots @($stick))" '' 'a damaged marker is ignored'
+
+    # A volume PowerShell has no drive for (the old Windows at C: of a Dell Latitude 5521 in WinPE): Join-Path threw
+    # "A drive with the name 'C' does not exist" and stopped the deploy. It must be skipped, and the next root read.
+    $used = @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() })
+    $free = @([char[]]'QRSTUVWXYZJKLMNOP' | Where-Object { "$_" -notin $used -and -not (Get-PSDrive -Name "$_" -ErrorAction SilentlyContinue) }) | Select-Object -First 1
+    if ($free) {
+        $m = Find-UnstartedDeployment -Serial 'ABC123' -Roots @("${free}:\", $disk)
+        Assert-Equal "$($m.serial)" 'ABC123' "a drive PowerShell does not have (${free}:) is skipped, not thrown on"
+    }
 }
 finally { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 

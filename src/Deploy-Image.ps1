@@ -479,7 +479,12 @@ try {
     $deployPlan = $null; $confirmed = $false; $wizardNotice = $null
     # A Windows deployed here that never started means the PC came back to WinPE after the restart, usually because
     # the USB stick is still first in the boot order. Ask instead of counting down, or it would be wiped again.
-    $unstarted = if (-not $job -and -not $NoPrompt) { Find-UnstartedDeployment -Serial "$($hw.Serial)" -ExcludeRoots @($root) } else { $null }
+    # Only a safety check: if it fails, log it and carry on, so it can never stop a deploy.
+    $unstarted = $null
+    if (-not $job -and -not $NoPrompt) {
+        try { $unstarted = Find-UnstartedDeployment -Serial "$($hw.Serial)" -ExcludeRoots @($root) }
+        catch { Write-DeployLog "Could not check this PC's disks for an earlier deployment: $($_.Exception.Message)" -Level WARN }
+    }
     if ($unstarted) {
         Write-DeployLog ("Windows was deployed to this PC at {0} ({1}) and has not started yet: no countdown. Remove the USB stick and restart to start Windows." -f $unstarted.deployed, $unstarted.path) -Level WARN
         $wizardNotice = 'Windows is already installed here but has not started. Remove the USB stick and restart, or deploy again.'
