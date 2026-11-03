@@ -215,8 +215,8 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 
 Every medium boots both UEFI and legacy BIOS. The ISO carries both
 `etfsboot.com` and `efisys.bin` (`efisys_noprompt.bin` for capture media), taken
-from the ADK's `Deployment Tools\amd64\Oscdimg` folder. Newer copype versions
-(ADK 10.1.26100) no longer create `fwfiles`, so that folder is only a fallback.
+from the ADK's `Deployment Tools\amd64\Oscdimg` folder (newer copype versions
+no longer create `fwfiles`).
 
 ### Multicast
 

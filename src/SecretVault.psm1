@@ -127,12 +127,6 @@ function Get-ContentSecrets {
     $out
 }
 
-function Test-SecretPath {
-    # True for a path inside config\secrets, which offline media leave out unless the admin asks for them.
-    param([string]$RelativePath)
-    (ConvertTo-SecretKey $RelativePath) -like 'config\secrets\*' -or (ConvertTo-SecretKey $RelativePath) -eq 'config\secrets'
-}
-
 function Get-AnswerSecrets {
     <#
     .SYNOPSIS
@@ -170,4 +164,4 @@ function Get-AnswerSecrets {
     $list.ToArray()
 }
 
-Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Test-SecretPath, Get-AnswerSecrets
+Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Get-AnswerSecrets

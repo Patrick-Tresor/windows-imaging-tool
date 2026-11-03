@@ -1059,7 +1059,7 @@ function Get-DeploymentLogs {
 
 #endregion
 
-Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
+Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
     Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, ConvertTo-MulticastView, Get-DeploymentLogs,

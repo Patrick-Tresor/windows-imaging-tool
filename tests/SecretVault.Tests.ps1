@@ -18,8 +18,6 @@ function Assert-Equal($Actual, $Expected, $Name) {
 # Paths agree between the build (Windows paths) and WinPE whatever the case or slashes.
 Assert-Equal (ConvertTo-SecretKey 'config/secrets/Staff-Join.txt') 'config\secrets\staff-join.txt' 'key: slashes and case'
 Assert-Equal (ConvertTo-SecretKey '.\config\secrets\a.txt') 'config\secrets\a.txt' 'key: leading .\ dropped'
-Assert-Equal (Test-SecretPath 'config\secrets\x.txt') $true 'config\secrets is secret'
-Assert-Equal (Test-SecretPath 'config\deploy-settings.json') $false 'settings are not secret'
 
 # Round trip through JSON, as the build writes it and WinPE reads it. Few iterations: the test, not the PC, is slow.
 $accent = 'p@ss ' + [char]0xE9

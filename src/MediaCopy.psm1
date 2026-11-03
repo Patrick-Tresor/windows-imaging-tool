@@ -154,35 +154,27 @@ function Test-NativeCopy {
 function Copy-MediaContent {
     <#
     .SYNOPSIS
-        Copies a Get-MediaCopyPlan to Destination in chunks, showing progress, and returns what it copied.
+        Copies a Get-MediaCopyPlan to Destination with Windows' own CopyFileEx (what Explorer and robocopy use) on a
+        background thread, unbuffered for big files like robocopy /J, while PowerShell only reads the byte count for
+        the progress bar. Returns what it copied.
     .PARAMETER OnProgress
         Called with each progress update (tests use it; the build shows Write-Progress and text lines instead).
     #>
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)][string]$Destination,
-        # Native: Windows' own CopyFileEx on a background thread (what Explorer and robocopy use), unbuffered for big
-        # files like robocopy /J, while PowerShell only reads the byte count for the progress bar. Stream: a chunked
-        # copy in PowerShell, used off Windows (tests). Auto picks Native on Windows.
-        [ValidateSet('Auto', 'Native', 'Stream')][string]$Method = 'Auto',
-        # Files at least this big are copied unbuffered (Native) and get their own text lines and progress updates.
+        # Files at least this big are copied unbuffered and get their own text lines and progress updates.
         [int64]$LineEvery10PercentFrom = 256MB,
-        # Stream method only: chunk size, and bytes written between flushes so progress shows what is on the disk.
-        [int]$BufferSize = 8MB,
-        [int64]$FlushEvery = 256MB,
         [scriptblock]$OnProgress,
         [switch]$Quiet
     )
-    if ($Method -eq 'Auto') { $Method = if (Test-NativeCopy) { 'Native' } else { 'Stream' } }
-    if ($Method -eq 'Native' -and -not (Test-NativeCopy)) { throw 'The native copy needs Windows.' }
+    if (-not (Test-NativeCopy)) { throw 'Copying to the USB stick needs Windows.' }
     $total = [int64]$Plan.TotalBytes
     $done = [int64]0
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $lastShown = -1000
     $index = 0
     $count = @($Plan.Items).Count
-    $buffer = $null
-    if ($Method -eq 'Stream') { $buffer = New-Object byte[] $BufferSize }
 
     foreach ($d in @($Plan.Directories)) { New-Item -ItemType Directory -Path (Join-CopyPath $Destination $d) -Force | Out-Null }
 
@@ -245,54 +237,25 @@ function Copy-MediaContent {
             $doneBefore = $done
             $nextLine = 10
             & $show $item 0 $big
-            if ($Method -eq 'Native') {
-                $job = New-Object ImagingTool.MediaFileCopy($item.Source, $target, $big)
-                $job.Start()
-                try {
-                    while (-not $job.Wait(250)) {
-                        $fileDone = $job.Done
-                        $done = $doneBefore + $fileDone
-                        & $show $item $fileDone $false
-                        & $lines $item $fileDone
-                    }
-                } finally {
-                    # Ctrl+C: stop the copy thread too.
-                    if (-not $job.Wait(0)) { $job.Cancel = $true; [void]$job.Wait(5000) }
+            $job = New-Object ImagingTool.MediaFileCopy($item.Source, $target, $big)
+            $job.Start()
+            try {
+                while (-not $job.Wait(250)) {
+                    $fileDone = $job.Done
+                    $done = $doneBefore + $fileDone
+                    & $show $item $fileDone $false
+                    & $lines $item $fileDone
                 }
-                if ($job.Error) {
-                    $msg = (New-Object ComponentModel.Win32Exception($job.Error)).Message
-                    throw "Copying $($item.Relative) to the USB stick failed: $msg Is the stick full or was it unplugged?"
-                }
-                $fileDone = $item.Length
-                $done = $doneBefore + $fileDone
-            } else {
-                $in = $null; $out = $null
-                try {
-                    $in = New-Object IO.FileStream($item.Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read, 65536, [IO.FileOptions]::SequentialScan)
-                    # Cached writes, flushed every FlushEvery bytes (write-through made every chunk wait for the stick).
-                    $out = New-Object IO.FileStream($target, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None, 4096, [IO.FileOptions]::None)
-                    $sinceFlush = [int64]0
-                    while (($read = $in.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                        $out.Write($buffer, 0, $read)
-                        $sinceFlush += $read
-                        if ($sinceFlush -ge $FlushEvery) { $out.Flush($true); $sinceFlush = 0 }
-                        $fileDone += $read
-                        $done += $read
-                        & $show $item $fileDone $false
-                        & $lines $item $fileDone
-                    }
-                    $out.Flush($true)
-                } catch {
-                    $msg = $_.Exception.Message
-                    if ($_.Exception.InnerException) { $msg = $_.Exception.InnerException.Message }
-                    throw "Copying $($item.Relative) to the USB stick failed: $msg Is the stick full or was it unplugged?"
-                } finally {
-                    if ($out) { $out.Dispose() }
-                    if ($in) { $in.Dispose() }
-                }
-                # Same timestamps as the source, as CopyFileEx and robocopy keep them.
-                try { [IO.File]::SetLastWriteTimeUtc($target, [IO.File]::GetLastWriteTimeUtc($item.Source)) } catch { }
+            } finally {
+                # Ctrl+C: stop the copy thread too.
+                if (-not $job.Wait(0)) { $job.Cancel = $true; [void]$job.Wait(5000) }
             }
+            if ($job.Error) {
+                $msg = (New-Object ComponentModel.Win32Exception($job.Error)).Message
+                throw "Copying $($item.Relative) to the USB stick failed: $msg Is the stick full or was it unplugged?"
+            }
+            $fileDone = $item.Length
+            $done = $doneBefore + $fileDone
             & $show $item $fileDone $big
             if ($big -and -not $Quiet) { Write-Host ('  done in {0}' -f (Format-MediaDuration $fileClock.Elapsed.TotalSeconds)) }
         }

@@ -48,8 +48,8 @@ param(
     [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
     [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
-    [switch]$SecretsOnMedia,
-    [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
+    [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
+    [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
@@ -264,7 +264,7 @@ switch ($Target) {
         # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
         # UEFI: the no-prompt EFI boot image. BIOS: etfsboot.com only prompts when boot\bootfix.bin exists.
         # The boot files come from the ADK's Oscdimg folder: newer copype versions no longer create fwfiles.
-        $bootFiles = Get-IsoBootFiles -AdkRoot $adk -WorkDir $WorkDir -NoPrompt:([bool]$CaptureConfig)
+        $bootFiles = Get-IsoBootFiles -AdkRoot $adk -NoPrompt:([bool]$CaptureConfig)
         if ($CaptureConfig) { Remove-Item "$WorkDir\media\boot\bootfix.bin" -ErrorAction SilentlyContinue }
         $bootData = "2#p0,e,b`"$($bootFiles.BiosBoot)`"#pEF,e,b`"$($bootFiles.UefiBoot)`""
         & cmd /c "oscdimg -m -o -u2 -udfver102 -bootdata:$bootData `"$WorkDir\media`" `"$iso`""

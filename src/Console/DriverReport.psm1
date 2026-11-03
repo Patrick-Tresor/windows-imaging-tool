@@ -7,12 +7,6 @@ Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1')
 # Same matching as the deploy, so a model drops off the report as soon as the catalog covers it.
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployCommon.psm1') -Function Find-DriverCatalogMatch
 
-function Join-ContentPath {
-    # Same as the private helper in ConsoleData.psm1: catalog paths use backslashes, normalized so tests run off Windows.
-    param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
-
 function Get-DriverReportDir {
     param([Parameter(Mandatory)][string]$ContentRoot)
     Join-Path (Join-Path $ContentRoot 'Reports') 'Drivers'
