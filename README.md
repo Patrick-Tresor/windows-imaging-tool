@@ -173,7 +173,12 @@ driver in two packs goes in once. Lenovo publishes no single WinPE pack, but the
 Intel storage drivers in Dell's pack match the controller, so they cover Lenovo
 and other PCs with VMD too. Choose the vendors on the Media tab (both on by
 default) or with `-WinPEDriverVendors Dell,HP`; `-NoVendorWinPEDrivers` skips
-them. Each pack makes boot.wim bigger and the build a few minutes longer.
+them. Each pack makes boot.wim bigger. Adding the components and drivers
+takes many minutes, so the result is kept in
+`%LOCALAPPDATA%\ImagingConsole\WinPEBuilds` (the last two builds) and the next
+build reuses it while the ADK, the components and every driver .inf stay the
+same; `-NoWinPECache` adds them again. Only the packs' x64 drivers are copied
+to the stick, and an update copies only the files that changed.
 Drivers in `<content root>\Drivers\_WinPE` are also added to boot.wim and, from
 the stick or share, loaded with drvload when WinPE starts, so a new storage
 driver can be added without rebuilding WinPE.
