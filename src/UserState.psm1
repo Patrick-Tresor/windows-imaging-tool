@@ -317,7 +317,8 @@ function Get-WindowsBackupPlan {
         return [pscustomobject]@{ Mode = 'None'; Drive = $null; ImagePath = $null; Summary = 'no Windows on the disk, nothing to back up' }
     }
     $safe = ($Serial -replace '[^A-Za-z0-9._-]', '_')
-    $path = Join-Path (Join-Path $ContentRoot 'Backups') ("{0}-{1}.wim" -f $safe, $Now.ToString('yyyyMMdd-HHmm'))
+    # Not Join-Path: it fails on a drive this PC does not have (Z: of WinPE, in tests).
+    $path = [IO.Path]::Combine($ContentRoot, 'Backups', ("{0}-{1}.wim" -f $safe, $Now.ToString('yyyyMMdd-HHmm')))
     [pscustomobject]@{ Mode = 'Backup'; Drive = $vol.Drive; ImagePath = $path; Name = "Backup of $Serial $($Now.ToString('yyyy-MM-dd HH:mm'))"; Summary = "old Windows on $($vol.Drive) to $path" }
 }
 
