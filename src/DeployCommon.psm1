@@ -258,6 +258,119 @@ function Format-DriverProgressLine {
     ('[{0}/{1}] {2}  ({3:m\:ss})' -f "$Index".PadLeft($width), $Total, $shown, $Elapsed)
 }
 
+# Bump when what goes into a cached WinPE build changes (components, how drivers are added), so old caches are not reused.
+$script:WinPEBuildCacheFormat = 1
+
+function Get-WinPEDriverPlan {
+    <#
+    .SYNOPSIS
+        The .inf files each WinPE driver source adds to boot.wim (Get-WinPEDriverInfs), each with a key
+        "name|SHA256". The same driver in a second source (Intel NICs and RST are in Dell's and HP's packs) is
+        marked Duplicate, so it goes in once. The keys also make the WinPE build cache key.
+    #>
+    param([object[]]$Sources)
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    @(foreach ($src in @($Sources | Where-Object { $_ })) {
+        $infs = @(foreach ($inf in @(Get-WinPEDriverInfs -Folder $src.Path)) {
+            $key = '{0}|{1}' -f $inf.Name, (Get-FileHash -LiteralPath $inf.FullName -Algorithm SHA256).Hash
+            [pscustomobject]@{ File = $inf; Key = $key; Duplicate = -not $seen.Add($key) }
+        })
+        [pscustomobject]@{ Name = $src.Name; Path = $src.Path; Infs = $infs }
+    })
+}
+
+function Get-WinPEBuildKey {
+    <#
+    .SYNOPSIS
+        A key for boot.wim with its optional components and WinPE drivers in: the same key means the same result,
+        so a build can reuse it instead of adding them again (minutes of DISM calls). It changes with the ADK's
+        WinPE (copype's boot.wim size and date), the component list, and any driver source or .inf file.
+    #>
+    param([Parameter(Mandatory)][string]$BaseWim, [string[]]$Components, [object[]]$DriverPlan)
+    $wim = Get-Item -LiteralPath $BaseWim
+    $lines = @("format=$script:WinPEBuildCacheFormat", "wim=$($wim.Length)|$($wim.LastWriteTimeUtc.Ticks)", "components=$(@($Components) -join ',')")
+    foreach ($s in @($DriverPlan)) {
+        $lines += "source=$($s.Name)|$($s.Path)"
+        foreach ($i in @($s.Infs)) { $lines += "inf=$($i.Key)" }
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $bytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))) } finally { $sha.Dispose() }
+    (-join ($bytes[0..7] | ForEach-Object { $_.ToString('x2') }))
+}
+
+function Get-WinPEBuildCacheDir {
+    $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::Combine($HOME, '.cache') }
+    [IO.Path]::Combine($base, 'ImagingConsole', 'WinPEBuilds')
+}
+
+function Find-WinPEBuildCache {
+    # The cached boot.wim for Key and the driver report saved with it; $null when there is none.
+    param([Parameter(Mandatory)][string]$Key, [string]$CacheDir = (Get-WinPEBuildCacheDir))
+    $dir = [IO.Path]::Combine($CacheDir, $Key)
+    $wim = [IO.Path]::Combine($dir, 'boot.wim')
+    $json = [IO.Path]::Combine($dir, 'build.json')
+    if (-not ([IO.File]::Exists($wim) -and [IO.File]::Exists($json))) { return $null }
+    try { $info = [IO.File]::ReadAllText($json) | ConvertFrom-Json } catch { return $null }
+    [pscustomobject]@{ Wim = $wim; Built = $info.built; Sources = @($info.sources | Where-Object { $_ }) }
+}
+
+function Save-WinPEBuildCache {
+    <#
+    .SYNOPSIS
+        Keeps a copy of boot.wim (components and drivers in, nothing else) and its driver report under Key, and
+        deletes all but the newest Keep builds: each one is a few hundred MB.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$WimPath,
+        [object[]]$Sources,
+        [string]$CacheDir = (Get-WinPEBuildCacheDir),
+        [int]$Keep = 2
+    )
+    $dir = [IO.Path]::Combine($CacheDir, $Key)
+    $staging = "$dir.new"
+    if ([IO.Directory]::Exists($staging)) { [IO.Directory]::Delete($staging, $true) }
+    [void][IO.Directory]::CreateDirectory($staging)
+    [IO.File]::Copy($WimPath, [IO.Path]::Combine($staging, 'boot.wim'))
+    $info = [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($Sources) }
+    [IO.File]::WriteAllText([IO.Path]::Combine($staging, 'build.json'), (ConvertTo-Json -InputObject $info -Depth 4))
+    if ([IO.Directory]::Exists($dir)) { [IO.Directory]::Delete($dir, $true) }
+    [IO.Directory]::Move($staging, $dir)
+    # The JSON marks a finished build; a folder without one (a build stopped halfway) is removed too.
+    $old = @(Get-ChildItem -LiteralPath $CacheDir -Directory | Where-Object { $_.FullName -ne (Get-Item -LiteralPath $dir).FullName } |
+        Sort-Object @{ Expression = { $j = [IO.Path]::Combine($_.FullName, 'build.json'); if ([IO.File]::Exists($j)) { [IO.File]::GetLastWriteTimeUtc($j) } else { [DateTime]::MinValue } }; Descending = $true })
+    $old | Select-Object -Skip ([Math]::Max(0, $Keep - 1)) | ForEach-Object { try { [IO.Directory]::Delete($_.FullName, $true) } catch { } }
+    $dir
+}
+
+function Get-WinPEPackCopyPlan {
+    <#
+    .SYNOPSIS
+        A Get-MediaCopyPlan-shaped plan that puts a vendor WinPE driver pack on the stick under
+        Drivers\_WinPE\<pack folder>, for drvload when boot.wim lacks a driver. The x86 and arm64 folders are left
+        out: WinPE is x64 and Get-WinPEDriverInfs never loads them, and they are about half the files.
+    #>
+    param([Parameter(Mandatory)][string]$PackPath, [string]$Under = 'Drivers\_WinPE')
+    $base = (Get-Item -LiteralPath $PackPath).FullName.TrimEnd('\', '/')
+    $prefix = "$($Under.Trim('\'))\$(Split-Path $base -Leaf)"
+    $items = New-Object System.Collections.ArrayList
+    $dirs = New-Object System.Collections.ArrayList
+    [void]$dirs.Add($prefix)
+    $skip = '(^|[\\/])(x86|arm64)([\\/]|$)'
+    foreach ($d in Get-ChildItem -LiteralPath $base -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
+        $rel = $d.FullName.Substring($base.Length + 1)
+        if ($rel -notmatch $skip) { [void]$dirs.Add("$prefix\$($rel -replace '/', '\')") }
+    }
+    $total = [int64]0
+    foreach ($f in Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
+        $rel = $f.FullName.Substring($base.Length + 1)
+        if ($rel -match $skip) { continue }
+        [void]$items.Add([pscustomobject]@{ Relative = "$prefix\$($rel -replace '/', '\')"; Source = $f.FullName; Length = [int64]$f.Length })
+        $total += $f.Length
+    }
+    [pscustomobject]@{ Items = @($items); Directories = @($dirs); TotalBytes = $total; FileCount = $items.Count; Missing = @() }
+}
+
 function Test-UefiBoot {
     # WinPE records the firmware type here: 1 = BIOS, 2 = UEFI.
     (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name PEFirmwareType -ErrorAction SilentlyContinue).PEFirmwareType -eq 2
@@ -721,6 +834,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-DriverProgressLine, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment
