@@ -72,7 +72,7 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it, or Update image to add the latest Windows updates to an image without capturing it again. Answer files choose which image a PC gets."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a VM) and capture it, or Update image to add the latest Windows updates to an image without capturing it again. Answer files choose which image a PC gets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>

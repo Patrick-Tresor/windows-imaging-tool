@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Captures a sysprepped reference PC (ideally a Hyper-V VM) to a WIM, from WinPE.
+    Captures a sysprepped reference PC (ideally a VM) to a WIM, from WinPE.
 .DESCRIPTION
     With -NewVersion, an existing image of the same name is replaced only once the new capture has
     succeeded, and the old one is kept as a version in Images\Previous\ (see ImageVersions.psm1).

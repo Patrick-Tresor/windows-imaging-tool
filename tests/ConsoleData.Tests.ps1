@@ -228,12 +228,12 @@ try {
     try { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @('a.msu') -ResetBase | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'reset base without cleanup is rejected'
 
-    $vc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy Share' -VMName "Win11's Ref" `
+    $vc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy Share' -DiskPath "D:\VMs\Win11's Ref\Ref.vmdk" `
         -Name 'Win11-24H2' -Description 'Lab build' -Split -NewVersion
     $vcDecoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vc[-1]))
-    Assert-Equal $vcDecoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -VMName 'Win11''s Ref' -Name 'Win11-24H2' -ContentRoot 'D:\Deploy Share' -Compression max -Description 'Lab build' -SplitSizeMB 3800 -NewVersion -NoPrompt" 'VM capture command quotes the VM name and adds the options'
+    Assert-Equal $vcDecoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'D:\VMs\Win11''s Ref\Ref.vmdk' -Name 'Win11-24H2' -ContentRoot 'D:\Deploy Share' -Compression max -Description 'Lab build' -SplitSizeMB 3800 -NewVersion -NoPrompt" 'VM capture command quotes the disk path and adds the options'
     $threw = $false
-    try { Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'y' -VMName 'v' -Name 'bad name' | Out-Null } catch { $threw = $true }
+    try { Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'y' -DiskPath 'v.vmdk' -Name 'bad name' | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'VM capture rejects an image name with spaces'
 
     $vhdxConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vhdx' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe'

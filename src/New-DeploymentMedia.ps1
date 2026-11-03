@@ -25,9 +25,6 @@
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
     Builds boot.wim and publishes it to the WDS server named in the settings' "wds" section.
-.EXAMPLE
-    .\New-DeploymentMedia.ps1 -Target Iso -CaptureConfig D:\DeployShare\config\capture.json -BootVM Win11-Ref
-    Builds capture media and boots the Hyper-V VM Win11-Ref from it.
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +42,6 @@ param(
     [string[]]$WinPEDriverVendors = @('Dell', 'HP'),   # whose WinPE driver packs go into boot.wim: Dell, HP (comma list from the console)
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
-    [string]$BootVM,                 # with -Target Iso: attach the ISO to this Hyper-V VM and start it
     [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
@@ -72,7 +68,6 @@ $adk = $adkStatus.Root
 $peRoot = "$adk\Windows Preinstallation Environment"
 
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
-if ($BootVM -and $Target -ne 'Iso') { throw '-BootVM needs -Target Iso.' }
 if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target Pxe.' }
 if ($AnswerFiles -and -not $ContentSource) { throw '-AnswerFiles needs -ContentSource.' }
 # The console passes the names as one comma-separated argument (powershell.exe -File doesn't take arrays).
@@ -119,11 +114,6 @@ if ($UpdateOnly) {
     # Check the stick is one of ours before spending minutes on the build.
     if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk).' }
     $null = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
-}
-if ($BootVM) {
-    # Check the VM before spending minutes on the build.
-    $vm = Get-VM -Name $BootVM
-    if ($vm.State -ne 'Off') { throw "VM $BootVM is $($vm.State). Let sysprep shut it down first." }
 }
 
 # copype and MakeWinPEMedia expect the ADK environment variables that DandISetEnv.bat sets.
@@ -270,29 +260,6 @@ switch ($Target) {
                 'Check that the output folder exists, has free space and the ISO is not open or attached to a VM.')
         }
         Write-Host "ISO written to $iso"
-
-        if ($BootVM) {
-            $dvd = Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1
-            if ($dvd) { Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $iso }
-            else { $dvd = Add-VMDvdDrive -VMName $BootVM -Path $iso -Passthru }
-            # Generation 2 (UEFI) picks a boot device; generation 1 (BIOS) orders device types.
-            if ($vm.Generation -eq 2) { Set-VMFirmware -VMName $BootVM -FirstBootDevice (Get-VMDvdDrive -VMName $BootVM | Select-Object -First 1) }
-            else { Set-VMBios -VMName $BootVM -StartupOrder @('CD', 'IDE', 'LegacyNetworkAdapter', 'Floppy') }
-            Start-VM -Name $BootVM
-            Write-Host "Started $BootVM from $iso. Watch it with: vmconnect localhost `"$BootVM`""
-
-            # The capture shuts the VM down when it finishes. Then eject the ISO and boot from disk again,
-            # or the next start would capture a second time.
-            Write-Host 'Waiting for the capture to finish and the VM to shut down...'
-            while ((Get-VM -Name $BootVM).State -ne 'Off') { Start-Sleep -Seconds 30 }
-            Set-VMDvdDrive -VMName $BootVM -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $null
-            if ($vm.Generation -eq 2) {
-                $disk = Get-VMHardDiskDrive -VMName $BootVM | Select-Object -First 1
-                if ($disk) { Set-VMFirmware -VMName $BootVM -FirstBootDevice $disk }
-            }
-            else { Set-VMBios -VMName $BootVM -StartupOrder @('IDE', 'CD', 'LegacyNetworkAdapter', 'Floppy') }
-            Write-Host "$BootVM is off, the ISO is ejected and it boots from its disk again. Check the Logs folder for the capture result."
-        }
     }
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }

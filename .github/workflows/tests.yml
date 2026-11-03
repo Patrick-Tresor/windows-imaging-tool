@@ -1,5 +1,5 @@
 # Runs the plain-script test suites on a Windows runner (Windows PowerShell 5.1, as in WinPE, and PowerShell 7),
-# after checking that every script parses and every XAML window loads. Nothing here needs WinPE, the ADK or Hyper-V.
+# after checking that every script parses and every XAML window loads. Nothing here needs WinPE, the ADK or a VM.
 name: Tests
 
 on:

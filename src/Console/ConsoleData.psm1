@@ -55,7 +55,6 @@ function Update-ContentTools {
     $dest = Join-Path $ContentRoot 'Tools'
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
     Copy-Item (Join-ContentPath $script:RepoRoot 'src\Prepare-Reference.ps1') $dest -Force
-    Copy-Item (Join-ContentPath $script:RepoRoot 'src\VMwareCaptureAgent.ps1') $dest -Force
 }
 
 function Test-ContentRoot {
@@ -226,7 +225,7 @@ function New-CaptureConfig {
 
 function Get-CaptureReadiness {
     # Problems that would make a capture fail in WinPE, for the wizard's summary page.
-    # Network captures (ISO for a VM) need the share; USB captures write to the stick's DEPLOY volume.
+    # Network captures (capture ISO) need the share; USB captures write to the stick's DEPLOY volume.
     param([Parameter(Mandatory)][string]$ContentRoot, [ValidateSet('Network', 'Usb')][string]$Destination)
     $issues = @()
     if ($Destination -eq 'Network') {
@@ -235,20 +234,6 @@ function Get-CaptureReadiness {
         elseif ($share -notmatch '^\\\\[^\\]+\\.+') { $issues += "The share '$share' is not a \\server\share path." }
     }
     $issues
-}
-
-function Get-ReferenceVMs {
-    # Hyper-V VMs that can be captured. Capture media boots both generation 2 (UEFI) and generation 1 (BIOS).
-    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return @() }
-    @(Get-VM -ErrorAction Stop | ForEach-Object {
-        [pscustomobject]@{
-            Name       = $_.Name
-            State      = "$($_.State)"
-            Generation = $_.Generation
-            Usable     = $_.Generation -in 1, 2
-            Label      = '{0}  ({1}, gen {2})' -f $_.Name, $_.State, $_.Generation
-        }
-    })
 }
 
 #endregion
@@ -787,15 +772,12 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window: a Hyper-V VM by name, a VMware
-    # Workstation VM by its .vmx file, or a shut-down, sysprepped VM's disk file.
-    [CmdletBinding(DefaultParameterSetName = 'HyperV')]
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down, sysprepped VM's
+    # disk file.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
-        [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
-        [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
+        [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
@@ -804,8 +786,7 @@ function Get-VMCaptureArguments {
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $vm = if ($DiskPath) { "-DiskPath $(& $quote $DiskPath)" } elseif ($VmxPath) { "-VmxPath $(& $quote $VmxPath)" } else { "-VMName $(& $quote $VMName)" }
-    $cmd = "& $(& $quote $ScriptPath) $vm -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
+    $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
@@ -962,7 +943,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
     Get-DeploymentLogs,
-    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
+    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,

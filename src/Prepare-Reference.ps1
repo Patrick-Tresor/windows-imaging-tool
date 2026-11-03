@@ -57,7 +57,7 @@ $warnings = [Collections.Generic.List[string]]::new()
 # Real hardware leaves its own drivers in the image. It still works, but a VM gives a cleaner image.
 $model = (Get-CimInstance Win32_ComputerSystem).Model
 if ($model -notmatch 'Virtual Machine|VMware|VirtualBox|KVM|QEMU') {
-    $warnings.Add("This looks like physical hardware ($model). A Hyper-V VM makes a cleaner hardware-independent image.")
+    $warnings.Add("This looks like physical hardware ($model). A VM makes a cleaner hardware-independent image.")
 }
 
 $rebootKeys = @(
