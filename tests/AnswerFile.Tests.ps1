@@ -64,6 +64,15 @@ try {
     Assert-Equal (($u.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand/u:CommandLine', $ns) | ForEach-Object InnerText) -join ',') 'a.cmd,c.cmd' 'only FIRSTLOGON tasks go to FirstLogonCommands, in order'
     [xml]$wg = New-UnattendXml -Answer $default -ComputerName 'PC-02'
     Assert-Equal $wg.SelectSingleNode('//u:JoinWorkgroup', $ns).InnerText 'WORKGROUP' 'workgroup answer file joins the workgroup'
+    # Local account page. A domain PC deployed with no built-in Administrator (the Dell 5521, French OOBE) stopped
+    # at "Qui utilisera cet appareil?" because the page was only hidden when the Administrator had a password.
+    $hide = { param($doc) $doc.SelectSingleNode('//u:OOBE/u:HideLocalAccountScreen', $ns).InnerText }
+    Assert-Equal "$($d.EnableAdministrator)|$(& $hide $u)" 'False|true' 'a domain PC skips the local account page without the built-in Administrator'
+    Assert-Equal "$($default.EnableAdministrator)|$(& $hide $wg)" 'False|false' 'a workgroup PC with no Administrator still asks for a local account'
+    $wa = $default.PSObject.Copy(); $wa.EnableAdministrator = $true; $wa.AdminPasswordFile = 'config\secrets\admin.txt'
+    [xml]$uwa = New-UnattendXml -Answer $wa -ComputerName 'PC-02' -AdminPassword 'a'
+    Assert-Equal "$(& $hide $uwa)|$($uwa.SelectSingleNode('//u:AdministratorPassword/u:Value', $ns).InnerText)" 'true|a' 'a workgroup PC with the Administrator skips the page and sets its password'
+    Assert-Equal "$((New-FirstBootPlan -Answer $d).joinsDomain)|$((New-FirstBootPlan -Answer $default).joinsDomain)" 'True|False' 'first boot knows the PC joins a domain'
 
     # Join account. Windows signs in as Credentials Domain\Username: CORP\svc typed as the user name with svc as the
     # account's domain came out as svc\CORP\svc, and every join attempt failed with 0x89a (bad user name).

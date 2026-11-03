@@ -66,6 +66,16 @@ if ($plan.disableSystemRestore) {
 if ($plan.enableAdministrator) {
     & net.exe user Administrator /active:yes | Out-Null
     Write-Log 'Built-in Administrator enabled'
+} elseif ($plan.PSObject.Properties['joinsDomain'] -and $plan.joinsDomain) {
+    # The unattend hid the local account page because users sign in with domain accounts. Windows may turn the
+    # built-in Administrator on (with no password) when OOBE creates no account, so turn it off again, but only once
+    # the domain join worked: otherwise it is the only way into the PC.
+    if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) {
+        & net.exe user Administrator /active:no | Out-Null
+        Write-Log 'Joined the domain with no local account; built-in Administrator kept off'
+    } else {
+        Write-Log 'WARNING: the domain join did not work and there is no local account; built-in Administrator left as Windows set it'
+    }
 }
 
 function Enable-DeployBitLocker($cfg) {
