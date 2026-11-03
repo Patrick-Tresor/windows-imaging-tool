@@ -1,25 +1,6 @@
-# Helpers for the hands-free capture of a VMware Workstation VM (Capture-VMImage.ps1 -VmxPath) and for the
-# console's capture wizard: finding vmrun.exe and the VMs Workstation knows, reading a .vmx for its disks, and
-# finding the current disk of each snapshot chain when the .vmx cannot be read.
-
-# The guest variables the host and VMwareCaptureAgent.ps1 (inside the VM) talk through. The host sets the request;
-# the agent answers in the state variable. In the guest they are guestinfo.<name>.
-$script:CaptureRequestVar = 'imagingtool.capture'
-$script:CaptureStateVar = 'imagingtool.state'
-
-function Get-VMwareCaptureVariables {
-    [pscustomobject]@{ Request = $script:CaptureRequestVar; State = $script:CaptureStateVar }
-}
-
-function Find-Vmrun {
-    # vmrun.exe ships with VMware Workstation Pro (Workstation Player's vmrun cannot take snapshots).
-    $cmd = Get-Command vmrun.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles) | Where-Object { $_ }) {
-        $path = Join-Path $base 'VMware\VMware Workstation\vmrun.exe'
-        if (Test-Path -LiteralPath $path) { return $path }
-    }
-}
+# Helpers for capturing a VMware Workstation disk file (Capture-VMImage.ps1 -DiskPath) and for the console's
+# capture wizard: the VMs Workstation knows, reading a .vmx for its disks, and finding the current disk of each
+# snapshot chain when the .vmx cannot be read.
 
 function Find-QemuImg {
     # qemu-img reads VMware disks, including the snapshot chain, and writes a VHD Windows can mount.
@@ -29,30 +10,6 @@ function Find-QemuImg {
         $path = Join-Path $base 'qemu\qemu-img.exe'
         if (Test-Path -LiteralPath $path) { return $path }
     }
-}
-
-function New-VmrunArguments {
-    # Arguments for vmrun.exe: vmrun -T ws [-vp <password>] <command> [<vmx>] [<more>...]. An encrypted VM (every
-    # VM with a virtual TPM, as Windows 11 needs) only opens with its encryption password.
-    param([Parameter(Mandatory)][string]$Command, [string]$VmxPath, [string[]]$Arguments = @(), [string]$Password)
-    $list = @('-T', 'ws')
-    if ($Password) { $list += @('-vp', $Password) }
-    $list += $Command
-    if ($VmxPath) { $list += $VmxPath }
-    $list + @($Arguments)
-}
-
-function ConvertFrom-VmrunList {
-    # The .vmx paths in the output of 'vmrun list' (a "Total running VMs: N" line, then one path per line).
-    param([AllowEmptyCollection()][string[]]$Lines = @())
-    @($Lines | ForEach-Object { "$_".Trim() } | Where-Object { $_ -and $_ -notmatch '^Total running VMs' })
-}
-
-function Test-VmxInList {
-    # True when $VmxPath is one of $RunningPaths. Windows paths compare without case.
-    param([Parameter(Mandatory)][string]$VmxPath, [AllowEmptyCollection()][string[]]$RunningPaths = @())
-    $want = [IO.Path]::GetFullPath($VmxPath)
-    [bool]@($RunningPaths | Where-Object { $_ -and [IO.Path]::GetFullPath($_) -ieq $want }).Count
 }
 
 function Read-VmxSettings {
@@ -66,16 +23,10 @@ function Read-VmxSettings {
 }
 
 function Test-VmxEncrypted {
-    # True when the .vmx is encrypted, so vmrun needs the VM's encryption password to open it.
+    # True when the .vmx is encrypted (every VM with a virtual TPM), so its settings cannot be read.
     param([Parameter(Mandatory)][string]$VmxPath)
     $settings = Read-VmxSettings -Path $VmxPath
     $settings.Contains('encryption.keysafe') -or $settings.Contains('encryption.data')
-}
-
-function Test-VmrunWrongPassword {
-    # True when vmrun's output says the VM's encryption password was missing or wrong.
-    param([AllowEmptyCollection()][string[]]$Output = @())
-    [bool]($Output -match 'Incorrect password|password is required|requires a password|encrypted')
 }
 
 function Get-VmxDiskPaths {
@@ -188,5 +139,5 @@ function Get-VMwareInventory {
     @($unique)
 }
 
-Export-ModuleMember -Function Get-VMwareCaptureVariables, Find-Vmrun, Find-QemuImg, New-VmrunArguments, ConvertFrom-VmrunList, Test-VmxInList,
-    Test-VmxEncrypted, Test-VmrunWrongPassword, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkDescriptorPaths, Get-VmdkLeafPaths, Resolve-VmdkCurrentDisk, Test-VMwareFolderInUse, Get-VMwareInventory
+Export-ModuleMember -Function Find-QemuImg, Test-VmxEncrypted, Read-VmxSettings, Get-VmxDiskPaths, Get-VmdkDescriptor, Get-VmdkDescriptorPaths,
+    Get-VmdkLeafPaths, Resolve-VmdkCurrentDisk, Test-VMwareFolderInUse, Get-VMwareInventory

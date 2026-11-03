@@ -35,7 +35,7 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'Tools\BIOS\Dell', 'AnswerFiles', 'Applications', 'Tasks', 'Updates', 'Computers', 'Reimage') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Tasks', 'Updates') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
     foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'naming-list.csv') {
@@ -55,7 +55,6 @@ function Update-ContentTools {
     $dest = Join-Path $ContentRoot 'Tools'
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
     Copy-Item (Join-ContentPath $script:RepoRoot 'src\Prepare-Reference.ps1') $dest -Force
-    Copy-Item (Join-ContentPath $script:RepoRoot 'src\VMwareCaptureAgent.ps1') $dest -Force
 }
 
 function Test-ContentRoot {
@@ -226,7 +225,7 @@ function New-CaptureConfig {
 
 function Get-CaptureReadiness {
     # Problems that would make a capture fail in WinPE, for the wizard's summary page.
-    # Network captures (ISO for a VM) need the share; USB captures write to the stick's DEPLOY volume.
+    # Network captures (capture ISO) need the share; USB captures write to the stick's DEPLOY volume.
     param([Parameter(Mandatory)][string]$ContentRoot, [ValidateSet('Network', 'Usb')][string]$Destination)
     $issues = @()
     if ($Destination -eq 'Network') {
@@ -235,20 +234,6 @@ function Get-CaptureReadiness {
         elseif ($share -notmatch '^\\\\[^\\]+\\.+') { $issues += "The share '$share' is not a \\server\share path." }
     }
     $issues
-}
-
-function Get-ReferenceVMs {
-    # Hyper-V VMs that can be captured. Capture media boots both generation 2 (UEFI) and generation 1 (BIOS).
-    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return @() }
-    @(Get-VM -ErrorAction Stop | ForEach-Object {
-        [pscustomobject]@{
-            Name       = $_.Name
-            State      = "$($_.State)"
-            Generation = $_.Generation
-            Usable     = $_.Generation -in 1, 2
-            Label      = '{0}  ({1}, gen {2})' -f $_.Name, $_.State, $_.Generation
-        }
-    })
 }
 
 #endregion
@@ -353,8 +338,6 @@ function Get-NewAnswer {
     $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
     $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
-    $a.Bios.PasswordFile = $null
-    $a.UserDataKeyFile = "config\secrets\$Name-usmt.txt"
     $a
 }
 
@@ -429,9 +412,7 @@ function Save-AnswerFromEditor {
         [string]$JoinPassword,
         [string]$AdminPassword,
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
-        [string]$BiosPassword,
         [string]$BitLockerPin,
-        [string]$UserDataKey,               # encryption key for a Share user data store
         [switch]$IsNew
     )
     $a = $Answer
@@ -441,10 +422,8 @@ function Save-AnswerFromEditor {
 
     if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
-    if ($BiosPassword -and -not $a.Bios.PasswordFile) { $a.Bios.PasswordFile = "config\secrets\$($a.Name)-bios.txt" }
     if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
     if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
-    if (-not $a.UserDataKeyFile) { $a.UserDataKeyFile = "config\secrets\$($a.Name)-usmt.txt" }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -454,9 +433,7 @@ function Save-AnswerFromEditor {
 
     if ($JoinPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Value $JoinPassword }
     if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
-    if ($BiosPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.Bios.PasswordFile -Value $BiosPassword }
     if ($BitLockerPin) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Value $BitLockerPin }
-    if ($UserDataKey) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile -Value $UserDataKey }
     foreach ($sh in $a.Shares) {
         $pw = $SharePasswords[$sh.LocalName]
         if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }
@@ -795,15 +772,12 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window: a Hyper-V VM by name, a VMware
-    # Workstation VM by its .vmx file, or a shut-down, sysprepped VM's disk file.
-    [CmdletBinding(DefaultParameterSetName = 'HyperV')]
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down, sysprepped VM's
+    # disk file.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory, ParameterSetName = 'HyperV')][string]$VMName,
-        [Parameter(Mandatory, ParameterSetName = 'VMware')][string]$VmxPath,
-        [Parameter(Mandatory, ParameterSetName = 'Disk')][string]$DiskPath,
+        [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
@@ -812,8 +786,7 @@ function Get-VMCaptureArguments {
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $vm = if ($DiskPath) { "-DiskPath $(& $quote $DiskPath)" } elseif ($VmxPath) { "-VmxPath $(& $quote $VmxPath)" } else { "-VMName $(& $quote $VMName)" }
-    $cmd = "& $(& $quote $ScriptPath) $vm -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
+    $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
@@ -943,99 +916,6 @@ function Save-WdsSettings {
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
 }
 
-function Get-MulticastSettings {
-    # The "multicast" section of deploy-settings.json, with defaults. WinPE reads it from the content root,
-    # so turning multicast on or off needs no media rebuild.
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    $mc = [ordered]@{ enabled = $false; server = ''; namespace = 'ImagingTool'; contentPath = ''; type = 'AutoCast'
-        clients = 0; startTime = ''; speedPolicy = 'None'; thresholdKbps = 1024; fallback = $true }
-    $saved = (Get-DeploySettings -ContentRoot $ContentRoot).multicast
-    if ($saved) { foreach ($p in $saved.PSObject.Properties) { if ($mc.Contains($p.Name)) { $mc[$p.Name] = $p.Value } } }
-    [pscustomobject]$mc
-}
-
-function Get-MulticastIssues {
-    # What is wrong with multicast settings before they are saved or sent to the server; empty when fine.
-    param([Parameter(Mandatory)]$Multicast)
-    $issues = @()
-    if ("$($Multicast.namespace)".Trim() -notmatch '^[A-Za-z0-9][A-Za-z0-9 _.-]*$') { $issues += 'Session name: letters, digits, spaces, dots, dashes and underscores only.' }
-    if ($Multicast.type -notin 'AutoCast', 'ScheduledCast') { $issues += "Session type must be AutoCast or ScheduledCast, not '$($Multicast.type)'." }
-    if ($Multicast.speedPolicy -notin 'None', 'AutoDisconnect', 'Multistream') { $issues += "Slow PC policy must be None, AutoDisconnect or Multistream, not '$($Multicast.speedPolicy)'." }
-    $clients = 0
-    $clientText = "$($Multicast.clients)".Trim()   # empty means 0
-    if ($clientText -and (-not [int]::TryParse($clientText, [ref]$clients) -or $clients -lt 0)) { $issues += 'Number of PCs must be a whole number, 0 or more.' }
-    $start = "$($Multicast.startTime)".Trim()
-    $t = [datetime]::MinValue
-    if ($start -and -not [datetime]::TryParseExact($start, 'yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture, 'None', [ref]$t)) {
-        $issues += "Start time must look like 2026-11-03 08:30, not '$start'."
-    }
-    if ($Multicast.type -eq 'ScheduledCast' -and $clients -le 0 -and -not $start) {
-        $issues += 'A scheduled session needs a number of PCs, a start time, or both.'
-    }
-    $kbps = 0
-    if ($Multicast.speedPolicy -eq 'AutoDisconnect' -and (-not [int]::TryParse("$($Multicast.thresholdKbps)", [ref]$kbps) -or $kbps -le 0)) {
-        $issues += 'Disconnect threshold must be a number of KB/s above 0.'
-    }
-    $issues
-}
-
-function Save-MulticastSettings {
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Multicast)
-    $issues = @(Get-MulticastIssues -Multicast $Multicast)
-    if ($issues) { throw ($issues -join "`n") }
-    $s = Get-DeploySettings -ContentRoot $ContentRoot
-    $s | Add-Member -NotePropertyName multicast -NotePropertyValue ([pscustomobject]@{
-        enabled       = [bool]$Multicast.enabled
-        server        = "$($Multicast.server)".Trim()
-        namespace     = "$($Multicast.namespace)".Trim()
-        contentPath   = "$($Multicast.contentPath)".Trim()
-        type          = $Multicast.type
-        clients       = [int]"$($Multicast.clients)".Trim()
-        startTime     = "$($Multicast.startTime)".Trim()
-        speedPolicy   = $Multicast.speedPolicy
-        thresholdKbps = $(if ("$($Multicast.thresholdKbps)".Trim()) { [int]"$($Multicast.thresholdKbps)" } else { 1024 })
-        fallback      = [bool]$Multicast.fallback
-    }) -Force
-    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
-}
-
-function Format-ByteRate([long]$BytesPerSecond) {
-    if ($BytesPerSecond -ge 1MB) { '{0:N1} MB/s' -f ($BytesPerSecond / 1MB) } else { '{0:N0} KB/s' -f ($BytesPerSecond / 1KB) }
-}
-
-function ConvertTo-MulticastView {
-    # Turns Set-WdsMulticast.ps1 -Action Monitor output into the Multicast tab's summary line and grid rows.
-    param([Parameter(Mandatory)]$Monitor)
-    $clients = @($Monitor.Clients | Where-Object { $_ })
-    $rows = foreach ($c in $clients | Sort-Object Percent, Name) {
-        $joined = [timespan]::FromSeconds([long]$c.JoinedSeconds)
-        [pscustomobject]@{
-            Id       = [long]$c.Id
-            Name     = $c.Name
-            Address  = (@($c.IpAddress, $c.MacAddress) | Where-Object { $_ }) -join '  '
-            File     = Split-Path "$($c.File)" -Leaf
-            Percent  = [int]$c.Percent
-            Progress = "$([int]$c.Percent) %"
-            Joined   = $(if ($joined.TotalHours -ge 1) { '{0} h {1:00} min' -f [int][math]::Floor($joined.TotalHours), $joined.Minutes } else { '{0} min' -f [int][math]::Floor($joined.TotalMinutes) })
-            Speed    = Format-ByteRate $c.RateBytes
-        }
-    }
-    $rows = @($rows)
-    $summary = if (-not $Monitor.Exists) {
-        "No multicast session named '$($Monitor.Namespace)' on $($Monitor.Server). Click Save and set up session."
-    } elseif ($Monitor.Sessions -eq 0) {
-        "Session '$($Monitor.Namespace)' on $($Monitor.Server) has not started sending yet. PCs waiting for a scheduled start show up once it starts."
-    } elseif (-not $rows) {
-        "Session '$($Monitor.Namespace)' on $($Monitor.Server): no PCs connected."
-    } else {
-        $avg = [int][math]::Round(($rows | Measure-Object Percent -Average).Average)
-        $slow = $rows[0]
-        $done = @($rows | Where-Object Percent -ge 100).Count
-        "$($rows.Count) PC$(if ($rows.Count -ne 1) { 's' }) receiving, average $avg %, $done done. Slowest: $($slow.Name) at $($slow.Percent) %."
-    }
-    [pscustomobject]@{ Summary = $summary; Rows = $rows }
-}
-
 function Get-DeploymentLogs {
     # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
     # or SERVICE-<name>_... (Update-OfflineImage.ps1).
@@ -1059,11 +939,11 @@ function Get-DeploymentLogs {
 
 #endregion
 
-Export-ModuleMember -Function Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
+Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
-    Get-MulticastSettings, Get-MulticastIssues, Save-MulticastSettings, ConvertTo-MulticastView, Get-DeploymentLogs,
-    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness, Get-ReferenceVMs,
+    Get-DeploymentLogs,
+    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-SmartDeployAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,

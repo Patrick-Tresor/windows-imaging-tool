@@ -54,26 +54,16 @@ try {
 
     # ISO boot files: from the ADK's Oscdimg folder, since ADK 10.1.26100 copype makes no fwfiles folder.
     $oscdimg = Join-Path (Join-Path (Join-Path $adk 'Deployment Tools') 'amd64') 'Oscdimg'
-    $work = Join-Path $base 'WinPE_Build'
-    New-Item -ItemType Directory -Path (Join-Path $work 'media') -Force | Out-Null
-    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work
+    $b = Get-IsoBootFiles -AdkRoot $adk
     Assert-Equal $b.BiosBoot (Join-Path $oscdimg 'etfsboot.com') 'the BIOS boot file comes from the ADK without fwfiles'
     Assert-Equal $b.UefiBoot (Join-Path $oscdimg 'efisys.bin') 'the UEFI boot file comes from the ADK without fwfiles'
-    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work -NoPrompt
+    $b = Get-IsoBootFiles -AdkRoot $adk -NoPrompt
     Assert-Equal $b.UefiBoot (Join-Path $oscdimg 'efisys_noprompt.bin') 'capture media uses the no-prompt UEFI boot file'
 
-    # An ADK without the files falls back to an older copype's fwfiles folder.
     Remove-Item (Join-Path $oscdimg 'etfsboot.com'), (Join-Path $oscdimg 'efisys.bin')
-    New-FakeFile $work 'fwfiles\etfsboot.com'
-    New-FakeFile $work 'fwfiles\efisys.bin'
-    $b = Get-IsoBootFiles -AdkRoot $adk -WorkDir $work
-    Assert-Equal $b.BiosBoot (Join-Path (Join-Path $work 'fwfiles') 'etfsboot.com') 'the BIOS boot file falls back to fwfiles'
-    Assert-Equal $b.UefiBoot (Join-Path (Join-Path $work 'fwfiles') 'efisys.bin') 'the UEFI boot file falls back to fwfiles'
-
-    Remove-Item (Join-Path $work 'fwfiles') -Recurse -Force
     $message = ''
-    try { Get-IsoBootFiles -AdkRoot $adk -WorkDir $work | Out-Null } catch { $message = $_.Exception.Message }
-    Assert-Equal ($message -like "*etfsboot.com, efisys.bin were not found*$oscdimg*fwfiles*Deployment Tools*") $true 'missing boot files name the file and the folders searched'
+    try { Get-IsoBootFiles -AdkRoot $adk | Out-Null } catch { $message = $_.Exception.Message }
+    Assert-Equal ($message -like "*etfsboot.com, efisys.bin were not found*$oscdimg*Deployment Tools*") $true 'missing boot files name the file and the folder searched'
 
     Remove-Item (Join-Path $adk 'Deployment Tools/amd64') -Recurse -Force
     $s = Get-AdkStatus -AdkRoot $adk -Versions $same

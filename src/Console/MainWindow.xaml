@@ -72,13 +72,12 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a Hyper-V VM) and capture it, or Update image to add the latest Windows updates to an image without capturing it again. Answer files choose which image a PC gets."/>
+            <TextBlock Style="{StaticResource Hint}" Text="Images in the content root's Images folder. Click Capture new image to prepare a reference machine (ideally a VM) and capture it, or Update image to add the latest Windows updates to an image without capturing it again. Answer files choose which image a PC gets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
-            <Button x:Name="BtnImageSchedule" Content="Monthly update..." ToolTip="Apply new update files from the Updates folder to the selected image each month after Patch Tuesday (scheduled task on this PC)."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
@@ -303,101 +302,6 @@
         </ScrollViewer>
       </TabItem>
 
-      <!-- Multicast -->
-      <TabItem Header="Multicast">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel>
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Multicast: image a room of PCs at once"/>
-            <TextBlock Style="{StaticResource Hint}" Text="WDS sends the image once over the network and every PC in the session receives it together, instead of each PC copying its own. PCs booted from PXE, ISO or a small USB stick (network share mode) use it; USB sticks that carry the images do not. The content root must be on the WDS server. WinPE reads these settings from the content root, so no media rebuild is needed."/>
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
-              </Grid.RowDefinitions>
-
-              <Label Content="Use multicast"/>
-              <StackPanel Grid.Column="1">
-                <CheckBox x:Name="ChkMcEnabled" Content="PCs download the image by multicast" Margin="0,2"/>
-                <CheckBox x:Name="ChkMcFallback" Content="If multicast fails, copy the image from the share instead" Margin="0,2"/>
-              </StackPanel>
-
-              <Label Grid.Row="2" Content="WDS server"/>
-              <TextBox x:Name="TxtMcServer" Grid.Row="2" Grid.Column="1" ToolTip="Empty: the server on the Media tab's WDS box, or else the server in the network share path. PCs need a name here, so set it when the console runs on the WDS server itself."/>
-
-              <Label Grid.Row="4" Content="Session name"/>
-              <TextBox x:Name="TxtMcNamespace" Grid.Row="4" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="The multicast namespace PCs ask WDS for."/>
-
-              <Label Grid.Row="6" Content="Content folder on server"/>
-              <TextBox x:Name="TxtMcContentPath" Grid.Row="6" Grid.Column="1" ToolTip="The content root as a folder on the WDS server, for example D:\Deploy. Empty: the folder behind the network share in Deploy Settings."/>
-
-              <Label Grid.Row="8" Content="Session type"/>
-              <StackPanel Grid.Row="8" Grid.Column="1">
-                <RadioButton x:Name="RbMcAuto" GroupName="McType" Content="Start as soon as a PC asks (PCs that join late catch up)" Margin="0,2"/>
-                <RadioButton x:Name="RbMcScheduled" GroupName="McType" Content="Wait for the room: start when enough PCs have joined or at a set time" Margin="0,2"/>
-              </StackPanel>
-
-              <Label Grid.Row="10" Content="Wait for"/>
-              <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" IsEnabled="{Binding IsChecked, ElementName=RbMcScheduled}">
-                <TextBox x:Name="TxtMcClients" Width="60" ToolTip="0: no PC count, use the start time or Start now."/>
-                <Label Content="PCs, or start at"/>
-                <TextBox x:Name="TxtMcStartTime" Width="140" ToolTip="yyyy-MM-dd HH:mm, server time. Empty: no start time."/>
-                <Label Content="(yyyy-MM-dd HH:mm)"/>
-              </StackPanel>
-
-              <Label Grid.Row="12" Content="Slow PCs"/>
-              <StackPanel Grid.Row="12" Grid.Column="1">
-                <RadioButton x:Name="RbMcSpeedNone" GroupName="McSpeed" Content="Everyone goes at the slowest PC's speed" Margin="0,2"/>
-                <RadioButton x:Name="RbMcSpeedMulti" GroupName="McSpeed" Content="Put slow PCs in a second, slower stream" Margin="0,2"/>
-                <StackPanel Orientation="Horizontal">
-                  <RadioButton x:Name="RbMcSpeedDrop" GroupName="McSpeed" Content="Drop PCs slower than" Margin="0,2" VerticalAlignment="Center"/>
-                  <TextBox x:Name="TxtMcThreshold" Width="70" Margin="6,0" IsEnabled="{Binding IsChecked, ElementName=RbMcSpeedDrop}"/>
-                  <Label Content="KB/s (they copy from the share instead)"/>
-                </StackPanel>
-              </StackPanel>
-
-              <Label Grid.Row="14" Content="Server answer"/>
-              <TextBox x:Name="TxtMcStatus" Grid.Row="14" Grid.Column="1" Height="60" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"
-                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-            </Grid>
-            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-              <Button x:Name="BtnMcSave" Content="Save and set up session" Style="{StaticResource Primary}"
-                      ToolTip="Saves the settings and creates the session on the WDS server, replacing one with the same name."/>
-              <Button x:Name="BtnMcStart" Content="Start now" ToolTip="Starts a waiting session without waiting for more PCs."/>
-              <Button x:Name="BtnMcRemove" Content="Remove session"/>
-            </StackPanel>
-
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Room monitor" Margin="0,24,0,4"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Every PC receiving the image from the session, slowest first. PCs show their WinPE name (MININT-...); match them by IP or MAC address. Disconnecting a PC stops its multicast download; with fallback on it then copies the image from the share."/>
-            <TextBlock x:Name="TxtMcSummary" FontWeight="SemiBold" Margin="0,0,0,8" TextWrapping="Wrap"/>
-            <DataGrid x:Name="GridMcClients" Height="220" IsReadOnly="True">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="PC" Binding="{Binding Name}" Width="140"/>
-                <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="230"/>
-                <DataGridTemplateColumn Header="Progress" Width="200">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <Grid>
-                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="16"/>
-                        <TextBlock Text="{Binding Progress}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
-                      </Grid>
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Image" Binding="{Binding File}" Width="*"/>
-                <DataGridTextColumn Header="Joined" Binding="{Binding Joined}" Width="90"/>
-                <DataGridTextColumn Header="Session speed" Binding="{Binding Speed}" Width="110"/>
-              </DataGrid.Columns>
-            </DataGrid>
-            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-              <Button x:Name="BtnMcStatus" Content="Refresh" ToolTip="Reads the session and its PCs from the WDS server."/>
-              <Button x:Name="BtnMcDisconnect" Content="Disconnect selected PC"/>
-              <CheckBox x:Name="ChkMcAutoRefresh" Content="Refresh every 10 seconds" VerticalAlignment="Center" Margin="8,0,0,0"/>
-            </StackPanel>
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
-
       <!-- Answer files -->
       <TabItem Header="Answer Files">
         <DockPanel>
@@ -523,83 +427,6 @@
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>
-      </TabItem>
-
-      <!-- Remote reimage -->
-      <TabItem Header="Remote Reimage">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <DockPanel MinHeight="540" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
-            <StackPanel DockPanel.Dock="Top">
-              <TextBlock Style="{StaticResource SectionTitle}" Text="Remote reimage"/>
-              <TextBlock Style="{StaticResource Hint}" Text="PCs this tool can wake and reimage over the network. Deployed PCs are added automatically; add others by hand, import a CSV (Name, MAC, Address, Group, Relay), or click Read from PCs for ones that are on. Reimage wakes PCs that are off, restarts running ones into a one-time network boot, and the deploy uses the chosen answer file without asking. PCs need Wake-on-LAN and the UEFI network stack enabled in their BIOS, and PowerShell remoting with your account as administrator."/>
-            </StackPanel>
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-              <Label Content="Group"/>
-              <ComboBox x:Name="CmbPcGroup" Width="160" Margin="0,0,12,0"/>
-              <Button x:Name="BtnPcRefresh" Content="Refresh"/>
-              <Button x:Name="BtnPcCheck" Content="Check online"/>
-              <Button x:Name="BtnPcRead" Content="Read from PCs" ToolTip="For selected PCs that are on: read the MAC, IP, model and serial over PowerShell remoting."/>
-              <Button x:Name="BtnPcImport" Content="Import CSV..."/>
-              <Button x:Name="BtnPcRemove" Content="Remove"/>
-            </StackPanel>
-            <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <GroupBox Header="Add or update a PC" Padding="8">
-                <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-                  <Label Content="Name"/>
-                  <TextBox x:Name="TxtPcName" Grid.Column="1"/>
-                  <Label Grid.Row="2" Content="MAC"/>
-                  <TextBox x:Name="TxtPcMac" Grid.Row="2" Grid.Column="1" ToolTip="Wired adapter, e.g. 00-15-5D-0A-1B-2C"/>
-                  <Label Grid.Row="4" Content="Address"/>
-                  <TextBox x:Name="TxtPcAddress" Grid.Row="4" Grid.Column="1" ToolTip="Name or IP used for remoting. Empty = the name."/>
-                  <Label Grid.Row="6" Content="Group"/>
-                  <TextBox x:Name="TxtPcGroup" Grid.Row="6" Grid.Column="1" ToolTip="A lab or room, e.g. Lab-B204"/>
-                  <Label Grid.Row="8" Content="Relay"/>
-                  <TextBox x:Name="TxtPcRelay" Grid.Row="8" Grid.Column="1" ToolTip="Optional: a PC that is usually on in the same subnet. It sends the Wake-on-LAN packet when routers block it."/>
-                  <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
-                    <Button x:Name="BtnPcSave" Content="Save PC"/>
-                    <Button x:Name="BtnPcClear" Content="Clear"/>
-                  </StackPanel>
-                </Grid>
-              </GroupBox>
-              <GroupBox Grid.Column="2" Header="Selected PCs" Padding="8">
-                <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="6"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
-                  <Label Content="Answer file"/>
-                  <ComboBox x:Name="CmbReimageAnswer" Grid.Column="1"/>
-                  <CheckBox x:Name="ChkKeepNames" Grid.Row="2" Grid.ColumnSpan="2" IsChecked="True" Content="Keep each PC's name (instead of the answer file's naming)"/>
-                  <StackPanel Grid.Row="4" Grid.ColumnSpan="2">
-                    <CheckBox x:Name="ChkSkipF12" IsChecked="True" Content="Boot without F12: prestage these PCs in WDS until their deploy starts"/>
-                    <CheckBox x:Name="ChkLocalBoot" Margin="0,4,0,0" Content="No PXE: copy WinPE to each running PC and boot it from its own disk (Boot\boot.wim on the content root)"/>
-                    <CheckBox x:Name="ChkBackupFirst" Margin="0,4,0,0" Content="Back up each PC's old Windows to Backups on the share before it is erased"/>
-                  </StackPanel>
-                  <Label Grid.Row="6" Content="WDS server"/>
-                  <TextBox x:Name="TxtReimageWds" Grid.Row="6" Grid.Column="1" ToolTip="Empty = this PC (or the WDS server in the PXE settings). Saved to deploy-settings.json."/>
-                  <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal">
-                    <Button x:Name="BtnPcReimage" Content="Reimage..." Style="{StaticResource Primary}"/>
-                    <Button x:Name="BtnPcWake" Content="Wake"/>
-                    <Button x:Name="BtnPcCancel" Content="Cancel reimage"/>
-                  </StackPanel>
-                </Grid>
-              </GroupBox>
-            </Grid>
-            <DataGrid x:Name="GridPcs" IsReadOnly="True" SelectionMode="Extended">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
-                <DataGridTextColumn Header="MAC" Binding="{Binding Mac}" Width="130"/>
-                <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="100"/>
-                <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
-                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="60"/>
-                <DataGridTextColumn Header="Last deployed" Binding="{Binding LastDeployed}" Width="120"/>
-                <DataGridTextColumn Header="Result" Binding="{Binding LastResult}" Width="60"/>
-                <DataGridTextColumn Header="Reimage" Binding="{Binding Job}" Width="*"/>
-              </DataGrid.Columns>
-            </DataGrid>
-          </DockPanel>
-        </ScrollViewer>
       </TabItem>
 
       <!-- Settings -->

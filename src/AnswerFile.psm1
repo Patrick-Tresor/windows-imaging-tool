@@ -1,11 +1,10 @@
-# Answer files: one XML per deployment profile (image, apps, disk, user data, regional settings, naming,
+# Answer files: one XML per deployment profile (image, apps, disk, regional settings, naming,
 # domain join, tasks, shares), modelled on SmartDeploy's deploy wizard answer files.
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
 $script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
 $script:BitLockerProtectors = 'Tpm', 'TpmPin'
-$script:BiosMakers = 'Dell', 'HP', 'Lenovo'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1')
 
 function Get-XmlText {
@@ -37,19 +36,6 @@ function Read-BitLockerNode($d) {
     }
 }
 
-function Read-BiosNode($d) {
-    # <bios>: firmware settings per maker, applied in WinPE before the disk is wiped. Off when missing.
-    [pscustomobject]@{
-        Enabled      = ConvertTo-Bool (Get-XmlText $d 'bios/enabled') $false
-        PasswordFile = Get-XmlText $d 'bios/passwordFile'
-        ToolsRoot    = Get-XmlText $d 'bios/toolsRoot' 'Tools\BIOS'
-        StopOnError  = ConvertTo-Bool (Get-XmlText $d 'bios/stopOnError') $false
-        Settings     = @($d.SelectNodes('bios/setting') | ForEach-Object {
-            [pscustomobject]@{ Maker = $_.GetAttribute('maker'); Name = $_.GetAttribute('name'); Value = "$($_.InnerText)".Trim() }
-        })
-    }
-}
-
 function Read-AnswerFile {
     <#
     .SYNOPSIS
@@ -73,15 +59,6 @@ function Read-AnswerFile {
         DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
         DriverRoot           = Get-XmlText $d 'drivers/root' 'Drivers'
-        MigrateUserData      = ConvertTo-Bool (Get-XmlText $d 'userData/migrate') $false
-        UserDataStore        = Get-XmlText $d 'userData/store' 'Local'
-        UserDataPath         = Get-XmlText $d 'userData/storePath' 'UserState'
-        UserDataRules        = @()
-        UserDataExclude      = @()
-        UserDataLocalAccounts = ConvertTo-Bool (Get-XmlText $d 'userData/createLocalAccounts') $false
-        UserDataEncrypt      = ConvertTo-Bool (Get-XmlText $d 'userData/encrypt') $false
-        UserDataKeyFile      = Get-XmlText $d 'userData/keyFile'
-        UserDataKeepStore    = ConvertTo-Bool (Get-XmlText $d 'userData/keepStore') $false
         AppLocation          = Get-XmlText $d 'applications/@location' 'Applications'
         Applications         = @()
         ProductKey           = Get-XmlText $d 'productKey'
@@ -112,15 +89,11 @@ function Read-AnswerFile {
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
         Shutdown             = ConvertTo-Bool (Get-XmlText $d 'completion/shutdown') $false
         BitLocker            = Read-BitLockerNode $d
-        Bios                 = Read-BiosNode $d
     }
 
     $a.Applications = @($d.SelectNodes('applications/application') |
         Sort-Object { [int]$_.GetAttribute('order') } |
         ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
-    $a.UserDataRules = @($d.SelectNodes('userData/rules/rule') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
-    if (-not $d.SelectSingleNode('userData/rules')) { $a.UserDataRules = @('MigDocs.xml', 'MigApp.xml') }
-    $a.UserDataExclude = @($d.SelectNodes('userData/excludeUsers/user') | ForEach-Object { "$($_.InnerText)".Trim() } | Where-Object { $_ })
     # A task is a plain command, or a script from the task library (script="name") whose text is extra arguments.
     $a.Tasks = @($d.SelectNodes('tasks/task') | ForEach-Object {
         [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Script = $_.GetAttribute('script').Trim(); Command = "$($_.InnerText)".Trim() }
@@ -161,14 +134,6 @@ function Test-AnswerFile {
         $account = Resolve-JoinAccount -Answer $a
         if ($account.Problem) { $account.Problem }
     }
-    if ($a.MigrateUserData) {
-        if ($a.UserDataStore -notin 'Local', 'Share') { "userData/store must be Local or Share, not '$($a.UserDataStore)'." }
-        if ($a.UserDataStore -eq 'Share' -and -not $a.UserDataPath) { 'A Share user data store needs userData/storePath.' }
-        if (-not @($a.UserDataRules).Count) { 'User data migration needs at least one rule file (MigDocs.xml, MigApp.xml).' }
-        if ($a.UserDataStore -eq 'Share' -and $a.UserDataEncrypt -and -not $a.UserDataKeyFile) { 'userData/encrypt needs userData/keyFile.' }
-        if ($a.UserDataStore -eq 'Local' -and $a.UserDataEncrypt) { 'A Local (hard-link) user data store can''t be encrypted; it never leaves the PC.' }
-        if ('MigDocs.xml' -in $a.UserDataRules -and 'MigUser.xml' -in $a.UserDataRules) { 'Use MigDocs.xml or MigUser.xml, not both: they collect the same files.' }
-    }
     if ($a.EnableAdministrator -and -not $a.AdminPasswordFile) { 'options/enableAdministrator needs options/administratorPasswordFile.' }
     foreach ($t in $a.Tasks) {
         if ($t.Phase -notin $script:Phases) { "Task phase '$($t.Phase)' must be one of $($script:Phases -join ', ')." }
@@ -190,15 +155,6 @@ function Test-AnswerFile {
         if ($bl.BackupToAD -and $a.Membership -ne 'Domain') { 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' }
         if ($bl.RecoveryKeyFolder -and $bl.RecoveryKeyFolder -notmatch '^\\\\[^\\]+\\.+') { "bitlocker/recoveryKeyFolder '$($bl.RecoveryKeyFolder)' must be a \\server\share path." }
         if ($bl.RequireBackup -and -not $bl.BackupToAD -and -not $bl.RecoveryKeyFolder) { 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' }
-    }
-    $bios = $a.Bios
-    if ($bios -and $bios.Enabled) {
-        if (-not $bios.Settings) { 'bios is enabled but has no settings.' }
-        foreach ($s in $bios.Settings) {
-            if ($s.Maker -notin $script:BiosMakers) { "BIOS setting '$($s.Name)': maker must be Dell, HP or Lenovo, not '$($s.Maker)'." }
-            if (-not $s.Name -or -not $s.Value) { "A $($s.Maker) BIOS setting needs a name and a value." }
-            elseif ($s.Maker -eq 'Lenovo' -and "$($s.Name)$($s.Value)" -match '[,;]') { "Lenovo BIOS setting '$($s.Name)': names and values can't contain , or ;." }
-        }
     }
 }
 
@@ -414,10 +370,9 @@ $accounts$logonBlock    </component>
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    # userState (Copy-UserStateForRestore) is restored after the applications, so their settings apply.
     # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
     # -Tasks: Resolve-DeployTasks rows (library tasks read, other PCs' tasks left out). Not passed: the plain commands.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), $UserState = $null, [string]$BitLockerPin, [object[]]$Tasks)
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [string]$BitLockerPin, [object[]]$Tasks)
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
@@ -427,7 +382,6 @@ function New-FirstBootPlan {
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
-        userState            = $UserState
         tasks                = @($rows | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object {
             [pscustomobject]@{ name = $_.Name; command = $_.Command; task = $_.Definition; arguments = $_.Arguments }
         })
@@ -462,8 +416,6 @@ function Export-AnswerFile {
     $b = { param([bool]$v) if ($v) { 'true' } else { 'false' } }
     $i = 0
     $apps = foreach ($n in $a.Applications) { $i++; "    <application order=`"$i`">$(& $x $n)</application>" }
-    $rules = foreach ($r in $a.UserDataRules) { "      <rule>$(& $x $r)</rule>" }
-    $excluded = foreach ($u in $a.UserDataExclude) { "      <user>$(& $x $u)</user>" }
     $tasks = foreach ($t in $a.Tasks) {
         $scriptAttr = if ($t.PSObject.Properties['Script'] -and $t.Script) { " script=`"$(& $x $t.Script)`"" } else { '' }
         "    <task phase=`"$($t.Phase)`"$scriptAttr>$(& $x $t.Command)</task>"
@@ -481,8 +433,6 @@ function Export-AnswerFile {
 "@
     }
     $bl = if ($a.BitLocker) { $a.BitLocker } else { Read-BitLockerNode ([xml]'<deployment/>').DocumentElement }
-    $bios = if ($a.Bios) { $a.Bios } else { Read-BiosNode ([xml]'<deployment/>').DocumentElement }
-    $biosSettings = foreach ($s in $bios.Settings) { "    <setting maker=`"$(& $x $s.Maker)`" name=`"$(& $x $s.Name)`">$(& $x $s.Value)</setting>" }
     $text = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
@@ -502,21 +452,6 @@ function Export-AnswerFile {
   <drivers>
     <root>$(& $x $a.DriverRoot)</root>
   </drivers>
-  <userData>
-    <migrate>$(& $b $a.MigrateUserData)</migrate>
-    <store>$(& $x $a.UserDataStore)</store>
-    <storePath>$(& $x $a.UserDataPath)</storePath>
-    <rules>
-$($rules -join "`n")
-    </rules>
-    <excludeUsers>
-$($excluded -join "`n")
-    </excludeUsers>
-    <createLocalAccounts>$(& $b $a.UserDataLocalAccounts)</createLocalAccounts>
-    <encrypt>$(& $b $a.UserDataEncrypt)</encrypt>
-    <keyFile>$(& $x $a.UserDataKeyFile)</keyFile>
-    <keepStore>$(& $b $a.UserDataKeepStore)</keepStore>
-  </userData>
   <applications location="$(& $x $a.AppLocation)">
 $($apps -join "`n")
   </applications>
@@ -571,13 +506,6 @@ $($shares -join "`n")
     <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
     <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>
   </bitlocker>
-  <bios>
-    <enabled>$(& $b $bios.Enabled)</enabled>
-    <passwordFile>$(& $x $bios.PasswordFile)</passwordFile>
-    <toolsRoot>$(& $x $bios.ToolsRoot)</toolsRoot>
-    <stopOnError>$(& $b $bios.StopOnError)</stopOnError>
-$($biosSettings -join "`n")
-  </bios>
   <completion>
     <reboot>$(& $b $a.Reboot)</reboot>
     <shutdown>$(& $b $a.Shutdown)</shutdown>
@@ -623,7 +551,7 @@ function ConvertFrom-SmartDeployAnswerFile {
     }
 
     $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
-    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated. To keep the users' data, turn on User data in the editor.") }
+    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (Wipe and load / SmartMigrate) isn't converted; the disk will be recreated.") }
 
     $membership = switch (Get-XmlText $w 'network_identification/membership' '1') { '0' { 'Domain' } '2' { 'Workgroup' } default { 'Workgroup' } }
     if ((Get-XmlText $w 'network_identification/membership') -eq '2') { $notes.Add('Azure AD join isn''t supported; set to Workgroup.') }
@@ -696,15 +624,6 @@ function ConvertFrom-SmartDeployAnswerFile {
         DiskNumber           = 0
         DiskOption           = 'Recreate'
         DriverRoot           = 'Drivers'
-        MigrateUserData      = $false
-        UserDataStore        = 'Local'
-        UserDataPath         = 'UserState'
-        UserDataRules        = @('MigDocs.xml', 'MigApp.xml')
-        UserDataExclude      = @()
-        UserDataLocalAccounts = $false
-        UserDataEncrypt      = $false
-        UserDataKeyFile      = 'config\secrets\usmt.txt'
-        UserDataKeepStore    = $false
         AppLocation          = 'Applications'
         Applications         = $apps
         ProductKey           = Get-XmlText $w 'product_key/product_key'
@@ -735,7 +654,6 @@ function ConvertFrom-SmartDeployAnswerFile {
         Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'
         Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
         BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
-        Bios                 = Read-BiosNode ([xml]'<deployment/>').DocumentElement
     }
     if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: put its password in config\secrets\admin.txt.') }
     @{ Answer = $answer; Notes = @($notes) }

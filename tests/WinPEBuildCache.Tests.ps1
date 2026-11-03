@@ -91,7 +91,7 @@ try {
     New-Item -ItemType Directory -Path $stick -Force | Out-Null
     $first = (Get-MediaUpdatePlan -Plan $copy -Destination $stick).Copy
     Assert-Equal $first.FileCount 4 'stick: a new stick gets every file'
-    $null = Copy-MediaContent -Plan $first -Destination $stick -Method Stream -Quiet
+    $null = Copy-MediaContent -Plan $first -Destination $stick -Quiet
     Assert-Equal ([IO.File]::ReadAllText((Join-Path $stick 'Drivers/_WinPE/Dell-WinPE11-A11/winpe/x64/storage/iaStorVD.inf'))) 'rst' 'stick: driver copied'
     Assert-Equal (Get-MediaUpdatePlan -Plan (Get-WinPEPackCopyPlan -PackPath $dell) -Destination $stick).Copy.FileCount 0 'stick: an update copies nothing unchanged'
     $drvload = @(Get-WinPEDriverInfs -Folder (Join-Path $stick 'Drivers/_WinPE') | ForEach-Object Name)

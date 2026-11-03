@@ -11,12 +11,6 @@ $script:VendorCatalogs = @{
     Lenovo = @{ Url = 'https://download.lenovo.com/cdrt/td/catalogv2.xml'; Xml = 'catalogv2.xml' }
 }
 
-function Join-ContentPath {
-    # Same as the private helper in ConsoleData.psm1: catalog paths use backslashes, normalized so tests run off Windows.
-    param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
-
 # The signer a downloaded .exe must carry before it is run to extract itself.
 $script:Signers = @{ Dell = 'Dell'; HP = 'HP Inc'; Lenovo = 'Lenovo' }
 

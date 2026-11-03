@@ -30,7 +30,7 @@ try {
     # An empty stick: everything is copied.
     $u = Get-MediaUpdatePlan -Plan $plan -Destination $stick
     Assert-Equal $u.Copy.FileCount 4 'empty stick: every file'
-    [void](Copy-MediaContent -Plan $u.Copy -Destination $stick -Method Stream -Quiet)
+    [void](Copy-MediaContent -Plan $u.Copy -Destination $stick -Quiet)
 
     # Copied once: nothing to do (the copy keeps the modified time).
     $u = Get-MediaUpdatePlan -Plan $plan -Destination $stick
@@ -48,7 +48,7 @@ try {
     Assert-Equal (@($u.Stale.Relative | Sort-Object) -join ';') 'config\secrets\join.txt;Drivers\HP\Old\b.inf' 'dropped pack and old password files are deleted'
     Assert-Equal $u.NeededBytes ([int64](15 - 8 - 3 - 2)) 'room needed: copied minus replaced minus deleted'
     Remove-StaleMediaFiles -UpdatePlan $u -Destination $stick
-    [void](Copy-MediaContent -Plan $u.Copy -Destination $stick -Method Stream -Quiet)
+    [void](Copy-MediaContent -Plan $u.Copy -Destination $stick -Quiet)
     Assert-Equal (Test-Path (Join-Path $stick 'Drivers/HP')) $false 'empty folders removed'
     Assert-Equal (Test-Path (Join-Path $stick 'Logs/PC1/Deploy.log')) $true 'Logs kept'
     Assert-Equal (Test-Path (Join-Path $stick 'Drivers/_WinPE/Dell/iaStorVD.inf')) $true 'WinPE drivers kept'

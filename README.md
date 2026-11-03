@@ -2,7 +2,7 @@
 
 Capture one hardware-independent Windows 10/11 image, then deploy it to any
 Dell, HP or Lenovo PC with the right drivers injected automatically. Works from
-an offline USB stick, a LAN share, or PXE, on UEFI and legacy BIOS PCs. Built on the Windows ADK, WinPE and
+an offline USB stick, a LAN share, or PXE, on UEFI PCs. Built on the Windows ADK, WinPE and
 DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Layout
@@ -10,10 +10,9 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
-                     Prepare-Reference.ps1, VMwareCaptureAgent.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1, Set-WdsMulticast.ps1,
-                     Start-RemoteReimage.ps1, Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
-                     PostDeployChecks.psm1, UserState.psm1, NamingList.psm1,
-                     RemoteReimage.psm1, Win11Readiness.psm1, DeployWizard.psm1,
+                     Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1,
+                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
+                     PostDeployChecks.psm1, NamingList.psm1, Win11Readiness.psm1, DeployWizard.psm1,
                      DeployProgress.psm1, DeployProgressWindow.ps1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
@@ -40,7 +39,7 @@ and click **Create folders** the first time. Then:
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares, BIOS settings, BitLocker and User data. Passwords are typed into password
+  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
   boxes and saved to their own files.
 - **Applications**: the application pack builder. Build, edit, test, export and
   import packs (see Applications below).
@@ -70,8 +69,6 @@ and click **Create folders** the first time. Then:
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-- **Remote Reimage**: the PCs on the network, by lab or room. Wake them, or
-  reimage a whole lab from here (see [Remote reimage](#remote-reimage)).
 - **Deploy Settings**: the network share WinPE uses to find the content root,
   and the default answer file.
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
@@ -92,12 +89,9 @@ AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 Tasks\         Set-Wallpaper\task.json + script.ps1, ... (scripts answer files run)
 config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (password files)
-UserState\     user data backups, one folder per PC serial (only with a folder store)
-Logs\          one log per deployed PC, capture or remote reimage
+Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
 Status\        <serial>.json + <serial>.log per PC, for the Dashboard
-Computers\     one .json per PC that can be reimaged remotely (MAC, name, group)
-Reimage\       pending remote reimage jobs, and Started\ for the ones WinPE picked up
 ```
 
 ## Answer files
@@ -110,7 +104,6 @@ the console; the format is documented in the commented
   (start after `unattendDelay` seconds; a key pressed during the countdown opens
   the wizard instead).
 - **image** and index, **disk** number, **drivers** root.
-- **user data**: keep the users' files and settings when redeploying a PC (see below).
 - **Windows 11 check** (`image/windows11Check`): `Block` (default), `Warn` or
   `Off`. See below.
 - **applications** installed in order at first boot (see below).
@@ -126,17 +119,8 @@ the console; the format is documented in the commented
   command or a script from the task library (`<task script="name">`).
 - extra **shares** to map in WinPE, **options** (disable System Restore, enable
   the built-in Administrator), and reboot or shut down when done.
-- **BIOS settings** for Dell, HP and Lenovo, applied in WinPE before the disk is
-  wiped (see below).
 - **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
   the recovery key backed up to AD and/or a share first.
-
-**BIOS settings** are name and value rows per maker; only the rows for the PC's
-maker are used. HP and Lenovo need no tool (the firmware's WMI interface). For
-Dell, copy the WinPE x64 folder of Dell Command | Configure to
-`Tools\BIOS\Dell` on the content root. If the PCs already have a BIOS admin
-password, type it in the editor; it is saved in `config\secrets` like the other
-passwords. Turn on the TPM here if BitLocker needs it.
 
 **BitLocker** needs a TPM that is on and ready, or it is skipped (see
 `C:\Windows\Temp\FirstBoot.log`). Backing the recovery key up to Active
@@ -206,11 +190,10 @@ password before it does anything and shuts down after 5 wrong tries or
 **Shut down**; nothing else is asked. Without a WinPE password, the deploy
 wizard shows a **Passwords** page right after the answer file, with one box for
 each password the answer file needs (join account, share, local Administrator,
-BitLocker PIN, BIOS, user data key). Each is typed once, kept in memory only,
+BitLocker PIN). Each is typed once, kept in memory only,
 and nothing is asked once Windows starts installing. An unattended answer file
-asks for them in one window before its countdown. A remote reimage cannot ask, so it needs the
-password files on the share, and a PXE image with a WinPE password waits for
-someone to type it. Tick **Passwords on USB** only if you accept that anyone
+asks for them in one window before its countdown. A PXE image with a WinPE
+password waits for someone to type it. Tick **Passwords on USB** only if you accept that anyone
 holding the stick can read them.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach
@@ -305,27 +288,6 @@ are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `C:\Windows\Temp\Task-<name>-<user>.log`. **Export...** zips a task to copy it to
 another content root; **Import...** adds it back.
 
-**User data migration** backs up the user profiles of the Windows already on
-the PC with USMT, in WinPE, before the disk is erased, and restores them at first
-boot after the applications. Turn it on in the editor's **User data** section.
-Install the ADK's *User State Migration Tool* feature before building media: the
-media builder copies it into WinPE. Two places to keep the data during the deploy:
-
-- **On the PC's disk** (hard links): fast and nothing is copied, but the disk's
-  partitions are kept and only the Windows partition is emptied. GPT disks
-  without BitLocker encryption only.
-- **In a folder** on the content root or an extra share (`UserState\<serial>` by
-  default): a compressed copy, optionally encrypted with a key saved under
-  `config\secrets`. WinPE needs write access to it. The copy stays as a backup;
-  delete it when you no longer need it.
-
-Choose what to keep (user files with `MigDocs.xml`, application settings with
-`MigApp.xml`, or your own rule files), users to skip (`*\Administrator`), and
-whether to recreate local accounts. A PC with no Windows on the disk is deployed
-without user data. A disk locked by BitLocker stops the deployment before anything
-is erased: unlock it with `manage-bde -unlock` in WinPE or suspend BitLocker first.
-USMT logs: `C:\Windows\Temp\ScanState.log` and `LoadState.log`.
-
 **Importing from SmartDeploy** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
 options. SmartDeploy encrypts its passwords, so they are never carried over; the
@@ -396,28 +358,6 @@ PCs. Without the console:
 This updates Windows itself, not the applications in the image or its recovery
 environment (`winre.wim`); refresh those with a new capture from time to time.
 
-### Every month, on a schedule
-
-Select an image and click **Monthly update...** on the Images tab. A scheduled
-task on this PC (`Imaging - monthly image update`, as SYSTEM) runs
-`src\Invoke-ScheduledImageUpdate.ps1` each day; from the day after Patch Tuesday
-it applies, once a month, the .msu/.cab files in `Updates\` (or
-`Updates\<image name>\` for that image only) that the image has not had yet,
-with cleanup, keeping the previous version for rollback. It does not download
-anything: put the month's files from the Microsoft Update Catalog in the folder
-before that day. Settings: `config\image-update-schedule.json` (`daysAfterPatchTuesday`,
-`time`, `cleanup`). Run it now with `Invoke-ScheduledImageUpdate.ps1 -ContentRoot D:\DeployShare -Force`.
-
-## Windows Autopilot (Intune)
-
-Add the **Autopilot-HardwareHash** task (Tasks tab, Template) to an answer file
-at FIRSTBOOT and replace `REPLACE_SHARE` with a folder on the share, for example
-`\\server\Deploy\Autopilot` (Domain Computers need write access). Each PC saves
-`Autopilot-<serial>.csv` there with its hardware hash (`-GroupTag Staff` adds a
-group tag). Merge them into one file and import it in Intune (Devices > Windows
-enrollment > Devices > Import):
-`Import-Module .\src\Autopilot.psm1; Merge-AutopilotCsv -Folder \\server\Deploy\Autopilot -OutFile C:\Temp\autopilot.csv`.
-
 ## Testing on real hardware
 
 [docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md) lists what still needs a real PC,
@@ -452,51 +392,6 @@ PXE-booted PCs find the content root through the network share in Deploy Setting
 the same as an ISO boot. From the command line:
 `.\src\Publish-WdsBootImage.ps1 -BootWim C:\WinPE\boot.wim -Server wds01 -Setup -RemoteInstallPath D:\RemoteInstall`
 publishes an existing `boot.wim`, and `-Status` only reports the server's state.
-
-## Multicast: a room at once
-
-When a whole room deploys from the network, each PC normally copies its own
-copy of the image, so 30 PCs pull it 30 times. With multicast, WDS sends it once
-and every PC in the session receives it together. Set it up on the
-**Multicast** tab and click **Save and set up session**:
-
-- **WDS server**: the transport server PCs ask. Empty uses the WDS box on the
-  Media tab, or else the server in the network share path. WDS must already be
-  set up (publish the boot image once with **Set up WDS if needed**).
-- **Content folder on server**: multicast serves a folder on the WDS server, so
-  the content root must live there. Empty finds it from the network share in
-  Deploy Settings (`\\wds01\Deploy` becomes the folder behind the `Deploy` share).
-  Images are served straight from `Images\`; nothing is imported into WDS.
-- **Session type**: *start as soon as a PC asks* (PCs that join late catch up on
-  what they missed), or *wait for the room*: start when N PCs have joined or at a
-  set time, whichever comes first. **Start now** starts a waiting session early.
-- **Slow PCs**: everyone at the slowest PC's speed, a second slower stream for
-  slow PCs, or drop PCs below a speed (they then copy from the share).
-- **If multicast fails, copy the image from the share**: on by default, so a PC
-  that can't join (no `wdsmcast.exe`, firewall, switch dropping multicast) still
-  deploys, only slower.
-- **Room monitor**: every PC receiving the image, slowest first, with a progress
-  bar, IP and MAC address, how long it has been connected and the session speed,
-  plus a summary line (PCs, average progress, how many are done, the slowest).
-  **Refresh** reads it once; tick **Refresh every 10 seconds** to watch the room.
-  **Disconnect selected PC** drops one PC that holds the room back; with fallback
-  on, it copies the image from the share instead. PCs show their WinPE name
-  (`MININT-...`), so match them by address. **Remove session** stops it all.
-
-A PC booted from PXE, an ISO or a small USB stick (network share mode) partitions
-its disk, downloads the image by multicast onto its new Windows partition with
-`wdsmcast.exe` (part of WinPE), applies it from there and deletes the download.
-USB sticks that carry the images, split `.swm` images and images outside the
-content root are copied as before. WinPE reads these settings from the content
-root, so there is nothing to rebuild. For a room, pair it with an unattended
-answer file so no PC waits at a prompt.
-
-The network must pass multicast between the WDS server and the PCs: same VLAN, or
-multicast routing between them, and IGMP snooping on the switches so the stream
-doesn't flood every port. From the command line:
-`.\src\Set-WdsMulticast.ps1 -Server wds01 -Type ScheduledCast -Clients 25 -SpeedPolicy Multistream`,
-then `-Action Monitor` (objects, one per PC), `-Action Status` (`wdsutil` text),
-`-Action Start`, `-Action Disconnect -ClientId <Id from Monitor>` or `-Action Remove`.
 
 ## Deployment dashboard
 
@@ -582,77 +477,6 @@ cells fall back to the answer file, and an unlisted PC is named by the answer
 file as before. Edit it in the console or in Excel; comma and semicolon files
 are both read. The deploy log says which entry was used.
 
-## Remote reimage
-
-The **Remote Reimage** tab reimages PCs without anyone walking to them, for
-example a whole lab overnight. It needs PXE (WDS) and the network share in Deploy
-Settings, since the PCs boot WinPE from the network.
-
-**The computer list.** Every PC deployed by this tool is added with its MAC, IP,
-model and last result. Add other PCs with **Save PC** (leave MAC empty to read it
-from a PC that is on), **Import CSV...** (columns `Name`, `MAC`, and optionally
-`Address`, `Group`, `Relay`; commas or semicolons), or select PCs and click
-**Read from PCs**. **Group** is a lab or room, and the list filters by it.
-
-**Reimage...** asks for confirmation, then opens a window that, for each selected PC:
-
-1. Queues a job (`Reimage\<MAC>.json`) with the chosen answer file and, if **Keep
-   each PC's name** is ticked, the PC's current name.
-2. If **Boot without F12** is ticked, prestages the PC in WDS with no PXE prompt,
-   so it boots straight into WinPE. Other PCs keep the server's prompt. The
-   prestage is removed again once the PC's deploy starts.
-3. **PC on:** connects with PowerShell remoting, sets the firmware's next boot (once
-   only) to the network entry with `bcdedit /set {fwbootmgr} bootsequence`, and
-   restarts it after a 60 second warning to anyone logged on.
-   **PC off:** sends Wake-on-LAN. A PC that boots from the network first goes
-   straight to WinPE. One that starts Windows instead is restarted into PXE as soon
-   as it answers.
-4. In WinPE, `Deploy-Image.ps1` finds the job by the PC's MAC, uses its answer file
-   without the menu or the YES prompt (it still counts down at least 15 seconds,
-   so someone at the PC can cancel), and deletes the job so the next network boot
-   does not reimage the PC again. Jobs expire after 12 hours.
-
-The window waits up to 20 minutes and then lists each PC as started or failed,
-with the reason. That summary is saved as a `REIMAGE_...` log on the Deployment
-Logs tab. **Cancel reimage** deletes the selected PCs' jobs (a deploy already running
-is not stopped). **Wake** only sends Wake-on-LAN.
-
-What the PCs need:
-
-- **BIOS:** Wake-on-LAN on, the UEFI network stack (PXE) on, and for Dell "Deep
-  Sleep Control" off, or Wake-on-LAN does not work from shutdown. UEFI only: a
-  legacy BIOS PC can only be reimaged this way if network boot is first in its
-  boot order.
-- **Windows:** PowerShell remoting (WinRM, on by default on domain PCs with the
-  usual GPO) and your account as administrator. The console tells you which PCs
-  answer with **Check online**.
-- **Network:** a Wake-on-LAN packet is a broadcast, and routers drop it unless
-  directed broadcasts are allowed for that subnet. The console sends it both to
-  the local broadcast and to the PC's subnet broadcast. If the lab is on another
-  VLAN that blocks it, set a **Relay**: a PC (or server) in that subnet that is
-  usually on; it sends the packet locally for the others.
-- **WDS** for the no-F12 option: you must be an administrator on the WDS server,
-  set as **WDS server** on the tab (empty = this PC). From the command line:
-  `.\src\Start-RemoteReimage.ps1 -ContentRoot \\server\Deploy -Mac 00155D0A1B2C,00155D0A1B2D -AnswerFile Lab-W11 -KeepNames -SkipPxePrompt`
-
-**Without PXE.** Tick **No PXE** to reimage running PCs without WDS: the window
-copies `Boot\boot.wim` from the content root to the PC's `C:\_ImagingBoot` over
-PowerShell remoting, adds a one-time RAM disk boot entry for it with `bcdedit`,
-suspends BitLocker for that one restart (the boot manager has to read C:) and
-restarts. WinPE then reaches the share in Deploy Settings and takes the job as
-above. Build that boot image on the Media tab: **PXE boot.wim** with
-`<content root>\Boot` as the output folder (rebuild it when you change WinPE).
-PCs that are off still need PXE, since nothing can copy a file to them. Command
-line: `-BootMethod LocalDisk` (and `-BootWim` for another file). A boot image with
-a WinPE password waits at the PC for someone to type it.
-
-**Backup first.** Tick **Back up each PC's old Windows** (`-BackupFirst`, or
-`Deploy-Image.ps1 -BackupFirst`) and WinPE captures the old Windows partition to
-`Backups\<serial>-<date>.wim` on the share before it erases the disk (DISM, fast
-compression; restore files with `dism /Mount-Image` or deploy it back). Only to the
-share, not to a USB stick; a PC whose Windows is locked by BitLocker stops before
-anything is erased. Clear old backups by hand.
-
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
@@ -671,56 +495,25 @@ anything is erased. Clear old backups by hand.
    Volume down while it starts.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
-2. **Build the reference** in a Hyper-V VM (generation 2 for the hands-free capture; generation 1 works
-   from a capture ISO) or a VMware Workstation VM: install Windows, apps and updates, no OEM drivers.
+2. **Build the reference** in a VM (VMware Workstation, VirtualBox, Hyper-V or others): install Windows,
+   apps and updates, no OEM drivers.
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
-   1. Choose the reference machine. **A Hyper-V VM on this PC** is the default and is
-      hands-free: you do not run sysprep. The wizard offers to shut the VM down if it is
-      running, takes a checkpoint, has Windows run `Prepare-Reference.ps1` at boot if the
-      VM is not sysprepped yet (sysprep shuts it down), reads the VM's disk on the admin
-      PC (`src\Capture-VMImage.ps1`) with the VM off, and then rolls the VM back to the
-      checkpoint. No password is needed, and the VM needs no network (generation 2 VMs
-      only). **A VMware Workstation VM on this PC** is hands-free too (see below). The
-      other choices are a **Hyper-V VM booted from a capture ISO** (the wizard
-      builds the ISO, boots the VM from it, and ejects it when the capture finishes), an
-      **ISO** for other VMs, or a **USB stick** for a physical PC.
-   2. For those other choices only, run the prepare command the wizard shows on the
-      reference machine (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot,
-      BitLocker and Store apps that break sysprep, then runs sysprep and shuts down.
+   1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
+      below), an **ISO** for a VM or PC that boots from one, or a **USB stick** for a
+      physical PC.
+   2. Run the prepare command the wizard shows on the reference machine
+      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
+      Store apps that break sysprep, then runs sysprep and shuts down.
    3. Name the image and choose compression.
-   4. Review and click Start (hands-free) or Build and start.
-   The image is saved to the content root's `Images` folder (hands-free), the share's
+   4. Review and click Start (disk file) or Build and start.
+   The image is saved to the content root's `Images` folder (disk file), the share's
    `Images` folder, or the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 
-   **VMware Workstation, hands-free (experimental).** No sysprep by hand and no capture ISO. On the
-   admin PC you need VMware Workstation Pro 17 or later (for `vmrun.exe`) and
-   `qemu-img.exe` from QEMU for Windows, on the PATH or in `C:\Program Files\qemu`
-   (it reads the VMware disk, snapshots included). In the VM you need VMware Tools and,
-   once per VM, the capture agent: boot the VM, run the command the wizard shows
-   (`Tools\VMwareCaptureAgent.ps1 -Install`) in an elevated PowerShell window, and shut
-   it down. The agent is a startup task that does nothing unless the admin PC asks for
-   a capture. Then pick the VM's `.vmx` in the wizard. `src\Capture-VMImage.ps1 -VmxPath`
-   takes a snapshot, starts the VM, asks the agent (through a VMware guest variable)
-   to run `Prepare-Reference.ps1 -RemoveUserApps`, waits for sysprep to shut the VM
-   down, copies the VM's disk to a temporary VHD on the admin PC (it needs free space
-   for the whole disk), removes the agent's leftovers from that copy, captures it,
-   and reverts the VM to the snapshot. If sysprep fails, the VM shuts down anyway and
-   the capture log shows the agent's log and the last sysprep error. The VM must not
-   be sysprepped already (capture a sysprepped VM with `-DiskPath` instead). A VM
-   whose encryption covers only its TPM works; a fully encrypted VM does not.
-   Windows 11 VMs are encrypted for their virtual TPM, and `vmrun` opens them only
-   with the VM's encryption password: the capture window asks for it (or pass
-   `-VmxPassword`) and checks it before taking the snapshot. It is the password typed
-   when the VM was created or its TPM was added. If Workstation never asked for one,
-   it generated one itself and keeps it in Windows; try setting one you know with
-   Change Password under VM > Settings > Options > Access Control (untested).
-   Untested on Windows and VMware so far.
-
    **A VM's disk file (VMware, VirtualBox, Proxmox, ESXi and others).** The simplest way
-   for VMs that are not in Hyper-V, and the recommended one for VMware. In the wizard pick
+   to capture a VM. In the wizard pick
    **A VM's disk file on this PC** and the VM's disk. On the next page the wizard shows the
    prepare command: run it in the VM as administrator (turn BitLocker off first, and don't
    capture while updates are installing), and sysprep shuts the VM down. Then the tool runs
@@ -729,7 +522,7 @@ anything is erased. Clear old backups by hand.
    of the whole disk with qemu-img (or VirtualBox), so the admin PC needs free space for it.
    For a VMware disk with snapshots, the newest snapshot of the chain is read, whichever
    .vmdk you pick, and the capture refuses to start while VMware still has the VM open. No
-   password, ISO or agent is needed, and the VM, its disk and its snapshots are left alone.
+   password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
    on it. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
@@ -746,13 +539,13 @@ anything is erased. Clear old backups by hand.
    or change the computer name, OU and target disk, tick the applications, then
    review the summary, tick the erase confirmation and click **Deploy**. A PC in
    the naming list starts with its own answer file, name and OU filled in. The
-   tool applies the BIOS settings, wipes the disk, applies the image, injects the
+   tool wipes the disk, applies the image, injects the
    drivers, and reboots. BitLocker, if set, starts at first boot.
    While it works, a progress window shows the current step, a progress bar,
    the elapsed time and the end of the log. At the end it shows the result, with
    **Restart**, **Shut down**, **View log** and **Command prompt** buttons; a
    failure names the step and the error.
-   `Unattended` answer files and remote reimage jobs skip the wizard after their
+   `Unattended` answer files skip the wizard after their
    countdown (the progress window's **Change settings** button, or any key on the
    console, opens it instead), and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
    entirely. If the WinPE image has no WinForms (built without WinPE-NetFX), the
@@ -761,6 +554,5 @@ anything is erased. Clear old backups by hand.
 ## Status
 
 Untested first draft. It has not yet been run on real hardware or in a VM.
-The console's data layer, the driver matching and the BIOS command building
-(with the firmware interfaces faked) have automated tests; the
+The console's data layer and the driver matching have automated tests; the
 WPF window itself has only been checked for syntax and XAML validity.
