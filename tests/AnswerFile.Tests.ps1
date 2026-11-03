@@ -72,7 +72,6 @@ try {
     $wa = $default.PSObject.Copy(); $wa.EnableAdministrator = $true; $wa.AdminPasswordFile = 'config\secrets\admin.txt'
     [xml]$uwa = New-UnattendXml -Answer $wa -ComputerName 'PC-02' -AdminPassword 'a'
     Assert-Equal "$(& $hide $uwa)|$($uwa.SelectSingleNode('//u:AdministratorPassword/u:Value', $ns).InnerText)" 'true|a' 'a workgroup PC with the Administrator skips the page and sets its password'
-    Assert-Equal "$((New-FirstBootPlan -Answer $d).joinsDomain)|$((New-FirstBootPlan -Answer $default).joinsDomain)" 'True|False' 'first boot knows the PC joins a domain'
 
     # Join account. Windows signs in as Credentials Domain\Username: CORP\svc typed as the user name with svc as the
     # account's domain came out as svc\CORP\svc, and every join attempt failed with 0x89a (bad user name).

@@ -342,8 +342,8 @@ function New-UnattendXml {
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
     # The local account page is skipped when someone can still sign in without it: the built-in Administrator has a
-    # password, or the PC joins a domain and users sign in with domain accounts (FirstBoot.ps1 then makes sure the
-    # built-in Administrator stays off). Only a workgroup PC with no Administrator still has OOBE ask for an account.
+    # password, or the PC joins a domain and users sign in with domain accounts (local accounts already in the image
+    # are left as they are). Only a workgroup PC with no Administrator still has OOBE ask for an account.
     $hideLocal = if ($a.EnableAdministrator -or $a.Membership -eq 'Domain') { 'true' } else { 'false' }
 
     @"
@@ -383,7 +383,6 @@ function New-FirstBootPlan {
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
-        joinsDomain          = $Answer.Membership -eq 'Domain'
         applications         = @($AppDefinitions)
         tasks                = @($rows | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object {
             [pscustomobject]@{ name = $_.Name; command = $_.Command; task = $_.Definition; arguments = $_.Arguments }
