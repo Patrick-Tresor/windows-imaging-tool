@@ -220,7 +220,7 @@ function Get-DeploySummary {
     }
     "Name:         $ComputerName"
     "Joins:        $join"
-    # Deploy-Image adds its own lines (Windows 11 check, firmware, BIOS, BitLocker, user data) to the plan.
+    # Deploy-Image adds its own lines (Windows 11 check, firmware, BitLocker) to the plan.
     if ($Plan.PSObject.Properties['Details']) { @($Plan.Details) }
     "ERASE disk:   $(Format-DiskChoice $Disk)"
 }

@@ -239,10 +239,6 @@ try {
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
         ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
-    # USMT for answer files that migrate user data (ScanState runs in WinPE, LoadState on the deployed PC).
-    $usmt = "$adk\User State Migration Tool\amd64"
-    if (Test-Path "$usmt\scanstate.exe") { Copy-Item $usmt "$deployDir\USMT" -Recurse }
-    elseif (-not $CaptureConfig) { Write-Warning 'USMT is not installed (ADK feature User State Migration Tool). Answer files that migrate user data will stop before erasing anything.' }
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
 }
 catch {

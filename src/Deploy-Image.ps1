@@ -4,11 +4,11 @@
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (LAN or PXE boot), where the image can come by WDS multicast. Reads an answer file
-    from <content root>\AnswerFiles: image, applications, disk, user data migration, regional settings, naming,
+    from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
     domain join, tasks, extra shares, BIOS settings and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
     answer file win over the answer file's naming, the answer file's OU and the default answer file.
-    Unless -NoPrompt, an Unattended answer file or a remote reimage job starts it, a graphical wizard
+    Unless -NoPrompt or an Unattended answer file starts it, a graphical wizard
     (DeployWizard.psm1) lets the operator pick the answer file, name, OU, disk and applications.
     Wipes the target disk (or, when user data is kept on the disk, only its Windows partition) and partitions it
     to match the firmware WinPE booted with: GPT for UEFI, MBR for legacy BIOS.
@@ -21,8 +21,7 @@ param(
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
     [string]$ComputerName,      # overrides the naming list and the answer file's naming (the wizard still lets the operator change it)
     [switch]$NoPrompt,          # no wizard, countdown or confirmation, whatever the answer file's mode
-    [switch]$IgnoreWindows11Check,  # deploy even when a Windows 11 requirement fails in Block mode
-    [switch]$BackupFirst            # capture the old Windows to <share>\Backups before the wipe (a remote reimage job can ask too)
+    [switch]$IgnoreWindows11Check   # deploy even when a Windows 11 requirement fails in Block mode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,12 +31,9 @@ Import-Module (Join-Path $PSScriptRoot 'Win11Readiness.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'UserState.psm1') -Force
-$usmtDir = Join-Path $PSScriptRoot 'USMT'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 
@@ -198,7 +194,6 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [string]$Firmware, [
         "Firmware:     $Firmware ($(if ($Firmware -eq 'UEFI') { 'GPT' } else { 'MBR' }) disk)"
         "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
     )
-    if ($Answer.MigrateUserData) { $details += "User data:    kept ($($Answer.UserDataStore) store), checked once the disk is chosen" }
 
     [pscustomobject]@{
         ImagePath     = $imagePath
@@ -324,18 +319,6 @@ function Request-DeploySecrets([string]$Root, $Answer) {
     Save-TypedSecrets -Values $typed -Secrets $missing
 }
 
-function Get-DeploySecretPath([string]$Root, [string]$RelativePath, [string]$Label) {
-    # A password file's path for tools that read the file themselves (USMT's /keyfile). When the file is not on the
-    # media, the password is written to WinPE's RAM drive, which is gone at the next restart.
-    $onMedia = Join-Path $Root $RelativePath
-    if (Test-Path -LiteralPath $onMedia) { return $onMedia }
-    $value = Get-DeploySecret -Root $Root -RelativePath $RelativePath -Label $Label
-    $tmp = Join-Path $env:TEMP ('Secrets\' + (Split-Path $RelativePath -Leaf))
-    New-Item -ItemType Directory -Path (Split-Path $tmp -Parent) -Force | Out-Null
-    [IO.File]::WriteAllText($tmp, $value)
-    $tmp
-}
-
 function Wait-Countdown([int]$Seconds) {
     # Unattended mode: start after a short countdown that any key, or Change settings in the progress window, cancels.
     try {
@@ -446,7 +429,7 @@ function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
 Unlock-DeployMedia
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
-$job = $null; $adapters = @(); $progressWindow = $false; $onStick = $false
+$progressWindow = $false; $onStick = $false
 $status = 'FAILED'; $failure = $null
 try {
     # A wide console whose lines wrap instead of running off the right edge.
@@ -480,18 +463,9 @@ try {
         Write-DeployLog "Reporting status to $($statusTarget.Local) as $statusId"
     }
 
-    # A remote reimage from the console queued a job for this PC's MAC: use its answer file without asking.
-    # Taking the job deletes it, so the next network boot of this PC does not reimage it again.
-    $adapters = @(Get-LocalMacAddresses)
-    $job = Receive-ReimageJob -ContentRoot $root -Mac @($adapters | ForEach-Object Mac)
-    if ($job) {
-        Write-DeployLog "Remote reimage requested by $($job.requestedBy) at $($job.requestedAt): answer file $($job.answerFile)"
-        $AnswerFile = $job.answerFile
-        if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
-    }
     $givenName = $ComputerName
-    # Someone is at this PC to type a password that is not on the media, unless it was started remotely or -NoPrompt.
-    $script:CanAskSecrets = -not $job -and -not $NoPrompt
+    # Someone is at this PC to type a password that is not on the media, unless -NoPrompt.
+    $script:CanAskSecrets = -not $NoPrompt
 
     # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
     $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
@@ -514,14 +488,14 @@ try {
     $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
     $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -Firmware $firmware -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
 
-    # -NoPrompt, Unattended answer files and remote reimage jobs start without the wizard. A key pressed during
+    # -NoPrompt and Unattended answer files start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.
     $deployPlan = $null; $confirmed = $false; $wizardNotice = $null
     # A Windows deployed here that never started means the PC came back to WinPE after the restart, usually because
     # the USB stick is still first in the boot order. Ask instead of counting down, or it would be wiped again.
     # Only a safety check: if it fails, log it and carry on, so it can never stop a deploy.
     $unstarted = $null
-    if (-not $job -and -not $NoPrompt) {
+    if (-not $NoPrompt) {
         try { $unstarted = Find-UnstartedDeployment -Serial "$($hw.Serial)" -ExcludeRoots @($root) }
         catch { Write-DeployLog "Could not check this PC's disks for an earlier deployment: $($_.Exception.Message)" -Level WARN }
     }
@@ -532,15 +506,14 @@ try {
     if ($AnswerFile) {
         $answer = & $readAnswer $AnswerFile
         if ($NoPrompt) { $confirmed = $true }
-        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted) -or $job) {
+        elseif ($answer.Mode -eq 'Unattended' -and -not $unstarted) {
             $deployPlan = & $preparePlan $answer
             $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
             Write-Host ''
             Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $name -Disk (Get-Disk -Number $answer.DiskNumber) -Applications $answer.Applications |
                 ForEach-Object { Write-Host $_ }
             Set-DeployStatus -Step 'Counting down' -Percent 5
-            # Nobody is at a remotely reimaged PC: count down, so someone who is can still cancel.
-            $confirmed = Wait-Countdown $(if ($job) { [Math]::Max([int]$answer.UnattendDelay, 15) } else { $answer.UnattendDelay })
+            $confirmed = Wait-Countdown $answer.UnattendDelay
             if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
         }
     }
@@ -563,7 +536,7 @@ try {
             if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $deployPlan.WmiValue -Serial $hw.Serial -Typed $typed }
         }
     }
-    $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $givenName -eq $job.computerName) { 'remote reimage' } else { 'parameter' } }
+    $nameSource = if ($givenName -and $ComputerName -eq $givenName) { 'parameter' }
                   elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
     Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName }
@@ -596,28 +569,6 @@ try {
     $bl = $answer.BitLocker
     $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Label 'BitLocker PIN' } else { $null }
 
-    # User data: find the old Windows on the chosen disk and check the backup can be done, still before anything is erased.
-    $migration = $null
-    if ($answer.MigrateUserData) {
-        $keyArgs = @{}
-        if ($answer.UserDataStore -eq 'Share' -and $answer.UserDataEncrypt -and $answer.UserDataKeyFile) {
-            $keyArgs.KeyFilePath = Get-DeploySecretPath -Root $root -RelativePath $answer.UserDataKeyFile -Label 'user data encryption key'
-        }
-        $migration = Get-UserStatePlan -Answer $answer -ContentRoot $root -UsmtDir $usmtDir -Serial $hw.Serial @keyArgs `
-            -SharePath (Resolve-ContentPath $root $answer.UserDataPath)
-        Write-DeployLog "User data: $($migration.Summary)" -Level $(if ($migration.Mode -eq 'None') { 'WARN' } else { 'INFO' })
-    }
-    # The old Windows as a WIM on the share, checked now (needs the share, not locked by BitLocker).
-    $windowsBackup = $null
-    if ($BackupFirst -or ($job -and $job.PSObject.Properties['backup'] -and $job.backup)) {
-        $windowsBackup = Get-WindowsBackupPlan -DiskNumber $answer.DiskNumber -ContentRoot $root -Serial "$($hw.Serial)" -IsNetworkRoot ($null -eq (Get-ContentDiskNumber $root))
-        Write-DeployLog "Backup: $($windowsBackup.Summary)"
-    }
-    $keepPartitions = $migration -and $migration.Store -eq 'Local' -and $migration.Mode -ne 'None'
-    if ($keepPartitions -and $firmware -ne 'UEFI') {
-        throw 'Keeping user data on the disk keeps its GPT partitions, which only boot in UEFI mode, but WinPE booted in legacy BIOS mode. Boot WinPE in UEFI mode, or store the user data on a share.'
-    }
-
     $disk = Get-Disk -Number $answer.DiskNumber
     if ($firmware -eq 'BIOS') {
         Write-DeployLog 'Legacy BIOS boot: the disk will be MBR. Boot WinPE in UEFI mode instead if this PC supports it.' -Level WARN
@@ -629,13 +580,6 @@ try {
     }
 
     $summary = @(Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $ComputerName -Disk $disk -Applications @($apps | ForEach-Object name))
-    if ($migration) {
-        # The real user data plan, now that the disk is known, replaces the wizard's placeholder line.
-        $summary = @($summary | Where-Object { $_ -notlike 'User data:*' -and $_ -notlike 'ERASE*' })
-        $summary += "User data:    $($migration.Summary)"
-        $summary += if ($keepPartitions) { "ERASE:        everything on $($migration.Volume.Drive) except the user data, disk $(Format-DiskChoice $disk)" } else { "ERASE disk:   $(Format-DiskChoice $disk)" }
-    }
-    if ($windowsBackup) { $summary = @($summary | Where-Object { $_ -notlike 'ERASE*' }) + @("Backup:       $($windowsBackup.Summary)") + @($summary | Where-Object { $_ -like 'ERASE*' }) }
     foreach ($line in $summary) { Write-DeployLog $line }
     if (-not $confirmed) {
         Write-Host ''
@@ -644,31 +588,11 @@ try {
         if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
     }
 
-    # 1. Back up the old Windows and the user data, then partition. A failed backup stops here, with the disk untouched.
-    if ($windowsBackup -and $windowsBackup.Mode -eq 'Backup') {
-        Set-DeployStatus -Step 'Backing up the old Windows' -Percent 7
-        New-Item -ItemType Directory -Path (Split-Path $windowsBackup.ImagePath -Parent) -Force | Out-Null
-        Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-WindowsBackupArgs -Drive $windowsBackup.Drive -ImagePath $windowsBackup.ImagePath -Name $windowsBackup.Name) -OnProgress {
-            param($pct)
-            if ($null -ne $pct) { Update-NativeStepStatus -Step "Backing up the old Windows: $pct %" }
-        }
-        Write-DeployLog "Old Windows backed up to $($windowsBackup.ImagePath)"
-    }
-    if ($migration -and $migration.Mode -eq 'Backup') {
-        Set-DeployStatus -Step 'Backing up user data' -Percent 7
-        Backup-UserState -Plan $migration -Answer $answer -UsmtDir $usmtDir
-    }
-
+    # 1. Partition: EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
     Set-DeployStatus -Step 'Partitioning the disk' -Percent 8
-    if ($keepPartitions) {
-        # Hard-link store: keep the partitions and empty the Windows partition around it.
-        Clear-WindowsPartition -Plan $migration -DiskNumber $answer.DiskNumber
-    } else {
-        # EFI, MSR, Windows, Recovery on UEFI; System, Windows, Recovery on BIOS.
-        $dp = Join-Path $env:TEMP 'diskpart.txt'
-        New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
-        Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
-    }
+    $dp = Join-Path $env:TEMP 'diskpart.txt'
+    New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
+    Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
     # 2. Apply the image. With multicast on, a room of PCs downloads it together onto the new Windows
     #    partition first (WDS sends it once for all of them), then applies it from there.
@@ -746,12 +670,10 @@ try {
         Copy-Item (Join-Path $PSScriptRoot 'Run-LogonTask.ps1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') $logonDir -Force
         ConvertTo-Json -InputObject $logonPlan -Depth 8 | Set-Content (Join-Path $logonDir 'logon-tasks.json') -Encoding utf8
     }
-    # User data is restored by FirstBoot.ps1 after the applications.
-    $userState = if ($migration -and $migration.Mode -ne 'None') { Copy-UserStateForRestore -Plan $migration -Answer $answer -UsmtDir $usmtDir } else { $null }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
         (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Deploy\'
-    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -UserState $userState -BitLockerPin $bitLockerPin -Tasks $deployTasks
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
@@ -787,18 +709,12 @@ catch {
 }
 finally {
     # Keep the log on the deployed disk and, when available, on the content root for central review.
-    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log', 'X:\Windows\Temp\ScanState.log' 'W:\Windows\Temp\' -ErrorAction SilentlyContinue }
+    if (Test-Path 'W:\Windows') { Copy-Item 'X:\Windows\Temp\Deploy.log' 'W:\Windows\Temp\' -ErrorAction SilentlyContinue }
     if ($root -and $hw -and $status -ne 'CANCELLED') {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
         $logName = "{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $hw.Serial, (Get-Date), $status
         Copy-Item 'X:\Windows\Temp\Deploy.log' (Join-Path $logDir $logName) -ErrorAction SilentlyContinue
-        # Remember this PC (MAC, IP, model) so the console can wake and reimage it later.
-        $nic = $adapters | Where-Object IP | Select-Object -First 1
-        if ($nic) {
-            try { Save-DeployedComputer -ContentRoot $root -Adapter $nic -Identity $hw -ComputerName $ComputerName -AnswerFile $AnswerFile -Result $status | Out-Null }
-            catch { Write-DeployLog "Could not update the computer list: $($_.Exception.Message)" -Level WARN }
-        }
     }
     $final = @{ logFile = $logName }
     switch ($status) {

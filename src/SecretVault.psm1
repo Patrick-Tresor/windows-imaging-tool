@@ -1,5 +1,5 @@
 # Keeps passwords off the USB stick in plain text. The build puts the content root's password files (join account,
-# share accounts, local Administrator, BitLocker PIN, BIOS password, USMT key) into one encrypted file baked into
+# share accounts, local Administrator, BitLocker PIN) into one encrypted file baked into
 # boot.wim (X:\Deploy\config\vault.json), locked with the WinPE password the admin sets on the Media tab. WinPE asks
 # for that password before anything else, so a lost stick or a copied boot.wim gives away nothing.
 #
@@ -156,9 +156,6 @@ function Get-AnswerSecrets {
     }
     $bl = $Answer.BitLocker
     if ($bl -and $bl.Enabled -and $bl.Protector -eq 'TpmPin') { & $add $bl.PinFile 'BitLocker PIN' }
-    if ($Answer.MigrateUserData -and $Answer.UserDataStore -eq 'Share' -and $Answer.UserDataEncrypt) {
-        & $add $Answer.UserDataKeyFile 'User data encryption key'
-    }
     $list.ToArray()
 }
 

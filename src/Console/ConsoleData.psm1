@@ -35,7 +35,7 @@ function Save-ConsoleConfig {
 function Initialize-ContentRoot {
     # Creates the folder layout and seeds config files from the repo defaults without overwriting existing ones.
     param([Parameter(Mandatory)][string]$Path)
-    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Tasks', 'Updates', 'Computers', 'Reimage') {
+    foreach ($dir in 'Images', 'Drivers', 'config', 'config\secrets', 'Logs', 'Tools', 'AnswerFiles', 'Applications', 'Tasks', 'Updates') {
         New-Item -ItemType Directory -Path (Join-ContentPath $Path $dir) -Force | Out-Null
     }
     foreach ($file in 'driver-catalog.json', 'deploy-settings.json', 'naming-list.csv') {
@@ -353,7 +353,6 @@ function Get-NewAnswer {
     $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
     $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
-    $a.UserDataKeyFile = "config\secrets\$Name-usmt.txt"
     $a
 }
 
@@ -429,7 +428,6 @@ function Save-AnswerFromEditor {
         [string]$AdminPassword,
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
         [string]$BitLockerPin,
-        [string]$UserDataKey,               # encryption key for a Share user data store
         [switch]$IsNew
     )
     $a = $Answer
@@ -441,7 +439,6 @@ function Save-AnswerFromEditor {
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
     if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
     if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
-    if (-not $a.UserDataKeyFile) { $a.UserDataKeyFile = "config\secrets\$($a.Name)-usmt.txt" }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -452,7 +449,6 @@ function Save-AnswerFromEditor {
     if ($JoinPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.JoinPasswordFile -Value $JoinPassword }
     if ($AdminPassword) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Value $AdminPassword }
     if ($BitLockerPin) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Value $BitLockerPin }
-    if ($UserDataKey) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $a.UserDataKeyFile -Value $UserDataKey }
     foreach ($sh in $a.Shares) {
         $pw = $SharePasswords[$sh.LocalName]
         if ($pw) { Save-SecretFile -ContentRoot $ContentRoot -RelativePath $sh.PasswordFile -Value $pw }

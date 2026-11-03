@@ -234,11 +234,6 @@ try {
     Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
     Assert-Equal "$(Get-Content -Raw (Join-Path $root 'config/secrets/Secure-bitlocker-pin.txt'))" '246810' 'the PIN goes to its own file'
     Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file'
-    $mig = Get-NewAnswer -Name 'Migrate'
-    $mig.MigrateUserData = $true; $mig.UserDataStore = 'Share'; $mig.UserDataEncrypt = $true
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $mig -UserDataKey 'K3y!' -IsNew
-    $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.MigrateUserData)|$($back.UserDataStore)|$($back.UserDataKeyFile)|$(Get-Content -Raw (Join-Path $root 'config/secrets/Migrate-usmt.txt'))" 'True|Share|config\secrets\Migrate-usmt.txt|K3y!' 'user data encryption key goes to its own file'
     $threw = $false
     try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
     Assert-Equal $threw $true 'password files must stay inside the content root'
