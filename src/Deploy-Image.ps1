@@ -3,7 +3,7 @@
     Deploys a Windows image to this PC from WinPE, driven by an answer file, and injects the matching OEM drivers.
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
-    deploy-settings.json (LAN or PXE boot), where the image can come by WDS multicast. Reads an answer file
+    deploy-settings.json (LAN or PXE boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
     domain join, tasks, extra shares, BIOS settings and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
@@ -594,26 +594,9 @@ try {
     New-DiskpartScript -DiskNumber $answer.DiskNumber -Firmware $firmware | Set-Content -Path $dp -Encoding ascii
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
-    # 2. Apply the image. With multicast on, a room of PCs downloads it together onto the new Windows
-    #    partition first (WDS sends it once for all of them), then applies it from there.
-    $applyFrom = $imagePath
-    $mcPlan = Get-MulticastPlan -Settings $settings -ContentRoot $root -ImagePath $imagePath -IsNetworkRoot ($root -eq 'Z:\')
-    if ($mcPlan) {
-        Set-DeployStatus -Step 'Downloading the image by multicast' -Percent 9
-        try {
-            $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault
-            $applyFrom = Receive-MulticastImage -Plan $mcPlan -Destination (Join-Path 'W:\_Multicast' (Split-Path $imagePath -Leaf)) -User $cred.User -Password $cred.Password
-        }
-        catch {
-            if (-not $mcPlan.Fallback) { throw "Multicast download failed: $($_.Exception.Message)" }
-            Write-DeployLog "Multicast download failed, applying from the share instead: $($_.Exception.Message)" -Level WARN
-            Set-DeployStatus -Warning 'Multicast download failed; applied from the share instead'
-            Remove-Item 'W:\_Multicast' -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-    # Split images (.swm) need /SWMFile.
-    $applyArgs = @('/Apply-Image', "/ImageFile:$applyFrom", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
-    if ($applyFrom -like '*.swm') { $applyArgs += "/SWMFile:$($applyFrom -replace '\.swm$', '*.swm')" }
+    # 2. Apply the image. Split images (.swm) need /SWMFile.
+    $applyArgs = @('/Apply-Image', "/ImageFile:$imagePath", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
+    if ($imagePath -like '*.swm') { $applyArgs += "/SWMFile:$($imagePath -replace '\.swm$', '*.swm')" }
     # The longest step: DISM's percentage maps to 10-70 % overall. The window on this PC follows every few seconds;
     # the dashboard gets a write at most every 15 s (Update-NativeStepStatus).
     Set-DeployStatus -Step 'Applying the image' -Percent 10
@@ -622,7 +605,6 @@ try {
         if ($null -ne $pct) { Update-NativeStepStatus -Step "Applying the image: $pct %" -Percent (10 + [int]($pct * 0.6)) }
         else { Update-NativeStepStatus }
     }
-    if ($applyFrom -ne $imagePath) { Remove-Item 'W:\_Multicast' -Recurse -Force }
 
     # 3. Inject the OEM driver pack offline.
     if ($driverPack) {

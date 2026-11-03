@@ -51,7 +51,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         }
     }
 
-    # A scrolling page that holds a short grid with more rows than fit, like the Multicast tab.
+    # A scrolling page that holds a short grid with more rows than fit.
     [xml]$px = @'
 <ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" VerticalScrollBarVisibility="Auto">
   <StackPanel>

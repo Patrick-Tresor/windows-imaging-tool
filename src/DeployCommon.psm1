@@ -737,61 +737,6 @@ function Get-ShareCredential {
     [pscustomobject]@{ User = $settings.share.user; Password = $password }
 }
 
-function Get-MulticastPlan {
-    # Decides whether this deploy downloads the image by WDS multicast, and what to ask the server for.
-    # Returns $null for a unicast deploy (multicast off, USB content, image outside the content root, split image),
-    # otherwise the server, namespace and the image path relative to the content root (the namespace's folder).
-    param(
-        $Settings,                                  # deploy-settings.json object
-        [Parameter(Mandatory)][string]$ContentRoot, # Z:\ for the share, D:\ for USB
-        [Parameter(Mandatory)][string]$ImagePath,
-        [bool]$IsNetworkRoot = $true
-    )
-    $mc = $Settings.multicast
-    if (-not $mc -or -not $mc.enabled -or -not $IsNetworkRoot) { return $null }
-    if ($ImagePath -like '*.swm') { return $null }
-    $root = $ContentRoot.TrimEnd('\', '/') + '\'
-    $image = $ImagePath -replace '/', '\'
-    if (-not $image.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $null }
-    # The transport server is the WDS server; failing that, the server that hosts the share.
-    $server = "$($mc.server)".Trim()
-    if (-not $server) { $server = "$($Settings.wds.server)".Trim() }
-    if (-not $server -and "$($Settings.share.path)" -match '^\\\\([^\\]+)\\') { $server = $Matches[1] }
-    if (-not $server) { return $null }
-    [pscustomobject]@{
-        Server     = $server
-        Namespace  = $(if ("$($mc.namespace)".Trim()) { "$($mc.namespace)".Trim() } else { 'ImagingTool' })
-        SourceFile = $image.Substring($root.Length)
-        Fallback   = $(if ($null -eq $mc.fallback) { $true } else { [bool]$mc.fallback })
-    }
-}
-
-function Receive-MulticastImage {
-    # Downloads one file from a WDS multicast namespace with wdsmcast.exe (the WDS transport client in WinPE).
-    # With a scheduled session it waits here until enough PCs have joined or the start time comes.
-    param(
-        [Parameter(Mandatory)]$Plan,
-        [Parameter(Mandatory)][string]$Destination,
-        [string]$User,
-        [string]$Password
-    )
-    $exe = @("$env:SystemRoot\System32\wdsmcast.exe", (Join-Path $PSScriptRoot 'Tools\wdsmcast.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $exe) { throw 'wdsmcast.exe is not in this WinPE image.' }
-    New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-    $mcArgs = @('/Transfer-File', "/Server:$($Plan.Server)", "/Namespace:$($Plan.Namespace)",
-        "/SourceFile:$($Plan.SourceFile)", "/DestinationFile:$Destination")
-    if ($User) {
-        $mcArgs += "/Username:$User"   # DOMAIN\user
-        if ($Password) { $mcArgs += "/Password:$Password" }
-    }
-    # Log the command without the password; leave the console attached so the progress shows.
-    Write-DeployLog "Multicast: $($Plan.SourceFile) from $($Plan.Server) namespace $($Plan.Namespace) to $Destination"
-    & $exe @mcArgs
-    if ($LASTEXITCODE -ne 0) { throw "wdsmcast exited with code $LASTEXITCODE" }
-    if (-not (Test-Path $Destination)) { throw "wdsmcast finished but $Destination is missing" }
-    $Destination
-}
-
 function Get-DiskConversionCommand {
     # The command that converts a VM disk file to a VHD Windows can mount, or $null when it is a VHD or VHDX already.
     # qemu-img converts qcow2, raw, vmdk and vdi. VirtualBox's VBoxManage converts vmdk and vdi.
@@ -835,5 +780,5 @@ function Get-OfflineImageState {
 }
 
 Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
-    Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-MulticastPlan, Receive-MulticastImage, Get-DiskConversionCommand, Get-OfflineImageState,
+    Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment
