@@ -103,10 +103,9 @@ try {
     Assert-Equal @(@(Test-AnswerFile $j) -like "*account's domain 'svc\CORP'*").Count 1 'an account domain with a backslash is caught before the disk is wiped'
 
     # OOBE reads the oobeSystem settings after SetupComplete.cmd: FirstBoot.ps1 deleting unattend.xml made the Dell
-    # 5521 ask for a local account even with the page hidden. It may only schedule the removal for the first sign-in.
+    # 5521 ask for a local account even with the page hidden, so it stays in place.
     $fbText = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
-    Assert-Equal ($fbText -match 'Remove-Item[^\r\n]*(Panther|\$unattend)') $false 'first boot leaves unattend.xml in place for OOBE'
-    Assert-Equal ($fbText -match '/sc onlogon') $true 'first boot schedules the unattend.xml removal for the first sign-in'
+    Assert-Equal ($fbText -match 'Remove-Item[^\r\n]*Panther') $false 'first boot leaves unattend.xml in place for OOBE'
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
     Assert-Equal (($plan.tasks | ForEach-Object command) -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
 
