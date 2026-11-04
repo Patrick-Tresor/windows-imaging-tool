@@ -181,7 +181,16 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
 }
 
 # Setup already blanked the passwords in the cached unattend.xml; remove it and the installers anyway.
-Remove-Item "$env:WINDIR\Panther\unattend.xml" -Force -ErrorAction SilentlyContinue
+# A copy with every password value removed stays in C:\Windows\Temp\unattend-deployed.xml, to check what setup was given.
+$unattend = "$env:WINDIR\Panther\unattend.xml"
+if (Test-Path $unattend) {
+    try {
+        (Get-Content -Raw $unattend) -replace '(?s)(<(Value|Password)>).*?(</\2>)', '$1*removed*$3' |
+            Set-Content "$env:WINDIR\Temp\unattend-deployed.xml" -Encoding utf8
+        Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
+    } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
+}
+Remove-Item $unattend -Force -ErrorAction SilentlyContinue
 Write-Log 'First boot finished; removing C:\Deploy'
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
 Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & rd /s /q `"$deployDir`"" -WindowStyle Hidden
