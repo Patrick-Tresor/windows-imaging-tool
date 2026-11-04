@@ -147,7 +147,9 @@ function Test-AnswerFile {
         elseif (-not $taskScript -and -not $t.Command) { "A $($t.Phase) task has no command." }
     }
     foreach ($s in $a.Shares) {
-        if ($s.LocalName -notmatch '^[D-WY]:$') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y: (W: and X: are used by the deploy, Z: by the content share)." }
+        # S: and W: are the EFI and Windows partitions diskpart creates after the erase (a share there made diskpart
+        # fail on a wiped disk), R: is the status share, X: is WinPE and Z: the content share.
+        if ($s.LocalName -notmatch '^[D-Y]:$' -or $s.LocalName -in 'R:', 'S:', 'X:') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y:, except R:, S:, W: and X: (the deploy uses them; Z: is the content share)." }
         if ($s.LocalName -eq 'W:') { "Share local name W: is used for the new Windows partition." }
         if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
@@ -331,7 +333,7 @@ $script:FirstBootTaskName = 'ImagingTool\FirstBoot'
 function Get-FirstBootTaskName { $script:FirstBootTaskName }
 function Get-FirstBootTaskCommand {
     # Five minutes after startup, so SetupComplete.cmd, when Windows runs it, starts FirstBoot.ps1 first.
-    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1 -FromTask`""
+    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1 -FromTask`""
 }
 
 function New-UnattendXml {
@@ -524,13 +526,13 @@ function Test-UnattendXml {
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
+    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed from C:\Temp at the end of first boot.
     # -Tasks: Resolve-DeployTasks rows (library tasks read, other PCs' tasks left out). Not passed: the plain commands.
     param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [string]$BitLockerPin, [object[]]$Tasks)
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
-    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Deploy\Tasks\<name>.
+    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Temp\Tasks\<name>.
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
@@ -749,7 +751,7 @@ function ConvertFrom-DeployWizardAnswerFile {
 
     # Letters W:, X: and Z: are taken by the deploy; keep every other letter the file already uses.
     $shareNodes = @($w.SelectNodes('settings/network_shares/network_share'))
-    $reserved = @('W:', 'X:', 'Z:')
+    $reserved = @('R:', 'S:', 'W:', 'X:', 'Z:')
     $used = $reserved + @($shareNodes | ForEach-Object { (Get-XmlText $_ 'local_name' '').ToUpperInvariant() } |
         Where-Object { $_ -match '^[D-Y]:$' -and $_ -notin $reserved })
     $shares = @($shareNodes | ForEach-Object {

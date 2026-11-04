@@ -43,6 +43,14 @@ $script:Vault = @{}
 $script:AnswerKey = $null
 $script:TypedSecrets = @{}
 $script:CanAskSecrets = $false
+# The share account's password the build encrypted in X:\Deploy\config\deploy-settings.json, decrypted with the
+# answer file key in the boot image (or in the vault).
+$script:DecryptShare = {
+    param([string]$Value)
+    if (-not $script:AnswerKey) { $script:AnswerKey = Find-AnswerKey -Vault $script:Vault -ScriptRoot $PSScriptRoot }
+    if (-not $script:AnswerKey) { throw 'this boot image has no answer file key' }
+    Unprotect-AnswerPassword -Value $Value -Key $script:AnswerKey
+}
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -420,6 +428,11 @@ function Connect-StatusFolder([string]$Root, $Settings) {
             # Without a password net use would stop and prompt, so only pass the account when its password is known.
             if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
             elseif ($script:Vault.ContainsKey((ConvertTo-SecretKey $Settings.share.passwordFile))) { $user = $Settings.share.user; $pw = $script:Vault[(ConvertTo-SecretKey $Settings.share.passwordFile)] }
+            else {
+                # The copy the build encrypted into this boot image's own settings (the stick has no plain password file).
+                $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
+                if ($cred.Password) { $user = $Settings.share.user; $pw = $cred.Password }
+            }
         }
         Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
         $target
@@ -467,7 +480,7 @@ try {
     $progressWindow = Start-ProgressWindow -ProgressPath $progressPath
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
-    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault
+    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
     # Which WinPE drivers this boot image was built with, so "no internal disk" can be explained from the log.
     Write-WinPEDriverReport -Path (Join-Path $PSScriptRoot 'config\winpe-drivers.json')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
@@ -599,7 +612,7 @@ try {
     # The unattend is built and checked now, before the disk is wiped: a setting Windows Setup rejects would only show
     # after the restart, as "could not parse or process the unattend answer file" at Getting ready.
     # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
-    # first boot removes C:\Deploy, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    # first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
     $logonIndex = 0
     $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
         if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
@@ -662,14 +675,14 @@ try {
 
     # 5. First boot: applications and FIRSTBOOT tasks run as SYSTEM from SetupComplete.cmd.
     Set-DeployStatus -Step 'Staging applications' -Percent 82
-    New-Item -ItemType Directory -Path 'W:\Deploy\Apps' -Force | Out-Null
+    New-Item -ItemType Directory -Path 'W:\Temp\Apps' -Force | Out-Null
     foreach ($app in $apps) {
         Write-DeployLog "Staging application $($app.name)"
-        Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
+        Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Temp\Apps\' -Recurse -Force
     }
     # Library tasks: FIRSTBOOT ones next to the applications, FIRSTLOGON ones where the first user's logon finds them.
     foreach ($t in @($libraryTasks | Where-Object Phase -in 'FIRSTBOOT', 'FIRSTLOGON')) {
-        $dest = if ($t.Phase -eq 'FIRSTBOOT') { 'W:\Deploy\Tasks' } else { 'W:\ProgramData\ImagingTool\Tasks' }
+        $dest = if ($t.Phase -eq 'FIRSTBOOT') { 'W:\Temp\Tasks' } else { 'W:\ProgramData\ImagingTool\Tasks' }
         Write-DeployLog "Staging task $($t.Name) ($($t.Phase))"
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         Copy-Item -Path $t.Folder -Destination $dest -Recurse -Force
@@ -681,7 +694,7 @@ try {
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
-        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Deploy\'
+        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Temp\'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
@@ -690,9 +703,9 @@ try {
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
-    $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Temp\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
-    "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
+    "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
 
     # 6. POSTIMAGE tasks, then boot files.
@@ -705,7 +718,7 @@ try {
     $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
     Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
     New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
-        ConvertTo-Json | Set-Content -Path 'W:\Deploy\deployed.json' -Encoding utf8
+        ConvertTo-Json | Set-Content -Path 'W:\Temp\deployed.json' -Encoding utf8
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'

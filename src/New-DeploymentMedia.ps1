@@ -113,7 +113,7 @@ $copyPlan = $null
 if ($Target -eq 'Usb' -and $ContentSource) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
     $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude }
-                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { 'config\secrets' }) }
+                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { Get-MediaSecretExcludes -ContentRoot $ContentSource }) }
     Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
 }
 if ($UpdateOnly) {
@@ -221,6 +221,21 @@ try {
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
     $answerKey = Get-AnswerKey -ContentRoot $secretRoot
+    if (-not $winPEPassword) {
+        # The share account's password (deploy-settings share.passwordFile) never goes on the stick as plain text:
+        # with a WinPE password it is in the vault below, otherwise it goes into this boot image's settings,
+        # encrypted with the answer file key that goes in next to it.
+        $shareFile = try { "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.passwordFile)" } catch { '' }
+        $sharePw = if ($shareFile) { (Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath)[(ConvertTo-SecretKey $shareFile)] } else { $null }
+        if ($sharePw) {
+            if (-not $answerKey) { $answerKey = Get-AnswerKey -ContentRoot $secretRoot -Create }
+            $baked = Get-Content -Raw "$deployDir\config\deploy-settings.json" | ConvertFrom-Json
+            $baked.share | Add-Member -NotePropertyName encryptedPassword -NotePropertyValue (Protect-AnswerPassword -Password $sharePw -Key $answerKey) -Force
+            $baked | ConvertTo-Json -Depth 8 | Set-Content "$deployDir\config\deploy-settings.json" -Encoding utf8
+            Write-Host "Share account password ($shareFile) is in boot.wim, encrypted with the answer file key." -ForegroundColor Green
+        }
+        $sharePw = $null
+    }
     if ($winPEPassword) {
         # The password files (the answer file key among them), encrypted with the WinPE password, inside boot.wim.
         # WinPE asks for it at start.

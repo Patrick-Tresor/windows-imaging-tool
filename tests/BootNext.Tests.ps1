@@ -121,16 +121,21 @@ exit 0
 
     # Marker: Windows deployed to this PC but never started.
     $disk = Join-Path $work 'C'; $stick = Join-Path $work 'D'
-    New-Item -ItemType Directory -Path (Join-Path $disk 'Deploy'), (Join-Path $stick 'Deploy') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $disk 'Temp'), (Join-Path $stick 'Temp') -Force | Out-Null
     $hw = [pscustomobject]@{ Serial = 'ABC123' }
     New-DeployedMarker -Identity $hw -AnswerFile 'W11-Staff' -ComputerName 'LAB-01' | ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $disk 'Deploy\deployed.json')
+        Set-Content -LiteralPath (Join-Path $disk 'Temp\deployed.json')
     $m = Find-UnstartedDeployment -Serial 'ABC123' -Roots @($stick, $disk)
     Assert-Equal "$($m.serial)|$($m.answerFile)|$($m.computerName)" 'ABC123|W11-Staff|LAB-01' 'the marker of this PC is found'
     Assert-Equal "$(Find-UnstartedDeployment -Serial 'OTHER' -Roots @($disk))" '' 'a marker for another serial (disk moved from another PC) is ignored'
     Assert-Equal "$(Find-UnstartedDeployment -Serial 'ABC123' -Roots @($stick))" '' 'no marker: nothing found'
-    Set-Content -LiteralPath (Join-Path $stick 'Deploy\deployed.json') -Value 'not json'
+    Set-Content -LiteralPath (Join-Path $stick 'Temp\deployed.json') -Value 'not json'
     Assert-Equal "$(Find-UnstartedDeployment -Serial 'ABC123' -Roots @($stick))" '' 'a damaged marker is ignored'
+    # Deployed by an older version, which staged in \Deploy instead of \Temp.
+    $old = Join-Path $work 'E'
+    New-Item -ItemType Directory -Path (Join-Path $old 'Deploy') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $disk 'Temp\deployed.json') -Destination (Join-Path $old 'Deploy\deployed.json')
+    Assert-Equal "$((Find-UnstartedDeployment -Serial 'ABC123' -Roots @($old)).serial)" 'ABC123' 'a marker in the old \Deploy folder is still found'
 
     # A volume PowerShell has no drive for (the old Windows at C: of a Dell Latitude 5521 in WinPE): Join-Path threw
     # "A drive with the name 'C' does not exist" and stopped the deploy. It must be skipped, and the next root read.

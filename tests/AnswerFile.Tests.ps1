@@ -33,6 +33,16 @@ try {
     $bad.Shares = @([pscustomobject]@{ LocalName = 'Z:'; RemoteName = 'server'; Username = $null; Domain = $null; PasswordFile = $null })
     $problems = @(Test-AnswerFile $bad)
     Assert-Equal $problems.Count 4 'validation lists every problem (join creds, phase, share letter, share path)'
+    # diskpart assigns S: (EFI) and W: (Windows) after the erase, and the status share is R:: a share there would
+    # make the deploy fail on a wiped disk, so the answer file is refused before anything is erased.
+    foreach ($letter in 'R:', 'S:', 'W:', 'X:', 'Z:') {
+        $s = $default.PSObject.Copy()
+        $s.Shares = @([pscustomobject]@{ LocalName = $letter; RemoteName = '\\srv\apps'; Username = $null; Domain = $null; PasswordFile = $null })
+        Assert-Equal (@(Test-AnswerFile $s | Where-Object { $_ -like 'Share local name*' }).Count -ge 1) $true "a share on $letter is refused"
+    }
+    $s = $default.PSObject.Copy()
+    $s.Shares = @([pscustomobject]@{ LocalName = 'T:'; RemoteName = '\\srv\apps'; Username = $null; Domain = $null; PasswordFile = $null })
+    Assert-Equal (@(Test-AnswerFile $s).Count) 0 'a share on T: is fine'
     $bad.Shares = @(); $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'KeepUserData'
     Assert-Equal (@(Test-AnswerFile $bad) -join '') "disk/option 'KeepUserData' is not supported yet; only Recreate (wipe the disk and recreate partitions)." 'unsupported disk option is rejected'
 
@@ -191,11 +201,15 @@ try {
     $task = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like 'schtasks.exe /Create*' }) }
     $tu = @(& $task $u); $tw = @(& $task $wg)
     Assert-Equal "$($tu.Count)|$($tw.Count)" '1|1' 'every unattend creates the first boot startup task'
-    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Deploy\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
+    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Temp\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
     $orders = @($u.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Order', $ns) | ForEach-Object InnerText) -join ','
     Assert-Equal $orders '1,2' 'specialize commands are numbered in order'
     Assert-Equal ($fbText.Contains("`$taskName = '$(Get-FirstBootTaskName)'")) $true 'FirstBoot.ps1 deletes the same task the unattend creates'
     Assert-Equal ($fbText -match "FileMode\]::CreateNew") $true 'FirstBoot.ps1 claims the run so SetupComplete.cmd and the task never both install'
+    # Staging is in C:\Temp (Patrick, 2026-11-04), which can hold other files: first boot removes only what it staged.
+    Assert-Equal ($fbText.Contains('rd /s /q `"$deployDir`"')) $false 'first boot does not delete the whole C:\Temp folder'
+    $dpText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+    Assert-Equal "$($dpText -match 'W:\\Deploy\\')|$($dpText -match '-File C:\\Temp\\FirstBoot\.ps1')" 'False|True' 'deploy stages first boot in C:\Temp'
 
     # Applications.
     $apps = Join-Path $tmp 'Applications'

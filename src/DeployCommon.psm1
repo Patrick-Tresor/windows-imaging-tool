@@ -437,7 +437,7 @@ function Set-WindowsBootNext {
 }
 
 function New-DeployedMarker {
-    # Written to <Windows drive>\Deploy\deployed.json after a deployment; FirstBoot.ps1 deletes it once Windows runs.
+    # Written to <Windows drive>\Temp\deployed.json after a deployment; FirstBoot.ps1 deletes it once Windows runs.
     # While it is there, WinPE knows this disk holds a Windows that has not started yet.
     param([Parameter(Mandatory)]$Identity, [string]$AnswerFile, [string]$ComputerName)
     [pscustomobject]@{
@@ -451,7 +451,7 @@ function New-DeployedMarker {
 function Find-UnstartedDeployment {
     <#
     .SYNOPSIS
-        Looks on this PC's volumes for a Windows this tool deployed that has never started (\Deploy\deployed.json
+        Looks on this PC's volumes for a Windows this tool deployed that has never started (\Temp\deployed.json, or \Deploy\deployed.json from older versions,
         with this PC's serial). Found means the PC restarted into WinPE again, usually from a USB stick left in,
         so an Unattended countdown must not wipe it a second time. Returns the marker or $null.
     #>
@@ -466,14 +466,16 @@ function Find-UnstartedDeployment {
         # .NET calls, not Join-Path/Test-Path/Get-Content: a volume PowerShell has no drive for (the old Windows
         # partition at C: on a BitLocker or not-yet-ready disk) makes those throw "A drive with the name 'C' does
         # not exist", which stopped the deploy before the wizard opened.
-        try {
-            $path = [IO.Path]::Combine($r, 'Deploy', 'deployed.json')
-            if (-not [IO.File]::Exists($path)) { continue }
-            $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-        } catch { continue }
-        if ("$($m.serial)" -eq $Serial) {
-            $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
-            return $m
+        foreach ($folder in 'Temp', 'Deploy') {
+            try {
+                $path = [IO.Path]::Combine($r, $folder, 'deployed.json')
+                if (-not [IO.File]::Exists($path)) { continue }
+                $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+            } catch { continue }
+            if ("$($m.serial)" -eq $Serial) {
+                $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
+                return $m
+            }
         }
     }
     $null
@@ -593,10 +595,12 @@ function Write-DriverReport {
 function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
     # Vault: the password files the WinPE password unlocked (SecretVault.psm1), for the share account.
-    param([string]$SettingsPath, [hashtable]$Vault = @{})
+    # Decrypt: turns the share password the build encrypted in the settings into text (Get-ShareCredential).
+    param([string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
     foreach ($vol in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' }) {
         $root = "$($vol.DriveLetter):\"
-        if (Test-Path (Join-Path $root 'Images')) { Write-DeployLog "Using USB content at $root"; return $root }
+        # .NET, not Test-Path/Join-Path: a volume PowerShell has no drive for makes those fail in WinPE.
+        if ([IO.Directory]::Exists([IO.Path]::Combine($root, 'Images'))) { Write-DeployLog "Using USB content at $root"; return $root }
     }
 
     if (-not $SettingsPath -or -not (Test-Path $SettingsPath)) { throw 'No DEPLOY volume found and no settings file to locate a network share.' }
@@ -606,7 +610,7 @@ function Find-ContentRoot {
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
 
-    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault
+    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault -Decrypt $Decrypt
     Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $cred.User -Password $cred.Password
     Write-DeployLog "Using network content at Z:\"
     'Z:\'
@@ -698,8 +702,9 @@ function Test-JoinAccount {
 
 function Get-ShareCredential {
     # The share account from deploy-settings.json. The password file sits next to config\ on the media (X:\Deploy).
-    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them).
-    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{})
+    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them),
+    # then share.encryptedPassword, which the build writes into the boot image's settings and Decrypt turns into text.
+    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
     $password = $null
     if ($settings.share.user -and $settings.share.passwordFile) {
@@ -707,6 +712,10 @@ function Get-ShareCredential {
         $key = ($settings.share.passwordFile -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
         if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
         elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
+        elseif ($Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
+            try { $password = & $Decrypt "$($settings.share.encryptedPassword)" }
+            catch { Write-DeployLog "Share account password in the boot image not usable: $($_.Exception.Message)" -Level WARN }
+        }
     }
     [pscustomobject]@{ User = $settings.share.user; Password = $password }
 }
@@ -733,17 +742,19 @@ function Get-OfflineImageState {
     # What sysprep left in an offline Windows at $Root: ImageState from Windows\Setup\State\State.ini ($null when the
     # file is missing), whether that means generalized, and the last SYSPRP error line in the sysprep Panther log.
     # IMAGE_STATE_COMPLETE means sysprep never ran or failed; IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE means it finished.
+    # .NET calls, not Join-Path/Test-Path/Select-String: in WinPE a volume can have no PowerShell drive.
     param([Parameter(Mandatory)][string]$Root)
+    $sep = [IO.Path]::DirectorySeparatorChar
     $state = $null
-    $ini = Join-Path $Root 'Windows\Setup\State\State.ini'
-    if (Test-Path -LiteralPath $ini) {
-        $m = Select-String -LiteralPath $ini -Pattern '^\s*ImageState\s*=\s*(\S+)' | Select-Object -First 1
-        $state = if ($m) { $m.Matches[0].Groups[1].Value } else { '' }
+    $ini = [IO.Path]::Combine($Root, ('Windows\Setup\State\State.ini' -replace '\\', $sep))
+    if ([IO.File]::Exists($ini)) {
+        $m = @([IO.File]::ReadAllLines($ini) | Where-Object { $_ -match '^\s*ImageState\s*=\s*(\S+)' } | Select-Object -First 1)
+        $state = if ($m -and $m[0] -match '^\s*ImageState\s*=\s*(\S+)') { $Matches[1] } else { '' }
     }
     $lastError = $null
-    $errLog = Join-Path $Root 'Windows\System32\Sysprep\Panther\setuperr.log'
-    if (Test-Path -LiteralPath $errLog) {
-        $lastError = Select-String -LiteralPath $errLog -Pattern '\bSYSPRP\b' | Select-Object -Last 1 | ForEach-Object { $_.Line.Trim() }
+    $errLog = [IO.Path]::Combine($Root, ('Windows\System32\Sysprep\Panther\setuperr.log' -replace '\\', $sep))
+    if ([IO.File]::Exists($errLog)) {
+        $lastError = [IO.File]::ReadAllLines($errLog) | Where-Object { $_ -match '\bSYSPRP\b' } | Select-Object -Last 1 | ForEach-Object { $_.Trim() }
     }
     [pscustomobject]@{
         Root        = $Root

@@ -67,7 +67,7 @@
         "models": []
       },
       "verify": false,
-      "notes": "Handy for lab and classroom PCs that get updates and remote reimaging at night.",
+      "notes": "Handy for lab and classroom PCs that get updates at night.",
       "text": [
         "@echo off",
         "powercfg /change standby-timeout-ac 0",

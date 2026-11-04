@@ -251,7 +251,7 @@ function Show-AnswerEditor {
     $e.BtnShareAdd.Add_Click({
         $used = @($shares | ForEach-Object LocalName)
         $r = [ShareRow]::new()
-        $r.LocalName = [char[]](89..68) | ForEach-Object { "$($_):" } | Where-Object { $_ -notin $used -and $_ -notin 'X:', 'W:' } | Select-Object -First 1
+        $r.LocalName = [char[]](89..68) | ForEach-Object { "$($_):" } | Where-Object { $_ -notin $used -and $_ -notin 'R:', 'S:', 'W:', 'X:' } | Select-Object -First 1
         $shares.Add($r); $e.GridShares.SelectedItem = $r
     })
     $e.BtnShareRemove.Add_Click({ $r = $e.GridShares.SelectedItem; if ($r -is [ShareRow]) { [void]$shares.Remove($r) } })
