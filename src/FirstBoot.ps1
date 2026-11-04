@@ -180,8 +180,10 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
     } catch { Write-Log "Post-deploy checks could not run: $($_.Exception.Message)" }
 }
 
-# Setup already blanked the passwords in the cached unattend.xml; remove it and the installers anyway.
-# A copy with every password value removed stays in C:\Windows\Temp\unattend-deployed.xml, to check what setup was given.
+# SetupComplete.cmd runs before the OOBE screens, and OOBE still reads the oobeSystem settings (account page, OOBE
+# pages, Administrator password) from C:\Windows\Panther\unattend.xml after this script ends. Deleting it here made
+# OOBE ask for a local account on the Dell 5521. A copy with every password value removed stays in
+# C:\Windows\Temp\unattend-deployed.xml, and a one-time SYSTEM task deletes the original at the first sign-in.
 $unattend = "$env:WINDIR\Panther\unattend.xml"
 if (Test-Path $unattend) {
     try {
@@ -189,8 +191,12 @@ if (Test-Path $unattend) {
             Set-Content "$env:WINDIR\Temp\unattend-deployed.xml" -Encoding utf8
         Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
     } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
+    $cleanTask = 'ImagingTool-RemoveUnattend'
+    # No quotes: Windows PowerShell 5.1 mangles embedded quotes in native arguments, and the path has no spaces.
+    $cleanCmd = "cmd.exe /c del /f /q $unattend & schtasks.exe /delete /tn $cleanTask /f"
+    & schtasks.exe /create /tn $cleanTask /sc onlogon /ru SYSTEM /rl highest /f /tr $cleanCmd | Out-Null
+    Write-Log $(if ($LASTEXITCODE -eq 0) { 'unattend.xml left for OOBE; removed at the first sign-in' } else { "Could not schedule the unattend.xml removal (schtasks exit $LASTEXITCODE)" })
 }
-Remove-Item $unattend -Force -ErrorAction SilentlyContinue
 Write-Log 'First boot finished; removing C:\Deploy'
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
 Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & rd /s /q `"$deployDir`"" -WindowStyle Hidden
