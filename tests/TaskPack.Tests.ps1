@@ -69,8 +69,8 @@ try {
     Assert-Equal (Test-Path (Join-Path $taskRoot 'Nope')) $false 'a refused new task leaves no folder behind'
 
     # How tasks are launched.
-    $l = Get-TaskLaunch -Definition $d -Folder 'C:\Deploy\Tasks\Wallpaper' -ExtraArguments '-Path X.jpg'
-    Assert-Equal "$($l.FilePath) $($l.Arguments)" 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Deploy\Tasks\Wallpaper\set.ps1" -Path X.jpg' 'a .ps1 runs with powershell -File and the answer file arguments'
+    $l = Get-TaskLaunch -Definition $d -Folder 'C:\Temp\Tasks\Wallpaper' -ExtraArguments '-Path X.jpg'
+    Assert-Equal "$($l.FilePath) $($l.Arguments)" 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Temp\Tasks\Wallpaper\set.ps1" -Path X.jpg' 'a .ps1 runs with powershell -File and the answer file arguments'
     $l = Get-TaskLaunch -Definition $c -Folder 'W:\x\Cleanup\'
     Assert-Equal "$($l.FilePath) $($l.Arguments)" 'cmd.exe /c ""W:\x\Cleanup\clean.cmd" /q"' 'a .cmd runs with cmd /c and its own arguments'
     $exe = ConvertTo-TaskDefinition -Name 'Tool' -Json @{ script = 'tool.exe'; arguments = '/s' }
@@ -188,9 +188,10 @@ try {
     Assert-Throws { Import-TaskPack -TaskRoot $other -Path $zip } '*already exists*' 'import does not overwrite a task by accident'
 
     # Task logs go straight in C:\Windows\Temp, next to Deploy.log and FirstBoot.log, not in a subfolder.
+    # (C:\Temp\Tasks, without Windows, is where FIRSTBOOT tasks are staged.)
     foreach ($f in 'FirstBoot.ps1', 'Deploy-Image.ps1') {
         $text = Get-Content -Raw (Join-Path $repo "src/$f")
-        Assert-Equal ($text -match '\\Temp\\Task-\$\(' -and $text -notmatch '\\Temp\\Tasks\\') $true "$f logs tasks to C:\Windows\Temp\Task-<name>.log"
+        Assert-Equal ($text -match '\\Temp\\Task-\$\(' -and $text -notmatch '\\Windows\\Temp\\Tasks\\') $true "$f logs tasks to C:\Windows\Temp\Task-<name>.log"
     }
 
     # Running tasks for real needs Windows (powershell.exe, cmd.exe).
