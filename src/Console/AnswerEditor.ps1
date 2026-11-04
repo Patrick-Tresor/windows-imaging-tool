@@ -340,6 +340,15 @@ function Show-AnswerEditor {
                 [void]$e[$joinProblem.Control].Focus()
                 throw $joinProblem.Message
             }
+            # Windows Setup reads these at Getting ready, after the disk is erased: a password typed in the product
+            # key box stopped a deploy there (specialize, Microsoft-Windows-Shell-Setup).
+            $settingProblem = @((Test-ProductKeyValue $a.ProductKey), (Test-TimeZoneId $a.TimeZone)) | Where-Object { $_ } | Select-Object -First 1
+            if ($settingProblem) {
+                $e.LstSections.SelectedIndex = 3
+                $win.UpdateLayout()
+                if (Test-ProductKeyValue $a.ProductKey) { [void]$e.TxtProductKey.Focus() } else { [void]$e.CmbTimeZone.Focus() }
+                throw $settingProblem
+            }
             if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Encrypted $a.AdminPasswordEncrypted)) {
                 throw 'Enter the Administrator password (Windows settings).'
             }

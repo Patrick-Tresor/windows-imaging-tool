@@ -215,7 +215,8 @@ function Test-ProductKeyValue {
     param([string]$Key)
     if (-not $Key) { return }
     if ($Key -notmatch '^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$') {
-        "productKey '$Key' must be five groups of five letters or digits (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX), or empty to keep the image's activation."
+        # The value isn't repeated: it is sometimes a password typed in the wrong box.
+        "The product key must be five groups of five letters or digits (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX), or empty to keep the image's activation."
     }
 }
 

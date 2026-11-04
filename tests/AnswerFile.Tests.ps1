@@ -125,7 +125,11 @@ try {
     $broken = $good -replace '(?s)(<settings pass="oobeSystem">.*?)(<component name="Microsoft-Windows-Shell-Setup")', '$1<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><ComputerName>X</ComputerName></component>$2'
     Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*twice*').Count 1 'a component twice in one pass is caught'
     $broken = $good -replace 'NPPR9-FWDCX-D2C8J-H872K-2YT43', 'NPPR9FWDCX'
-    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like "*productKey 'NPPR9FWDCX'*").Count 1 'a malformed product key is caught'
+    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*product key must be five groups*').Count 1 'a malformed product key is caught'
+    # The Dell's failure: a password in the product key box (Shell Unattend: ProductKey installation failed 0x80070057).
+    $pwKey = $good -replace 'NPPR9-FWDCX-D2C8J-H872K-2YT43', 'S3cret$ 2021'
+    $pwProblems = @(Test-UnattendXml -Xml $pwKey)
+    Assert-Equal "$(@($pwProblems -like '*product key must be five groups*').Count)|$(@($pwProblems -like '*S3cret*').Count)" '1|0' 'a password in the product key is caught and not repeated in the message'
     $broken = $good -replace '<ComputerName>GWHZLG3</ComputerName>', '<ComputerName>1234567</ComputerName>'
     Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*only digits*').Count 1 'an all-digit computer name is caught'
     Assert-Equal @(@(Test-UnattendXml -Xml ($good -replace '</unattend>', '')) -like '*not valid XML*').Count 1 'unattend XML that does not parse is caught'
