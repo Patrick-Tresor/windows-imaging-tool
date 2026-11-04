@@ -187,7 +187,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
               <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
-              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
             </Grid.RowDefinitions>
             <Label Content="Full name"/>
             <TextBox x:Name="TxtFullName" Grid.Column="1"/>
@@ -198,18 +198,20 @@
             <Label Grid.Row="3" Content="Time zone"/>
             <ComboBox x:Name="CmbTimeZone" Grid.Row="3" Grid.Column="1" IsEditable="True"/>
             <Label Grid.Row="4" Content="Keyboard (input locale)"/>
-            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
+            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="A language tag such as fr-CA, or several keyboards as language:keyboard IDs, first is the default. Example: 0c0c:00001009; 0409:00000409 (Canadian French, then US)."/>
             <Label Grid.Row="5" Content="Formats (user locale)"/>
             <ComboBox x:Name="CmbUserLocale" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="6" Content="System locale"/>
             <ComboBox x:Name="CmbSystemLocale" Grid.Row="6" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="7" Content="Display language"/>
             <ComboBox x:Name="CmbUILanguage" Grid.Row="7" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Must be a language installed in the image."/>
-            <Label Grid.Row="8" Content="Options"/>
-            <CheckBox x:Name="ChkNoRestore" Grid.Row="8" Grid.Column="1" Content="Turn off System Restore"/>
-            <Label Grid.Row="9" Content="Built-in Administrator"/>
-            <CheckBox x:Name="ChkAdmin" Grid.Row="9" Grid.Column="1" Content="Enable it with this password (on a workgroup PC, this is what skips the local account page in setup)"/>
-            <StackPanel Grid.Row="10" Grid.Column="1">
+            <Label Grid.Row="8" Content="Fallback display language"/>
+            <ComboBox x:Name="CmbUILanguageFallback" Grid.Row="8" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Used where the display language has no translation, for example en-US. Leave empty if not needed."/>
+            <Label Grid.Row="9" Content="Options"/>
+            <CheckBox x:Name="ChkNoRestore" Grid.Row="9" Grid.Column="1" Content="Turn off System Restore"/>
+            <Label Grid.Row="10" Content="Built-in Administrator"/>
+            <CheckBox x:Name="ChkAdmin" Grid.Row="10" Grid.Column="1" Content="Enable it with this password (on a workgroup PC, this is what skips the local account page in setup)"/>
+            <StackPanel Grid.Row="11" Grid.Column="1">
               <PasswordBox x:Name="PwdAdmin" Width="260" HorizontalAlignment="Left"/>
               <TextBlock x:Name="TxtAdminPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
             </StackPanel>

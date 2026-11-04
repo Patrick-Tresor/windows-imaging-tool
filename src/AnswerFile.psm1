@@ -69,6 +69,7 @@ function Read-AnswerFile {
         InputLocale          = Get-XmlText $d 'regional/inputLocale'
         SystemLocale         = Get-XmlText $d 'regional/systemLocale'
         UILanguage           = Get-XmlText $d 'regional/uiLanguage'
+        UILanguageFallback   = Get-XmlText $d 'regional/uiLanguageFallback'
         UserLocale           = Get-XmlText $d 'regional/userLocale'
         NamingMode           = Get-XmlText $d 'identification/naming/@mode' 'WMI'
         WmiQuery             = Get-XmlText $d 'identification/naming/wmiQuery' 'SELECT SerialNumber FROM Win32_BIOS'
@@ -317,7 +318,7 @@ function New-UnattendXml {
     }
 
     $intl = @()
-    foreach ($pair in @(@('InputLocale', $a.InputLocale), @('SystemLocale', $a.SystemLocale), @('UILanguage', $a.UILanguage), @('UserLocale', $a.UserLocale))) {
+    foreach ($pair in @(@('InputLocale', $a.InputLocale), @('SystemLocale', $a.SystemLocale), @('UILanguage', $a.UILanguage), @('UILanguageFallback', $a.UILanguageFallback), @('UserLocale', $a.UserLocale))) {
         if ($pair[1]) { $intl += "      <$($pair[0])>$(& $x $pair[1])</$($pair[0])>" }
     }
     $intlBlock = if ($intl) { "    <component name=`"Microsoft-Windows-International-Core`" $comp>`n$($intl -join "`n")`n    </component>`n" } else { '' }
@@ -475,6 +476,7 @@ $($apps -join "`n")
     <inputLocale>$(& $x $a.InputLocale)</inputLocale>
     <systemLocale>$(& $x $a.SystemLocale)</systemLocale>
     <uiLanguage>$(& $x $a.UILanguage)</uiLanguage>
+    <uiLanguageFallback>$(& $x $a.UILanguageFallback)</uiLanguageFallback>
     <userLocale>$(& $x $a.UserLocale)</userLocale>
   </regional>
   <identification>
@@ -646,6 +648,7 @@ function ConvertFrom-DeployWizardAnswerFile {
         InputLocale          = $locale
         SystemLocale         = $null
         UILanguage           = $null
+        UILanguageFallback   = $null
         UserLocale           = $locale
         NamingMode           = $mode
         WmiQuery             = if ($wmiQuery) { $wmiQuery } else { 'SELECT SerialNumber FROM Win32_BIOS' }
