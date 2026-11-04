@@ -207,7 +207,9 @@ no longer create `fwfiles`).
 6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
-   cached copy after use, and FirstBoot.ps1 deletes it.
+   cached copy after use. OOBE reads it after SetupComplete.cmd, so the file is
+   left in place; FirstBoot.ps1 also keeps a copy with the passwords removed in
+   `C:\Windows\Temp\unattend-deployed.xml`.
 7. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
    model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
    and `firstboot.json`, and write `SetupComplete.cmd` to run it.
