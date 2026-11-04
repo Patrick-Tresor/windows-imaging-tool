@@ -346,10 +346,26 @@ function New-UnattendXml {
         }
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
-    # HideLocalAccountScreen is documented for Windows Server only. On Windows 10/11 the page is really skipped by the
-    # AdministratorPassword above (the Dell 5521 on Windows 11 still asked with only the domain join), so an answer file
-    # that must skip it enables the built-in Administrator. It stays true for domain PCs anyway: harmless on client.
-    $hideLocal = if ($a.EnableAdministrator -or $a.Membership -eq 'Domain') { 'true' } else { 'false' }
+    # HideLocalAccountScreen is documented for Windows Server only. Windows 11 (the Dell 5521, 26200) still showed
+    # "Who's going to use this device?" with it, the domain join and the Administrator password all applied. What OOBE
+    # checks is the UnattendCreatedUser flag, so specialize sets it whenever someone can sign in without a new account:
+    # the built-in Administrator has a password, or the PC joins a domain.
+    $skipAccount = $a.EnableAdministrator -or $a.Membership -eq 'Domain'
+    $hideLocal = if ($skipAccount) { 'true' } else { 'false' }
+    $deployBlock = ''
+    if ($skipAccount) {
+        $deployBlock = @"
+    <component name="Microsoft-Windows-Deployment" $comp>
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg.exe add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE /v UnattendCreatedUser /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+
+"@
+    }
 
     @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -359,7 +375,7 @@ function New-UnattendXml {
     <component name="Microsoft-Windows-Shell-Setup" $comp>
 $($shell -join "`n")
     </component>
-$join  </settings>
+$join$deployBlock  </settings>
   <settings pass="oobeSystem">
 $intlBlock    <component name="Microsoft-Windows-Shell-Setup" $comp>
       <OOBE>
