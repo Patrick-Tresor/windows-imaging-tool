@@ -53,7 +53,7 @@ try {
     # WinPE assigns letters unpredictably: find the volume that holds an offline Windows install.
     # A VM with a second Windows disk attached has two; capture the generalized one.
     $found = @(Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveLetter -ne 'X' } |
-        Where-Object { Test-Path "$($_.DriveLetter):\Windows\System32\config\SYSTEM" } | Sort-Object DriveLetter |
+        Where-Object { [IO.File]::Exists("$($_.DriveLetter):\Windows\System32\config\SYSTEM") } | Sort-Object DriveLetter |
         ForEach-Object { [pscustomobject]@{ Volume = $_; State = Get-OfflineImageState -Root "$($_.DriveLetter):\" } })
     if (-not $found) { throw 'No offline Windows installation found on this machine.' }
     foreach ($f in $found) {

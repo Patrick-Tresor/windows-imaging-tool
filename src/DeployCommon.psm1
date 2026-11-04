@@ -740,17 +740,19 @@ function Get-OfflineImageState {
     # What sysprep left in an offline Windows at $Root: ImageState from Windows\Setup\State\State.ini ($null when the
     # file is missing), whether that means generalized, and the last SYSPRP error line in the sysprep Panther log.
     # IMAGE_STATE_COMPLETE means sysprep never ran or failed; IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE means it finished.
+    # .NET calls, not Join-Path/Test-Path/Select-String: in WinPE a volume can have no PowerShell drive.
     param([Parameter(Mandatory)][string]$Root)
+    $sep = [IO.Path]::DirectorySeparatorChar
     $state = $null
-    $ini = Join-Path $Root 'Windows\Setup\State\State.ini'
-    if (Test-Path -LiteralPath $ini) {
-        $m = Select-String -LiteralPath $ini -Pattern '^\s*ImageState\s*=\s*(\S+)' | Select-Object -First 1
-        $state = if ($m) { $m.Matches[0].Groups[1].Value } else { '' }
+    $ini = [IO.Path]::Combine($Root, ('Windows\Setup\State\State.ini' -replace '\\', $sep))
+    if ([IO.File]::Exists($ini)) {
+        $m = @([IO.File]::ReadAllLines($ini) | Where-Object { $_ -match '^\s*ImageState\s*=\s*(\S+)' } | Select-Object -First 1)
+        $state = if ($m -and $m[0] -match '^\s*ImageState\s*=\s*(\S+)') { $Matches[1] } else { '' }
     }
     $lastError = $null
-    $errLog = Join-Path $Root 'Windows\System32\Sysprep\Panther\setuperr.log'
-    if (Test-Path -LiteralPath $errLog) {
-        $lastError = Select-String -LiteralPath $errLog -Pattern '\bSYSPRP\b' | Select-Object -Last 1 | ForEach-Object { $_.Line.Trim() }
+    $errLog = [IO.Path]::Combine($Root, ('Windows\System32\Sysprep\Panther\setuperr.log' -replace '\\', $sep))
+    if ([IO.File]::Exists($errLog)) {
+        $lastError = [IO.File]::ReadAllLines($errLog) | Where-Object { $_ -match '\bSYSPRP\b' } | Select-Object -Last 1 | ForEach-Object { $_.Trim() }
     }
     [pscustomobject]@{
         Root        = $Root
