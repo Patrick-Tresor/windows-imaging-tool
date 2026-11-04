@@ -2,9 +2,9 @@
 .SYNOPSIS
     Runs once on the deployed PC, as SYSTEM, from SetupComplete.cmd before anyone logs on.
 .DESCRIPTION
-    Deploy-Image.ps1 copies this to C:\Deploy with firstboot.json and the answer file's applications.
+    Deploy-Image.ps1 copies this to C:\Temp with firstboot.json and the answer file's applications.
     Installs the applications in order, applies options, runs FIRSTBOOT tasks, turns on BitLocker, runs the post-deploy checks
-    (PostDeployChecks.psm1), then removes C:\Deploy. The checks and their state stay in C:\ProgramData\ImagingTool,
+    (PostDeployChecks.psm1), then removes what it staged in C:\Temp. The checks and their state stay in C:\ProgramData\ImagingTool,
     where Test-Deployment.ps1 can run them again later.
     When firstboot.json has a status folder, reports progress to the console's dashboard from 90 to 100 %.
     That folder is a UNC path written as the computer account (SYSTEM), so the share must let Domain Computers
@@ -23,6 +23,13 @@ $deployDir = $PSScriptRoot
 # product key, which Dell, HP and Lenovo PCs have in the firmware, on editions other than Enterprise).
 # Whichever comes second finds firstboot.started and stops, so nothing installs twice.
 $taskName = 'ImagingTool\FirstBoot'
+function Get-FirstBootCleanupCommand([string]$Dir) {
+    $d = $Dir.TrimEnd('\')
+    $folders = 'Apps', 'Tasks' | ForEach-Object { "rd /s /q `"$d\$_`"" }
+    $files = 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'firstboot.json', 'deployed.json' |
+        ForEach-Object { "del /f /q `"$d\$_`"" }
+    (@($folders) + @($files)) -join ' & '
+}
 if ($FromTask) {
     # Let Windows setup finish (SetupComplete.cmd, when it runs, runs before that and claims the run first).
     for ($i = 0; $i -lt 120; $i++) {
@@ -84,7 +91,7 @@ foreach ($plain in $plan.applications) {
         Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed ($($r.Status))"
     }
 }
-# Kept after C:\Deploy is removed, for whoever checks the PC (and the deployment dashboard).
+# Kept after C:\Temp is cleared, for whoever checks the PC (and the deployment dashboard).
 $appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
 if ($plan.disableSystemRestore) {
@@ -157,7 +164,7 @@ function Enable-DeployBitLocker($cfg) {
 }
 
 # FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
-# C:\Deploy\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
+# C:\Temp\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
 if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }
 Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
 $taskResults = @()
@@ -181,7 +188,7 @@ foreach ($t in @($plan.tasks)) {
     $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
     if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
 }
-# Kept after C:\Deploy is removed, next to FirstBoot-apps.json.
+# Kept after C:\Temp is cleared, next to FirstBoot-apps.json.
 if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
 if ($plan.bitlocker) {
@@ -190,7 +197,7 @@ if ($plan.bitlocker) {
 }
 
 # Post-deploy checks. Their files move to C:\ProgramData\ImagingTool so Test-Deployment.ps1 can re-run them
-# after C:\Deploy is gone, for example once a missing driver is added.
+# after C:\Temp is cleared, for example once a missing driver is added.
 if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
     Set-Progress 'Running post-deploy checks' 99
     try {
@@ -224,6 +231,8 @@ if (Test-Path $unattend) {
         Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
     } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
 }
-Write-Log 'First boot finished; removing C:\Deploy'
+Write-Log "First boot finished; removing what deploy staged in $deployDir"
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
-Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & rd /s /q `"$deployDir`"" -WindowStyle Hidden
+# C:\Temp can hold other files (the golden image's, or an installer's), so only what Deploy-Image.ps1 staged goes.
+# firstboot.started stays: it keeps the startup task, if it is still there, from running first boot again.
+Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & $(Get-FirstBootCleanupCommand $deployDir)" -WindowStyle Hidden

@@ -118,11 +118,15 @@ try {
     $task = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like 'schtasks.exe /Create*' }) }
     $tu = @(& $task $u); $tw = @(& $task $wg)
     Assert-Equal "$($tu.Count)|$($tw.Count)" '1|1' 'every unattend creates the first boot startup task'
-    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Deploy\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
+    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Temp\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
     $orders = @($u.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Order', $ns) | ForEach-Object InnerText) -join ','
     Assert-Equal $orders '1,2' 'specialize commands are numbered in order'
     Assert-Equal ($fbText.Contains("`$taskName = '$(Get-FirstBootTaskName)'")) $true 'FirstBoot.ps1 deletes the same task the unattend creates'
     Assert-Equal ($fbText -match "FileMode\]::CreateNew") $true 'FirstBoot.ps1 claims the run so SetupComplete.cmd and the task never both install'
+    # Staging is in C:\Temp (Patrick, 2026-11-04), which can hold other files: first boot removes only what it staged.
+    Assert-Equal ($fbText.Contains('rd /s /q `"$deployDir`"')) $false 'first boot does not delete the whole C:\Temp folder'
+    $dpText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+    Assert-Equal "$($dpText -match 'W:\\Deploy\\')|$($dpText -match '-File C:\\Temp\\FirstBoot\.ps1')" 'False|True' 'deploy stages first boot in C:\Temp'
 
     # Applications.
     $apps = Join-Path $tmp 'Applications'

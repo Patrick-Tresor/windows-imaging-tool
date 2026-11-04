@@ -437,7 +437,7 @@ function Set-WindowsBootNext {
 }
 
 function New-DeployedMarker {
-    # Written to <Windows drive>\Deploy\deployed.json after a deployment; FirstBoot.ps1 deletes it once Windows runs.
+    # Written to <Windows drive>\Temp\deployed.json after a deployment; FirstBoot.ps1 deletes it once Windows runs.
     # While it is there, WinPE knows this disk holds a Windows that has not started yet.
     param([Parameter(Mandatory)]$Identity, [string]$AnswerFile, [string]$ComputerName)
     [pscustomobject]@{
@@ -451,7 +451,7 @@ function New-DeployedMarker {
 function Find-UnstartedDeployment {
     <#
     .SYNOPSIS
-        Looks on this PC's volumes for a Windows this tool deployed that has never started (\Deploy\deployed.json
+        Looks on this PC's volumes for a Windows this tool deployed that has never started (\Temp\deployed.json, or \Deploy\deployed.json from older versions,
         with this PC's serial). Found means the PC restarted into WinPE again, usually from a USB stick left in,
         so an Unattended countdown must not wipe it a second time. Returns the marker or $null.
     #>
@@ -466,14 +466,16 @@ function Find-UnstartedDeployment {
         # .NET calls, not Join-Path/Test-Path/Get-Content: a volume PowerShell has no drive for (the old Windows
         # partition at C: on a BitLocker or not-yet-ready disk) makes those throw "A drive with the name 'C' does
         # not exist", which stopped the deploy before the wizard opened.
-        try {
-            $path = [IO.Path]::Combine($r, 'Deploy', 'deployed.json')
-            if (-not [IO.File]::Exists($path)) { continue }
-            $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-        } catch { continue }
-        if ("$($m.serial)" -eq $Serial) {
-            $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
-            return $m
+        foreach ($folder in 'Temp', 'Deploy') {
+            try {
+                $path = [IO.Path]::Combine($r, $folder, 'deployed.json')
+                if (-not [IO.File]::Exists($path)) { continue }
+                $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+            } catch { continue }
+            if ("$($m.serial)" -eq $Serial) {
+                $m | Add-Member -NotePropertyName path -NotePropertyValue $path -Force
+                return $m
+            }
         }
     }
     $null

@@ -210,13 +210,13 @@ no longer create `fwfiles`).
    cached copy after use. OOBE reads it after SetupComplete.cmd, so the file is
    left in place; FirstBoot.ps1 also keeps a copy with the passwords removed in
    `C:\Windows\Temp\unattend-deployed.xml`.
-7. Stage the applications in `W:\Deploy\Apps` (leaving out those whose maker or
+7. Stage the applications in `W:\Temp\Apps` (leaving out those whose maker or
    model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
    and `firstboot.json`, and write `SetupComplete.cmd` to run it. Windows skips
    SetupComplete.cmd with an OEM product key (firmware keys on Dell, HP and
    Lenovo) except on Enterprise, so specialize also creates the startup task
    `ImagingTool\FirstBoot` (`FirstBoot.ps1 -FromTask`, 5 minute delay). The
-   first run claims `C:\Deploy\firstboot.started`, deletes the task and runs;
+   first run claims `C:\Temp\firstboot.started`, deletes the task and runs;
    a second one stops.
 8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
 9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
@@ -238,7 +238,7 @@ applications in order through `Invoke-AppInstall` (detect, skip if present, run
 with a timeout, check exit code, detect again), writes the results to
 `C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
-post-deploy checks and removes `C:\Deploy`.
+post-deploy checks and removes the files it staged in `C:\Temp` (other files there are left alone).
 
 `AppPack.psm1` holds the application pack format: reading and normalizing
 `app.json`, validation, installer inspection (MSI properties through the Windows
@@ -265,7 +265,7 @@ BitLocker is turned on by `FirstBoot.ps1` as SYSTEM, after the domain join
    method, used space only by default, skipping the hardware test so encryption
    starts at once.
 
-The startup PIN travels in `firstboot.json`, which is deleted with `C:\Deploy`.
+The startup PIN travels in `firstboot.json`, which is deleted from `C:\Temp` at the end of first boot.
 Microsoft Entra key backup is not done: the PC is not Entra joined at first boot.
 
 ### Status reporting

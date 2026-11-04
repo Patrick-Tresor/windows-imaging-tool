@@ -6,7 +6,7 @@
 
 $script:TaskTypes = 'powershell', 'cmd', 'exe'
 $script:TaskPhases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
-# Where FIRSTLOGON tasks are kept on the deployed PC: C:\Deploy is removed at the end of first boot.
+# Where FIRSTLOGON tasks are kept on the deployed PC: first boot clears what it staged in C:\Temp.
 $script:LogonTaskDir = 'C:\ProgramData\ImagingTool\Tasks'
 
 #region Definition

@@ -271,7 +271,7 @@ $script:FirstBootTaskName = 'ImagingTool\FirstBoot'
 function Get-FirstBootTaskName { $script:FirstBootTaskName }
 function Get-FirstBootTaskCommand {
     # Five minutes after startup, so SetupComplete.cmd, when Windows runs it, starts FirstBoot.ps1 first.
-    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1 -FromTask`""
+    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1 -FromTask`""
 }
 
 function New-UnattendXml {
@@ -400,13 +400,13 @@ $accounts$logonBlock    </component>
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed with C:\Deploy.
+    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed from C:\Temp at the end of first boot.
     # -Tasks: Resolve-DeployTasks rows (library tasks read, other PCs' tasks left out). Not passed: the plain commands.
     param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [string]$BitLockerPin, [object[]]$Tasks)
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
-    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Deploy\Tasks\<name>.
+    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Temp\Tasks\<name>.
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
