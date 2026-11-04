@@ -113,6 +113,16 @@ try {
     Assert-Equal ($fbText -match 'net\.exe user Administrator ') $false 'first boot finds the built-in Administrator by SID, not by its English name'
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
     Assert-Equal (($plan.tasks | ForEach-Object command) -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
+    # Windows skips SetupComplete.cmd with an OEM product key (the Dell 5521's firmware key): no app or FIRSTBOOT task ran.
+    # Specialize creates a startup task as the backup start, on every PC.
+    $task = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like 'schtasks.exe /Create*' }) }
+    $tu = @(& $task $u); $tw = @(& $task $wg)
+    Assert-Equal "$($tu.Count)|$($tw.Count)" '1|1' 'every unattend creates the first boot startup task'
+    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Deploy\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
+    $orders = @($u.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Order', $ns) | ForEach-Object InnerText) -join ','
+    Assert-Equal $orders '1,2' 'specialize commands are numbered in order'
+    Assert-Equal ($fbText.Contains("`$taskName = '$(Get-FirstBootTaskName)'")) $true 'FirstBoot.ps1 deletes the same task the unattend creates'
+    Assert-Equal ($fbText -match "FileMode\]::CreateNew") $true 'FirstBoot.ps1 claims the run so SetupComplete.cmd and the task never both install'
 
     # Applications.
     $apps = Join-Path $tmp 'Applications'
