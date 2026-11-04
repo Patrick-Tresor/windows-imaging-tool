@@ -197,16 +197,16 @@
             <TextBox x:Name="TxtProductKey" Grid.Row="2" Grid.Column="1" ToolTip="Leave empty to keep the image's key or KMS / digital licence activation."/>
             <Label Grid.Row="3" Content="Time zone"/>
             <ComboBox x:Name="CmbTimeZone" Grid.Row="3" Grid.Column="1" IsEditable="True"/>
-            <Label Grid.Row="4" Content="Keyboard (input locale)"/>
-            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="A language tag such as fr-CA, or several keyboards as language:keyboard IDs, first is the default. Example: 0c0c:00001009; 0409:00000409 (Canadian French, then US)."/>
+            <Label Grid.Row="4" Content="Keyboards (input locale)"/>
+            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Type fr-CA for one keyboard, or several as language:keyboard IDs separated by ; with the default first. Canadian French then US English: 0c0c:00001009; 0409:00000409"/>
             <Label Grid.Row="5" Content="Formats (user locale)"/>
             <ComboBox x:Name="CmbUserLocale" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="6" Content="System locale"/>
             <ComboBox x:Name="CmbSystemLocale" Grid.Row="6" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="7" Content="Display language"/>
             <ComboBox x:Name="CmbUILanguage" Grid.Row="7" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Must be a language installed in the image."/>
-            <Label Grid.Row="8" Content="Fallback display language"/>
-            <ComboBox x:Name="CmbUILanguageFallback" Grid.Row="8" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Used where the display language has no translation, for example en-US. Leave empty if not needed."/>
+            <Label Grid.Row="8" Content="Fallback for untranslated text"/>
+            <ComboBox x:Name="CmbUILanguageFallback" Grid.Row="8" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Only used for text the display language has no translation for, for example en-US. It does not add a keyboard or a language to the list: add keyboards in the Keyboards box."/>
             <Label Grid.Row="9" Content="Options"/>
             <CheckBox x:Name="ChkNoRestore" Grid.Row="9" Grid.Column="1" Content="Turn off System Restore"/>
             <Label Grid.Row="10" Content="Built-in Administrator"/>
