@@ -64,8 +64,12 @@ if ($plan.disableSystemRestore) {
     Write-Log 'System Restore disabled'
 }
 if ($plan.enableAdministrator) {
-    & net.exe user Administrator /active:yes | Out-Null
-    Write-Log 'Built-in Administrator enabled'
+    # By SID (RID 500): the account is "Administrateur" on French Windows, and net user Administrator failed there.
+    $admin = Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' | Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
+    if ($admin) {
+        & net.exe user $admin.Name /active:yes | Out-Null
+        Write-Log "Built-in Administrator ($($admin.Name)) enabled: exit $LASTEXITCODE"
+    } else { Write-Log 'WARNING: built-in Administrator account not found; not enabled' }
 }
 
 function Enable-DeployBitLocker($cfg) {

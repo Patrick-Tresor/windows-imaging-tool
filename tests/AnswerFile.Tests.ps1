@@ -78,9 +78,13 @@ try {
     $hide = { param($doc) $doc.SelectSingleNode('//u:OOBE/u:HideLocalAccountScreen', $ns).InnerText }
     Assert-Equal "$($d.EnableAdministrator)|$(& $hide $u)" 'False|true' 'a domain PC skips the local account page without the built-in Administrator'
     Assert-Equal "$($default.EnableAdministrator)|$(& $hide $wg)" 'False|false' 'a workgroup PC with no Administrator still asks for a local account'
+    # Windows 11 ignores HideLocalAccountScreen; the UnattendCreatedUser flag set in specialize is what skips the page.
+    $flag = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like '*UnattendCreatedUser*/d 1*' }).Count }
+    Assert-Equal "$(& $flag $u)|$(& $flag $wg)" '1|0' 'a domain PC sets UnattendCreatedUser, a workgroup PC with no Administrator does not'
     $wa = $default.PSObject.Copy(); $wa.EnableAdministrator = $true; $wa.AdminPasswordFile = 'config\secrets\admin.txt'
     [xml]$uwa = New-UnattendXml -Answer $wa -ComputerName 'PC-02' -AdminPassword 'a'
     Assert-Equal "$(& $hide $uwa)|$($uwa.SelectSingleNode('//u:AdministratorPassword/u:Value', $ns).InnerText)" 'true|a' 'a workgroup PC with the Administrator skips the page and sets its password'
+    Assert-Equal (& $flag $uwa) 1 'a workgroup PC with the Administrator sets UnattendCreatedUser'
 
     # Join account. Windows signs in as Credentials Domain\Username: CORP\svc typed as the user name with svc as the
     # account's domain came out as svc\CORP\svc, and every join attempt failed with 0x89a (bad user name).
@@ -106,6 +110,7 @@ try {
     # 5521 ask for a local account even with the page hidden, so it stays in place.
     $fbText = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
     Assert-Equal ($fbText -match 'Remove-Item[^\r\n]*Panther') $false 'first boot leaves unattend.xml in place for OOBE'
+    Assert-Equal ($fbText -match 'net\.exe user Administrator ') $false 'first boot finds the built-in Administrator by SID, not by its English name'
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
     Assert-Equal (($plan.tasks | ForEach-Object command) -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
 
