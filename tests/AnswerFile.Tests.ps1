@@ -56,6 +56,16 @@ try {
     Assert-Equal ($name -match '^A\d{4}-XY9$') $true "custom scheme fills # with digits and {SERIAL} ($name)"
     $n.NamingMode = 'Prompt'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'SER1' -Typed 'kiosk 01') 'KIOSK01' 'typed name wins in prompt mode'
+    # Names Windows Setup rejects in the specialize pass are never built.
+    $n.NamingMode = 'WMI'; $n.Prefix = ''
+    Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '1.25.0') 'PC-1250' 'an all-digit name gets a PC- prefix'
+    Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-AB12-') 'AB12' 'leading and trailing dashes are dropped'
+    $n.Prefix = 'ABCDEFGHIJKLMN'
+    Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-X') 'ABCDEFGHIJKLMN' 'a name cut at 15 characters does not end with a dash'
+    foreach ($bad in '', '1234567', 'PC_01', 'ABCDEFGHIJKLMNOP', '-PC', 'PC-') {
+        Assert-Equal ([bool](Test-UnattendComputerName $bad)) $true "computer name '$bad' is rejected"
+    }
+    Assert-Equal "$(Test-UnattendComputerName 'GWHZLG3')" '' 'a Dell service tag is a valid computer name'
 
     # Unattend generation.
     $d = $default.PSObject.Copy()
@@ -113,6 +123,69 @@ try {
     $j.JoinUser = 'CORP\svc\x'
     Assert-Equal @(@(Test-AnswerFile $j) -like '*must be user, DOMAIN\user or user@domain*').Count 1 'a user name with two backslashes is caught before the disk is wiped'
     Assert-Throws { New-UnattendXml -Answer $j -ComputerName 'PC-03' -JoinPassword 'x' } '*must be user, DOMAIN\user or user@domain*' 'no unattend is written with a bad join account'
+    # The generated unattend is checked the way Windows Setup reads it, before the disk is erased. A Dell stopped at
+    # Getting ready with "could not parse or process the unattend answer file for pass [specialize]" for component
+    # Microsoft-Windows-Shell-Setup: a value there that Setup rejects.
+    $full = $d.PSObject.Copy()
+    $full.EnableAdministrator = $true; $full.AdminPasswordFile = 'config\secrets\admin.txt'
+    $full.ProductKey = 'NPPR9-FWDCX-D2C8J-H872K-2YT43'; $full.FullName = 'IT & Co'
+    $good = New-UnattendXml -Answer $full -ComputerName 'GWHZLG3' -JoinPassword 'p&ss<1>' -AdminPassword 'a"b' -LogonCommands @('a.cmd')
+    Assert-Equal (@(Test-UnattendXml -Xml $good) -join ' | ') '' 'every generated setting is in a pass and component that takes it'
+    [xml]$gx = $good
+    $specialShell = $gx.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-Shell-Setup']", $ns)
+    Assert-Equal (($specialShell.ChildNodes | Where-Object { $_.NodeType -eq 'Element' } | ForEach-Object LocalName) -join ',') 'ComputerName,TimeZone,RegisteredOwner,RegisteredOrganization,ProductKey' 'specialize Shell-Setup holds only the name, time zone, owner and key'
+    Assert-Equal $gx.SelectNodes("//u:settings[@pass='specialize']//u:OOBE | //u:settings[@pass='specialize']//u:UserAccounts | //u:settings[@pass='specialize']//u:FirstLogonCommands", $ns).Count 0 'no oobeSystem setting is in specialize'
+    Assert-Equal (@(Test-UnattendXml -Xml (New-UnattendXml -Answer $default -ComputerName 'PC-02')) -join ' | ') '' 'the workgroup unattend checks out too'
+    # Everything New-UnattendXml writes must be on the allow-list, or every deploy would stop: domain join, built-in
+    # Administrator, fallback display language (UILanguageFallback) and the specialize RunSynchronous commands
+    # (UnattendCreatedUser, FirstBoot startup task).
+    $all = $full.PSObject.Copy(); $all.UILanguage = 'fr-CA'; $all.UILanguageFallback = 'en-US'
+    $allXml = New-UnattendXml -Answer $all -ComputerName 'GWHZLG3' -JoinPassword 'x' -AdminPassword 'y' -LogonCommands @('a.cmd')
+    [xml]$allDoc = $allXml
+    $hasFallback = [bool]$allDoc.SelectSingleNode('//u:UILanguageFallback', $ns)
+    $hasSync = [bool]$allDoc.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-Deployment']/u:RunSynchronous", $ns)
+    Assert-Equal "$hasFallback|$hasSync" 'True|True' 'the full unattend has the fallback language and the specialize commands'
+    Assert-Equal (@(Test-UnattendXml -Xml $allXml) -join ' | ') '' 'domain join, Administrator, fallback language and specialize commands pass the check'
+    # Passwords are now kept encrypted in the answer file and decrypted in WinPE: the decrypted text goes in as it is.
+    Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
+    $key = New-AnswerKey
+    $plain = Unprotect-AnswerPassword -Value (Protect-AnswerPassword -Password 'J&in<Pa$$>' -Key $key) -Key $key
+    [xml]$ex = New-UnattendXml -Answer $d -ComputerName 'PC-04' -JoinPassword $plain
+    Assert-Equal "$($ex.SelectSingleNode('//u:Credentials/u:Password', $ns).InnerText)|$(@(Test-UnattendXml -Xml $ex.OuterXml).Count)" 'J&in<Pa$$>|0' 'a decrypted answer file password gives a valid unattend'
+
+    $broken = $good -replace '<RegisteredOwner>', '<CopyProfile>true</CopyProfile><RegisteredOwner>'
+    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*CopyProfile*').Count 1 'a setting the generator does not write in specialize is caught'
+    $broken = $good -replace '(?s)(<settings pass="oobeSystem">.*?)(<component name="Microsoft-Windows-Shell-Setup")', '$1<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"><ComputerName>X</ComputerName></component>$2'
+    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*twice*').Count 1 'a component twice in one pass is caught'
+    $broken = $good -replace 'NPPR9-FWDCX-D2C8J-H872K-2YT43', 'NPPR9FWDCX'
+    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*product key must be five groups*').Count 1 'a malformed product key is caught'
+    # The Dell's failure: a password in the product key box (Shell Unattend: ProductKey installation failed 0x80070057).
+    $pwKey = $good -replace 'NPPR9-FWDCX-D2C8J-H872K-2YT43', 'S3cret$ 2021'
+    $pwProblems = @(Test-UnattendXml -Xml $pwKey)
+    Assert-Equal "$(@($pwProblems -like '*product key must be five groups*').Count)|$(@($pwProblems -like '*S3cret*').Count)" '1|0' 'a password in the product key is caught and not repeated in the message'
+    $broken = $good -replace '<ComputerName>GWHZLG3</ComputerName>', '<ComputerName>1234567</ComputerName>'
+    Assert-Equal @(@(Test-UnattendXml -Xml $broken) -like '*only digits*').Count 1 'an all-digit computer name is caught'
+    Assert-Equal @(@(Test-UnattendXml -Xml ($good -replace '</unattend>', '')) -like '*not valid XML*').Count 1 'unattend XML that does not parse is caught'
+    Assert-Throws { New-UnattendXml -Answer $default -ComputerName 'PC_01' } '*letters, digits and dashes*' 'no unattend is built with a bad computer name'
+
+    # The answer file catches a bad product key or time zone, so the console and WinPE stop before the erase.
+    $v = $default.PSObject.Copy(); $v.ProductKey = 'ABCDE-12345'
+    Assert-Equal @(@(Test-AnswerFile $v) -like '*five groups of five*').Count 1 'a malformed product key is an answer file problem'
+    $v.ProductKey = 'nppr9-fwdcx-d2c8j-h872k-2yt43'
+    Assert-Equal @(Test-AnswerFile $v).Count 0 'a lower-case product key is fine'
+    if ($env:OS -eq 'Windows_NT') {
+        $v.TimeZone = '(UTC-05:00) Eastern Time (US & Canada)'
+        Assert-Equal @(@(Test-AnswerFile $v) -like '*not a Windows time zone ID*').Count 1 'a time zone display name is an answer file problem'
+        $v.TimeZone = 'America/Toronto'
+        Assert-Equal @(@(Test-AnswerFile $v) -like '*not a Windows time zone ID*').Count 1 'an IANA time zone is an answer file problem'
+        $v.TimeZone = 'Eastern Standard Time'
+        Assert-Equal @(Test-AnswerFile $v).Count 0 'a Windows time zone ID is fine'
+    }
+
+    $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+    $checkAt = $deploy.IndexOf('Test-UnattendXml -Xml $unattendXml')
+    Assert-Equal ($checkAt -gt 0 -and $checkAt -lt $deploy.IndexOf("Invoke-Native -FilePath 'diskpart.exe'")) $true 'Deploy-Image checks the unattend before the disk is partitioned'
+
     $j.JoinUser = 'svc'; $j.JoinDomain = 'svc\CORP'
     Assert-Equal @(@(Test-AnswerFile $j) -like "*account's domain 'svc\CORP'*").Count 1 'an account domain with a backslash is caught before the disk is wiped'
 

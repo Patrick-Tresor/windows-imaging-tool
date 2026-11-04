@@ -199,12 +199,15 @@ no longer create `fwfiles`).
 2. Check everything before touching the disk: image, driver pack, applications,
    password files, computer name, and for a Windows 11 image the hardware
    requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
-   memory, disk), which stop the deploy in Block mode. Show a summary, then either a countdown
+   memory, disk), which stop the deploy in Block mode. The unattend is built here too and checked
+   by `Test-UnattendXml` (each setting in a pass and component that takes it; computer name,
+   product key and time zone values Setup accepts), so a setting Windows would reject at
+   "Getting ready" stops the deploy before the erase. Show a summary, then either a countdown
    (unattended) or a YES prompt (interactive).
 3. `diskpart` (script from `New-DiskpartScript`): wipe the disk and create the GPT layout (see below).
 4. `DISM /Apply-Image` the WIM to `W:`.
 5. `DISM /Image:W:\ /Add-Driver /Driver:<pack> /Recurse` for the matched pack.
-6. Generate `W:\Windows\Panther\unattend.xml` from the answer file: computer name,
+6. Write `W:\Windows\Panther\unattend.xml`, built from the answer file in step 2: computer name,
    time zone, owner, product key, domain or workgroup join, locales, OOBE pages,
    Administrator password, FIRSTLOGON commands. Setup blanks the passwords in its
    cached copy after use. OOBE reads it after SetupComplete.cmd, so the file is
