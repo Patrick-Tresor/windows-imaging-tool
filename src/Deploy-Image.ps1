@@ -654,7 +654,7 @@ try {
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
     # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
-    # first boot removes C:\Deploy, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    # first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
     $logonPlan = @(New-LogonTaskPlan -Tasks $deployTasks)
     $logonIndex = 0
     $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
@@ -667,14 +667,14 @@ try {
 
     # 5. First boot: applications and FIRSTBOOT tasks run as SYSTEM from SetupComplete.cmd.
     Set-DeployStatus -Step 'Staging applications' -Percent 82
-    New-Item -ItemType Directory -Path 'W:\Deploy\Apps' -Force | Out-Null
+    New-Item -ItemType Directory -Path 'W:\Temp\Apps' -Force | Out-Null
     foreach ($app in $apps) {
         Write-DeployLog "Staging application $($app.name)"
-        Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Deploy\Apps\' -Recurse -Force
+        Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Temp\Apps\' -Recurse -Force
     }
     # Library tasks: FIRSTBOOT ones next to the applications, FIRSTLOGON ones where the first user's logon finds them.
     foreach ($t in @($libraryTasks | Where-Object Phase -in 'FIRSTBOOT', 'FIRSTLOGON')) {
-        $dest = if ($t.Phase -eq 'FIRSTBOOT') { 'W:\Deploy\Tasks' } else { 'W:\ProgramData\ImagingTool\Tasks' }
+        $dest = if ($t.Phase -eq 'FIRSTBOOT') { 'W:\Temp\Tasks' } else { 'W:\ProgramData\ImagingTool\Tasks' }
         Write-DeployLog "Staging task $($t.Name) ($($t.Phase))"
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         Copy-Item -Path $t.Folder -Destination $dest -Recurse -Force
@@ -686,7 +686,7 @@ try {
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
-        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Deploy\'
+        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Temp\'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
@@ -695,9 +695,9 @@ try {
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
-    $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Deploy\firstboot.json' -Encoding utf8
+    $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Temp\firstboot.json' -Encoding utf8
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
-    "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1`r`n" |
+    "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
 
     # 6. POSTIMAGE tasks, then boot files.
@@ -710,7 +710,7 @@ try {
     $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
     Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
     New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
-        ConvertTo-Json | Set-Content -Path 'W:\Deploy\deployed.json' -Encoding utf8
+        ConvertTo-Json | Set-Content -Path 'W:\Temp\deployed.json' -Encoding utf8
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'
