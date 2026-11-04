@@ -69,6 +69,7 @@ function Read-AnswerFile {
         InputLocale          = Get-XmlText $d 'regional/inputLocale'
         SystemLocale         = Get-XmlText $d 'regional/systemLocale'
         UILanguage           = Get-XmlText $d 'regional/uiLanguage'
+        UILanguageFallback   = Get-XmlText $d 'regional/uiLanguageFallback'
         UserLocale           = Get-XmlText $d 'regional/userLocale'
         NamingMode           = Get-XmlText $d 'identification/naming/@mode' 'WMI'
         WmiQuery             = Get-XmlText $d 'identification/naming/wmiQuery' 'SELECT SerialNumber FROM Win32_BIOS'
@@ -325,6 +326,14 @@ function Resolve-JoinAccount {
     $r
 }
 
+# FirstBoot.ps1's backup start: a SYSTEM task at startup, created in specialize (New-UnattendXml).
+$script:FirstBootTaskName = 'ImagingTool\FirstBoot'
+function Get-FirstBootTaskName { $script:FirstBootTaskName }
+function Get-FirstBootTaskCommand {
+    # Five minutes after startup, so SetupComplete.cmd, when Windows runs it, starts FirstBoot.ps1 first.
+    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1 -FromTask`""
+}
+
 function New-UnattendXml {
     <#
     .SYNOPSIS
@@ -379,7 +388,7 @@ function New-UnattendXml {
     }
 
     $intl = @()
-    foreach ($pair in @(@('InputLocale', $a.InputLocale), @('SystemLocale', $a.SystemLocale), @('UILanguage', $a.UILanguage), @('UserLocale', $a.UserLocale))) {
+    foreach ($pair in @(@('InputLocale', $a.InputLocale), @('SystemLocale', $a.SystemLocale), @('UILanguage', $a.UILanguage), @('UILanguageFallback', $a.UILanguageFallback), @('UserLocale', $a.UserLocale))) {
         if ($pair[1]) { $intl += "      <$($pair[0])>$(& $x $pair[1])</$($pair[0])>" }
     }
     $intlBlock = if ($intl) { "    <component name=`"Microsoft-Windows-International-Core`" $comp>`n$($intl -join "`n")`n    </component>`n" } else { '' }
@@ -407,10 +416,25 @@ function New-UnattendXml {
         }
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
-    # The local account page is skipped when someone can still sign in without it: the built-in Administrator has a
-    # password, or the PC joins a domain and users sign in with domain accounts (local accounts already in the image
-    # are left as they are). Only a workgroup PC with no Administrator still has OOBE ask for an account.
-    $hideLocal = if ($a.EnableAdministrator -or $a.Membership -eq 'Domain') { 'true' } else { 'false' }
+    # HideLocalAccountScreen is documented for Windows Server only. Windows 11 (the Dell 5521, 26200) still showed
+    # "Who's going to use this device?" with it, the domain join and the Administrator password all applied. What OOBE
+    # checks is the UnattendCreatedUser flag, so specialize sets it whenever someone can sign in without a new account:
+    # the built-in Administrator has a password, or the PC joins a domain.
+    $skipAccount = $a.EnableAdministrator -or $a.Membership -eq 'Domain'
+    $hideLocal = if ($skipAccount) { 'true' } else { 'false' }
+    # Specialize commands (run as SYSTEM). The FirstBoot task is the backup start for FirstBoot.ps1: Windows skips
+    # SetupComplete.cmd when it activates with an OEM product key (every Dell, HP and Lenovo has one in the firmware)
+    # on editions other than Enterprise, and then no application or FIRSTBOOT task ran. FirstBoot.ps1 runs only once
+    # whichever starts it, and deletes the task (Get-FirstBootTaskCommand).
+    $sync = @()
+    if ($skipAccount) { $sync += 'reg.exe add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE /v UnattendCreatedUser /t REG_DWORD /d 1 /f' }
+    $sync += Get-FirstBootTaskCommand
+    $j = 0
+    $syncCmds = foreach ($c in $sync) {
+        $j++
+        "        <RunSynchronousCommand wcm:action=`"add`">`n          <Order>$j</Order>`n          <Path>$(& $x $c)</Path>`n        </RunSynchronousCommand>"
+    }
+    $deployBlock = "    <component name=`"Microsoft-Windows-Deployment`" $comp>`n      <RunSynchronous>`n$($syncCmds -join "`n")`n      </RunSynchronous>`n    </component>`n`n"
 
     @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -420,7 +444,7 @@ function New-UnattendXml {
     <component name="Microsoft-Windows-Shell-Setup" $comp>
 $($shell -join "`n")
     </component>
-$join  </settings>
+$join$deployBlock  </settings>
   <settings pass="oobeSystem">
 $intlBlock    <component name="Microsoft-Windows-Shell-Setup" $comp>
       <OOBE>
@@ -441,7 +465,8 @@ $accounts$logonBlock    </component>
 $script:UnattendSettings = @{
     'specialize|Microsoft-Windows-Shell-Setup'          = 'ComputerName', 'TimeZone', 'RegisteredOwner', 'RegisteredOrganization', 'ProductKey'
     'specialize|Microsoft-Windows-UnattendedJoin'       = @('Identification')
-    'oobeSystem|Microsoft-Windows-International-Core'   = 'InputLocale', 'SystemLocale', 'UILanguage', 'UserLocale'
+    'specialize|Microsoft-Windows-Deployment'           = @('RunSynchronous')
+    'oobeSystem|Microsoft-Windows-International-Core'   = 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale'
     'oobeSystem|Microsoft-Windows-Shell-Setup'          = 'OOBE', 'UserAccounts', 'FirstLogonCommands'
 }
 
@@ -598,6 +623,7 @@ $($apps -join "`n")
     <inputLocale>$(& $x $a.InputLocale)</inputLocale>
     <systemLocale>$(& $x $a.SystemLocale)</systemLocale>
     <uiLanguage>$(& $x $a.UILanguage)</uiLanguage>
+    <uiLanguageFallback>$(& $x $a.UILanguageFallback)</uiLanguageFallback>
     <userLocale>$(& $x $a.UserLocale)</userLocale>
   </regional>
   <identification>
@@ -769,6 +795,7 @@ function ConvertFrom-DeployWizardAnswerFile {
         InputLocale          = $locale
         SystemLocale         = $null
         UILanguage           = $null
+        UILanguageFallback   = $null
         UserLocale           = $locale
         NamingMode           = $mode
         WmiQuery             = if ($wmiQuery) { $wmiQuery } else { 'SELECT SerialNumber FROM Win32_BIOS' }
@@ -797,4 +824,4 @@ function ConvertFrom-DeployWizardAnswerFile {
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
-    Test-ProductKeyValue, Test-TimeZoneId, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile
+    Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile

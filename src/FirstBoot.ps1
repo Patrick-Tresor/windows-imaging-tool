@@ -10,11 +10,39 @@
     That folder is a UNC path written as the computer account (SYSTEM), so the share must let Domain Computers
     write to it; if it cannot be reached the deployment still finishes and the dashboard shows it as Stalled.
 #>
+param(
+    # Started by the ImagingTool\FirstBoot startup task (created in specialize), not by SetupComplete.cmd.
+    [switch]$FromTask
+)
 $ErrorActionPreference = 'Continue'
 $log = "$env:WINDIR\Temp\FirstBoot.log"
 function Write-Log([string]$Message) { Add-Content -Path $log -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message) }
 
 $deployDir = $PSScriptRoot
+# Two ways in: SetupComplete.cmd, or the startup task for when Windows skips SetupComplete.cmd (it does with an OEM
+# product key, which Dell, HP and Lenovo PCs have in the firmware, on editions other than Enterprise).
+# Whichever comes second finds firstboot.started and stops, so nothing installs twice.
+$taskName = 'ImagingTool\FirstBoot'
+if ($FromTask) {
+    # Let Windows setup finish (SetupComplete.cmd, when it runs, runs before that and claims the run first).
+    for ($i = 0; $i -lt 120; $i++) {
+        $setup = Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue
+        if (-not $setup -or (-not $setup.SystemSetupInProgress -and -not $setup.OOBEInProgress)) { break }
+        Start-Sleep -Seconds 30
+    }
+}
+try {
+    $claim = [IO.File]::Open([IO.Path]::Combine($deployDir, 'firstboot.started'), [IO.FileMode]::CreateNew)
+    $claim.Close()
+} catch {
+    Write-Log "First boot already started earlier; this run ($(if ($FromTask) { 'startup task' } else { 'SetupComplete.cmd' })) stops"
+    if ($FromTask) { & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null }
+    exit 0
+}
+Write-Log $(if ($FromTask) { 'Started by the startup task: Windows did not run SetupComplete.cmd (OEM product key?)' } else { 'Started by SetupComplete.cmd' })
+# One run is enough: the task would otherwise start this again at every boot.
+& schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+Write-Log "Startup task $taskName removed: exit $LASTEXITCODE"
 $plan = Get-Content -Raw (Join-Path $deployDir 'firstboot.json') | ConvertFrom-Json
 Write-Log "First boot for answer file $($plan.answerFile)"
 # Windows has started, so WinPE may wipe this disk again on a later Unattended deploy (see Find-UnstartedDeployment).
@@ -64,8 +92,12 @@ if ($plan.disableSystemRestore) {
     Write-Log 'System Restore disabled'
 }
 if ($plan.enableAdministrator) {
-    & net.exe user Administrator /active:yes | Out-Null
-    Write-Log 'Built-in Administrator enabled'
+    # By SID (RID 500): the account is "Administrateur" on French Windows, and net user Administrator failed there.
+    $admin = Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' | Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
+    if ($admin) {
+        & net.exe user $admin.Name /active:yes | Out-Null
+        Write-Log "Built-in Administrator ($($admin.Name)) enabled: exit $LASTEXITCODE"
+    } else { Write-Log 'WARNING: built-in Administrator account not found; not enabled' }
 }
 
 function Enable-DeployBitLocker($cfg) {
@@ -180,8 +212,18 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
     } catch { Write-Log "Post-deploy checks could not run: $($_.Exception.Message)" }
 }
 
-# Setup already blanked the passwords in the cached unattend.xml; remove it and the installers anyway.
-Remove-Item "$env:WINDIR\Panther\unattend.xml" -Force -ErrorAction SilentlyContinue
+# C:\Windows\Panther\unattend.xml stays where it is: SetupComplete.cmd runs before the OOBE screens, and OOBE still
+# reads the oobeSystem settings (account page, Administrator password) from it after this script ends. Deleting it
+# here made OOBE ask for a local account on the Dell 5521. Setup blanks the passwords in it after use.
+# A copy with every password value removed is also kept in C:\Windows\Temp\unattend-deployed.xml.
+$unattend = "$env:WINDIR\Panther\unattend.xml"
+if (Test-Path $unattend) {
+    try {
+        (Get-Content -Raw $unattend) -replace '(?s)(<(Value|Password)>).*?(</\2>)', '$1*removed*$3' |
+            Set-Content "$env:WINDIR\Temp\unattend-deployed.xml" -Encoding utf8
+        Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
+    } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
+}
 Write-Log 'First boot finished; removing C:\Deploy'
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
 Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & rd /s /q `"$deployDir`"" -WindowStyle Hidden

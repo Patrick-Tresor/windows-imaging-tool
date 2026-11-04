@@ -71,6 +71,15 @@ try {
     Assert-Equal $u.SelectSingleNode('//u:Credentials/u:Password', $ns).InnerText 'p&ss' 'join password is escaped correctly'
     Assert-Equal $u.SelectSingleNode('//u:RegisteredOrganization', $ns).InnerText 'R&D <Labs>' 'special characters survive'
     Assert-Equal $u.SelectSingleNode('//u:InputLocale', $ns).InnerText 'fr-CA' 'unattend sets the input locale'
+    # Language settings, as Patrick's college image uses them: two keyboards, French display with English fallback.
+    $l = $default.PSObject.Copy()
+    $l.InputLocale = '0c0c:00001009; 0409:00000409'; $l.SystemLocale = 'fr-CA'; $l.UILanguage = 'fr-CA'
+    $l.UILanguageFallback = 'en-US'; $l.UserLocale = 'en-US'
+    [xml]$lu = New-UnattendXml -Answer $l -ComputerName 'PC-03'
+    $intl = $lu.SelectSingleNode("//u:settings[@pass='oobeSystem']/u:component[@name='Microsoft-Windows-International-Core']", $ns)
+    Assert-Equal (($intl.ChildNodes | ForEach-Object { "$($_.LocalName)=$($_.InnerText)" }) -join '|') 'InputLocale=0c0c:00001009; 0409:00000409|SystemLocale=fr-CA|UILanguage=fr-CA|UILanguageFallback=en-US|UserLocale=en-US' 'unattend writes every language setting in schema order'
+    [xml]$noFallback = New-UnattendXml -Answer $default -ComputerName 'PC-04'
+    Assert-Equal $noFallback.SelectSingleNode('//u:UILanguageFallback', $ns) $null 'an empty fallback language is left out of the unattend'
     Assert-Equal (($u.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand/u:CommandLine', $ns) | ForEach-Object InnerText) -join ',') 'a.cmd,c.cmd' 'only FIRSTLOGON tasks go to FirstLogonCommands, in order'
     [xml]$wg = New-UnattendXml -Answer $default -ComputerName 'PC-02'
     Assert-Equal $wg.SelectSingleNode('//u:JoinWorkgroup', $ns).InnerText 'WORKGROUP' 'workgroup answer file joins the workgroup'
@@ -79,9 +88,13 @@ try {
     $hide = { param($doc) $doc.SelectSingleNode('//u:OOBE/u:HideLocalAccountScreen', $ns).InnerText }
     Assert-Equal "$($d.EnableAdministrator)|$(& $hide $u)" 'False|true' 'a domain PC skips the local account page without the built-in Administrator'
     Assert-Equal "$($default.EnableAdministrator)|$(& $hide $wg)" 'False|false' 'a workgroup PC with no Administrator still asks for a local account'
+    # Windows 11 ignores HideLocalAccountScreen; the UnattendCreatedUser flag set in specialize is what skips the page.
+    $flag = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like '*UnattendCreatedUser*/d 1*' }).Count }
+    Assert-Equal "$(& $flag $u)|$(& $flag $wg)" '1|0' 'a domain PC sets UnattendCreatedUser, a workgroup PC with no Administrator does not'
     $wa = $default.PSObject.Copy(); $wa.EnableAdministrator = $true; $wa.AdminPasswordFile = 'config\secrets\admin.txt'
     [xml]$uwa = New-UnattendXml -Answer $wa -ComputerName 'PC-02' -AdminPassword 'a'
     Assert-Equal "$(& $hide $uwa)|$($uwa.SelectSingleNode('//u:AdministratorPassword/u:Value', $ns).InnerText)" 'true|a' 'a workgroup PC with the Administrator skips the page and sets its password'
+    Assert-Equal (& $flag $uwa) 1 'a workgroup PC with the Administrator sets UnattendCreatedUser'
 
     # Join account. Windows signs in as Credentials Domain\Username: CORP\svc typed as the user name with svc as the
     # account's domain came out as svc\CORP\svc, and every join attempt failed with 0x89a (bad user name).
@@ -113,6 +126,16 @@ try {
     Assert-Equal (($specialShell.ChildNodes | Where-Object { $_.NodeType -eq 'Element' } | ForEach-Object LocalName) -join ',') 'ComputerName,TimeZone,RegisteredOwner,RegisteredOrganization,ProductKey' 'specialize Shell-Setup holds only the name, time zone, owner and key'
     Assert-Equal $gx.SelectNodes("//u:settings[@pass='specialize']//u:OOBE | //u:settings[@pass='specialize']//u:UserAccounts | //u:settings[@pass='specialize']//u:FirstLogonCommands", $ns).Count 0 'no oobeSystem setting is in specialize'
     Assert-Equal (@(Test-UnattendXml -Xml (New-UnattendXml -Answer $default -ComputerName 'PC-02')) -join ' | ') '' 'the workgroup unattend checks out too'
+    # Everything New-UnattendXml writes must be on the allow-list, or every deploy would stop: domain join, built-in
+    # Administrator, fallback display language (UILanguageFallback) and the specialize RunSynchronous commands
+    # (UnattendCreatedUser, FirstBoot startup task).
+    $all = $full.PSObject.Copy(); $all.UILanguage = 'fr-CA'; $all.UILanguageFallback = 'en-US'
+    $allXml = New-UnattendXml -Answer $all -ComputerName 'GWHZLG3' -JoinPassword 'x' -AdminPassword 'y' -LogonCommands @('a.cmd')
+    [xml]$allDoc = $allXml
+    $hasFallback = [bool]$allDoc.SelectSingleNode('//u:UILanguageFallback', $ns)
+    $hasSync = [bool]$allDoc.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-Deployment']/u:RunSynchronous", $ns)
+    Assert-Equal "$hasFallback|$hasSync" 'True|True' 'the full unattend has the fallback language and the specialize commands'
+    Assert-Equal (@(Test-UnattendXml -Xml $allXml) -join ' | ') '' 'domain join, Administrator, fallback language and specialize commands pass the check'
     # Passwords are now kept encrypted in the answer file and decrypted in WinPE: the decrypted text goes in as it is.
     Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
     $key = New-AnswerKey
@@ -156,8 +179,23 @@ try {
     $j.JoinUser = 'svc'; $j.JoinDomain = 'svc\CORP'
     Assert-Equal @(@(Test-AnswerFile $j) -like "*account's domain 'svc\CORP'*").Count 1 'an account domain with a backslash is caught before the disk is wiped'
 
+    # OOBE reads the oobeSystem settings after SetupComplete.cmd: FirstBoot.ps1 deleting unattend.xml made the Dell
+    # 5521 ask for a local account even with the page hidden, so it stays in place.
+    $fbText = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
+    Assert-Equal ($fbText -match 'Remove-Item[^\r\n]*Panther') $false 'first boot leaves unattend.xml in place for OOBE'
+    Assert-Equal ($fbText -match 'net\.exe user Administrator ') $false 'first boot finds the built-in Administrator by SID, not by its English name'
     $plan = New-FirstBootPlan -Answer $d -AppDefinitions @()
     Assert-Equal (($plan.tasks | ForEach-Object command) -join ',') 'b.cmd' 'first boot plan holds the FIRSTBOOT tasks'
+    # Windows skips SetupComplete.cmd with an OEM product key (the Dell 5521's firmware key): no app or FIRSTBOOT task ran.
+    # Specialize creates a startup task as the backup start, on every PC.
+    $task = { param($doc) @($doc.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Path', $ns) | Where-Object { $_.InnerText -like 'schtasks.exe /Create*' }) }
+    $tu = @(& $task $u); $tw = @(& $task $wg)
+    Assert-Equal "$($tu.Count)|$($tw.Count)" '1|1' 'every unattend creates the first boot startup task'
+    Assert-Equal ($tu[0].InnerText -like "*/TN `"$(Get-FirstBootTaskName)`"*/RU SYSTEM*C:\Deploy\FirstBoot.ps1 -FromTask*") $true 'the task runs FirstBoot.ps1 -FromTask as SYSTEM'
+    $orders = @($u.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Order', $ns) | ForEach-Object InnerText) -join ','
+    Assert-Equal $orders '1,2' 'specialize commands are numbered in order'
+    Assert-Equal ($fbText.Contains("`$taskName = '$(Get-FirstBootTaskName)'")) $true 'FirstBoot.ps1 deletes the same task the unattend creates'
+    Assert-Equal ($fbText -match "FileMode\]::CreateNew") $true 'FirstBoot.ps1 claims the run so SetupComplete.cmd and the task never both install'
 
     # Applications.
     $apps = Join-Path $tmp 'Applications'
@@ -173,6 +211,11 @@ try {
     Export-AnswerFile -Answer $d -Path $rt
     $back = Read-AnswerFile -Path $rt
     Assert-Equal "$($back.Domain)|$($back.Organization)|$($back.Applications -join ',')|$($back.Tasks.Count)|$($back.OrganizationalUnit)" 'corp.example.com|R&D <Labs>|Zoom,Teams|3|OU=Labs,DC=corp,DC=example,DC=com' 'export then read gives the same answer file'
+    $lrt = Join-Path $tmp 'Languages.xml'
+    $l.JoinUser = $null; $l.Membership = 'Workgroup'
+    Export-AnswerFile -Answer $l -Path $lrt
+    $lback = Read-AnswerFile -Path $lrt
+    Assert-Equal "$($lback.InputLocale)|$($lback.SystemLocale)|$($lback.UILanguage)|$($lback.UILanguageFallback)|$($lback.UserLocale)" '0c0c:00001009; 0409:00000409|fr-CA|fr-CA|en-US|en-US' 'language settings survive export then read'
 
     # BitLocker.
     Assert-Equal "$($default.BitLocker.Enabled)" 'False' 'sample has BitLocker off'

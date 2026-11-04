@@ -187,7 +187,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
               <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
-              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+              <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
             </Grid.RowDefinitions>
             <Label Content="Full name"/>
             <TextBox x:Name="TxtFullName" Grid.Column="1"/>
@@ -197,19 +197,21 @@
             <TextBox x:Name="TxtProductKey" Grid.Row="2" Grid.Column="1" ToolTip="Leave empty to keep the image's key or KMS / digital licence activation."/>
             <Label Grid.Row="3" Content="Time zone"/>
             <ComboBox x:Name="CmbTimeZone" Grid.Row="3" Grid.Column="1" IsEditable="True"/>
-            <Label Grid.Row="4" Content="Keyboard (input locale)"/>
-            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
+            <Label Grid.Row="4" Content="Keyboards (input locale)"/>
+            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Type fr-CA for one keyboard, or several as language:keyboard IDs separated by ; with the default first. Canadian French then US English: 0c0c:00001009; 0409:00000409"/>
             <Label Grid.Row="5" Content="Formats (user locale)"/>
             <ComboBox x:Name="CmbUserLocale" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="6" Content="System locale"/>
             <ComboBox x:Name="CmbSystemLocale" Grid.Row="6" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="7" Content="Display language"/>
             <ComboBox x:Name="CmbUILanguage" Grid.Row="7" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Must be a language installed in the image."/>
-            <Label Grid.Row="8" Content="Options"/>
-            <CheckBox x:Name="ChkNoRestore" Grid.Row="8" Grid.Column="1" Content="Turn off System Restore"/>
-            <Label Grid.Row="9" Content="Built-in Administrator"/>
-            <CheckBox x:Name="ChkAdmin" Grid.Row="9" Grid.Column="1" Content="Enable it with this password (on a workgroup PC, this is what skips the local account page in setup)"/>
-            <StackPanel Grid.Row="10" Grid.Column="1">
+            <Label Grid.Row="8" Content="Fallback for untranslated text"/>
+            <ComboBox x:Name="CmbUILanguageFallback" Grid.Row="8" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Only used for text the display language has no translation for, for example en-US. It does not add a keyboard or a language to the list: add keyboards in the Keyboards box."/>
+            <Label Grid.Row="9" Content="Options"/>
+            <CheckBox x:Name="ChkNoRestore" Grid.Row="9" Grid.Column="1" Content="Turn off System Restore"/>
+            <Label Grid.Row="10" Content="Built-in Administrator"/>
+            <CheckBox x:Name="ChkAdmin" Grid.Row="10" Grid.Column="1" Content="Enable it with this password (needed to skip the local account page in Windows setup)"/>
+            <StackPanel Grid.Row="11" Grid.Column="1">
               <PasswordBox x:Name="PwdAdmin" Width="260" HorizontalAlignment="Left"/>
               <TextBlock x:Name="TxtAdminPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
             </StackPanel>
