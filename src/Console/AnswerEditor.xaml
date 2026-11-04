@@ -311,7 +311,7 @@
       <DockPanel x:Name="Sec7" Visibility="Collapsed">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Style="{StaticResource Title}" Text="Network shares"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Extra shares mapped in WinPE before the deployment, for images, applications or scripts kept on other servers. Drive letters D: to Y:, except W: and X:."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Extra shares mapped in WinPE before the deployment, for images, applications or scripts kept on other servers. Drive letters D: to Y:, except R:, S:, W: and X: (the deploy uses them)."/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
           <Button x:Name="BtnShareAdd" Content="Add"/>

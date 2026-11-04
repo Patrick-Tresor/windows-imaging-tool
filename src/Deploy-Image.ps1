@@ -43,6 +43,14 @@ $script:Vault = @{}
 $script:AnswerKey = $null
 $script:TypedSecrets = @{}
 $script:CanAskSecrets = $false
+# The share account's password the build encrypted in X:\Deploy\config\deploy-settings.json, decrypted with the
+# answer file key in the boot image (or in the vault).
+$script:DecryptShare = {
+    param([string]$Value)
+    if (-not $script:AnswerKey) { $script:AnswerKey = Find-AnswerKey -Vault $script:Vault -ScriptRoot $PSScriptRoot }
+    if (-not $script:AnswerKey) { throw 'this boot image has no answer file key' }
+    Unprotect-AnswerPassword -Value $Value -Key $script:AnswerKey
+}
 
 function Resolve-ContentPath([string]$Root, [string]$Path) {
     # Answer file paths are relative to the content root unless they are absolute (Y:\..., \\server\...).
@@ -420,6 +428,11 @@ function Connect-StatusFolder([string]$Root, $Settings) {
             # Without a password net use would stop and prompt, so only pass the account when its password is known.
             if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
             elseif ($script:Vault.ContainsKey((ConvertTo-SecretKey $Settings.share.passwordFile))) { $user = $Settings.share.user; $pw = $script:Vault[(ConvertTo-SecretKey $Settings.share.passwordFile)] }
+            else {
+                # The copy the build encrypted into this boot image's own settings (the stick has no plain password file).
+                $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
+                if ($cred.Password) { $user = $Settings.share.user; $pw = $cred.Password }
+            }
         }
         Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
         $target
@@ -467,7 +480,7 @@ try {
     $progressWindow = Start-ProgressWindow -ProgressPath $progressPath
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
-    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault
+    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
     # Which WinPE drivers this boot image was built with, so "no internal disk" can be explained from the log.
     Write-WinPEDriverReport -Path (Join-Path $PSScriptRoot 'config\winpe-drivers.json')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3

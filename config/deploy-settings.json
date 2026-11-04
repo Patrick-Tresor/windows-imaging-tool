@@ -3,7 +3,7 @@
   "share": {
     "path": "\\\\deploy-server\\Deploy",
     "user": "DOMAIN\\svc-deploy",
-    "passwordFile": "config\\share.cred"
+    "passwordFile": "config\\secrets\\share.txt"
   },
   "defaultAnswerFile": "Default",
   "wds": {

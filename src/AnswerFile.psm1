@@ -147,7 +147,9 @@ function Test-AnswerFile {
         elseif (-not $taskScript -and -not $t.Command) { "A $($t.Phase) task has no command." }
     }
     foreach ($s in $a.Shares) {
-        if ($s.LocalName -notmatch '^[D-WY]:$') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y: (W: and X: are used by the deploy, Z: by the content share)." }
+        # S: and W: are the EFI and Windows partitions diskpart creates after the erase (a share there made diskpart
+        # fail on a wiped disk), R: is the status share, X: is WinPE and Z: the content share.
+        if ($s.LocalName -notmatch '^[D-Y]:$' -or $s.LocalName -in 'R:', 'S:', 'X:') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y:, except R:, S:, W: and X: (the deploy uses them; Z: is the content share)." }
         if ($s.LocalName -eq 'W:') { "Share local name W: is used for the new Windows partition." }
         if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
@@ -625,7 +627,7 @@ function ConvertFrom-DeployWizardAnswerFile {
 
     # Letters W:, X: and Z: are taken by the deploy; keep every other letter the file already uses.
     $shareNodes = @($w.SelectNodes('settings/network_shares/network_share'))
-    $reserved = @('W:', 'X:', 'Z:')
+    $reserved = @('R:', 'S:', 'W:', 'X:', 'Z:')
     $used = $reserved + @($shareNodes | ForEach-Object { (Get-XmlText $_ 'local_name' '').ToUpperInvariant() } |
         Where-Object { $_ -match '^[D-Y]:$' -and $_ -notin $reserved })
     $shares = @($shareNodes | ForEach-Object {

@@ -677,7 +677,7 @@ function Get-LogCopyTarget {
     if ($null -eq $Volumes) { $Volumes = @(try { Get-Volume } catch { }) }
     $deploy = $Volumes | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' } | Select-Object -First 1
     if ($deploy) { return "$($deploy.DriveLetter):\Logs" }
-    if (Test-Path -LiteralPath 'Z:\') { return 'Z:\Logs' }
+    if ([IO.Directory]::Exists('Z:\')) { return 'Z:\Logs' }
     $usb = $Volumes | Where-Object { $_.DriveLetter -and "$($_.DriveLetter)" -notin 'X', 'W' -and $_.DriveType -eq 'Removable' } | Select-Object -First 1
     if ($usb) { return "$($usb.DriveLetter):\Logs" }
     $null
@@ -694,15 +694,20 @@ function Copy-DeployLogs {
     if (-not $Destination) { throw 'No USB stick or share to copy the logs to.' }
     if (-not $Serial) { $Serial = try { "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim() } catch { '' } }
     $name = "$(if ($Serial) { $Serial -replace '[^A-Za-z0-9._-]', '_' } else { 'PC' })-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
-    $folder = Join-Path $Destination $name
-    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    # .NET calls only: a stick plugged in after WinPE started may have no PowerShell drive, and Join-Path,
+    # Test-Path or Copy-Item then fail with "A drive with the name 'E' does not exist".
+    $folder = [IO.Path]::Combine($Destination, $name)
+    [void][IO.Directory]::CreateDirectory($folder)
     $count = 0
     foreach ($src in $Sources) {
-        foreach ($f in @(Get-ChildItem -Path $src -File -ErrorAction SilentlyContinue)) {
+        $dir = [IO.Path]::GetDirectoryName($src); $pattern = [IO.Path]::GetFileName($src)
+        $files = @(try { if ([IO.Directory]::Exists($dir)) { [IO.Directory]::GetFiles($dir, $pattern) | Sort-Object } } catch { })
+        foreach ($f in $files) {
             # Same names from two places (X: and W: both have Windows\Temp\Deploy.log): keep both.
-            $target = Join-Path $folder $f.Name
-            if (Test-Path -LiteralPath $target) { $target = Join-Path $folder ("{0}-{1}" -f ($f.FullName.Substring(0, 1)), $f.Name) }
-            try { Copy-Item -LiteralPath $f.FullName -Destination $target -Force; $count++ } catch { }
+            $leaf = [IO.Path]::GetFileName($f)
+            $target = [IO.Path]::Combine($folder, $leaf)
+            if ([IO.File]::Exists($target)) { $target = [IO.Path]::Combine($folder, ("{0}-{1}" -f $f.Substring(0, 1), $leaf)) }
+            try { [IO.File]::Copy($f, $target, $true); $count++ } catch { }
         }
     }
     [pscustomobject]@{ Path = $folder; Count = $count }

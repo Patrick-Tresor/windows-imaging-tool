@@ -41,6 +41,22 @@ function Test-MediaWithin([string]$Path, [string[]]$Folders) {
     $false
 }
 
+function Get-MediaSecretExcludes {
+    <#
+    .SYNOPSIS
+        What a stick never gets as plain text: config\secrets, and the share account's password file named in the
+        content root's deploy-settings.json when it is kept somewhere else (the old default was config\share.cred).
+        WinPE gets that password from the boot image instead (encrypted, see New-DeploymentMedia.ps1).
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $out = @('config\secrets')
+    $settings = Join-MediaPath $ContentRoot 'config\deploy-settings.json'
+    $s = if (Test-Path -LiteralPath $settings) { try { Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json } catch { $null } } else { $null }
+    $pf = if ($s -and $s.share -and $s.share.PSObject.Properties['passwordFile']) { ConvertTo-MediaRelative "$($s.share.passwordFile)".Trim() } else { '' }
+    if ($pf -and -not (Test-MediaRooted $pf) -and -not (Test-MediaWithin $pf @('config\secrets'))) { $out += $pf }
+    $out
+}
+
 function Get-MediaAnswerFileNames {
     param([Parameter(Mandatory)][string]$ContentRoot)
     @(Get-ChildItem -Path (Join-MediaPath $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue |
@@ -151,7 +167,7 @@ function Get-MediaContent {
     }
     $exclude = @()
     if (-not $IncludeSecrets) {
-        $exclude += 'config\secrets'
+        $exclude += @(Get-MediaSecretExcludes -ContentRoot $ContentRoot)
         if ($names -and (Test-Path (Join-MediaPath $ContentRoot 'config\secrets'))) {
             $notes += 'Password files (config\secrets) are not copied to the stick. The answer files carry their passwords encrypted, and WinPE decrypts them with the key the build puts in boot.wim.'
         }
@@ -239,4 +255,4 @@ function Get-MediaDriverPacks {
     }
 }
 
-Export-ModuleMember -Function Get-MediaAnswerFileNames, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks
+Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaAnswerFileNames, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks

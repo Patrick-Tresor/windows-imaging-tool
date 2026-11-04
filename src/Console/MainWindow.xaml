@@ -251,7 +251,7 @@
                 <PasswordBox x:Name="PwdWinPE2" Width="200"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
-                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm. A locked PXE image stops remote reimaging from running unattended."/>
+                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm. A locked PXE image waits for the WinPE password at every network boot."/>
             </StackPanel>
 
             <Label Grid.Row="14" Content="Passwords on USB"/>
@@ -447,7 +447,7 @@
               <Label Grid.Row="2" Content="Share user"/>
               <TextBox x:Name="TxtShareUser" Grid.Row="2" Grid.Column="1" ToolTip="DOMAIN\user. Leave empty for guest access."/>
               <Label Grid.Row="4" Content="Password file"/>
-              <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to X:\Deploy in WinPE. If missing, WinPE prompts for the password."/>
+              <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to the content root; keep it in config\secrets. The stick never gets it as plain text: the build puts the password in the boot image, encrypted (in the vault with a WinPE password)."/>
               <Label Grid.Row="6" Content="Default answer file"/>
               <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
               <Label Grid.Row="8" Content="Versions to keep"/>
