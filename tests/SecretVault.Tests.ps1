@@ -62,9 +62,24 @@ try {
     Assert-Equal $found['config\secrets\default-join.txt'] 'JoinPw1' 'vault gets config\secrets'
     Assert-Equal $found['config\share.txt'] 'SharePw' 'vault gets the share password file from the settings'
 
+    # Without a WinPE password the build writes the share password into the boot image's settings, encrypted with
+    # the answer file key; WinPE decrypts it (Get-ShareCredential -Decrypt) since the stick has no plain file.
+    Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
+    $key = New-AnswerKey
+    $peDir = Join-Path $root 'pe/Deploy/config'
+    New-Item -ItemType Directory -Path $peDir -Force | Out-Null
+    $baked = Get-Content -Raw $settings | ConvertFrom-Json
+    $baked.share | Add-Member -NotePropertyName encryptedPassword -NotePropertyValue (Protect-AnswerPassword -Password 'SharePw' -Key $key) -Force
+    $baked | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $peDir 'deploy-settings.json')
+    Assert-Equal ((Get-Content -Raw (Join-Path $peDir 'deploy-settings.json')) -like '*SharePw*') $false 'boot image settings hold no plain share password'
+    $cred = Get-ShareCredential -SettingsPath (Join-Path $peDir 'deploy-settings.json') -Decrypt { param($v) Unprotect-AnswerPassword -Value $v -Key $key }
+    Assert-Equal "$($cred.User)|$($cred.Password)" 'CORP\svc|SharePw' 'WinPE decrypts the share password from the boot image settings'
+    $cred = Get-ShareCredential -SettingsPath (Join-Path $peDir 'deploy-settings.json')
+    Assert-Equal ($null -eq $cred.Password) $true 'without the key nothing is decrypted (net use then asks)'
+
     # The stick: config is copied, config\secrets is not, unless asked for.
     $c = Get-MediaContent -ContentRoot $root
-    Assert-Equal ($c.Exclude -join ';') 'config\secrets' 'secrets left out by default'
+    Assert-Equal ($c.Exclude -join ';') 'config\secrets;config\share.txt' 'secrets and the share password file left out by default'
     Assert-Equal (($c.Notes -join ' ') -like '*Password files (config\secrets) are not copied*') $true 'and the build says so'
     $plan = Get-MediaCopyPlan -ContentRoot $root -Folders $c.Folders -Files $c.Files -Exclude $c.Exclude
     Assert-Equal (@($plan.Items | Where-Object { $_.Relative -like 'config\secrets*' }).Count) 0 'no password file in the copy'

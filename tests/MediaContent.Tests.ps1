@@ -116,6 +116,24 @@ try {
     Assert-Equal (@($c.Folders | Where-Object { $_ -like 'Drivers*' }) -join ';') 'Drivers' 'whole driver folder covers the WinPE drivers'
     Remove-Item (Join-Path $root 'Drivers/_WinPE') -Recurse -Force
 
+    # Password files never go on the stick as plain text: config\secrets, and the share account's password file
+    # when deploy-settings.json keeps it elsewhere (the old default, config\share.cred).
+    Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
+    $set = Join-Path $root 'config/deploy-settings.json'
+    $s = if (Test-Path $set) { Get-Content -Raw $set | ConvertFrom-Json } else { [pscustomobject]@{ share = [pscustomobject]@{ path = ''; user = ''; passwordFile = '' } } }
+    $s.share.passwordFile = 'config\share.cred'
+    $s | ConvertTo-Json -Depth 6 | Set-Content $set
+    Set-Content (Join-Path $root 'config/share.cred') 'SharePw'
+    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default'
+    Assert-Equal ($c.Exclude -join ';') 'config\secrets;config\share.cred' 'share password file outside config\secrets is left off the stick'
+    $plan = Get-MediaCopyPlan -ContentRoot $root -Folders $c.Folders -Files $c.Files -Exclude $c.Exclude
+    Assert-Equal (@($plan.Items | Where-Object { $_.Relative -like '*share.cred' }).Count) 0 'the copy plan has no share.cred'
+    Assert-Equal (@(Get-MediaContent -ContentRoot $root -AnswerFiles 'Default' -IncludeSecrets).Exclude.Count) 0 '-IncludeSecrets copies it'
+    $s.share.passwordFile = 'config\secrets\share.txt'
+    $s | ConvertTo-Json -Depth 6 | Set-Content $set
+    Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Default').Exclude -join ';') 'config\secrets' 'share password file in config\secrets: one exclude'
+    Remove-Item (Join-Path $root 'config/share.cred')
+
     # Unknown answer file, none checked, none at all.
     Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Nope').Problems[0]) "Answer file Nope is not in $root\AnswerFiles." 'unknown answer file'
     $choices = @(Get-MediaAnswerChoices -ContentRoot $root)

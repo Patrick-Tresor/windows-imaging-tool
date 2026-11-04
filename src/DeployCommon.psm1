@@ -593,10 +593,12 @@ function Write-DriverReport {
 function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
     # Vault: the password files the WinPE password unlocked (SecretVault.psm1), for the share account.
-    param([string]$SettingsPath, [hashtable]$Vault = @{})
+    # Decrypt: turns the share password the build encrypted in the settings into text (Get-ShareCredential).
+    param([string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
     foreach ($vol in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' }) {
         $root = "$($vol.DriveLetter):\"
-        if (Test-Path (Join-Path $root 'Images')) { Write-DeployLog "Using USB content at $root"; return $root }
+        # .NET, not Test-Path/Join-Path: a volume PowerShell has no drive for makes those fail in WinPE.
+        if ([IO.Directory]::Exists([IO.Path]::Combine($root, 'Images'))) { Write-DeployLog "Using USB content at $root"; return $root }
     }
 
     if (-not $SettingsPath -or -not (Test-Path $SettingsPath)) { throw 'No DEPLOY volume found and no settings file to locate a network share.' }
@@ -606,7 +608,7 @@ function Find-ContentRoot {
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
 
-    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault
+    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault -Decrypt $Decrypt
     Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $cred.User -Password $cred.Password
     Write-DeployLog "Using network content at Z:\"
     'Z:\'
@@ -698,8 +700,9 @@ function Test-JoinAccount {
 
 function Get-ShareCredential {
     # The share account from deploy-settings.json. The password file sits next to config\ on the media (X:\Deploy).
-    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them).
-    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{})
+    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them),
+    # then share.encryptedPassword, which the build writes into the boot image's settings and Decrypt turns into text.
+    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
     $password = $null
     if ($settings.share.user -and $settings.share.passwordFile) {
@@ -707,6 +710,10 @@ function Get-ShareCredential {
         $key = ($settings.share.passwordFile -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
         if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
         elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
+        elseif ($Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
+            try { $password = & $Decrypt "$($settings.share.encryptedPassword)" }
+            catch { Write-DeployLog "Share account password in the boot image not usable: $($_.Exception.Message)" -Level WARN }
+        }
     }
     [pscustomobject]@{ User = $settings.share.user; Password = $password }
 }
