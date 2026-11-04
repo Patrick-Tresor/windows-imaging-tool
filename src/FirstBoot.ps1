@@ -10,11 +10,39 @@
     That folder is a UNC path written as the computer account (SYSTEM), so the share must let Domain Computers
     write to it; if it cannot be reached the deployment still finishes and the dashboard shows it as Stalled.
 #>
+param(
+    # Started by the ImagingTool\FirstBoot startup task (created in specialize), not by SetupComplete.cmd.
+    [switch]$FromTask
+)
 $ErrorActionPreference = 'Continue'
 $log = "$env:WINDIR\Temp\FirstBoot.log"
 function Write-Log([string]$Message) { Add-Content -Path $log -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message) }
 
 $deployDir = $PSScriptRoot
+# Two ways in: SetupComplete.cmd, or the startup task for when Windows skips SetupComplete.cmd (it does with an OEM
+# product key, which Dell, HP and Lenovo PCs have in the firmware, on editions other than Enterprise).
+# Whichever comes second finds firstboot.started and stops, so nothing installs twice.
+$taskName = 'ImagingTool\FirstBoot'
+if ($FromTask) {
+    # Let Windows setup finish (SetupComplete.cmd, when it runs, runs before that and claims the run first).
+    for ($i = 0; $i -lt 120; $i++) {
+        $setup = Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue
+        if (-not $setup -or (-not $setup.SystemSetupInProgress -and -not $setup.OOBEInProgress)) { break }
+        Start-Sleep -Seconds 30
+    }
+}
+try {
+    $claim = [IO.File]::Open([IO.Path]::Combine($deployDir, 'firstboot.started'), [IO.FileMode]::CreateNew)
+    $claim.Close()
+} catch {
+    Write-Log "First boot already started earlier; this run ($(if ($FromTask) { 'startup task' } else { 'SetupComplete.cmd' })) stops"
+    if ($FromTask) { & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null }
+    exit 0
+}
+Write-Log $(if ($FromTask) { 'Started by the startup task: Windows did not run SetupComplete.cmd (OEM product key?)' } else { 'Started by SetupComplete.cmd' })
+# One run is enough: the task would otherwise start this again at every boot.
+& schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+Write-Log "Startup task $taskName removed: exit $LASTEXITCODE"
 $plan = Get-Content -Raw (Join-Path $deployDir 'firstboot.json') | ConvertFrom-Json
 Write-Log "First boot for answer file $($plan.answerFile)"
 # Windows has started, so WinPE may wipe this disk again on a later Unattended deploy (see Find-UnstartedDeployment).

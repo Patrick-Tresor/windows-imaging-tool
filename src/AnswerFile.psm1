@@ -266,6 +266,14 @@ function Resolve-JoinAccount {
     $r
 }
 
+# FirstBoot.ps1's backup start: a SYSTEM task at startup, created in specialize (New-UnattendXml).
+$script:FirstBootTaskName = 'ImagingTool\FirstBoot'
+function Get-FirstBootTaskName { $script:FirstBootTaskName }
+function Get-FirstBootTaskCommand {
+    # Five minutes after startup, so SetupComplete.cmd, when Windows runs it, starts FirstBoot.ps1 first.
+    "schtasks.exe /Create /F /TN `"$script:FirstBootTaskName`" /SC ONSTART /DELAY 0005:00 /RU SYSTEM /RL HIGHEST /TR `"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\FirstBoot.ps1 -FromTask`""
+}
+
 function New-UnattendXml {
     <#
     .SYNOPSIS
@@ -352,20 +360,19 @@ function New-UnattendXml {
     # the built-in Administrator has a password, or the PC joins a domain.
     $skipAccount = $a.EnableAdministrator -or $a.Membership -eq 'Domain'
     $hideLocal = if ($skipAccount) { 'true' } else { 'false' }
-    $deployBlock = ''
-    if ($skipAccount) {
-        $deployBlock = @"
-    <component name="Microsoft-Windows-Deployment" $comp>
-      <RunSynchronous>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>1</Order>
-          <Path>reg.exe add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE /v UnattendCreatedUser /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-      </RunSynchronous>
-    </component>
-
-"@
+    # Specialize commands (run as SYSTEM). The FirstBoot task is the backup start for FirstBoot.ps1: Windows skips
+    # SetupComplete.cmd when it activates with an OEM product key (every Dell, HP and Lenovo has one in the firmware)
+    # on editions other than Enterprise, and then no application or FIRSTBOOT task ran. FirstBoot.ps1 runs only once
+    # whichever starts it, and deletes the task (Get-FirstBootTaskCommand).
+    $sync = @()
+    if ($skipAccount) { $sync += 'reg.exe add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE /v UnattendCreatedUser /t REG_DWORD /d 1 /f' }
+    $sync += Get-FirstBootTaskCommand
+    $j = 0
+    $syncCmds = foreach ($c in $sync) {
+        $j++
+        "        <RunSynchronousCommand wcm:action=`"add`">`n          <Order>$j</Order>`n          <Path>$(& $x $c)</Path>`n        </RunSynchronousCommand>"
     }
+    $deployBlock = "    <component name=`"Microsoft-Windows-Deployment`" $comp>`n      <RunSynchronous>`n$($syncCmds -join "`n")`n      </RunSynchronous>`n    </component>`n`n"
 
     @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -692,4 +699,4 @@ function ConvertFrom-DeployWizardAnswerFile {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile
+    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile

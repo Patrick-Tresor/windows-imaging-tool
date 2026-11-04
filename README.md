@@ -249,10 +249,14 @@ tab, or with **New application...** in the answer file editor:
 
 On the PC, apps for another maker or model are skipped in WinPE and never copied.
 At first boot each app is skipped when its detection already finds it, runs from
-its folder as SYSTEM (from `SetupComplete.cmd`, which does not run on images
-activated with an OEM product key), is stopped after its timeout, and is marked
+its folder as SYSTEM, is stopped after its timeout, and is marked
 failed when it exits 0 but detection still can't find it. Results go to
 `C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`.
+First boot starts from `SetupComplete.cmd`. Windows skips that script when it
+activates with an OEM product key (Dell, HP and Lenovo PCs have one in the
+firmware) on editions other than Enterprise, so the unattend also creates a
+startup task, `ImagingTool\FirstBoot`, that starts it five minutes after boot.
+Only the first of the two runs it; the first line of `FirstBoot.log` says which.
 Old `app.json` files with only `command` and `successCodes` still work.
 
 **Export...** zips a pack (installer included) to copy it to another content
