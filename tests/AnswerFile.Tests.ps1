@@ -61,6 +61,15 @@ try {
     Assert-Equal $u.SelectSingleNode('//u:Credentials/u:Password', $ns).InnerText 'p&ss' 'join password is escaped correctly'
     Assert-Equal $u.SelectSingleNode('//u:RegisteredOrganization', $ns).InnerText 'R&D <Labs>' 'special characters survive'
     Assert-Equal $u.SelectSingleNode('//u:InputLocale', $ns).InnerText 'fr-CA' 'unattend sets the input locale'
+    # Language settings, as Patrick's college image uses them: two keyboards, French display with English fallback.
+    $l = $default.PSObject.Copy()
+    $l.InputLocale = '0c0c:00001009; 0409:00000409'; $l.SystemLocale = 'fr-CA'; $l.UILanguage = 'fr-CA'
+    $l.UILanguageFallback = 'en-US'; $l.UserLocale = 'en-US'
+    [xml]$lu = New-UnattendXml -Answer $l -ComputerName 'PC-03'
+    $intl = $lu.SelectSingleNode("//u:settings[@pass='oobeSystem']/u:component[@name='Microsoft-Windows-International-Core']", $ns)
+    Assert-Equal (($intl.ChildNodes | ForEach-Object { "$($_.LocalName)=$($_.InnerText)" }) -join '|') 'InputLocale=0c0c:00001009; 0409:00000409|SystemLocale=fr-CA|UILanguage=fr-CA|UILanguageFallback=en-US|UserLocale=en-US' 'unattend writes every language setting in schema order'
+    [xml]$noFallback = New-UnattendXml -Answer $default -ComputerName 'PC-04'
+    Assert-Equal $noFallback.SelectSingleNode('//u:UILanguageFallback', $ns) $null 'an empty fallback language is left out of the unattend'
     Assert-Equal (($u.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand/u:CommandLine', $ns) | ForEach-Object InnerText) -join ',') 'a.cmd,c.cmd' 'only FIRSTLOGON tasks go to FirstLogonCommands, in order'
     [xml]$wg = New-UnattendXml -Answer $default -ComputerName 'PC-02'
     Assert-Equal $wg.SelectSingleNode('//u:JoinWorkgroup', $ns).InnerText 'WORKGROUP' 'workgroup answer file joins the workgroup'
@@ -110,6 +119,11 @@ try {
     Export-AnswerFile -Answer $d -Path $rt
     $back = Read-AnswerFile -Path $rt
     Assert-Equal "$($back.Domain)|$($back.Organization)|$($back.Applications -join ',')|$($back.Tasks.Count)|$($back.OrganizationalUnit)" 'corp.example.com|R&D <Labs>|Zoom,Teams|3|OU=Labs,DC=corp,DC=example,DC=com' 'export then read gives the same answer file'
+    $lrt = Join-Path $tmp 'Languages.xml'
+    $l.JoinUser = $null; $l.Membership = 'Workgroup'
+    Export-AnswerFile -Answer $l -Path $lrt
+    $lback = Read-AnswerFile -Path $lrt
+    Assert-Equal "$($lback.InputLocale)|$($lback.SystemLocale)|$($lback.UILanguage)|$($lback.UILanguageFallback)|$($lback.UserLocale)" '0c0c:00001009; 0409:00000409|fr-CA|fr-CA|en-US|en-US' 'language settings survive export then read'
 
     # BitLocker.
     Assert-Equal "$($default.BitLocker.Enabled)" 'False' 'sample has BitLocker off'

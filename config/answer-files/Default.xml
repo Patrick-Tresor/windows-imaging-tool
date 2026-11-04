@@ -49,12 +49,16 @@
     <organization>Contoso</organization>
   </userInformation>
 
-  <!-- Time zone IDs: tzutil /l. Locales: language tags such as en-US, fr-CA. -->
+  <!-- Time zone IDs: tzutil /l. Locales: language tags such as en-US, fr-CA.
+       inputLocale can also list several keyboards as language:keyboard IDs, the first is the default,
+       for example 0c0c:00001009; 0409:00000409 (Canadian French, then US).
+       uiLanguageFallback is used where the display language has no translation; leave empty if not needed. -->
   <regional>
     <timeZone>Eastern Standard Time</timeZone>
     <inputLocale>en-US</inputLocale>
     <systemLocale>en-US</systemLocale>
     <uiLanguage>en-US</uiLanguage>
+    <uiLanguageFallback></uiLanguageFallback>
     <userLocale>en-US</userLocale>
   </regional>
 

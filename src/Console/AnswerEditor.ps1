@@ -53,7 +53,7 @@ function Show-AnswerEditor {
     $e.CmbImage.ItemsSource = @($images | ForEach-Object { "Images\$($_.Name)" })
     $e.CmbTimeZone.ItemsSource = @([TimeZoneInfo]::GetSystemTimeZones() | ForEach-Object Id)
     $cultures = @([Globalization.CultureInfo]::GetCultures('SpecificCultures') | Sort-Object Name | ForEach-Object Name)
-    foreach ($c in 'CmbInputLocale', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage') { $e[$c].ItemsSource = $cultures }
+    foreach ($c in 'CmbInputLocale', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage', 'CmbUILanguageFallback') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
     $refreshTaskLibrary = {
         # The Script column offers the library's tasks, plus an empty choice for a plain command, plus any name
@@ -133,6 +133,7 @@ function Show-AnswerEditor {
     $e.CmbUserLocale.Text = $a.UserLocale
     $e.CmbSystemLocale.Text = $a.SystemLocale
     $e.CmbUILanguage.Text = $a.UILanguage
+    $e.CmbUILanguageFallback.Text = $a.UILanguageFallback
     $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
@@ -289,6 +290,7 @@ function Show-AnswerEditor {
         $a.UserLocale    = $e.CmbUserLocale.Text.Trim()
         $a.SystemLocale  = $e.CmbSystemLocale.Text.Trim()
         $a.UILanguage    = $e.CmbUILanguage.Text.Trim()
+        $a.UILanguageFallback = $e.CmbUILanguageFallback.Text.Trim()
         $a.DisableSystemRestore = [bool]$e.ChkNoRestore.IsChecked
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
         $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } elseif ($e.RbNamePrompt.IsChecked) { 'Prompt' } else { 'WMI' }
