@@ -345,9 +345,9 @@ function New-UnattendXml {
         }
         $logonBlock = "      <FirstLogonCommands>`n$($cmds -join "`n")`n      </FirstLogonCommands>`n"
     }
-    # The local account page is skipped when someone can still sign in without it: the built-in Administrator has a
-    # password, or the PC joins a domain and users sign in with domain accounts (local accounts already in the image
-    # are left as they are). Only a workgroup PC with no Administrator still has OOBE ask for an account.
+    # HideLocalAccountScreen is documented for Windows Server only. On Windows 10/11 the page is really skipped by the
+    # AdministratorPassword above (the Dell 5521 on Windows 11 still asked with only the domain join), so an answer file
+    # that must skip it enables the built-in Administrator. It stays true for domain PCs anyway: harmless on client.
     $hideLocal = if ($a.EnableAdministrator -or $a.Membership -eq 'Domain') { 'true' } else { 'false' }
 
     @"
