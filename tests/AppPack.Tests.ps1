@@ -83,6 +83,15 @@ try {
     Assert-Equal (Find-AppTemplate -Installer 'setup.exe' -Templates $templates) $null 'a plain setup.exe is not taken for Office'
     Assert-Equal ((Find-AppTemplate -Installer 'Dell-Command-Update-Windows-Universal-Application_9M35M_WIN64_5.7.2_A00.EXE' -Templates $templates).name) 'Dell-Command-Update' 'the Dell download name finds the Dell Command Update template'
     Assert-Equal ((Find-AppTemplate -Installer 'windowsdesktop-runtime-8.0.11-win-x64.exe' -Templates $templates).name) 'DotNet-Desktop-Runtime-8' 'the .NET 8 Desktop Runtime has a template'
+    # Ready-made .NET 8 pack (apps\DotNet-Desktop-Runtime-8): downloads the runtime from Microsoft at first boot.
+    $dotnet = Read-AppPack -AppRoot (Join-Path $repo 'apps') -Name 'DotNet-Desktop-Runtime-8'
+    Assert-Equal (@(Test-AppPack -Definition $dotnet -Folder (Join-Path $repo 'apps/DotNet-Desktop-Runtime-8') | Where-Object { $_ -notlike 'Warning:*' }) -join '; ') '' 'the .NET 8 pack is valid'
+    Assert-Equal "$($dotnet.installerType)|$($dotnet.detection.rules[0].type)|$($dotnet.successCodes -contains 3010)" 'script|uninstall|True' 'the .NET 8 pack runs its script and checks the uninstall entry'
+    $dnText = Get-Content -Raw (Join-Path $repo 'apps/DotNet-Desktop-Runtime-8/Install-DotNet8.ps1')
+    Assert-Equal "$($dnText.Contains('https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe'))|$($dnText -match '/install /quiet /norestart')" 'True|True' 'the .NET 8 script downloads from Microsoft and installs silently'
+    $parseErrors = $null
+    $null = [Management.Automation.Language.Parser]::ParseInput($dnText, [ref]$null, [ref]$parseErrors)
+    Assert-Equal @($parseErrors).Count 0 'the .NET 8 script parses'
     [xml]$odt = Get-Content -Raw (Join-Path $repo 'config/office-configuration.xml')
     Assert-Equal "$($odt.Configuration.Display.Level)|$($odt.Configuration.Display.AcceptEULA)" 'None|TRUE' 'the sample Office configuration installs silently'
     $vlc = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Installer 'vlc-3.0.21-win64.exe' -Templates $templates) -Installer 'vlc-3.0.21-win64.exe'

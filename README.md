@@ -269,7 +269,12 @@ Two installers need more than a silent switch:
   in the pack.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
-  before Dell Command | Update in the answer file.
+  before Dell Command | Update in the answer file. The ready-made pack in
+  `apps\DotNet-Desktop-Runtime-8` downloads the newest .NET 8 Desktop
+  Runtime from Microsoft at first boot (the PC needs internet): copy the
+  folder to `<content root>\Applications`. A
+  `windowsdesktop-runtime-8.*-win-x64.exe` put in that folder is used instead,
+  for PCs without internet.
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
