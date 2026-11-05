@@ -77,6 +77,14 @@ try {
     Assert-Equal ((Find-AppTemplate -Name 'Dell-Command-Update' -Templates $templates).name) 'Dell-Command-Update' 'template found by imported pack name'
     Assert-Equal ((Find-AppTemplate -Name 'Zoom-Latest' -Templates $templates).name) 'Zoom' 'template found by alias'
     Assert-Equal (Find-AppTemplate -Installer 'unknown.exe' -Templates $templates) $null 'no template for unknown installers'
+    # Dell 5521, 2026-11-04: OfficeSetup.exe /S exited 0 without installing, and Dell Command Update 5 exited 4 with no .NET 8.
+    Assert-Equal ((Find-AppTemplate -Name 'Microsoft-Office' -Templates $templates).name) 'Microsoft-365-Apps' 'an Office pack gets the Office Deployment Tool template'
+    Assert-Equal ((Find-AppTemplate -Name 'Microsoft-Office' -Templates $templates).command) '"{installer}" /configure configuration.xml' 'Office installs with setup.exe /configure'
+    Assert-Equal (Find-AppTemplate -Installer 'setup.exe' -Templates $templates) $null 'a plain setup.exe is not taken for Office'
+    Assert-Equal ((Find-AppTemplate -Installer 'Dell-Command-Update-Windows-Universal-Application_9M35M_WIN64_5.7.2_A00.EXE' -Templates $templates).name) 'Dell-Command-Update' 'the Dell download name finds the Dell Command Update template'
+    Assert-Equal ((Find-AppTemplate -Installer 'windowsdesktop-runtime-8.0.11-win-x64.exe' -Templates $templates).name) 'DotNet-Desktop-Runtime-8' 'the .NET 8 Desktop Runtime has a template'
+    [xml]$odt = Get-Content -Raw (Join-Path $repo 'config/office-configuration.xml')
+    Assert-Equal "$($odt.Configuration.Display.Level)|$($odt.Configuration.Display.AcceptEULA)" 'None|TRUE' 'the sample Office configuration installs silently'
     $vlc = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Installer 'vlc-3.0.21-win64.exe' -Templates $templates) -Installer 'vlc-3.0.21-win64.exe'
     Assert-Equal "$($vlc.name)|$($vlc.command)|$($vlc.installer)|$($vlc.detection.rules[0].type)" 'VLC|"vlc-3.0.21-win64.exe" /L=1036 /S|vlc-3.0.21-win64.exe|file'.Replace('1036', '1033') 'template fills in the installer name'
     foreach ($t in $templates) {
