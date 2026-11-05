@@ -271,15 +271,14 @@ Two installers need more than a silent switch:
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
   before Dell Command | Update in the answer file.
 
-**From the internet...** adds applications that the PC downloads by itself at
-first boot, with nothing to download first: tick them in the list and click
-Add. The list is every template with a `download` address in
-`config\app-templates.json`: .NET 8 Desktop Runtime, Microsoft 365 Apps
-(Office Deployment Tool plus `config\office-configuration.xml`), Teams, Zoom,
-Google Chrome and Firefox. The PC needs internet at first boot; it tries for
-about five minutes, and a failed download marks the application failed in
-`FirstBoot.log`. An application the console already knows (by its name or installer, for
-example an Office pack built from `OfficeSetup.exe`) can switch too: select it
+Some applications are ready to download with nothing to get first, because
+`config\app-templates.json` has a `download` address for them: .NET 8 Desktop
+Runtime, Microsoft 365 Apps (Office Deployment Tool plus
+`config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
+The PC needs internet at first boot; it tries for about five minutes, and a
+failed download marks the application failed in `FirstBoot.log`. An
+application the console already knows (by its name or installer, for
+example an Office pack built from `OfficeSetup.exe`) can switch: select it
 on the Applications tab and tick **Download it from the internet when the PC
 installs it**. No link to paste: it uses the publisher's link from the
 catalog, and unticking brings back the pack's own installer. The **Download

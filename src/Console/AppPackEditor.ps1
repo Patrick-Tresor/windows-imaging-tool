@@ -1,14 +1,6 @@
 # Application pack builder window: installer, silent command, detection rules and which PCs get the app.
 # Dot-sourced by ImagingConsole.ps1 after AnswerEditor.ps1 (for Get-XamlControls); uses AppPack.psm1 and ConsoleData.psm1.
 
-class CatalogRow {
-    [bool]$Selected
-    [bool]$CanAdd
-    [string]$Name
-    [string]$Title
-    [string]$Detail
-}
-
 class DetectionRow {
     [string]$Type
     [string]$Target
@@ -269,54 +261,4 @@ function Show-AppPackEditor {
 
     [void]$win.ShowDialog()
     $state.Saved
-}
-
-function Get-AppCatalogRows {
-    # One row per catalog application for the "From the internet" window; ones already in Applications can't be ticked.
-    param([Parameter(Mandatory)][string]$AppRoot, [object[]]$Catalog = (Get-AppCatalog))
-    foreach ($t in $Catalog) {
-        $have = Test-Path -LiteralPath (Join-Path (Join-Path $AppRoot $t.name) 'app.json')
-        $row = [CatalogRow]::new()
-        $row.Name = $t.name
-        $row.CanAdd = -not $have
-        $row.Title = "$($t.displayName)$(if ($have) { ' (already added)' })"
-        $row.Detail = "$($t.publisher). $($t.notes)"
-        $row
-    }
-}
-
-function Show-AppCatalog {
-    <#
-    .SYNOPSIS
-        Lists the applications the PC can download by itself (Get-AppCatalog) and adds the ticked ones to
-        Applications. Returns the names added.
-    #>
-    param([Parameter(Mandatory)]$Owner, [Parameter(Mandatory)][string]$ContentRoot)
-    $appRoot = Join-Path $ContentRoot 'Applications'
-    $catalog = @(Get-AppCatalog)
-    [xml]$cx = Get-Content -Raw (Join-Path $PSScriptRoot 'AppCatalog.xaml')
-    $cwin = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($cx))
-    $cwin.Owner = $Owner
-    Enable-WheelScrolling $cwin
-    $c = Get-XamlControls $cx $cwin
-    $state = @{ Added = @() }
-    $refresh = { $c.LstCatalog.ItemsSource = @(Get-AppCatalogRows -AppRoot $appRoot -Catalog $catalog) }
-    & $refresh
-
-    $c.BtnClose.Add_Click({ $cwin.Close() })
-    $c.BtnAdd.Add_Click({
-        $picked = @($c.LstCatalog.ItemsSource | Where-Object { $_.Selected -and $_.CanAdd })
-        if (-not $picked) { $c.TxtResult.Text = 'Tick at least one application.'; return }
-        $failed = @()
-        foreach ($row in $picked) {
-            $t = $catalog | Where-Object name -eq $row.Name | Select-Object -First 1
-            try { New-AppFromCatalog -AppRoot $appRoot -Template $t | Out-Null; $state.Added += $row.Name }
-            catch { $failed += "$($row.Name): $($_.Exception.Message)" }
-        }
-        & $refresh
-        $c.TxtResult.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($(if ($failed) { '#B91C1C' } else { '#166534' }))
-        $c.TxtResult.Text = if ($failed) { "Not added: $($failed -join ' ')" } else { "Added: $(($picked | ForEach-Object Name) -join ', ')." }
-    })
-    [void]$cwin.ShowDialog()
-    $state.Added
 }
