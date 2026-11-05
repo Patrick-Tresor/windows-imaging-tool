@@ -83,15 +83,42 @@ try {
     Assert-Equal (Find-AppTemplate -Installer 'setup.exe' -Templates $templates) $null 'a plain setup.exe is not taken for Office'
     Assert-Equal ((Find-AppTemplate -Installer 'Dell-Command-Update-Windows-Universal-Application_9M35M_WIN64_5.7.2_A00.EXE' -Templates $templates).name) 'Dell-Command-Update' 'the Dell download name finds the Dell Command Update template'
     Assert-Equal ((Find-AppTemplate -Installer 'windowsdesktop-runtime-8.0.11-win-x64.exe' -Templates $templates).name) 'DotNet-Desktop-Runtime-8' 'the .NET 8 Desktop Runtime has a template'
-    # Ready-made .NET 8 pack (apps\DotNet-Desktop-Runtime-8): downloads the runtime from Microsoft at first boot.
-    $dotnet = Read-AppPack -AppRoot (Join-Path $repo 'apps') -Name 'DotNet-Desktop-Runtime-8'
-    Assert-Equal (@(Test-AppPack -Definition $dotnet -Folder (Join-Path $repo 'apps/DotNet-Desktop-Runtime-8') | Where-Object { $_ -notlike 'Warning:*' }) -join '; ') '' 'the .NET 8 pack is valid'
-    Assert-Equal "$($dotnet.installerType)|$($dotnet.detection.rules[0].type)|$($dotnet.successCodes -contains 3010)" 'script|uninstall|True' 'the .NET 8 pack runs its script and checks the uninstall entry'
-    $dnText = Get-Content -Raw (Join-Path $repo 'apps/DotNet-Desktop-Runtime-8/Install-DotNet8.ps1')
-    Assert-Equal "$($dnText.Contains('https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe'))|$($dnText -match '/install /quiet /norestart')" 'True|True' 'the .NET 8 script downloads from Microsoft and installs silently'
-    $parseErrors = $null
-    $null = [Management.Automation.Language.Parser]::ParseInput($dnText, [ref]$null, [ref]$parseErrors)
-    Assert-Equal @($parseErrors).Count 0 'the .NET 8 script parses'
+    # From the internet: catalog templates make packs with no installer; the PC downloads it at first boot.
+    $catalog = @(Get-AppCatalog -Templates $templates)
+    Assert-Equal (($catalog | ForEach-Object name | Sort-Object) -join ',') 'DotNet-Desktop-Runtime-8,Google-Chrome,Microsoft-365-Apps,Mozilla-Firefox,Teams,Zoom' 'the catalog lists the downloadable applications'
+    $catRoot = Join-Path $tmp 'CatalogApps'
+    foreach ($t in $catalog) {
+        $dest = New-AppFromCatalog -AppRoot $catRoot -Template $t
+        $cd = Read-AppPack -AppRoot $catRoot -Name $t.name
+        $errs = @(Test-AppPack -Definition $cd -Folder $dest | Where-Object { $_ -notlike 'Warning:*' })
+        Assert-Equal "$($cd.downloadUrl -like 'https://*')|$($errs -join '; ')" 'True|' "catalog $($t.name): a valid pack with a download address and no installer"
+    }
+    Assert-Equal (Test-Path (Join-Path $catRoot 'Microsoft-365-Apps/configuration.xml')) $true 'the Office pack gets configuration.xml'
+    Assert-Equal (Read-AppPack -AppRoot $catRoot -Name 'Teams').command '"teamsbootstrapper.exe" -p' 'Teams from the internet uses the online bootstrapper command'
+    Assert-Equal (Read-AppPack -AppRoot $catRoot -Name 'DotNet-Desktop-Runtime-8').command '"windowsdesktop-runtime-8-win-x64.exe" /install /quiet /norestart' '.NET 8 installs silently from the downloaded file'
+    Assert-Throws { New-AppFromCatalog -AppRoot $catRoot -Template ($catalog | Where-Object name -eq 'Zoom') } '*already exists*' 'adding the same application twice is refused'
+    Assert-Throws { New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Name 'VLC' -Templates $templates) -Online } '*no download*' 'a template without a download address cannot be online'
+    $bad = ConvertTo-AppDefinition -Name 'Bad' -Json @{ command = 'x.exe'; downloadUrl = 'ftp://x/y.exe' }
+    Assert-Equal @(@(Test-AppPack -Definition $bad) -like '*must start with https*').Count 1 'a download address must be http(s)'
+    Assert-Equal @(@(Test-AppPack -Definition $bad) -like '*installer file name*').Count 1 'a download needs the file name to save it as'
+    $missing = ConvertTo-AppDefinition -Name 'Local' -Json @{ command = 'x.exe'; installer = 'x.exe' }
+    Assert-Equal @(@(Test-AppPack -Definition $missing -Folder $catRoot) -like '*not in the application folder*').Count 1 'without a download the installer must be in the folder'
+
+    # Download at first boot (Get-AppDownload, called by Invoke-AppInstall).
+    $zd = Read-AppPack -AppRoot $catRoot -Name 'Zoom'
+    $zf = Join-Path $catRoot 'Zoom'
+    $script:dlCalls = 0
+    $fake = { param($Url, $Path) $script:dlCalls++; Set-Content -LiteralPath $Path -Value "from $Url" }
+    Get-AppDownload -Definition $zd -AppFolder $zf -Log { param($m) } -Downloader $fake
+    Assert-Equal "$script:dlCalls|$((Get-Content -Raw (Join-Path $zf 'ZoomInstallerFull.msi')).Trim())" '1|from https://zoom.us/client/latest/ZoomInstallerFull.msi' 'the installer is downloaded into the application folder'
+    Get-AppDownload -Definition $zd -AppFolder $zf -Log { param($m) } -Downloader $fake
+    Assert-Equal $script:dlCalls 1 'an installer already in the folder is not downloaded again'
+    $cf = Join-Path $catRoot 'Google-Chrome'
+    $script:tries = 0
+    $broken = { param($Url, $Path) $script:tries++; throw 'The remote name could not be resolved' }
+    Assert-Throws { Get-AppDownload -Definition (Read-AppPack -AppRoot $catRoot -Name 'Google-Chrome') -AppFolder $cf -Log { param($m) } -Attempts 3 -WaitSeconds 0 -Downloader $broken } '*could not download*' 'no internet: the download fails after its attempts'
+    Assert-Equal "$script:tries|$(Test-Path (Join-Path $cf 'googlechromestandaloneenterprise64.msi'))" '3|False' 'it tried each attempt and left no partial file'
+
     [xml]$odt = Get-Content -Raw (Join-Path $repo 'config/office-configuration.xml')
     Assert-Equal "$($odt.Configuration.Display.Level)|$($odt.Configuration.Display.AcceptEULA)" 'None|TRUE' 'the sample Office configuration installs silently'
     $vlc = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Installer 'vlc-3.0.21-win64.exe' -Templates $templates) -Installer 'vlc-3.0.21-win64.exe'

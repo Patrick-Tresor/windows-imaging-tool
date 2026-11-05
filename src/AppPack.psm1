@@ -35,6 +35,8 @@ function ConvertTo-AppDefinition {
         version          = & $get 'version' ''
         publisher        = & $get 'publisher' ''
         installer        = & $get 'installer' ''
+        # When set, the PC downloads the installer from here at first boot (saved as installer) if it is not in the folder.
+        downloadUrl      = & $get 'downloadUrl' ''
         installerType    = & $get 'installerType' ''
         command          = & $get 'command' ''
         # Lists are wrapped in @() so an empty one stays []: Windows PowerShell 5.1 writes an if statement's
@@ -107,7 +109,9 @@ function Test-AppPack {
     if ($d.installerType -and $d.installerType -notin $script:InstallerTypes) { "Unknown installer type '$($d.installerType)'." }
     if ($d.timeoutMinutes -lt 1 -or $d.timeoutMinutes -gt 600) { 'The timeout must be between 1 and 600 minutes.' }
     if (-not @($d.successCodes).Count) { 'There must be at least one success code (usually 0).' }
-    if ($Folder -and $d.installer -and -not (Test-Path (Join-Path $Folder $d.installer))) { "The installer $($d.installer) is not in the application folder." }
+    if ($Folder -and $d.installer -and -not $d.downloadUrl -and -not (Test-Path (Join-Path $Folder $d.installer))) { "The installer $($d.installer) is not in the application folder." }
+    if ($d.downloadUrl -and $d.downloadUrl -notmatch '^https?://\S+$') { "The download address '$($d.downloadUrl)' must start with https://." }
+    if ($d.downloadUrl -and -not $d.installer) { 'An application downloaded at first boot needs the installer file name to save it as (Installer to run).' }
     foreach ($r in $d.detection.rules) {
         if (-not $r.target) { "A $($r.type) detection rule has nothing to look for." }
         if ($r.operator -notin 'exists', '=', '>=') { "Detection operator '$($r.operator)' must be exists, = or >=." }
@@ -277,6 +281,34 @@ function Get-AppTemplates {
     @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
 }
 
+function Get-AppCatalog {
+    # The templates the PC can download by itself at first boot (they have a download address).
+    param([object[]]$Templates = (Get-AppTemplates))
+    @($Templates | Where-Object { $_.PSObject.Properties['download'] -and $_.download.url })
+}
+
+function New-AppFromCatalog {
+    <#
+    .SYNOPSIS
+        Creates Applications\<name> from a catalog template: app.json with the download address, plus the template's
+        extra files (Office's configuration.xml) from config\. Nothing is downloaded now; the PC does it at first boot.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AppRoot,
+        [Parameter(Mandatory)]$Template,
+        [string]$Name,
+        [string]$ConfigDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config')
+    )
+    $d = New-AppDefinitionFromTemplate -Template $Template -Name $(if ($Name) { $Name } else { $Template.name }) -Online
+    $dest = Save-AppPack -AppRoot $AppRoot -Definition $d
+    if ($Template.PSObject.Properties['files'] -and $Template.files) {
+        foreach ($f in $Template.files.PSObject.Properties) {
+            Copy-Item -LiteralPath (Join-Path $ConfigDir $f.Value) -Destination (Join-Path $dest $f.Name) -Force
+        }
+    }
+    $dest
+}
+
 function Find-AppTemplate {
     # The first template whose file patterns match the installer name, or whose name matches -Name.
     param([string]$Installer, [string]$Name, [object[]]$Templates = (Get-AppTemplates))
@@ -294,9 +326,16 @@ function Find-AppTemplate {
 
 function New-AppDefinitionFromTemplate {
     # A definition from a template; {installer} in its commands becomes the installer's file name.
-    param([Parameter(Mandatory)]$Template, [string]$Installer, [string]$Name)
+    # -Online: the template's download (address and, when it differs, the command), so the PC gets the installer itself.
+    param([Parameter(Mandatory)]$Template, [string]$Installer, [string]$Name, [switch]$Online)
     $json = $Template | ConvertTo-Json -Depth 6 | ConvertFrom-Json
     $file = if ($Installer) { $Installer } elseif ($json.PSObject.Properties['installer']) { $json.installer } else { '' }
+    if ($Online) {
+        $dl = if ($json.PSObject.Properties['download']) { $json.download } else { $null }
+        if (-not $dl -or -not $dl.url) { throw "There is no download for $($Template.name): pick its installer instead." }
+        $json | Add-Member -NotePropertyName downloadUrl -NotePropertyValue $dl.url -Force
+        if ($dl.PSObject.Properties['command'] -and $dl.command) { $json.command = $dl.command }
+    }
     foreach ($p in 'command', 'uninstallCommand') {
         if ($json.PSObject.Properties[$p] -and $json.$p) { $json.$p = $json.$p.Replace('{installer}', $file) }
     }
@@ -483,6 +522,45 @@ function Test-AppDetection {
     [pscustomobject]@{ HasRules = $true; Detected = $detected; Details = $results }
 }
 
+function Get-AppDownload {
+    <#
+    .SYNOPSIS
+        Downloads the installer of an application that has a downloadUrl into its folder, unless it is already there.
+        Tries -Attempts times, -WaitSeconds apart (the network can take a minute after setup). Throws when it can't.
+    #>
+    param(
+        [Parameter(Mandatory)]$Definition,
+        [Parameter(Mandatory)][string]$AppFolder,
+        [scriptblock]$Log = { param($m) Write-Host $m },
+        [int]$Attempts = 10,
+        [int]$WaitSeconds = 30,
+        # Tests pass their own; the default is Invoke-WebRequest.
+        [scriptblock]$Downloader = { param($Url, $Path) Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing }
+    )
+    $d = $Definition
+    if (-not $d.downloadUrl) { return }
+    $path = [IO.Path]::Combine($AppFolder, $d.installer)
+    if ([IO.File]::Exists($path)) { & $Log "  $($d.installer) is already in the folder; not downloaded"; return }
+    # Windows PowerShell 5.1 does not always offer TLS 1.2 on its own.
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+    try {
+        for ($i = 1; $i -le $Attempts; $i++) {
+            try {
+                & $Downloader $d.downloadUrl $path
+                if (-not [IO.File]::Exists($path)) { throw 'nothing was saved' }
+                & $Log ("  Downloaded {0} ({1:N1} MB)" -f $d.downloadUrl, ((Get-Item -LiteralPath $path).Length / 1MB))
+                return
+            } catch {
+                & $Log "  Download attempt $i of $Attempts failed: $($_.Exception.Message)"
+                if ([IO.File]::Exists($path)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+                if ($i -lt $Attempts) { Start-Sleep -Seconds $WaitSeconds }
+            }
+        }
+    } finally { $ProgressPreference = $old }
+    throw "could not download $($d.downloadUrl) (no internet?)"
+}
+
 function Invoke-AppInstall {
     <#
     .SYNOPSIS
@@ -497,6 +575,10 @@ function Invoke-AppInstall {
     $before = Test-AppDetection -Definition $d -AppFolder $AppFolder
     if ($before.HasRules -and $before.Detected -and $d.skipIfDetected) {
         return & $out 'AlreadyInstalled' $null $false "already installed ($(($before.Details | ForEach-Object Detail) -join '; '))"
+    }
+    if ($d.downloadUrl) {
+        try { Get-AppDownload -Definition $d -AppFolder $AppFolder -Log $Log }
+        catch { return & $out 'Failed' $null $false "download failed: $($_.Exception.Message)" }
     }
 
     & $Log "  > $($d.command)"
@@ -524,6 +606,6 @@ function Invoke-AppInstall {
 
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
-    Get-AppTemplates, Find-AppTemplate, New-AppDefinitionFromTemplate,
+    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Save-AppPack, Export-AppPack, Import-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall

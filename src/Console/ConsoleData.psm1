@@ -511,14 +511,15 @@ function New-Application {
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$Source,
+        # Empty for an application the PC downloads at first boot (downloadUrl in -Definition).
+        [string]$Source,
         [string]$Command,
         [int[]]$SuccessCodes = @(0, 3010),
         $Definition
     )
     if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
     if (-not $Definition) {
-        $leaf = if (Test-Path $Source -PathType Leaf) { Split-Path $Source -Leaf } else { '' }
+        $leaf = if ($Source -and (Test-Path $Source -PathType Leaf)) { Split-Path $Source -Leaf } else { '' }
         $Definition = ConvertTo-AppDefinition -Name $Name -Json ([pscustomobject]@{ command = $Command; successCodes = $SuccessCodes; installer = $leaf })
     }
     $Definition.name = $Name

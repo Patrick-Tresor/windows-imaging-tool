@@ -33,12 +33,14 @@
       ] },
       "timeoutMinutes": 30,
       "verify": false,
-      "notes": "Dell Update Package (/s is silent). Only installed on Dell PCs. Version 5 needs the .NET 8 Desktop Runtime: put the DotNet-Desktop-Runtime-8 application before this one in the answer file. Without it the package exits 4 (a required component is missing)."
+      "notes": "Dell does not publish a fixed download address, so pick the installer from dell.com/support. Dell Update Package (/s is silent). Only installed on Dell PCs. Version 5 needs the .NET 8 Desktop Runtime: put the DotNet-Desktop-Runtime-8 application before this one in the answer file. Without it the package exits 4 (a required component is missing)."
     },
     {
       "name": "DotNet-Desktop-Runtime-8",
       "aliases": ["DotNet-Desktop-Runtime", ".NET Desktop Runtime", "Windows Desktop Runtime", "dotnet8"],
       "match": ["windowsdesktop-runtime-8.*-win-x64.exe"],
+      "installer": "windowsdesktop-runtime-8-win-x64.exe",
+      "download": { "url": "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe" },
       "displayName": "Microsoft Windows Desktop Runtime 8 (x64)",
       "publisher": "Microsoft",
       "installerType": "burn",
@@ -48,12 +50,15 @@
       ] },
       "timeoutMinutes": 15,
       "verify": false,
-      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application. To download it from Microsoft at first boot instead, copy the repo folder apps\\DotNet-Desktop-Runtime-8 to the content root's Applications folder."
+      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application. From the internet... adds it with Microsoft's link to the newest .NET 8, downloaded at first boot."
     },
     {
       "name": "Microsoft-365-Apps",
       "aliases": ["Microsoft-Office", "Office", "Microsoft Office", "Office365", "Microsoft 365", "M365"],
       "match": [],
+      "installer": "setup.exe",
+      "download": { "url": "https://officecdn.microsoft.com/pr/wsus/setup.exe" },
+      "files": { "configuration.xml": "office-configuration.xml" },
       "displayName": "Microsoft 365 Apps",
       "publisher": "Microsoft",
       "installerType": "exe",
@@ -65,13 +70,14 @@
       ] },
       "timeoutMinutes": 90,
       "verify": true,
-      "notes": "Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
+      "notes": "From the internet... adds the Office Deployment Tool's setup.exe (downloaded at first boot) and config\\office-configuration.xml as configuration.xml; Office itself then downloads from Microsoft. Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
     },
     {
       "name": "Teams",
       "aliases": ["MSTeams", "Microsoft Teams", "NewTeams"],
       "match": ["teamsbootstrapper.exe"],
       "installer": "teamsbootstrapper.exe",
+      "download": { "url": "https://go.microsoft.com/fwlink/?linkid=2243204", "command": "\"teamsbootstrapper.exe\" -p" },
       "displayName": "Microsoft Teams",
       "publisher": "Microsoft",
       "installerType": "exe",
@@ -79,12 +85,14 @@
       "detection": { "match": "all", "rules": [ { "type": "appx", "target": "MSTeams" } ] },
       "timeoutMinutes": 20,
       "verify": false,
-      "notes": "Choose the folder with teamsbootstrapper.exe and MSTeams-x64.msix (both from Microsoft's Teams admin download page), so it installs offline for every user."
+      "notes": "Choose the folder with teamsbootstrapper.exe and MSTeams-x64.msix (both from Microsoft's Teams admin download page), so it installs offline for every user. From the internet... downloads the bootstrapper at first boot, and it downloads Teams for every user (-p)."
     },
     {
       "name": "Zoom",
       "aliases": ["ZoomWorkplace", "Zoom-Latest", "ZoomLatest"],
       "match": ["ZoomInstallerFull*.msi"],
+      "installer": "ZoomInstallerFull.msi",
+      "download": { "url": "https://zoom.us/client/latest/ZoomInstallerFull.msi" },
       "displayName": "Zoom Workplace",
       "publisher": "Zoom",
       "installerType": "msi",
@@ -96,6 +104,42 @@
       "timeoutMinutes": 20,
       "verify": false,
       "notes": "Per-machine MSI. Add MSI properties from Zoom's mass deployment guide (auto-update, SSO domain) after /norestart if you need them."
+    },
+    {
+      "name": "Google-Chrome",
+      "aliases": ["Chrome", "Google Chrome", "GoogleChrome"],
+      "match": ["googlechromestandaloneenterprise64*.msi", "GoogleChromeEnterprise*.msi"],
+      "installer": "googlechromestandaloneenterprise64.msi",
+      "download": { "url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi" },
+      "displayName": "Google Chrome",
+      "publisher": "Google",
+      "installerType": "msi",
+      "command": "msiexec /i \"{installer}\" /qn /norestart",
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" },
+        { "type": "uninstall", "target": "Google Chrome" }
+      ] },
+      "timeoutMinutes": 20,
+      "verify": false,
+      "notes": "Chrome Enterprise MSI (64-bit), for every user. It updates itself."
+    },
+    {
+      "name": "Mozilla-Firefox",
+      "aliases": ["Firefox", "Mozilla Firefox"],
+      "match": ["Firefox Setup *.msi", "Firefox*.msi"],
+      "installer": "Firefox.msi",
+      "download": { "url": "https://download.mozilla.org/?product=firefox-msi-latest-ssl&os=win64&lang=fr" },
+      "displayName": "Mozilla Firefox",
+      "publisher": "Mozilla",
+      "installerType": "msi",
+      "command": "msiexec /i \"{installer}\" /qn /norestart",
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles%\\Mozilla Firefox\\firefox.exe" },
+        { "type": "uninstall", "target": "Mozilla Firefox*" }
+      ] },
+      "timeoutMinutes": 20,
+      "verify": false,
+      "notes": "Firefox MSI (64-bit, French: lang=fr in the download address; use lang=en-US for English)."
     },
     {
       "name": "VLC",

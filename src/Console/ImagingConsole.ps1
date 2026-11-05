@@ -479,6 +479,11 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+$ui.BtnAppCatalog.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $added = @(Show-AppCatalog -Owner $window -ContentRoot $script:root)
+    if ($added) { Update-Apps; Update-Answers; Set-Status "Added from the internet: $($added -join ', ')" }
+} })
 $ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
 $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
 

@@ -340,8 +340,9 @@
             <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
             <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
           </StackPanel>
-          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+          <WrapPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnAppCatalog" Content="From the internet..." ToolTip="Add applications the PC downloads by itself at first boot (.NET 8, Office, Teams, Zoom, Chrome, Firefox)"/>
             <Button x:Name="BtnAppEdit" Content="Edit"/>
             <Button x:Name="BtnAppTest" Content="Test detection"/>
             <Button x:Name="BtnAppExport" Content="Export..."/>
@@ -349,7 +350,7 @@
             <Button x:Name="BtnAppDelete" Content="Delete"/>
             <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
             <Button x:Name="BtnAppsOpen" Content="Open folder"/>
-          </StackPanel>
+          </WrapPanel>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
           <DataGrid x:Name="GridApps" IsReadOnly="True">

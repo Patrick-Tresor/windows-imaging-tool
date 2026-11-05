@@ -269,12 +269,18 @@ Two installers need more than a silent switch:
   in the pack.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
-  before Dell Command | Update in the answer file. The ready-made pack in
-  `apps\DotNet-Desktop-Runtime-8` downloads the newest .NET 8 Desktop
-  Runtime from Microsoft at first boot (the PC needs internet): copy the
-  folder to `<content root>\Applications`. A
-  `windowsdesktop-runtime-8.*-win-x64.exe` put in that folder is used instead,
-  for PCs without internet.
+  before Dell Command | Update in the answer file.
+
+**From the internet...** adds applications that the PC downloads by itself at
+first boot, with nothing to download first: tick them in the list and click
+Add. The list is every template with a `download` address in
+`config\app-templates.json`: .NET 8 Desktop Runtime, Microsoft 365 Apps
+(Office Deployment Tool plus `config\office-configuration.xml`), Teams, Zoom,
+Google Chrome and Firefox. The PC needs internet at first boot; it tries for
+about five minutes, and a failed download marks the application failed in
+`FirstBoot.log`. Any pack can do the same: put the address in **Download from**
+in the builder and leave the installer file empty. When the installer file is
+in the pack folder anyway, it is used and nothing is downloaded.
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
