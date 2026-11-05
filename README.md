@@ -287,6 +287,18 @@ link** column shows which packs download, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
+**Find an app online** (on the Applications tab) is for any other
+application: type its name (VLC, 7-Zip, Notepad++, Adobe Reader...), press
+Enter or click **Search**, pick the right result and click **Add**. The
+search uses Microsoft's winget catalog, so the console PC needs winget (App
+Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
+the publisher's download address, the silent switches and the file's SHA256
+from the catalog; nothing big is downloaded when you add it. The PC downloads
+the installer at first boot and refuses it if its SHA256 changed (the
+publisher replaced the file): add the application again to get the new
+version. Packs whose catalog entry gives no silent switch say so in their
+notes; test those on a VM first.
+
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
 

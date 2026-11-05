@@ -119,6 +119,114 @@ try {
     Assert-Throws { Get-AppDownload -Definition (Read-AppPack -AppRoot $catRoot -Name 'Google-Chrome') -AppFolder $cf -Log { param($m) } -Attempts 3 -WaitSeconds 0 -Downloader $broken } '*could not download*' 'no internet: the download fails after its attempts'
     Assert-Equal "$script:tries|$(Test-Path (Join-Path $cf 'googlechromestandaloneenterprise64.msi'))" '3|False' 'it tried each attempt and left no partial file'
 
+    # Find an app online (winget catalog). French winget, with the spinner before the header and a cut-off id.
+    $ell = [string][char]0x2026
+    $search = @(
+        "`r   - `r   \ `rNom                 ID                    Version Correspondance Source",
+        '-------------------------------------------------------------------------------',
+        'VLC media player    VideoLAN.VLC          3.0.21                 winget',
+        'VLC UWP             9NBLGGH4VVNH          Unknown                msstore',
+        'VLC Nightly build   VideoLAN.VLC.Nightly  4.0.0   Tag: vlc       winget',
+        "A very long name    Publisher.VeryLongI$ell 1.0                    winget",
+        '')
+    $found = @(ConvertFrom-WingetSearch -Lines $search)
+    Assert-Equal $found.Count 2 'winget search: rows without a full catalog id are left out'
+    Assert-Equal "$($found[0].Name)|$($found[0].Id)|$($found[0].Version)" 'VLC media player|VideoLAN.VLC|3.0.21' 'winget search: name, id and version from the French columns'
+    Assert-Equal "$($found[1].Id)|$($found[1].Version)" 'VideoLAN.VLC.Nightly|4.0.0' 'winget search: the match column is not part of the version'
+    Assert-Equal @(ConvertFrom-WingetSearch -Lines @('Aucun package ne correspond aux criteres d''entree.')).Count 0 'winget search: no result gives an empty list'
+    Assert-Equal (Get-WingetManifestUrl -Id 'VideoLAN.VLC' -Version '3.0.21') 'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/v/VideoLAN/VLC/3.0.21/VideoLAN.VLC.installer.yaml' 'winget manifest address'
+
+    $vlcYaml = @'
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: VideoLAN.VLC
+PackageVersion: 3.0.21
+Platform:
+- Windows.Desktop
+Scope: machine
+InstallerSwitches:
+  Silent: /S
+Commands:
+- vlc
+Installers:
+- Architecture: x86
+  InstallerType: nullsoft
+  InstallerUrl: https://download.videolan.org/videolan/vlc/3.0.21/win32/vlc-3.0.21-win32.exe
+  InstallerSha256: 4BD03202B6633F9611B3FC8757880A9B2B38C7C0C40ED6BCBEFEC71C0099D493
+  AppsAndFeaturesEntries:
+  - DisplayName: VLC media player
+    Publisher: VideoLAN
+- Architecture: x64
+  InstallerType: nullsoft
+  InstallerUrl: https://download.videolan.org/videolan/vlc/3.0.21/win64/vlc-3.0.21-win64.exe
+  InstallerSha256: 9742689A50E96DDC04D80CEFF046B28DA2BEEFD617BE18166F8C5E715EC60C59
+  AppsAndFeaturesEntries:
+  - DisplayName: VLC media player
+    Publisher: VideoLAN
+ManifestType: installer
+ManifestVersion: 1.9.0
+'@
+    $inst = @(ConvertFrom-WingetInstallerYaml -Text $vlcYaml)
+    Assert-Equal "$($inst.Count)|$($inst[1].Architecture)|$($inst[1].Silent)|$($inst[1].Scope)|$($inst[1].DisplayName)" '2|x64|/S|machine|VLC media player' 'winget manifest: installers with the root defaults filled in'
+    $pick = Select-WingetInstaller -Installers $inst
+    Assert-Equal $pick.InstallerUrl 'https://download.videolan.org/videolan/vlc/3.0.21/win64/vlc-3.0.21-win64.exe' 'winget manifest: the 64-bit installer is picked'
+    $wd = New-AppDefinitionFromWinget -Installer $pick -Id 'VideoLAN.VLC' -Version '3.0.21'
+    Assert-Equal "$($wd.name)|$($wd.installer)|$($wd.installerType)|$($wd.command)|$($wd.detection.rules[0].type)|$($wd.detection.rules[0].target)" 'VideoLAN-VLC|vlc-3.0.21-win64.exe|nsis|"vlc-3.0.21-win64.exe" /S|uninstall|VLC media player*' 'winget app: name, file, silent command and detection'
+    Assert-Equal @(Test-AppPack -Definition $wd | Where-Object { $_ -notlike 'Warning:*' }).Count 0 'winget app: the pack is valid'
+
+    $msiYaml = @"
+PackageIdentifier: Contoso.Tool
+PackageVersion: 2.1
+Installers:
+- Architecture: x64
+  InstallerType: wix
+  Scope: user
+  InstallerUrl: https://contoso.example/tool-user.msi
+  InstallerSha256: 1111111111111111111111111111111111111111111111111111111111111111
+- Architecture: x64
+  InstallerType: wix
+  Scope: machine
+  InstallerUrl: https://contoso.example/download?file=tool
+  InstallerSha256: abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd
+  ProductCode: '{12345678-1234-1234-1234-123456789ABC}'
+- Architecture: arm64
+  InstallerType: wix
+  InstallerUrl: https://contoso.example/tool-arm.msi
+- Architecture: neutral
+  InstallerType: zip
+  InstallerUrl: https://contoso.example/tool.zip
+"@
+    $mi = Select-WingetInstaller -Installers @(ConvertFrom-WingetInstallerYaml -Text $msiYaml)
+    Assert-Equal $mi.InstallerUrl 'https://contoso.example/download?file=tool' 'winget manifest: the machine-wide installer before the per-user one'
+    $md = New-AppDefinitionFromWinget -Installer $mi -Id 'Contoso.Tool' -Version '2.1' -DisplayName 'Contoso Tool'
+    Assert-Equal "$($md.installer)|$($md.installerType)|$($md.detection.rules[0].type)|$($md.detection.rules[0].target)|$($md.downloadSha256)" 'Contoso.Tool-setup.msi|msi|msi|{12345678-1234-1234-1234-123456789ABC}|ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD' 'winget MSI: file name, product code detection, SHA256'
+    Assert-Equal ($md.command -like 'msiexec /i "Contoso.Tool-setup.msi" /qn*') $true 'winget MSI: msiexec silent command'
+    $zipOnly = "PackageIdentifier: X.Y`nInstallers:`n- Architecture: x64`n  InstallerType: zip`n  InstallerUrl: https://x.example/y.zip`n"
+    Assert-Equal (@(Select-WingetInstaller -Installers @(ConvertFrom-WingetInstallerYaml -Text $zipOnly)).Count) 0 'winget manifest: zip files are not installers'
+
+    $wRoot = Join-Path $tmp 'winget-apps'
+    $script:fetched = @()
+    $fetch = { param($Url) $script:fetched += $Url; if ($Url -like '*.installer.yaml') { throw '404' }; "Publisher: VideoLAN`n" + $vlcYaml }
+    $added = New-AppFromWinget -AppRoot $wRoot -Id 'VideoLAN.VLC' -Version '3.0.21' -DisplayName 'VLC media player' -Fetch $fetch
+    $saved = Read-AppPack -AppRoot $wRoot -Name 'VideoLAN-VLC'
+    Assert-Equal "$($script:fetched.Count)|$($script:fetched[1])" '2|https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/v/VideoLAN/VLC/3.0.21/VideoLAN.VLC.yaml' 'winget app: a single-file manifest is read when there is no installer manifest'
+    Assert-Equal "$($added.name)|$($saved.publisher)|$($saved.version)|$($saved.downloadUrl)|$($saved.downloadSha256)" 'VideoLAN-VLC|VideoLAN|3.0.21|https://download.videolan.org/videolan/vlc/3.0.21/win64/vlc-3.0.21-win64.exe|9742689A50E96DDC04D80CEFF046B28DA2BEEFD617BE18166F8C5E715EC60C59' 'winget app: saved pack downloads from the publisher with its SHA256'
+    Assert-Equal (Test-Path (Join-Path $wRoot 'VideoLAN-VLC/vlc-3.0.21-win64.exe')) $false 'winget app: nothing big is downloaded when it is added'
+    Assert-Throws { New-AppFromWinget -AppRoot $wRoot -Id 'VideoLAN.VLC' -Version '3.0.21' -Fetch $fetch } '*already exists*' 'winget app: adding it twice is refused'
+    Assert-Throws { New-AppFromWinget -AppRoot $wRoot -Id 'No.Such' -Version '1' -Fetch { param($Url) throw '404' } } '*Could not read the winget manifest*' 'winget app: no manifest gives a short error'
+
+    # The download is checked against the catalog's SHA256 (SHA256 of "abc").
+    $abc = { param($Url, $Path) [IO.File]::WriteAllText($Path, 'abc') }
+    $hd = ConvertTo-AppDefinition -Name 'Hashed' -Json @{ installer = 'h.exe'; command = '"h.exe" /S'; downloadUrl = 'https://x.example/h.exe'; downloadSha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' }
+    $hf = Join-Path $tmp 'hashed'; New-Item -ItemType Directory -Path $hf -Force | Out-Null
+    Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc
+    Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $true 'a download with the expected SHA256 is kept'
+    Remove-Item (Join-Path $hf 'h.exe')
+    $hd.downloadSha256 = '0' * 64
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $abc } '*could not download*' 'a download with another SHA256 fails'
+    Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $false 'a download with another SHA256 is deleted'
+    $hd.downloadSha256 = 'xyz'
+    Assert-Equal @(@(Test-AppPack -Definition $hd) -like '*64 hexadecimal*').Count 1 'a SHA256 must be 64 hexadecimal characters'
+
     [xml]$odt = Get-Content -Raw (Join-Path $repo 'config/office-configuration.xml')
     Assert-Equal "$($odt.Configuration.Display.Level)|$($odt.Configuration.Display.AcceptEULA)" 'None|TRUE' 'the sample Office configuration installs silently'
     $vlc = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Installer 'vlc-3.0.21-win64.exe' -Templates $templates) -Installer 'vlc-3.0.21-win64.exe'

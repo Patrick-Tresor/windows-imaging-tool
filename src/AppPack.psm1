@@ -37,6 +37,8 @@ function ConvertTo-AppDefinition {
         installer        = & $get 'installer' ''
         # When set, the PC downloads the installer from here at first boot (saved as installer) if it is not in the folder.
         downloadUrl      = & $get 'downloadUrl' ''
+        # SHA256 of the download (from the winget catalog); a different file is refused.
+        downloadSha256   = & $get 'downloadSha256' ''
         installerType    = & $get 'installerType' ''
         command          = & $get 'command' ''
         # Lists are wrapped in @() so an empty one stays []: Windows PowerShell 5.1 writes an if statement's
@@ -111,6 +113,7 @@ function Test-AppPack {
     if (-not @($d.successCodes).Count) { 'There must be at least one success code (usually 0).' }
     if ($Folder -and $d.installer -and -not $d.downloadUrl -and -not (Test-Path (Join-Path $Folder $d.installer))) { "The installer $($d.installer) is not in the application folder." }
     if ($d.downloadUrl -and $d.downloadUrl -notmatch '^https?://\S+$') { "The download address '$($d.downloadUrl)' must start with https://." }
+    if ($d.downloadSha256 -and $d.downloadSha256 -notmatch '^[0-9A-Fa-f]{64}$') { "The download's SHA256 '$($d.downloadSha256)' must be 64 hexadecimal characters." }
     if ($d.downloadUrl -and -not $d.installer) { 'An application downloaded at first boot needs the installer file name to save it as (Installer to run).' }
     foreach ($r in $d.detection.rules) {
         if (-not $r.target) { "A $($r.type) detection rule has nothing to look for." }
@@ -355,6 +358,159 @@ function New-AppDefinitionFromTemplate {
 
 #endregion
 
+#region Online search (winget catalog)
+
+function ConvertFrom-WingetSearch {
+    <#
+    .SYNOPSIS
+        Rows of "winget search" output as @{ Name; Id; Version }. Reads the columns from the header line above the
+        dashes, so it works whatever the language winget speaks (Nom/ID/Version in French).
+    #>
+    param([string[]]$Lines)
+    $lines = @($Lines | ForEach-Object { "$_" -split "`r" | Select-Object -Last 1 })
+    $dash = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^-{5,}\s*$') { $dash = $i; break } }
+    if ($dash -lt 1) { return }
+    $starts = @([regex]::Matches($lines[$dash - 1], '\S+') | ForEach-Object Index)
+    if ($starts.Count -lt 3) { return }
+    $cut = { param($line, $c)
+        if ($line.Length -le $starts[$c]) { return '' }
+        $end = if ($c + 1 -lt $starts.Count) { [Math]::Min($starts[$c + 1], $line.Length) } else { $line.Length }
+        $line.Substring($starts[$c], $end - $starts[$c]).Trim() }
+    foreach ($line in $lines[($dash + 1)..($lines.Count - 1)]) {
+        if (-not $line.Trim()) { continue }
+        $id = & $cut $line 1
+        # A cut-off id (winget ends it with ...) can't be looked up.
+        if ($id -notmatch '^[A-Za-z0-9][\w+-]*(\.[\w+-]+)+$') { continue }
+        [pscustomobject]@{ Name = $line.Substring(0, [Math]::Min($starts[1], $line.Length)).Trim(); Id = $id; Version = & $cut $line 2 }
+    }
+}
+
+function Find-WingetPackage {
+    # Searches Microsoft's winget catalog with winget.exe on this PC (Windows 10 1809 and later have it).
+    param([Parameter(Mandatory)][string]$Query)
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        throw 'winget is not on this PC. Install App Installer from the Microsoft Store, then search again.'
+    }
+    $old = try { [Console]::OutputEncoding } catch { $null }
+    try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+    try { $out = & winget.exe search --query $Query --source winget --accept-source-agreements --disable-interactivity 2>&1 }
+    finally { if ($old) { try { [Console]::OutputEncoding = $old } catch { } } }
+    @(ConvertFrom-WingetSearch -Lines @($out | ForEach-Object { "$_" }))
+}
+
+function Get-WingetManifestUrl {
+    # Where the winget catalog keeps a package's installer manifest (github.com/microsoft/winget-pkgs).
+    param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][string]$Version, [switch]$Singleton)
+    $path = "$($Id.Substring(0, 1).ToLowerInvariant())/$($Id.Replace('.', '/'))/$Version"
+    $file = if ($Singleton) { "$Id.yaml" } else { "$Id.installer.yaml" }
+    "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$path/$file"
+}
+
+function ConvertFrom-WingetInstallerYaml {
+    <#
+    .SYNOPSIS
+        The installers in a winget installer manifest, each with the manifest's defaults filled in:
+        Architecture, InstallerType, InstallerUrl, InstallerSha256, Scope, Silent, ProductCode, DisplayName.
+    #>
+    param([Parameter(Mandatory)][string]$Text)
+    $root = @{}; $items = [Collections.Generic.List[hashtable]]::new(); $cur = $null; $inList = $false; $parent = ''
+    foreach ($raw in $Text -split "\r?\n") {
+        if ($raw -match '^\s*(#|$)') { continue }
+        $m = [regex]::Match($raw, '^( *)(- )?(.*)$')
+        $ind = $m.Groups[1].Length; $dash = $m.Groups[2].Success; $body = $m.Groups[3].Value
+        if ($ind -eq 0 -and -not $dash) {
+            $cur = $null; $inList = $body -match '^Installers:\s*$'
+            if ($inList) { continue }
+        }
+        if ($inList -and $ind -eq 0 -and $dash) { $cur = @{}; $items.Add($cur) }
+        $target = if ($inList -and $cur) { $cur } else { $root }
+        $level = $ind + $(if ($dash) { 2 } else { 0 }) - $(if ($inList -and $cur) { 2 } else { 0 })
+        if ($body -notmatch '^([A-Za-z0-9]+):\s*(.*?)\s*$') { continue }
+        $k = $Matches[1]; $v = $Matches[2] -replace "^'(.*)'$", '$1' -replace '^"(.*)"$', '$1'
+        $key = if ($level -le 0) { $parent = $k; $k } else { "$parent.$k" }
+        if ($v -and -not $target.ContainsKey($key)) { $target[$key] = $v }
+    }
+    $pick = { param($i, $k) if ($i.ContainsKey($k)) { $i[$k] } elseif ($root.ContainsKey($k)) { $root[$k] } else { '' } }
+    foreach ($i in $items) {
+        [pscustomobject]@{
+            Architecture    = & $pick $i 'Architecture'
+            InstallerType   = & $pick $i 'InstallerType'
+            InstallerUrl    = & $pick $i 'InstallerUrl'
+            InstallerSha256 = & $pick $i 'InstallerSha256'
+            Scope           = & $pick $i 'Scope'
+            Silent          = & $pick $i 'InstallerSwitches.Silent'
+            ProductCode     = & $pick $i 'ProductCode'
+            DisplayName     = & $pick $i 'AppsAndFeaturesEntries.DisplayName'
+        }
+    }
+}
+
+function Select-WingetInstaller {
+    # The installer to deploy: 64-bit first, then neutral, then 32-bit; for every user (machine) before per user.
+    # Zip and portable packages are left out: they have no installer to run.
+    param([object[]]$Installers)
+    $arch = @{ x64 = 0; neutral = 1; x86 = 2 }
+    $scope = @{ machine = 0; '' = 1; user = 2 }
+    @($Installers | Where-Object { $_.InstallerUrl -and $_.InstallerType -notin 'zip', 'portable', 'pwa' -and $arch.ContainsKey("$($_.Architecture)") } |
+        Sort-Object { $arch["$($_.Architecture)"] }, { $scope["$($_.Scope)"] }) | Select-Object -First 1
+}
+
+function New-AppDefinitionFromWinget {
+    # An application pack definition for a winget installer: downloaded at first boot from the publisher's address,
+    # checked against the catalog's SHA256, installed silently, detected by MSI product code or uninstall name.
+    param([Parameter(Mandatory)]$Installer, [Parameter(Mandatory)][string]$Id, [string]$Name, [string]$DisplayName, [string]$Version, [string]$Publisher)
+    $i = $Installer
+    $type = switch ("$($i.InstallerType)") { 'wix' { 'msi' } 'msi' { 'msi' } 'nullsoft' { 'nsis' } 'inno' { 'inno' } 'burn' { 'burn' } 'msix' { 'msix' } 'appx' { 'msix' } default { 'exe' } }
+    $ext = switch ($type) { 'msi' { '.msi' } 'msix' { '.msix' } default { '.exe' } }
+    $leaf = try { [IO.Path]::GetFileName(([Uri]$i.InstallerUrl).AbsolutePath) } catch { '' }
+    $file = if ($leaf -match '^[\w.()+ -]+\.(exe|msi|msix|msixbundle|appx|appxbundle)$') { $leaf } else { ($Id -replace '[^A-Za-z0-9.-]', '-') + "-setup$ext" }
+    $command = if ($type -ne 'msi' -and $type -ne 'msix' -and $i.Silent) { "`"$file`" $($i.Silent)" } else { Get-SilentInstallCommand -Installer $file -Type $type }
+    $shown = if ($i.DisplayName) { $i.DisplayName } elseif ($DisplayName) { $DisplayName } else { $Id }
+    $rule = if ($type -eq 'msi' -and $i.ProductCode -match '^\{[0-9A-Fa-f-]{36}\}$') { @{ type = 'msi'; target = $i.ProductCode } }
+            else { @{ type = 'uninstall'; target = "$shown*" } }
+    $note = "From the winget catalog ($Id $Version). The PC downloads it from the publisher at first boot and checks its SHA256."
+    if ($type -eq 'exe' -and -not $i.Silent) { $note += ' The catalog gives no silent switch: /S is a guess, test it on a VM first.' }
+    ConvertTo-AppDefinition -Name $(if ($Name) { $Name } else { $Id -replace '\.', '-' }) -Json @{
+        displayName = $shown; version = $Version; publisher = $Publisher
+        installer = $file; installerType = $type; command = $command
+        downloadUrl = $i.InstallerUrl; downloadSha256 = "$($i.InstallerSha256)".ToUpperInvariant()
+        detection = @{ match = 'all'; rules = @($rule) }; timeoutMinutes = 30; notes = $note
+    }
+}
+
+function New-AppFromWinget {
+    <#
+    .SYNOPSIS
+        Adds Applications\<name> for a winget package (from Find-WingetPackage): reads its installer manifest from the
+        winget catalog on GitHub and saves a pack the PC downloads at first boot. Nothing big is downloaded now.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AppRoot,
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$Version,
+        [string]$Name,
+        [string]$DisplayName,
+        # Tests pass their own; the default reads the address with Invoke-WebRequest.
+        [scriptblock]$Fetch = { param($Url) (Invoke-WebRequest -Uri $Url -UseBasicParsing).Content }
+    )
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $yaml = $null
+    foreach ($single in $false, $true) {
+        try { $yaml = & $Fetch (Get-WingetManifestUrl -Id $Id -Version $Version -Singleton:$single); break } catch { }
+    }
+    if (-not $yaml) { throw "Could not read the winget manifest of $Id $Version. Check the internet connection, or search again." }
+    if ($yaml -is [byte[]]) { $yaml = [Text.Encoding]::UTF8.GetString($yaml) }
+    $publisher = if ("$yaml" -match '(?m)^Publisher:\s*(.+?)\s*$') { $Matches[1] } else { '' }
+    $inst = Select-WingetInstaller -Installers @(ConvertFrom-WingetInstallerYaml -Text "$yaml")
+    if (-not $inst) { throw "$Id $Version has no installer this tool can run (only zip or portable files)." }
+    $d = New-AppDefinitionFromWinget -Installer $inst -Id $Id -Name $Name -DisplayName $DisplayName -Version $Version -Publisher $publisher
+    Save-AppPack -AppRoot $AppRoot -Definition $d | Out-Null
+    $d
+}
+
+#endregion
+
 #region Pack folders and files
 
 function Save-AppPack {
@@ -559,6 +715,13 @@ function Get-AppDownload {
             try {
                 & $Downloader $d.downloadUrl $path
                 if (-not [IO.File]::Exists($path)) { throw 'nothing was saved' }
+                if ($d.downloadSha256) {
+                    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    if ($hash -ne $d.downloadSha256.ToUpperInvariant()) {
+                        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                        throw "the download's SHA256 $hash is not the expected $($d.downloadSha256); the publisher changed the file, so add the application again"
+                    }
+                }
                 & $Log ("  Downloaded {0} ({1:N1} MB)" -f $d.downloadUrl, ((Get-Item -LiteralPath $path).Length / 1MB))
                 return
             } catch {
@@ -616,6 +779,8 @@ function Invoke-AppInstall {
 
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
-    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Get-AppKnownDownload, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
+    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Get-AppKnownDownload,
+    ConvertFrom-WingetSearch, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
+    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Save-AppPack, Export-AppPack, Import-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
