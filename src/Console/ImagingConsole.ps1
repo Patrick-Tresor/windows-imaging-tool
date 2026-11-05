@@ -479,6 +479,14 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+$ui.BtnAppUrlSave.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedApp
+    if (-not $row) { return }
+    $url = $ui.TxtAppUrl.Text.Trim()
+    Set-ApplicationDownload -ContentRoot $script:root -Name $row.Name -Url $url | Out-Null
+    Update-Apps
+    Set-Status $(if ($url) { "$($row.Name) downloads from $url when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
+} })
 $ui.BtnAppCatalog.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $added = @(Show-AppCatalog -Owner $window -ContentRoot $script:root)
@@ -489,8 +497,10 @@ $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.Selected
 
 $ui.GridApps.Add_SelectionChanged({
     $row = $ui.GridApps.SelectedItem
+    $ui.TxtAppUrl.Text = if ($row) { "$($row.Download)" } else { '' }
     $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
         $lines = @("Install: $($row.Command)")
+        if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
         if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
         $lines += @($row.Issues | ForEach-Object { "- $_" })
         $lines -join "`r`n"

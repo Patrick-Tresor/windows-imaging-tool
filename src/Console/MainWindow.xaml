@@ -353,6 +353,13 @@
           </WrapPanel>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+          <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <TextBlock DockPanel.Dock="Left" Text="Download link" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <Button x:Name="BtnAppUrlSave" DockPanel.Dock="Right" Content="Save link" Margin="8,0,0,0"
+                    ToolTip="The selected application is downloaded from this address when the PC installs it (first boot). Empty the box and save to use the installer in the pack again."/>
+            <TextBox x:Name="TxtAppUrl" VerticalContentAlignment="Center" Padding="4,3"
+                     ToolTip="https:// address of the installer. Select an application above first."/>
+          </DockPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
@@ -360,6 +367,7 @@
               <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
               <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
               <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
+              <DataGridTextColumn Header="Download link" Binding="{Binding Download}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
               <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
             </DataGrid.Columns>

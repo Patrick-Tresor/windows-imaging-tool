@@ -135,6 +135,17 @@ try {
     New-Application -ContentRoot $root -Name 'Zoom' -Source $inst -Command 'msiexec /i zoom-src.msi /qn' | Out-Null
     $appList = @(Get-ApplicationList -ContentRoot $root)
     Assert-Equal "$($appList.Name)|$($appList.Status)|$(Test-Path (Join-Path $root 'Applications/Zoom/zoom-src.msi'))" 'Zoom|Ready (no detection)|True' 'new application copies the installer and writes app.json'
+    # Download link typed on the Applications tab: the PC downloads the installer when it installs the app.
+    New-Application -ContentRoot $root -Name 'Chrome' -Command 'msiexec /i chrome.msi /qn' | Out-Null
+    $set = Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url ' https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi '
+    $cr = @(Get-ApplicationList -ContentRoot $root | Where-Object Name -eq 'Chrome')[0]
+    Assert-Equal "$($cr.Download)|$($set.installer)|$($set.installerType)|$($cr.Status)" 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi|googlechromestandaloneenterprise64.msi|msi|Ready (no detection)' 'a download link saved from the tab shows in the list and names the installer'
+    Assert-Equal (Get-DownloadFileName -Url 'https://go.microsoft.com/fwlink/?linkid=2243204' -Name 'Teams') 'Teams-setup.exe' 'a link with no file name saves as <name>-setup.exe'
+    $err = try { Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url 'ftp://x/y.msi' | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal ($err -like '*must start with https*') $true 'a link that is not http(s) is refused'
+    $err = try { Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url '' | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal ($err -like '*not in the application folder*') $true 'removing the link needs the installer in the folder'
+    Remove-Item (Join-Path $root 'Applications/Chrome') -Recurse -Force
 
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'

@@ -278,8 +278,10 @@ Add. The list is every template with a `download` address in
 (Office Deployment Tool plus `config\office-configuration.xml`), Teams, Zoom,
 Google Chrome and Firefox. The PC needs internet at first boot; it tries for
 about five minutes, and a failed download marks the application failed in
-`FirstBoot.log`. Any pack can do the same: put the address in **Download from**
-in the builder and leave the installer file empty. When the installer file is
+`FirstBoot.log`. Any pack can do the same: select it on the Applications tab,
+paste the address in **Download link** and click **Save link** (or use
+**Download from** in the builder), and leave the installer file out. The
+**Download link** column shows which packs download. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
 **Export...** zips a pack (installer included) to copy it to another content

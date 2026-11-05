@@ -487,13 +487,14 @@ function Get-ApplicationList {
     $root = Join-Path $ContentRoot 'Applications'
     $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
     Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'
+        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'; Download = ''
                            UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
                            Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
         try {
             $d = Read-AppPack -AppRoot $root -Name $_.Name
             $row.Definition = $d
             $row.DisplayName = $d.displayName; $row.Version = $d.version; $row.Type = $d.installerType; $row.Command = $d.command
+            $row.Download = $d.downloadUrl
             $row.Detection = if ($d.detection.rules) { (@($d.detection.rules | ForEach-Object { "$($_.type) $($_.target)" }) -join " $($d.detection.match) ") } else { 'none' }
             $for = @($d.requirements.makers) + @($d.requirements.models)
             if ($for) { $row.For = $for -join ', ' }
@@ -503,6 +504,33 @@ function Get-ApplicationList {
         } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
         [pscustomobject]$row
     }
+}
+
+function Get-DownloadFileName {
+    # The file name to save a download as: the address's last part when it names an installer, else <name>-setup.exe.
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][string]$Name)
+    $leaf = try { [IO.Path]::GetFileName(([Uri]$Url).AbsolutePath) } catch { '' }
+    if ($leaf -match '^[\w.() -]+\.(exe|msi|msix|msixbundle|appx|appxbundle)$') { return $leaf }
+    "$Name-setup.exe"
+}
+
+function Set-ApplicationDownload {
+    <#
+    .SYNOPSIS
+        Sets (or, with an empty -Url, removes) the download address of Applications\<name>, from the Applications tab.
+        The PC then downloads the installer at first boot. Without an installer name one is made from the address.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name, [AllowEmptyString()][string]$Url)
+    $root = Join-Path $ContentRoot 'Applications'
+    $d = Read-AppPack -AppRoot $root -Name $Name
+    $Url = "$Url".Trim()
+    $d.downloadUrl = $Url
+    if ($Url -and -not $d.installer) {
+        $d.installer = Get-DownloadFileName -Url $Url -Name $Name
+        if (-not $d.installerType) { $d.installerType = if ($d.installer -like '*.msi') { 'msi' } else { 'exe' } }
+    }
+    Save-AppPack -AppRoot $root -Definition $d -Overwrite | Out-Null
+    $d
 }
 
 function New-Application {
@@ -971,7 +999,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
+    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationDownload, Get-DownloadFileName,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
