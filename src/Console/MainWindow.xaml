@@ -353,13 +353,11 @@
           </WrapPanel>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-            <TextBlock DockPanel.Dock="Left" Text="Download link" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <Button x:Name="BtnAppUrlSave" DockPanel.Dock="Right" Content="Save link" Margin="8,0,0,0"
-                    ToolTip="The selected application is downloaded from this address when the PC installs it (first boot). Empty the box and save to use the installer in the pack again."/>
-            <TextBox x:Name="TxtAppUrl" VerticalContentAlignment="Center" Padding="4,3"
-                     ToolTip="https:// address of the installer. Select an application above first."/>
-          </DockPanel>
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <CheckBox x:Name="ChkAppOnline" IsEnabled="False" Content="Download it from the internet when the PC installs it (no installer to keep in the pack)"
+                      ToolTip="Uses the publisher's link the console already knows for this application. Untick to use the installer in the pack again."/>
+            <TextBlock x:Name="TxtAppOnline" Foreground="#5B6170" TextWrapping="Wrap" Margin="22,2,0,0"/>
+          </StackPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>

@@ -135,17 +135,22 @@ try {
     New-Application -ContentRoot $root -Name 'Zoom' -Source $inst -Command 'msiexec /i zoom-src.msi /qn' | Out-Null
     $appList = @(Get-ApplicationList -ContentRoot $root)
     Assert-Equal "$($appList.Name)|$($appList.Status)|$(Test-Path (Join-Path $root 'Applications/Zoom/zoom-src.msi'))" 'Zoom|Ready (no detection)|True' 'new application copies the installer and writes app.json'
-    # Download link typed on the Applications tab: the PC downloads the installer when it installs the app.
-    New-Application -ContentRoot $root -Name 'Chrome' -Command 'msiexec /i chrome.msi /qn' | Out-Null
-    $set = Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url ' https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi '
-    $cr = @(Get-ApplicationList -ContentRoot $root | Where-Object Name -eq 'Chrome')[0]
-    Assert-Equal "$($cr.Download)|$($set.installer)|$($set.installerType)|$($cr.Status)" 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi|googlechromestandaloneenterprise64.msi|msi|Ready (no detection)' 'a download link saved from the tab shows in the list and names the installer'
-    Assert-Equal (Get-DownloadFileName -Url 'https://go.microsoft.com/fwlink/?linkid=2243204' -Name 'Teams') 'Teams-setup.exe' 'a link with no file name saves as <name>-setup.exe'
-    $err = try { Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url 'ftp://x/y.msi' | Out-Null; '' } catch { $_.Exception.Message }
-    Assert-Equal ($err -like '*must start with https*') $true 'a link that is not http(s) is refused'
-    $err = try { Set-ApplicationDownload -ContentRoot $root -Name 'Chrome' -Url '' | Out-Null; '' } catch { $_.Exception.Message }
-    Assert-Equal ($err -like '*not in the application folder*') $true 'removing the link needs the installer in the folder'
-    Remove-Item (Join-Path $root 'Applications/Chrome') -Recurse -Force
+    # Download tick box on the Applications tab: no link to paste, the console knows it from the catalog.
+    $oi = Join-Path $root 'OfficeSetup.exe'
+    Set-Content $oi 'exe'
+    New-Application -ContentRoot $root -Name 'Microsoft-Office' -Source $oi -Command '"OfficeSetup.exe" /S' | Out-Null
+    $mo = @(Get-ApplicationList -ContentRoot $root | Where-Object Name -eq 'Microsoft-Office')[0]
+    Assert-Equal "[$($mo.Download)]|$($mo.KnownDownload)" '[]|https://officecdn.microsoft.com/pr/wsus/setup.exe' 'an application the catalog knows can be ticked to download'
+    $on = Set-ApplicationOnline -ContentRoot $root -Name 'Microsoft-Office' -On $true
+    Assert-Equal "$($on.downloadUrl)|$($on.command)|$(Test-Path (Join-Path $root 'Applications/Microsoft-Office/configuration.xml'))" 'https://officecdn.microsoft.com/pr/wsus/setup.exe|"setup.exe" /configure configuration.xml|True' 'ticking it makes the online Office (Deployment Tool and configuration.xml)'
+    $off = Set-ApplicationOnline -ContentRoot $root -Name 'Microsoft-Office' -On $false
+    Assert-Equal "[$($off.downloadUrl)]|$($off.command)" '[]|"OfficeSetup.exe" /S' 'unticking brings back the settings from before'
+    $zon = Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $true
+    $zoff = Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $false
+    Assert-Equal "$($zon.downloadUrl)|[$($zoff.downloadUrl)]|$($zoff.command)" 'https://zoom.us/client/latest/ZoomInstallerFull.msi|[]|msiexec /i zoom-src.msi /qn' 'Zoom is known too, and unticking uses its own installer again'
+    $err = try { Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $true | Out-Null; Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $false | Out-Null; '' } catch { $_.Exception.Message }
+    Assert-Equal "$err" '' 'ticking twice works'
+    Remove-Item (Join-Path $root 'Applications/Microsoft-Office') -Recurse -Force
 
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'

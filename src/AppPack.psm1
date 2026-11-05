@@ -297,16 +297,26 @@ function New-AppFromCatalog {
         [Parameter(Mandatory)][string]$AppRoot,
         [Parameter(Mandatory)]$Template,
         [string]$Name,
-        [string]$ConfigDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config')
+        [string]$ConfigDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config'),
+        # Turns an existing application into the online one (the Applications tab's download tick box).
+        [switch]$Overwrite
     )
     $d = New-AppDefinitionFromTemplate -Template $Template -Name $(if ($Name) { $Name } else { $Template.name }) -Online
-    $dest = Save-AppPack -AppRoot $AppRoot -Definition $d
+    $dest = Save-AppPack -AppRoot $AppRoot -Definition $d -Overwrite:$Overwrite
     if ($Template.PSObject.Properties['files'] -and $Template.files) {
         foreach ($f in $Template.files.PSObject.Properties) {
             Copy-Item -LiteralPath (Join-Path $ConfigDir $f.Value) -Destination (Join-Path $dest $f.Name) -Force
         }
     }
     $dest
+}
+
+function Get-AppKnownDownload {
+    # The catalog template that knows where to download this application (by installer file or name), or $null.
+    param([Parameter(Mandatory)]$Definition, [object[]]$Templates = (Get-AppTemplates))
+    $t = Find-AppTemplate -Installer $Definition.installer -Templates $Templates
+    if (-not $t -or -not ($t.PSObject.Properties['download'] -and $t.download.url)) { $t = Find-AppTemplate -Name $Definition.name -Templates $Templates }
+    if ($t -and $t.PSObject.Properties['download'] -and $t.download.url) { $t } else { $null }
 }
 
 function Find-AppTemplate {
@@ -606,6 +616,6 @@ function Invoke-AppInstall {
 
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
-    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
+    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Get-AppKnownDownload, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Save-AppPack, Export-AppPack, Import-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
