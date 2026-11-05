@@ -551,14 +551,15 @@ are both read. The deploy log says which entry was used.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a VM (VMware Workstation, VirtualBox, Hyper-V or others): install Windows,
-   apps and updates, no OEM drivers.
+   apps and updates, no OEM drivers. Step by step, including audit mode and keeping the Microsoft Store
+   in the image: [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md).
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
       below), an **ISO** for a VM or PC that boots from one, or a **USB stick** for a
       physical PC.
    2. Run the prepare command the wizard shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
-      Store apps that break sysprep, then runs sysprep and shuts down.
+      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
+      Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
    3. Name the image and choose compression.
    4. Review and click Start (disk file) or Build and start.
    The image is saved to the content root's `Images` folder (disk file), the share's
