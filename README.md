@@ -259,6 +259,18 @@ startup task, `ImagingTool\FirstBoot`, that starts it five minutes after boot.
 Only the first of the two runs it; the first line of `FirstBoot.log` says which.
 Old `app.json` files with only `command` and `successCodes` still work.
 
+Two installers need more than a silent switch:
+
+- **Microsoft 365 Apps (Office).** `OfficeSetup.exe` from office.com exits 0
+  without installing anything. Use the Office Deployment Tool's `setup.exe`
+  with a `configuration.xml` next to it (template `Microsoft-365-Apps`, sample in
+  `config\office-configuration.xml`). It downloads Office at first boot unless
+  you run `setup.exe /download configuration.xml` first and keep the files
+  in the pack.
+- **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
+  without it. Add the `DotNet-Desktop-Runtime-8` application and list it
+  before Dell Command | Update in the answer file.
+
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
 

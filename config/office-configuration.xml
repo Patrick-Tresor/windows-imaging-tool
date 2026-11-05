@@ -1,0 +1,20 @@
+<!-- Sample Office Deployment Tool configuration for the Microsoft-365-Apps application template.
+     Copy it into the application's folder as configuration.xml, next to setup.exe (from the Office Deployment Tool).
+     Change Product ID to your license (O365ProPlusRetail = Microsoft 365 Apps for enterprise) and the languages.
+     Office has no fr-CA: French is fr-fr. MatchOS also installs the Windows display language.
+     For an offline install, run once: setup.exe /download configuration.xml, then add SourcePath=".\" to <Add>
+     (the Office folder that /download makes must be next to setup.exe). -->
+<Configuration>
+  <Add OfficeClientEdition="64" Channel="MonthlyEnterprise">
+    <Product ID="O365ProPlusRetail">
+      <Language ID="fr-fr" />
+      <Language ID="en-us" />
+      <ExcludeApp ID="Groove" />
+    </Product>
+  </Add>
+  <Property Name="SharedComputerLicensing" Value="0" />
+  <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+  <Updates Enabled="TRUE" />
+  <RemoveMSI />
+  <Display Level="None" AcceptEULA="TRUE" />
+</Configuration>

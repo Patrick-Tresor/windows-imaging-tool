@@ -21,7 +21,7 @@
     {
       "name": "Dell-Command-Update",
       "aliases": ["DellCommandUpdate", "Dell Command Update", "DCU"],
-      "match": ["Dell-Command-Update*.exe"],
+      "match": ["Dell-Command-Update*.exe", "*Command-Update-Windows-Universal*.exe"],
       "displayName": "Dell Command | Update",
       "publisher": "Dell",
       "installerType": "exe",
@@ -33,7 +33,39 @@
       ] },
       "timeoutMinutes": 30,
       "verify": false,
-      "notes": "Dell Update Package (/s is silent). Only installed on Dell PCs. Check Dell's release notes for prerequisites such as the .NET Desktop Runtime."
+      "notes": "Dell Update Package (/s is silent). Only installed on Dell PCs. Version 5 needs the .NET 8 Desktop Runtime: put the DotNet-Desktop-Runtime-8 application before this one in the answer file. Without it the package exits 4 (a required component is missing)."
+    },
+    {
+      "name": "DotNet-Desktop-Runtime-8",
+      "aliases": ["DotNet-Desktop-Runtime", ".NET Desktop Runtime", "Windows Desktop Runtime", "dotnet8"],
+      "match": ["windowsdesktop-runtime-8.*-win-x64.exe"],
+      "displayName": "Microsoft Windows Desktop Runtime 8 (x64)",
+      "publisher": "Microsoft",
+      "installerType": "burn",
+      "command": "\"{installer}\" /install /quiet /norestart",
+      "detection": { "match": "all", "rules": [
+        { "type": "uninstall", "target": "Microsoft Windows Desktop Runtime - 8.*(x64)*" }
+      ] },
+      "timeoutMinutes": 15,
+      "verify": false,
+      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application."
+    },
+    {
+      "name": "Microsoft-365-Apps",
+      "aliases": ["Microsoft-Office", "Office", "Microsoft Office", "Office365", "Microsoft 365", "M365"],
+      "match": [],
+      "displayName": "Microsoft 365 Apps",
+      "publisher": "Microsoft",
+      "installerType": "exe",
+      "command": "\"{installer}\" /configure configuration.xml",
+      "detection": { "match": "any", "rules": [
+        { "type": "file", "target": "%ProgramFiles%\\Microsoft Office\\root\\Office16\\WINWORD.EXE" },
+        { "type": "uninstall", "target": "Microsoft 365*" },
+        { "type": "uninstall", "target": "Microsoft Office*" }
+      ] },
+      "timeoutMinutes": 90,
+      "verify": true,
+      "notes": "Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
     },
     {
       "name": "Teams",
