@@ -479,13 +479,68 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+# Click, not Checked: selecting a row sets the box too and must not change the application.
+$ui.ChkAppOnline.Add_Click({ Invoke-Safely {
+    $row = $ui.GridApps.SelectedItem
+    if (-not $row) { return }
+    $on = [bool]$ui.ChkAppOnline.IsChecked
+    try { Set-ApplicationOnline -ContentRoot $script:root -Name $row.Name -On $on | Out-Null }
+    finally {
+        Update-Apps
+        $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $row.Name)[0]
+    }
+    Set-Status $(if ($on) { "$($row.Name) downloads from the internet when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
+} })
+$ui.BtnAppCatalog.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $added = @(Show-AppCatalog -Owner $window -ContentRoot $script:root)
+    if ($added) { Update-Apps; Update-Answers; Set-Status "Added from the internet: $($added -join ', ')" }
+} })
+# Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
+$script:appFound = @()
+function Find-AppOnline {
+    $query = $ui.TxtAppFind.Text.Trim()
+    if (-not $query) { Set-Status 'Type the name of an application to find.'; return }
+    $ui.CmbAppFound.Items.Clear(); $ui.CmbAppFound.IsEnabled = $false; $ui.BtnAppFoundAdd.IsEnabled = $false
+    Set-Status "Searching the winget catalog for $query..."
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    try { $script:appFound = @(Find-WingetPackage -Query $query) }
+    finally { $window.Cursor = $null }
+    foreach ($p in $script:appFound) { [void]$ui.CmbAppFound.Items.Add("$($p.Name)  ($($p.Id) $($p.Version))") }
+    if (-not $script:appFound.Count) { Set-Status "Nothing found online for $query. Try another name."; return }
+    $ui.CmbAppFound.SelectedIndex = 0; $ui.CmbAppFound.IsEnabled = $true; $ui.BtnAppFoundAdd.IsEnabled = $true
+    $ui.CmbAppFound.IsDropDownOpen = $script:appFound.Count -gt 1
+    Set-Status "$($script:appFound.Count) found for $query. Pick one and click Add."
+}
+$ui.BtnAppFind.Add_Click({ Invoke-Safely { Find-AppOnline } })
+$ui.TxtAppFind.Add_KeyDown({ param($s, $e)
+    if ($e.Key -eq [Windows.Input.Key]::Return) { $e.Handled = $true; Invoke-Safely { Find-AppOnline } } })
+$ui.BtnAppFoundAdd.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $i = $ui.CmbAppFound.SelectedIndex
+    if ($i -lt 0 -or $i -ge $script:appFound.Count) { return }
+    $p = $script:appFound[$i]
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    try { $d = New-AppFromWinget -AppRoot (Join-Path $script:root 'Applications') -Id $p.Id -Version $p.Version -DisplayName $p.Name }
+    finally { $window.Cursor = $null }
+    Update-Apps; Update-Answers
+    $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $d.name)[0]
+    Set-Status "Added $($d.name) $($p.Version): the PC downloads it from the publisher when it installs it"
+} })
 $ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
 $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
 
 $ui.GridApps.Add_SelectionChanged({
     $row = $ui.GridApps.SelectedItem
+    $ui.ChkAppOnline.IsChecked = [bool]($row -and $row.Download)
+    $ui.ChkAppOnline.IsEnabled = [bool]($row -and ($row.Download -or $row.KnownDownload))
+    $ui.TxtAppOnline.Text = if (-not $row) { '' }
+        elseif ($row.Download) { "Downloads from $($row.Download)" }
+        elseif ($row.KnownDownload) { "Can download from $($row.KnownDownload)" }
+        else { 'No known download for this application: it installs from the installer in its pack.' }
     $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
         $lines = @("Install: $($row.Command)")
+        if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
         if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
         $lines += @($row.Issues | ForEach-Object { "- $_" })
         $lines -join "`r`n"

@@ -87,7 +87,7 @@
           <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. Inspect reads its type, name, version and MSI product code, and fills in the silent command and a detection rule. A template gives known settings for common applications."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Installer file or folder"/>
             <TextBox x:Name="TxtSource" Grid.Column="1" ToolTip="Copied into Applications\&lt;name&gt; when you save. When editing, leave empty to keep the files already there."/>
             <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,8">
@@ -109,6 +109,11 @@
             <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
             <Label Grid.Row="7" Content="Publisher"/>
             <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1"/>
+            <Label Grid.Row="8" Content="Download from"/>
+            <TextBox x:Name="TxtDownloadUrl" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2"
+                     ToolTip="https:// address of the installer. The PC downloads it at first boot (saved as Installer to run) when it is not in the folder, so you can leave the installer file empty."/>
+            <TextBlock Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you Apply it with no installer picked."/>
           </Grid>
           <Label Content="Notes"/>
           <TextBox x:Name="TxtNotes" Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>

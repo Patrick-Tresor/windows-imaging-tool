@@ -269,12 +269,35 @@ Two installers need more than a silent switch:
   in the pack.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
-  before Dell Command | Update in the answer file. The ready-made pack in
-  `apps\DotNet-Desktop-Runtime-8` downloads the newest .NET 8 Desktop
-  Runtime from Microsoft at first boot (the PC needs internet): copy the
-  folder to `<content root>\Applications`. A
-  `windowsdesktop-runtime-8.*-win-x64.exe` put in that folder is used instead,
-  for PCs without internet.
+  before Dell Command | Update in the answer file.
+
+**From the internet...** adds applications that the PC downloads by itself at
+first boot, with nothing to download first: tick them in the list and click
+Add. The list is every template with a `download` address in
+`config\app-templates.json`: .NET 8 Desktop Runtime, Microsoft 365 Apps
+(Office Deployment Tool plus `config\office-configuration.xml`), Teams, Zoom,
+Google Chrome and Firefox. The PC needs internet at first boot; it tries for
+about five minutes, and a failed download marks the application failed in
+`FirstBoot.log`. An application the console already knows (by its name or installer, for
+example an Office pack built from `OfficeSetup.exe`) can switch too: select it
+on the Applications tab and tick **Download it from the internet when the PC
+installs it**. No link to paste: it uses the publisher's link from the
+catalog, and unticking brings back the pack's own installer. The **Download
+link** column shows which packs download, and the builder's **Download from**
+box takes any other address. When the installer file is
+in the pack folder anyway, it is used and nothing is downloaded.
+
+**Find an app online** (on the Applications tab) is for any other
+application: type its name (VLC, 7-Zip, Notepad++, Adobe Reader...), press
+Enter or click **Search**, pick the right result and click **Add**. The
+search uses Microsoft's winget catalog, so the console PC needs winget (App
+Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
+the publisher's download address, the silent switches and the file's SHA256
+from the catalog; nothing big is downloaded when you add it. The PC downloads
+the installer at first boot and refuses it if its SHA256 changed (the
+publisher replaced the file): add the application again to get the new
+version. Packs whose catalog entry gives no silent switch say so in their
+notes; test those on a VM first.
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
