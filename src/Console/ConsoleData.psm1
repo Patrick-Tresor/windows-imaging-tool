@@ -525,7 +525,7 @@ function Set-ApplicationOnline {
     if ($On) {
         if ($d.downloadUrl) { return $d }
         $t = Get-AppKnownDownload -Definition $d
-        if (-not $t) { throw "There is no known download for $Name. Pick its installer, or add an application from From the internet..." }
+        if (-not $t) { throw "There is no known download for $Name. Pick its installer, or find the application online on the Applications tab." }
         Copy-Item -LiteralPath (Join-Path $dir 'app.json') -Destination $local -Force
         New-AppFromCatalog -AppRoot $root -Template $t -Name $Name -Overwrite | Out-Null
     } elseif (Test-Path -LiteralPath $local) {

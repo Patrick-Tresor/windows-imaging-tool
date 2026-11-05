@@ -342,7 +342,6 @@
           </StackPanel>
           <WrapPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnAppCatalog" Content="From the internet..." ToolTip="Add applications the PC downloads by itself at first boot (.NET 8, Office, Teams, Zoom, Chrome, Firefox)"/>
             <Button x:Name="BtnAppEdit" Content="Edit"/>
             <Button x:Name="BtnAppTest" Content="Test detection"/>
             <Button x:Name="BtnAppExport" Content="Export..."/>

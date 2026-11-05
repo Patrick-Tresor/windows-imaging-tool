@@ -491,11 +491,6 @@ $ui.ChkAppOnline.Add_Click({ Invoke-Safely {
     }
     Set-Status $(if ($on) { "$($row.Name) downloads from the internet when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
 } })
-$ui.BtnAppCatalog.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $added = @(Show-AppCatalog -Owner $window -ContentRoot $script:root)
-    if ($added) { Update-Apps; Update-Answers; Set-Status "Added from the internet: $($added -join ', ')" }
-} })
 # Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
 $script:appFound = @()
 function Find-AppOnline {

@@ -83,7 +83,7 @@ try {
     Assert-Equal (Find-AppTemplate -Installer 'setup.exe' -Templates $templates) $null 'a plain setup.exe is not taken for Office'
     Assert-Equal ((Find-AppTemplate -Installer 'Dell-Command-Update-Windows-Universal-Application_9M35M_WIN64_5.7.2_A00.EXE' -Templates $templates).name) 'Dell-Command-Update' 'the Dell download name finds the Dell Command Update template'
     Assert-Equal ((Find-AppTemplate -Installer 'windowsdesktop-runtime-8.0.11-win-x64.exe' -Templates $templates).name) 'DotNet-Desktop-Runtime-8' 'the .NET 8 Desktop Runtime has a template'
-    # From the internet: catalog templates make packs with no installer; the PC downloads it at first boot.
+    # Catalog templates make packs with no installer; the PC downloads it at first boot.
     $catalog = @(Get-AppCatalog -Templates $templates)
     Assert-Equal (($catalog | ForEach-Object name | Sort-Object) -join ',') 'DotNet-Desktop-Runtime-8,Google-Chrome,Microsoft-365-Apps,Mozilla-Firefox,Teams,Zoom' 'the catalog lists the downloadable applications'
     $catRoot = Join-Path $tmp 'CatalogApps'
