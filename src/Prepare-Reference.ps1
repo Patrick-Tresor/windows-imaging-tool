@@ -3,7 +3,8 @@
     Run inside the reference machine: checks it is ready for capture, then runs sysprep and shuts down.
 .DESCRIPTION
     Catches the usual reasons sysprep fails or a golden image ends up tied to one machine:
-    a pending reboot, BitLocker, Store apps installed for one user only, and running on real hardware.
+    a pending reboot, BitLocker, Store apps installed for one user only, a missing Microsoft Store, and running
+    on real hardware. Step by step guide: docs\REFERENCE-PC.md.
 .EXAMPLE
     \\deploy-server\Deploy\Tools\Prepare-Reference.ps1
 .EXAMPLE
@@ -26,13 +27,39 @@ function Get-UserOnlyApps {
     $keep = 'Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller',
             'Microsoft.Services.Store.Engagement', 'Microsoft.SecHealthUI', 'Microsoft.WindowsAppRuntime*', 'Microsoft.UI.Xaml*',
             'Microsoft.VCLibs*', 'Microsoft.NET.Native*'
+    # An app provisioned at any version is part of Windows (Notepad, Photos, Terminal...) that the Store updated
+    # for a user. Removing it with -AllUsers took it out of the image too, so it is never returned either.
     $provFull = @($Provisioned | ForEach-Object { "$($_.PackageName)" })
+    $provNames = @($Provisioned | ForEach-Object { "$($_.DisplayName)" })
     @($Installed | Where-Object {
         $name = "$($_.Name)"
         -not $_.IsFramework -and -not $_.NonRemovable -and "$($_.SignatureKind)" -eq 'Store' -and
-        $provFull -notcontains $_.PackageFullName -and
+        $provFull -notcontains $_.PackageFullName -and $provNames -notcontains $name -and
         -not @($keep | Where-Object { $name -like $_ }).Count
     })
+}
+
+function Get-UpdatedInboxApps {
+    # Returns the apps provisioned in Windows that the Store has since updated for a user (a newer version that is
+    # not provisioned). They are left alone; sysprep can still fail on one of them.
+    param([object[]]$Installed, [object[]]$Provisioned)
+    $provFull = @($Provisioned | ForEach-Object { "$($_.PackageName)" })
+    $provNames = @($Provisioned | ForEach-Object { "$($_.DisplayName)" })
+    @($Installed | Where-Object {
+        -not $_.IsFramework -and -not $_.NonRemovable -and "$($_.SignatureKind)" -eq 'Store' -and
+        $provNames -contains "$($_.Name)" -and $provFull -notcontains $_.PackageFullName
+    })
+}
+
+function Get-StoreProblem {
+    # Returns why deployed PCs would have no Microsoft Store, or nothing when the Store is provisioned.
+    param([object[]]$Installed, [object[]]$Provisioned)
+    if (@($Provisioned | Where-Object { "$($_.DisplayName)" -eq 'Microsoft.WindowsStore' }).Count) { return }
+    $why = if (@($Installed | Where-Object { "$($_.Name)" -eq 'Microsoft.WindowsStore' }).Count) {
+        'It is installed for a user (wsreset -i does that) but not provisioned, so sysprep would fail on it and new users would not get it.'
+    } else { 'It is not installed or provisioned.' }
+    "The Microsoft Store is missing from this Windows, so every PC deployed from it would have no Store. $why " +
+    'Revert the VM to a snapshot taken before Prepare-Reference -RemoveUserApps first ran, or install Windows fresh in the VM.'
 }
 
 function Get-SysprepErrors {
@@ -92,7 +119,20 @@ try {
 
 # Sysprep fails with 0x80073cf2 when a Store app is installed for a user but not provisioned for all users.
 $provisioned = @(Get-AppxProvisionedPackage -Online)
-$userOnly = @(Get-UserOnlyApps -Installed @(Get-AppxPackage -AllUsers) -Provisioned $provisioned)
+$installedApps = @(Get-AppxPackage -AllUsers)
+$storeProblem = Get-StoreProblem -Installed $installedApps -Provisioned $provisioned
+if ($storeProblem) { $problems.Add($storeProblem) }
+$updated = @(Get-UpdatedInboxApps -Installed $installedApps -Provisioned $provisioned)
+if ($updated) {
+    $warnings.Add("The Store updated these Windows apps after Windows was installed: $(($updated.Name | Sort-Object -Unique) -join ', '). They are kept. If sysprep fails on one of them, revert the VM and keep the Store from updating apps before capture (docs\REFERENCE-PC.md).")
+}
+# A Store policy set while building the reference would be captured and apply to every deployed PC.
+$storePolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+foreach ($value in 'AutoDownload', 'RemoveWindowsStore', 'DisableStoreApps') {
+    $set = (Get-ItemProperty -Path $storePolicy -Name $value -ErrorAction SilentlyContinue).$value
+    if ($null -ne $set) { $warnings.Add("The Store policy $value=$set is set in $storePolicy and will be in the image. Delete it before capture unless deployed PCs should have it.") }
+}
+$userOnly = @(Get-UserOnlyApps -Installed $installedApps -Provisioned $provisioned)
 if ($userOnly) {
     if ($RemoveUserApps) {
         foreach ($app in $userOnly) {

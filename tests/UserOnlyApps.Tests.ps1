@@ -13,8 +13,10 @@ function Assert-Equal($Actual, $Expected, $Name) {
 
 # The script needs admin rights and runs sysprep, so load only the function.
 $ast = [Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$null)
-$fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-UserOnlyApps' }, $true)
-. ([scriptblock]::Create($fn.Extent.Text))
+foreach ($fnName in 'Get-UserOnlyApps', 'Get-UpdatedInboxApps', 'Get-StoreProblem') {
+    $fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $true)
+    . ([scriptblock]::Create($fn.Extent.Text))
+}
 
 function New-App($Name, $Version, [switch]$Framework, [switch]$NonRemovable, $Signature = 'Store') {
     [pscustomobject]@{ Name = $Name; PackageFullName = "${Name}_${Version}_x64__8wekyb3d8bbwe"
@@ -29,19 +31,32 @@ $installed = @(
     (New-App 'Microsoft.UI.Xaml.2.8' '8.2310.30001.0'),
     (New-App 'Microsoft.BingWeather' '4.53.1.0'),                 # provisioned, same version
     (New-App 'SpotifyAB.SpotifyMusic' '1.250.0.0'),               # installed for one user only
+    (New-App 'Microsoft.WindowsNotepad' '11.2410.21.0'),          # provisioned, then updated by the Store
     (New-App 'Microsoft.VCLibs.140.00' '14.0.33519.0' -Framework),
     (New-App 'Microsoft.Windows.ShellExperienceHost' '10.0.0.0' -NonRemovable),
     (New-App 'Contoso.LineOfBusiness' '1.0.0.0' -Signature 'Developer')
 )
 $provisioned = @(
     (New-Prov 'Microsoft.WindowsStore' '22305.1401.4.0'),
-    (New-Prov 'Microsoft.BingWeather' '4.53.1.0')
+    (New-Prov 'Microsoft.BingWeather' '4.53.1.0'),
+    (New-Prov 'Microsoft.WindowsNotepad' '11.2302.16.0')
 )
 
 $found = @(Get-UserOnlyApps -Installed $installed -Provisioned $provisioned)
 Assert-Equal (($found.Name | Sort-Object) -join ',') 'SpotifyAB.SpotifyMusic' 'only the user-only app is returned'
 Assert-Equal (@($found | Where-Object Name -like 'Microsoft.WindowsStore').Count) 0 'an updated Microsoft Store is never returned for removal'
 Assert-Equal (@(Get-UserOnlyApps -Installed @() -Provisioned $provisioned).Count) 0 'nothing installed returns nothing'
+Assert-Equal (@($found | Where-Object Name -eq 'Microsoft.WindowsNotepad').Count) 0 'a Windows app the Store updated is never returned for removal'
+
+$updated = @(Get-UpdatedInboxApps -Installed $installed -Provisioned $provisioned)
+Assert-Equal (($updated.Name | Sort-Object) -join ',') 'Microsoft.WindowsNotepad,Microsoft.WindowsStore' 'updated Windows apps are reported'
+
+Assert-Equal "$(Get-StoreProblem -Installed $installed -Provisioned $provisioned)" '' 'a provisioned Store is no problem'
+$noStore = @($provisioned | Where-Object DisplayName -ne 'Microsoft.WindowsStore')
+$msg = "$(Get-StoreProblem -Installed $installed -Provisioned $noStore)"
+Assert-Equal ($msg -like '*installed for a user*not provisioned*') $true 'a Store installed only for a user (wsreset -i) is a problem'
+$msg = "$(Get-StoreProblem -Installed @() -Provisioned $noStore)"
+Assert-Equal ($msg -like '*not installed or provisioned*') $true 'a Store that is gone is a problem'
 
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green
