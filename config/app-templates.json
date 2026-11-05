@@ -48,7 +48,7 @@
       ] },
       "timeoutMinutes": 15,
       "verify": false,
-      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application."
+      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application. To download it from Microsoft at first boot instead, copy the repo folder apps\\DotNet-Desktop-Runtime-8 to the content root's Applications folder."
     },
     {
       "name": "Microsoft-365-Apps",
