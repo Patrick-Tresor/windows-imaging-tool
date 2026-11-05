@@ -12,11 +12,28 @@
 [CmdletBinding()]
 param(
     [switch]$CheckOnly,        # report problems and stop, without running sysprep
-    [switch]$RemoveUserApps,   # remove Store apps that are installed for a user but not provisioned (they break sysprep)
+    [switch]$RemoveUserApps,   # remove Store apps that are installed for a user but not provisioned (they break sysprep); never the Store itself
     [string]$Unattend          # optional answer file passed to sysprep /unattend
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Get-UserOnlyApps {
+    # Returns the Store apps installed for a user but not provisioned, the ones that make sysprep fail.
+    # The Store itself and the packages it needs are never returned, even after the Store has updated them for a
+    # user: removing them with -AllUsers left a deployed image with no Microsoft Store and no way to open it.
+    param([object[]]$Installed, [object[]]$Provisioned)
+    $keep = 'Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller',
+            'Microsoft.Services.Store.Engagement', 'Microsoft.SecHealthUI', 'Microsoft.WindowsAppRuntime*', 'Microsoft.UI.Xaml*',
+            'Microsoft.VCLibs*', 'Microsoft.NET.Native*'
+    $provFull = @($Provisioned | ForEach-Object { "$($_.PackageName)" })
+    @($Installed | Where-Object {
+        $name = "$($_.Name)"
+        -not $_.IsFramework -and -not $_.NonRemovable -and "$($_.SignatureKind)" -eq 'Store' -and
+        $provFull -notcontains $_.PackageFullName -and
+        -not @($keep | Where-Object { $name -like $_ }).Count
+    })
+}
 
 function Get-SysprepErrors {
     # Returns the sysprep error lines in setuperr.log under $LogDir, from the latest sysprep run at or after $Since.
@@ -74,11 +91,8 @@ try {
 } catch { }  # BitLocker cmdlets are missing on some editions; nothing to check then
 
 # Sysprep fails with 0x80073cf2 when a Store app is installed for a user but not provisioned for all users.
-$provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.PackageName })
-$userOnly = @(Get-AppxPackage -AllUsers | Where-Object {
-    -not $_.IsFramework -and -not $_.NonRemovable -and $_.SignatureKind -eq 'Store' -and
-    $provisioned -notcontains $_.PackageFullName
-})
+$provisioned = @(Get-AppxProvisionedPackage -Online)
+$userOnly = @(Get-UserOnlyApps -Installed @(Get-AppxPackage -AllUsers) -Provisioned $provisioned)
 if ($userOnly) {
     if ($RemoveUserApps) {
         foreach ($app in $userOnly) {
