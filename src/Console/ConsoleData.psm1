@@ -841,7 +841,10 @@ function Get-VMCaptureArguments {
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
         [switch]$Split,
-        [switch]$NewVersion
+        [switch]$NewVersion,
+        [string]$ReuseConvertedDisk,
+        [string]$ProgressFile,
+        [string]$LogPath
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
@@ -849,6 +852,9 @@ function Get-VMCaptureArguments {
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
+    if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }
+    if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
+    if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
     @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }

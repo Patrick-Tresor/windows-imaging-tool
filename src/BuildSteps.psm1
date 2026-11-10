@@ -130,6 +130,18 @@ function Format-BuildElapsed {
     '{0:00}:{1:00}' -f $t.Minutes, $t.Seconds
 }
 
+function Format-TimeLeft {
+    # How long a step still needs, from how long it has run and how far it is: 'about 4 min left'. Nothing until
+    # the step has run 15 seconds and passed 2%, when the guess would still jump around.
+    param([double]$ElapsedSeconds, [double]$Percent)
+    if ($ElapsedSeconds -lt 15 -or $Percent -lt 2 -or $Percent -ge 100) { return '' }
+    $left = $ElapsedSeconds * (100 - $Percent) / $Percent
+    if ($left -lt 60) { return 'under 1 min left' }
+    $minutes = [int][Math]::Ceiling($left / 60)
+    if ($minutes -lt 60) { return "about $minutes min left" }
+    'about {0} h {1:00} min left' -f [int][Math]::Floor($minutes / 60), ($minutes % 60)
+}
+
 function Get-BuildStepView {
     <#
     .SYNOPSIS
@@ -148,7 +160,12 @@ function Get-BuildStepView {
             'reused'  { 'Reused' }
             'skipped' { 'Not needed' }
             'failed'  { 'Failed' }
-            'running' { if ([int]$s.percent -ge 0) { "$([int]$s.percent)%" } else { '' } }
+            'running' {
+                if ([int]$s.percent -ge 0) {
+                    $left = Format-TimeLeft -ElapsedSeconds $secs -Percent ([int]$s.percent)
+                    "$([int]$s.percent)%$(if ($left) { ", $left" })"
+                } else { '' }
+            }
             default   { '' }
         }
         [pscustomobject]@{
@@ -182,4 +199,4 @@ function Get-BuildStepView {
 }
 
 Export-ModuleMember -Function Start-BuildProgress, Start-BuildStep, Set-BuildStepProgress, Complete-BuildStep, Stop-BuildProgress,
-    Read-BuildProgress, Get-BuildStepView, Format-BuildElapsed
+    Read-BuildProgress, Get-BuildStepView, Format-BuildElapsed, Format-TimeLeft

@@ -1,5 +1,5 @@
-# Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg,
-# Get-UsbDiskChoices and the ConsoleData and VMwareVM modules.
+# Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg, Get-UsbDiskChoices,
+# Show-BuildProgress and the ConsoleData, VMwareVM and CaptureCheck modules.
 
 function Show-CaptureWizard {
     param(
@@ -18,7 +18,10 @@ function Show-CaptureWizard {
         $w[$name] = $wiz.FindName($name)
     }
 
-    $state = @{ Page = 0; Last = 3 }
+    # Check: the Check the disk page's run (checklist, result file, background process) for the disk in CheckedDisk.
+    $state = @{ Page = 0; Last = 4; Checklist = $null; CheckedDisk = $null; CheckProc = $null; ResultPath = $null
+        Result = $null; CheckPassed = $false; CheckLog = $null; HandedOver = $false }
+    $checkPage = 2
     $settings = Get-DeploySettings -ContentRoot $ContentRoot
 
     function Show-WizardError([string]$Text) {
@@ -98,6 +101,91 @@ function Show-CaptureWizard {
     # The disk file capture reads the VM's disk with DISM on this PC and saves to the content root: no share, no ADK, no media.
     $onThisPC = @('DiskFile')
 
+    # Page 3: check the disk. The quick checks run here; reading Windows on the disk (and copying a VMDK to a VHD
+    # first, which takes minutes) runs in a hidden elevated PowerShell, Capture-VMImage.ps1 -CheckOnly, that writes
+    # a result file this timer reads. The copy it makes is handed to the capture, or deleted when the wizard closes.
+    $checkTimer = New-Object Windows.Threading.DispatcherTimer
+    $checkTimer.Interval = [TimeSpan]::FromMilliseconds(500)
+
+    $stopCheck = {
+        # Stops a running check and deletes its copy of the disk (unless the capture took it over).
+        $checkTimer.Stop()
+        $proc = $state.CheckProc
+        $converted = $(if ($state.Result) { "$($state.Result.convertedPath)" } else { '' })
+        if ($proc -and -not $proc.HasExited) {
+            $latest = Read-CaptureCheckResult -Path $state.ResultPath
+            if ($latest -and "$($latest.step)" -eq 'convert') {
+                # Only the copy is running: stop it and its qemu-img, then delete the half-written file.
+                & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
+                try { $proc.WaitForExit(5000) | Out-Null } catch { }
+                Remove-ConvertedDisk "$($latest.convertedPath)"
+            } else {
+                # It may have the disk mounted: let it finish, and tell it to delete its copy.
+                try { [IO.File]::WriteAllText("$($state.ResultPath).cancel", 'cancel') } catch { }
+            }
+        } elseif ($converted -and -not $state.HandedOver) {
+            Remove-ConvertedDisk $converted
+        }
+        $state.CheckProc = $null; $state.Result = $null; $state.CheckPassed = $false; $state.Checklist = $null; $state.CheckedDisk = $null
+    }
+
+    $refreshCheck = {
+        if (-not $state.Checklist) { return }
+        $result = Read-CaptureCheckResult -Path $state.ResultPath
+        $proc = $state.CheckProc
+        if ($state.Checklist.Passed -and $proc -and $proc.HasExited -and (-not $result -or "$($result.state)" -eq 'running')) {
+            $result = [pscustomobject]@{ state = 'failed'; error = 'The check stopped before it finished. Open the log to see why.'; convertedPath = '' }
+        }
+        $state.Result = $result
+        $view = Get-CaptureCheckView -Checklist $state.Checklist -Result $result
+        $w.LstChecks.ItemsSource = @($view.Rows)
+        $w.BarCheck.Visibility = if ($view.Busy) { 'Visible' } else { 'Collapsed' }
+        $w.BarCheck.IsIndeterminate = $view.Percent -lt 0
+        if ($view.Percent -ge 0) { $w.BarCheck.Value = $view.Percent }
+        $w.BtnCheckLog.IsEnabled = [bool]($state.CheckLog -and (Test-Path -LiteralPath $state.CheckLog))
+        $state.CheckPassed = $view.Passed
+        if (-not $view.Busy) { $checkTimer.Stop() }
+        if ($state.Page -eq $checkPage) { $w.BtnNext.IsEnabled = $view.Passed }
+    }
+
+    $startCheck = {
+        & $stopCheck
+        $c = & $getChoice
+        $state.CheckedDisk = $c.DiskFile
+        $state.Checklist = Get-CaptureDiskChecklist -DiskPath $c.DiskFile -QemuImg (Find-QemuImg) -VBoxManage (Find-VBoxManage)
+        if ($state.Checklist.Passed) {
+            $id = [guid]::NewGuid().ToString('N')
+            $state.ResultPath = Join-Path $env:TEMP "capture-check-$id.json"
+            $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
+            $state.CheckLog = [IO.Path]::Combine($logDir, ('capture-check-{0:yyyyMMdd-HHmmss}.log' -f (Get-Date)))
+            $checkArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Capture-VMImage.ps1')),
+                '-CheckOnly', '-DiskPath', (ConvertTo-Arg $c.DiskFile), '-ResultPath', (ConvertTo-Arg $state.ResultPath),
+                '-LogPath', (ConvertTo-Arg $state.CheckLog))
+            $state.CheckProc = Start-Process powershell.exe -ArgumentList $checkArgs -WindowStyle Hidden -PassThru
+            $null = $state.CheckProc.Handle   # PowerShell 5.1 only keeps HasExited/ExitCode if the handle was read
+            $checkTimer.Start()
+        }
+        & $refreshCheck
+    }
+
+    $enterCheck = {
+        # Runs the check again unless it already passed for this disk and its copy is still current.
+        $c = & $getChoice
+        $current = $state.CheckPassed -and $state.CheckedDisk -eq $c.DiskFile
+        if ($current -and $state.Result -and "$($state.Result.convertedPath)") {
+            $current = Test-ConvertedDiskReusable -ConvertedPath "$($state.Result.convertedPath)" -SourcePath "$($state.Result.readPath)"
+        }
+        if (-not $current -and -not ($state.CheckProc -and -not $state.CheckProc.HasExited -and $state.CheckedDisk -eq $c.DiskFile)) { & $startCheck }
+        else { & $refreshCheck }
+    }
+
+    $checkTimer.Add_Tick({ try { & $refreshCheck } catch { $checkTimer.Stop() } })
+    $w.BtnCheckAgain.Add_Click({ try { & $startCheck } catch { Show-WizardError $_.Exception.Message } })
+    $w.BtnCheckLog.Add_Click({
+        if ($state.CheckLog -and (Test-Path -LiteralPath $state.CheckLog)) { Start-Process notepad.exe -ArgumentList (ConvertTo-Arg $state.CheckLog) }
+    })
+    $wiz.Add_Closed({ try { & $stopCheck } catch { } })
+
     # Returns an error message for the current page, or nothing when the user may move on.
     $validate = {
         $c = & $getChoice
@@ -113,6 +201,9 @@ function Show-CaptureWizard {
                 elseif ($c.Mode -eq 'DiskFile' -and (Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }
             }
             2 {
+                if (-not $state.CheckPassed) { 'The disk check has not passed yet. Fix the lines with a cross, then click Check again.' }
+            }
+            3 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
                 elseif (-not $c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
                     "An image named $($c.Name) already exists. Pick another name, or tick the box to capture it as a new version."
@@ -126,8 +217,10 @@ function Show-CaptureWizard {
         $target = switch ($c.Mode) {
             'DiskFile' {
                 $current = try { Resolve-VmdkCurrentDisk -Path $c.DiskFile } catch { $c.DiskFile }
-                "Disk file $current, copied and captured on this PC" +
-                $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" })
+                "Disk file $current, captured on this PC" +
+                $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" }) +
+                $(if ($state.Result -and "$($state.Result.state)" -eq 'done') {
+                    "`r`nWindows:       $($state.Result.windowsName), $(Format-DiskSize ([double]$state.Result.usedBytes)) used, generalized" })
             }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
@@ -155,7 +248,7 @@ function Show-CaptureWizard {
             $issues += @((Get-AdkStatus).Problems)
         }
         $w.TxtSummaryIntro.Text = if ($c.Mode -eq 'DiskFile') {
-            'Clicking Start opens a window that copies the VM''s disk on this PC and captures it. This takes a while and needs free space on this PC for a copy of the whole disk (VHD and VHDX files are read in place). The new image appears on the Images tab when it finishes.'
+            'Clicking Start opens a progress window with each step and the time left. The copy of the disk made by the check is reused, so the capture starts right away. The new image appears on the Images tab when it finishes.'
         } else {
             'Clicking Build and start opens a window that builds the capture media (a few minutes). Boot the reference machine from it to capture. The new image appears on the Images tab when it finishes.'
         }
@@ -164,6 +257,8 @@ function Show-CaptureWizard {
     }
 
     $showPage = {
+        $isDisk = (& $getChoice).Mode -eq 'DiskFile'
+        $w.Step2.Text = if ($isDisk) { '3. Check the disk' } else { '3. Check the disk (VM disk only)' }
         for ($i = 0; $i -le $state.Last; $i++) {
             $w["Page$i"].Visibility = if ($i -eq $state.Page) { 'Visible' } else { 'Collapsed' }
             $w["Step$i"].Foreground = if ($i -eq $state.Page) { 'White' } elseif ($i -lt $state.Page) { '#9CA3AF' } else { '#6B7280' }
@@ -172,6 +267,7 @@ function Show-CaptureWizard {
         $w.BtnBack.IsEnabled = $state.Page -gt 0
         $w.BtnNext.IsEnabled = $true
         $w.BtnNext.Content = if ($state.Page -ne $state.Last) { 'Next' } elseif ((& $getChoice).Mode -in $onThisPC) { 'Start' } else { 'Build and start' }
+        if ($state.Page -eq $checkPage) { & $enterCheck }
         if ($state.Page -eq $state.Last) { & $showSummary }
     }
 
@@ -181,9 +277,17 @@ function Show-CaptureWizard {
             [Windows.MessageBox]::Show($wiz, "Everything on $($c.Usb.Label) will be erased. Continue?", 'Capture Wizard', 'YesNo', 'Warning') -ne 'Yes') { return $false }
 
         if ($c.Mode -eq 'DiskFile') {
-            Start-Process powershell.exe -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+            # Its own minimized window, followed in the progress window (steps, bars, time left), like a media build.
+            $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+            $progressFile = Join-Path $env:TEMP "capture-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
+            $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
+            $logPath = [IO.Path]::Combine($logDir, "capture-$($c.Name)-$stamp.log")
+            $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
+            $proc = Start-Process powershell.exe -WindowStyle Minimized -PassThru -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                -Split:$c.Split -NewVersion:$c.NewVersion)
+                -Split:$c.Split -NewVersion:$c.NewVersion -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath)
+            $state.HandedOver = $true
+            Show-BuildProgress -Owner $Owner -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Capturing $($c.Name)"
             return $true
         }
         $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `
@@ -200,9 +304,14 @@ function Show-CaptureWizard {
         $true
     }
 
+    # The disk check page is only for a VM's disk file; the ISO and USB captures check the disk in WinPE.
+    $skipCheck = { $state.Page -eq $checkPage -and (& $getChoice).Mode -ne 'DiskFile' }
     $w.BtnBack.Add_Click({
-        if ($state.Page -gt 0) { $state.Page-- }
-        & $showPage
+        try {
+            if ($state.Page -gt 0) { $state.Page-- }
+            if (& $skipCheck) { $state.Page-- }
+            & $showPage
+        } catch { Show-WizardError $_.Exception.Message }
     })
     $w.BtnNext.Add_Click({
         try {
@@ -210,6 +319,7 @@ function Show-CaptureWizard {
             if ($problem) { Show-WizardError $problem; return }
             if ($state.Page -lt $state.Last) {
                 $state.Page++
+                if (& $skipCheck) { $state.Page++ }
                 & $showPage; return
             }
             if (& $finish) { $wiz.DialogResult = $true; $wiz.Close() }

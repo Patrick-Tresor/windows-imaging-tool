@@ -53,8 +53,9 @@
         <TextBlock Text="Capture an image" Foreground="White" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,16"/>
         <TextBlock x:Name="Step0" Text="1. Reference machine" Style="{StaticResource StepLabel}"/>
         <TextBlock x:Name="Step1" Text="2. Run sysprep" Style="{StaticResource StepLabel}"/>
-        <TextBlock x:Name="Step2" Text="3. Image details" Style="{StaticResource StepLabel}"/>
-        <TextBlock x:Name="Step3" Text="4. Summary" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step2" Text="3. Check the disk" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step3" Text="4. Image details" Style="{StaticResource StepLabel}"/>
+        <TextBlock x:Name="Step4" Text="5. Summary" Style="{StaticResource StepLabel}"/>
       </StackPanel>
     </Border>
 
@@ -117,8 +118,40 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- Page 3: image details -->
+      <!-- Page 3: check the disk (VM disk file only; the other choices skip it) -->
       <ScrollViewer x:Name="Page2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Title}" Text="Check the disk"/>
+          <TextBlock Style="{StaticResource Body}"
+                     Text="The tool checks the VM's disk on this PC and reads the Windows on it before capturing. Nothing in the VM or its disk is changed. Next is available once every line has a tick."/>
+          <ItemsControl x:Name="LstChecks">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid Margin="0,5">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="26"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding Mark}" Foreground="{Binding Color}" FontWeight="Bold" FontSize="15"/>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Foreground="#4B5563" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <ProgressBar x:Name="BarCheck" Height="8" Margin="26,6,0,0" Minimum="0" Maximum="100" Visibility="Collapsed"
+                       Foreground="#0F6CBD" Background="#E8EAEE" BorderThickness="0"/>
+          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <Button x:Name="BtnCheckAgain" Content="Check again" Margin="0"/>
+            <Button x:Name="BtnCheckLog" Content="Open log" IsEnabled="False"/>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Page 4: image details -->
+      <ScrollViewer x:Name="Page3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Image details"/>
           <TextBlock Style="{StaticResource Body}" Text="The image is saved to the Images folder of the content root."/>
@@ -148,8 +181,8 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- Page 4: summary -->
-      <DockPanel x:Name="Page3" Visibility="Collapsed">
+      <!-- Page 5: summary -->
+      <DockPanel x:Name="Page4" Visibility="Collapsed">
         <TextBlock DockPanel.Dock="Top" Style="{StaticResource Title}" Text="Summary"/>
         <TextBlock x:Name="TxtSummaryIntro" DockPanel.Dock="Top" Style="{StaticResource Body}"
                    Text="Clicking Build and start opens a window that builds the capture media (a few minutes). Boot the reference machine from it to capture. The new image appears on the Images tab when it finishes."/>

@@ -18,6 +18,13 @@ Assert-Equal (Format-BuildElapsed 0) '00:00' 'elapsed: zero'
 Assert-Equal (Format-BuildElapsed 82.7) '01:22' 'elapsed: minutes and seconds, rounded down'
 Assert-Equal (Format-BuildElapsed 3725) '1:02:05' 'elapsed: over an hour'
 
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 10 -Percent 50) '' 'time left: nothing in the first 15 seconds'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 60 -Percent 1) '' 'time left: nothing below 2%'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 30 -Percent 60) 'under 1 min left' 'time left: under a minute'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 120 -Percent 25) 'about 6 min left' 'time left: minutes, rounded up'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 1800 -Percent 25) 'about 1 h 30 min left' 'time left: over an hour'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 600 -Percent 100) '' 'time left: nothing at 100%'
+
 $dir = Join-Path ([IO.Path]::GetTempPath()) ("imaging-steps-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $dir | Out-Null
 try {
@@ -74,6 +81,9 @@ try {
     Assert-Equal $view.Rows[1].Time '01:06' 'a running step counts up'
     Assert-Equal $view.Rows[1].Indeterminate $true 'a step without a percent shows a busy bar'
     Assert-Equal $view.Elapsed '01:28' 'total elapsed'
+    $fixed.steps[1].percent = 25
+    $view = Get-BuildStepView -Data $fixed -Now $t0.AddSeconds(142)
+    Assert-Equal $view.Rows[1].Status '25%, about 6 min left' 'a running step with a percent says how long it still needs'
 
     # An error: the running step fails, with only the first line of the message.
     Stop-BuildProgress -Message "Copying Images\W11.wim to the USB stick failed: device not ready.`nAt line 12 char 3"
