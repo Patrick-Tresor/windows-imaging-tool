@@ -127,8 +127,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     $wiz.Width = $wiz.MinWidth
     $wiz.Show()
     try {
-        foreach ($p in 0..2) {
-            0..3 | ForEach-Object { $wiz.FindName("Page$_").Visibility = 'Collapsed' }
+        foreach ($p in 0..3) {
+            0..4 | ForEach-Object { $wiz.FindName("Page$_").Visibility = 'Collapsed' }
             $page = $wiz.FindName("Page$p")
             $page.Visibility = 'Visible'
             $wiz.UpdateLayout()

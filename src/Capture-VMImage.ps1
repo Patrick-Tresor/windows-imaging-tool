@@ -8,6 +8,11 @@
     with qemu-img or VirtualBox (whichever is installed). A VMware disk with snapshots is read at its newest
     snapshot. The script does not change the VM, its disk file, or its snapshots.
 
+    -CheckOnly only reads the disk and reports, in the JSON file -ResultPath, which Windows is on it and whether
+    sysprep has run (the capture wizard's Check the disk page). A VMDK is copied to a temporary VHD for that; the
+    copy is kept, and the capture reuses it with -ReuseConvertedDisk while the VM's disk files are unchanged.
+    -ProgressFile writes each step for the console's progress window (src\BuildSteps.psm1).
+
     The image goes to the Images folder of the content root, as Capture-GoldenImage.ps1 does. With -NewVersion
     an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
     as a version in Images\Previous\ (see ImageVersions.psm1).
@@ -17,21 +22,30 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$DiskPath,
-    [Parameter(Mandatory)][string]$Name,
-    [Parameter(Mandatory)][string]$ContentRoot,
+    [string]$Name,
+    [string]$ContentRoot,
     [string]$Description,
     [ValidateSet('fast', 'max')][string]$Compression = 'max',
     [int]$SplitSizeMB = 0,       # e.g. 3800 to fit a FAT32 USB; 0 = no split
     [switch]$NewVersion,         # replace an existing image, keeping the old one as a version
-    [switch]$NoPrompt
+    [switch]$NoPrompt,
+    [switch]$CheckOnly,          # only read the disk and write what was found to -ResultPath
+    [string]$ResultPath,
+    [string]$ReuseConvertedDisk, # a temporary VHD the check made; used when the disk has not changed since
+    [string]$ProgressFile,       # step-by-step progress for the console's window
+    [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 
-$logPath = Join-Path $env:TEMP 'Capture-VMImage.log'
+$logPath = if ($LogPath) { $LogPath } elseif ($CheckOnly) { Join-Path $env:TEMP 'Capture-VMImage-check.log' } else { Join-Path $env:TEMP 'Capture-VMImage.log' }
+$logParent = Split-Path -Parent $logPath
+if ($logParent -and -not (Test-Path -LiteralPath $logParent)) { New-Item -ItemType Directory -Path $logParent -Force | Out-Null }
 Set-Content -Path $logPath -Value $null
 # DeployCommon logs to X:\ (WinPE) by default; point it at a local file.
 & (Get-Module DeployCommon) { param($p) $script:LogPath = $p } $logPath
@@ -79,22 +93,60 @@ function Test-Generalized {
     (Test-Path $setupState) -and [bool](Select-String -Path $setupState -Pattern 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE' -Quiet)
 }
 
+function Test-NeedsConversion([string]$Path) { [IO.Path]::GetExtension($Path) -notin '.vhd', '.vhdx' }
+
 function Get-DiskForCapture {
-    # The VHD to mount for a disk file. Other formats are converted to a temporary VHD, which the caller deletes.
-    param([Parameter(Mandatory)][string]$Path)
+    # The VHD to mount for a disk file. Other formats are converted to $TempPath, which the caller deletes.
+    # OnProgress gets the conversion's percent (or $null) every few seconds.
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$TempPath, [scriptblock]$OnProgress = { })
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Disk file not found: $Path" }
-    $qemu = Find-QemuImg
-    $vbox = (Get-Command VBoxManage.exe -ErrorAction SilentlyContinue).Source
-    if (-not $vbox -and (Test-Path (Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'))) {
-        $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
-    }
-    $temp = Join-Path $env:TEMP ("capture-{0}.vhd" -f [guid]::NewGuid().ToString('N'))
-    $conversion = Get-DiskConversionCommand -SourcePath $Path -DestinationPath $temp -QemuImg $qemu -VBoxManage $vbox
+    $conversion = Get-DiskConversionCommand -SourcePath $Path -DestinationPath $TempPath -QemuImg (Find-QemuImg) -VBoxManage (Find-VBoxManage)
     if (-not $conversion) { return [pscustomobject]@{ Path = $Path; Temp = $null } }
     Write-DeployLog "Converting $(Split-Path $Path -Leaf) to a temporary VHD. This copies the whole disk, so it needs free space."
-    Invoke-Native -FilePath $conversion.FilePath -ArgumentList $conversion.ArgumentList
-    Clear-MountBlockingAttributes -Path $temp
-    [pscustomobject]@{ Path = $temp; Temp = $temp }
+    Invoke-NativeWithProgress -FilePath $conversion.FilePath -ArgumentList $conversion.ArgumentList -OnProgress $OnProgress
+    Clear-MountBlockingAttributes -Path $TempPath
+    [pscustomobject]@{ Path = $TempPath; Temp = $TempPath }
+}
+
+function Get-OfflineWindowsInfo {
+    # Name, version and size of the Windows at $Root (a mounted disk), read from a copy of its SOFTWARE hive so the
+    # disk itself stays untouched. The build also comes from ntoskrnl.exe, for when the hive cannot be loaded.
+    param([Parameter(Mandatory)][string]$Root)
+    $build = 0
+    $kernel = Join-Path $Root 'Windows\System32\ntoskrnl.exe'
+    if (Test-Path -LiteralPath $kernel) { $build = [Diagnostics.FileVersionInfo]::GetVersionInfo($kernel).FileBuildPart }
+    $values = @{}
+    $copy = Join-Path $env:TEMP ("capture-hive-{0}" -f [guid]::NewGuid().ToString('N'))
+    $key = 'HKLM\ImagingToolCapture'
+    try {
+        New-Item -ItemType Directory -Path $copy -Force | Out-Null
+        # The .LOG1/.LOG2 files carry the last changes when Windows was shut down without flushing the hive.
+        Get-ChildItem -LiteralPath (Join-Path $Root 'Windows\System32\config') -Filter 'SOFTWARE*' -File -Force |
+            Where-Object { $_.Name -match '^SOFTWARE(\.LOG\d?)?$' } | Copy-Item -Destination $copy
+        & reg.exe load $key (Join-Path $copy 'SOFTWARE') 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            try { $values = ConvertFrom-RegQuery -Lines @(& reg.exe query "$key\Microsoft\Windows NT\CurrentVersion" 2>$null) }
+            finally {
+                for ($i = 0; $i -lt 5; $i++) {
+                    & reg.exe unload $key 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) { break }
+                    Start-Sleep -Milliseconds 500
+                }
+            }
+        } else { Write-DeployLog 'Could not load the disk''s registry to read the Windows edition; showing the build only.' -Level WARN }
+    } catch {
+        Write-DeployLog "Could not read the Windows edition: $($_.Exception.Message)" -Level WARN
+    } finally {
+        Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($values.CurrentBuild -match '^\d+$') { $build = [int]$values.CurrentBuild }
+    $drive = New-Object IO.DriveInfo($Root)
+    [pscustomobject]@{
+        Name       = Get-WindowsDisplayName -ProductName $values.ProductName -DisplayVersion $values.DisplayVersion -Build $build
+        Build      = $build
+        TotalBytes = [double]$drive.TotalSize
+        UsedBytes  = [double]($drive.TotalSize - $drive.TotalFreeSpace)
+    }
 }
 
 function Clear-MountBlockingAttributes {
@@ -115,6 +167,72 @@ function Clear-MountBlockingAttributes {
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw 'Run this from an elevated PowerShell (mounting disks and DISM need administrator rights).' }
+
+if ($CheckOnly) {
+    # Read the disk and report; the wizard reads -ResultPath twice a second. The VM and its disk are not changed.
+    if (-not $ResultPath) { throw '-CheckOnly needs -ResultPath.' }
+    $check = [ordered]@{
+        state = 'running'; step = 'start'; percent = -1; detail = 'Starting the check...'; error = ''
+        readPath = ''; convertedPath = ''; windowsName = ''; build = 0; usedBytes = 0; totalBytes = 0
+        imageState = ''; generalized = $false; lastError = ''; log = $logPath
+    }
+    Write-CaptureCheckResult -Path $ResultPath -Result $check
+    $mount = $null
+    try {
+        if (-not (Test-Path -LiteralPath $DiskPath -PathType Leaf)) { throw "Disk file not found: $DiskPath" }
+        $DiskPath = (Resolve-Path -LiteralPath $DiskPath).ProviderPath
+        if (Test-VMwareFolderInUse -Folder (Split-Path -Parent $DiskPath)) { throw 'VMware still has the VM open. Shut it down, then click Check again.' }
+        $read = Resolve-VmdkCurrentDisk -Path $DiskPath
+        $check.readPath = $read
+        Write-DeployLog "Checking $read"
+        if (Test-NeedsConversion $read) {
+            $check.step = 'convert'
+            $check.convertedPath = Join-Path $env:TEMP ("capture-check-{0}.vhd" -f [guid]::NewGuid().ToString('N'))
+            $check.detail = 'Copying the VM''s disk to read it (the capture reuses this copy)'
+            Write-CaptureCheckResult -Path $ResultPath -Result $check
+            $disk = Get-DiskForCapture -Path $read -TempPath $check.convertedPath -OnProgress {
+                param($pct)
+                $check.percent = if ($null -ne $pct) { [int]$pct } else { -1 }
+                Write-CaptureCheckResult -Path $ResultPath -Result $check
+            }
+        } else {
+            $disk = [pscustomobject]@{ Path = $read; Temp = $null }
+        }
+        $check.step = 'read'; $check.percent = -1; $check.detail = 'Reading Windows on the disk'
+        Write-CaptureCheckResult -Path $ResultPath -Result $check
+        $mount = Mount-VMDisks -Paths @($disk.Path)
+        if (-not $mount.Root) { throw 'No Windows found on the disk. If BitLocker is on in the VM, turn it off there (manage-bde -off C:), wait until it is decrypted, and check again.' }
+        $info = Get-OfflineWindowsInfo -Root $mount.Root
+        $offline = Get-OfflineImageState -Root $mount.Root
+        $check.windowsName = $info.Name; $check.build = $info.Build
+        $check.usedBytes = $info.UsedBytes; $check.totalBytes = $info.TotalBytes
+        $check.imageState = "$($offline.ImageState)"; $check.lastError = "$($offline.LastError)"
+        $check.generalized = Test-Generalized -Root $mount.Root
+        Write-DeployLog "Found $($info.Name), $(Format-DiskSize $info.UsedBytes) used; generalized: $($check.generalized) ($($check.imageState))"
+        $check.state = 'done'; $check.detail = ''
+    }
+    catch {
+        Write-DeployLog $_.Exception.Message -Level ERROR
+        $check.state = 'failed'
+        $check.error = (@("$($_.Exception.Message)" -split "`r?`n" | Where-Object { $_.Trim() })[0])
+    }
+    finally {
+        if ($mount) { Dismount-VMDisks $mount }
+        # The copy is kept for the capture only when it can be captured, and the wizard was not closed meanwhile.
+        $keep = $check.convertedPath -and $check.state -eq 'done' -and $check.generalized -and -not (Test-Path -LiteralPath "$ResultPath.cancel")
+        if ($check.convertedPath) {
+            if ($keep) { Save-ConvertedDiskSource -ConvertedPath $check.convertedPath -SourcePath $check.readPath }
+            else { Remove-ConvertedDisk $check.convertedPath; $check.convertedPath = '' }
+        }
+        Remove-Item -LiteralPath "$ResultPath.cancel" -Force -ErrorAction SilentlyContinue
+        Write-CaptureCheckResult -Path $ResultPath -Result $check
+    }
+    if ($check.state -ne 'done') { exit 1 }
+    exit 0
+}
+
+if (-not $Name) { throw '-Name is required.' }
+if (-not $ContentRoot) { throw '-ContentRoot is required.' }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
 
 $imagesDir = Join-Path $ContentRoot 'Images'
@@ -124,6 +242,14 @@ $staging = $null
 $swapping = $false
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
+
+Start-BuildProgress -Path $ProgressFile -Title "Capturing $Name" -LogPath $logPath -Steps @(
+    , @('convert', 'Copying the VM''s disk')
+    , @('read', 'Reading Windows on the disk')
+    , @('capture', 'Capturing the image')
+    , @('split', 'Splitting into 3.8 GB parts')
+    , @('save', 'Saving to the Images folder')
+)
 
 try {
     $existing = @((Join-Path $imagesDir "$Name.wim"), (Join-Path $imagesDir "$Name.swm")) | Where-Object { Test-Path $_ }
@@ -145,13 +271,36 @@ try {
     if (-not $NoPrompt -and (Read-Host "Type YES to capture $(Split-Path $DiskPath -Leaf) (its VM must be shut down)") -ne 'YES') {
         Write-DeployLog 'Cancelled by operator' -Level WARN
         $status = 'CANCELLED'
+        Stop-BuildProgress -Message 'Cancelled'
         return
     }
-    $disk = Get-DiskForCapture -Path $DiskPath
+    if ($ReuseConvertedDisk -and (Test-ConvertedDiskReusable -ConvertedPath $ReuseConvertedDisk -SourcePath $DiskPath)) {
+        Write-DeployLog "Reusing $ReuseConvertedDisk, the copy the disk check made (the disk has not changed since)."
+        $disk = [pscustomobject]@{ Path = $ReuseConvertedDisk; Temp = $ReuseConvertedDisk }
+        Complete-BuildStep 'convert' -State reused -Detail 'Copied during the disk check'
+    } else {
+        if ($ReuseConvertedDisk) {
+            Write-DeployLog 'The VM''s disk changed after the check, so it is copied again.' -Level WARN
+            Remove-ConvertedDisk $ReuseConvertedDisk
+        }
+        if (Test-NeedsConversion $DiskPath) {
+            Start-BuildStep 'convert' -Detail (Split-Path -Leaf $DiskPath)
+            $tempPath = Join-Path $env:TEMP ("capture-{0}.vhd" -f [guid]::NewGuid().ToString('N'))
+            $tempDisk = $tempPath   # deleted in finally, even when the conversion fails halfway
+            $disk = Get-DiskForCapture -Path $DiskPath -TempPath $tempPath -OnProgress {
+                param($pct) Set-BuildStepProgress 'convert' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
+            }
+            Complete-BuildStep 'convert'
+        } else {
+            $disk = [pscustomobject]@{ Path = $DiskPath; Temp = $null }
+            Complete-BuildStep 'convert' -State skipped -Detail 'VHD and VHDX disks are read in place'
+        }
+    }
     $tempDisk = $disk.Temp
     $paths = @($disk.Path)
 
     # The capture reads the disk with the VM off.
+    Start-BuildStep 'read'
     $mount = Mount-VMDisks -Paths $paths
     if (-not $mount.Root) { throw 'No Windows install found on the disk. If BitLocker is on in the VM, turn it off there (manage-bde -off C:), wait until it is decrypted, and capture again.' }
     $windowsRoot = $mount.Root
@@ -160,6 +309,7 @@ try {
         $why = if ($state.LastError) { " Last sysprep error on this disk: $($state.LastError)" } else { '' }
         throw "Windows on this disk was not generalized (ImageState $($state.ImageState)). Boot the VM, run Prepare-Reference.ps1 in it as administrator, let sysprep shut the VM down, and run this again.$why"
     }
+    Complete-BuildStep 'read' -Detail $(try { (Get-OfflineWindowsInfo -Root $windowsRoot).Name } catch { '' })
 
     New-Item -ItemType Directory -Path $imagesDir -Force | Out-Null
     # The capture goes to a staging folder first, so a failed capture leaves the current image alone.
@@ -172,13 +322,20 @@ try {
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
         "/Compress:$Compression", '/CheckIntegrity', '/Verify')
     if ($Description) { $captureArgs += "/Description:$Description" }
-    Invoke-Native -FilePath 'dism.exe' -ArgumentList $captureArgs
+    Start-BuildStep 'capture'
+    Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
+        param($pct) Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
+    }
+    Complete-BuildStep 'capture' -Detail "$(Format-DiskSize (Get-Item -LiteralPath $wim).Length)"
 
     if ($SplitSizeMB -gt 0) {
+        Start-BuildStep 'split'
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
             '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $staging "$Name.swm")", "/FileSize:$SplitSizeMB")
         Remove-Item $wim
+        Complete-BuildStep 'split'
     }
+    Start-BuildStep 'save'
 
     if ($existing) {
         $swapping = $true
@@ -201,16 +358,21 @@ try {
     }
 
     Write-DeployLog "Captured the disk to $imagesDir\$newLeaf"
+    Complete-BuildStep 'save' -Detail "Images\$newLeaf"
     $status = 'OK'
+    Stop-BuildProgress
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
+    Stop-BuildProgress -Message $_.Exception.Message
     if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
 }
 finally {
     # Release the disk before the temporary copy's deletion, which needs it free.
     if ($mount) { Dismount-VMDisks $mount }
-    if ($tempDisk) { Remove-Item -LiteralPath $tempDisk -Force -ErrorAction SilentlyContinue }
+    if ($tempDisk) { Remove-ConvertedDisk $tempDisk }
+    # The check's copy is used once: reused above, or stale, or never reached because the capture failed earlier.
+    if ($ReuseConvertedDisk) { Remove-ConvertedDisk $ReuseConvertedDisk }
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
     if ($staging -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     if ($status -ne 'CANCELLED') {

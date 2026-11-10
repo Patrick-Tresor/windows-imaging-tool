@@ -88,9 +88,11 @@ On the admin PC, in the console: **Images > Capture new image...**
 
 1. **A VM's disk file on this PC**, and the VM's .vmdk (the newest snapshot is read).
 2. Tick that the prepare command has run.
-3. Name the image. To replace the current image, keep the same name and tick
+3. **Check the disk**: wait until every line has a tick. A cross on "Sysprep has run" means the VM
+   was not generalized: boot it, run the prepare command again, and click **Check again**.
+4. Name the image. To replace the current image, keep the same name and tick
    **capture it as a new version**: the old one is kept in `Images\Previous`.
-4. Start. The capture refuses a disk that was not generalized.
+5. Start. The progress window shows each step and the time left.
 
 ## 9. Put the VM back
 

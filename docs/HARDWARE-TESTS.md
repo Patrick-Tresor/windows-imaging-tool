@@ -43,6 +43,9 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | # | Test | Pass when |
 |---|------|-----------|
 | 4.1 | VMware disk file capture | Image in `Images`, VM and its snapshots unchanged |
+| 4.1a | Check the disk page, sysprepped VM | Every line ticked; edition, version and size right; the capture reuses the check's copy (step says Reused) |
+| 4.1b | Check the disk page, VM not sysprepped or still open | Cross on Sysprep has run or VM shut down, Next stays off |
+| 4.1c | Capture progress window | Each step with its bar, the capture step shows a percent and the time left |
 | 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
 | 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
 | 4.4 | Roll back a version | Answer files deploy the older image |

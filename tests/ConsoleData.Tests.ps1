@@ -258,6 +258,9 @@ try {
     $threw = $false
     try { Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'y' -DiskPath 'v.vmdk' -Name 'bad name' | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'VM capture rejects an image name with spaces'
+    $vcp = Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'D:\Share' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' `
+        -ReuseConvertedDisk 'C:\Temp\capture-check-1.vhd' -ProgressFile 'C:\Temp\p.json' -LogPath 'C:\Logs\c.log'
+    Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vcp[-1]))) "& 'x.ps1' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ContentRoot 'D:\Share' -Compression max -ReuseConvertedDisk 'C:\Temp\capture-check-1.vhd' -ProgressFile 'C:\Temp\p.json' -LogPath 'C:\Logs\c.log' -NoPrompt" 'VM capture command passes the checked copy, progress file and log'
 
     $vhdxConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vhdx' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe'
     Assert-Equal $vhdxConv $null 'a VHDX needs no conversion'

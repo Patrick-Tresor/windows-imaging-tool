@@ -567,8 +567,15 @@ are both read. The deploy log says which entry was used.
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
       Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
-   3. Name the image and choose compression.
-   4. Review and click Start (disk file) or Build and start.
+   3. **Check the disk** (disk file only): each line gets a tick or a cross. The quick checks (the
+      disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
+      free space for the temporary copy) come first, then the wizard reads the Windows on the disk
+      and shows its edition, version, size and whether sysprep has run. Next stays off until every
+      line has a tick, so a disk that was not generalized is caught here, not after the capture
+      started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
+   4. Name the image and choose compression.
+   5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
+      window with each step (copy, read, capture, save), its bar and the time left.
    The image is saved to the content root's `Images` folder (disk file), the share's
    `Images` folder, or the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.

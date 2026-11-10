@@ -87,6 +87,17 @@ VirtualBox (`Get-DiskConversionCommand`). A VMware disk with snapshots is read a
 the newest delta (`Resolve-VmdkCurrentDisk` in `VMwareVM.psm1`). The VM, its
 disk and its snapshots are not changed.
 
+Before that, the wizard's Check the disk page (disk file only) runs the quick checks of
+`Get-CaptureDiskChecklist` (`CaptureCheck.psm1`), then `Capture-VMImage.ps1 -CheckOnly
+-ResultPath` in a hidden PowerShell. It mounts the disk read-only, reads the edition
+from a copy of the SOFTWARE hive and the sysprep state, and writes a JSON result the
+page reads twice a second (`Get-CaptureCheckView`). The temporary VHD it made is kept
+with a `.source` note (names, sizes and times of the VM's disk files); the capture
+gets it with `-ReuseConvertedDisk` and uses it only while that note still matches
+(`Test-ConvertedDiskReusable`). The capture then reports its steps with `-ProgressFile`
+to the same Build progress window as a media build, which shows the time left for a
+step with a percent (`Format-TimeLeft` in `BuildSteps.psm1`).
+
 ## Image versions
 
 `ImageVersions.psm1` (used in WinPE and by the console) treats every folder
