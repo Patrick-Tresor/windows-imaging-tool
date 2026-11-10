@@ -56,7 +56,7 @@ function Get-SysprepHookRegArgs {
     if ($PreventDeviceEncryption -and $ControlSet) {
         [void]$list.Add(@('add', "$HiveKey\$ControlSet\Control\BitLocker", '/v', 'PreventDeviceEncryption', '/t', 'REG_DWORD', '/d', '1', '/f'))
     }
-    , $list.ToArray()
+    $list.ToArray()   # one argument list per write: the pipeline unrolls only this outer array
 }
 
 function Get-ControlSetName {
