@@ -24,6 +24,8 @@ Assert-Equal (Format-TimeLeft -ElapsedSeconds 30 -Percent 60) 'under 1 min left'
 Assert-Equal (Format-TimeLeft -ElapsedSeconds 120 -Percent 25) 'about 6 min left' 'time left: minutes, rounded up'
 Assert-Equal (Format-TimeLeft -ElapsedSeconds 1800 -Percent 25) 'about 1 h 30 min left' 'time left: over an hour'
 Assert-Equal (Format-TimeLeft -ElapsedSeconds 600 -Percent 100) '' 'time left: nothing at 100%'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 300 -Percent 4 -FromPercent 1) 'about 2 h 40 min left' 'time left: from the first percent, not from 0'
+Assert-Equal (Format-TimeLeft -ElapsedSeconds 300 -Percent 3 -FromPercent 2.5) '' 'time left: nothing until it moved 1% since the first percent'
 
 $dir = Join-Path ([IO.Path]::GetTempPath()) ("imaging-steps-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $dir | Out-Null
@@ -56,6 +58,8 @@ try {
     Assert-Equal (@($data.steps | ForEach-Object state) -join ',') 'done,running,pending' 'states as the build goes'
     Assert-Equal $data.steps[1].percent 43 'percent rounded down'
     Assert-Equal $data.steps[1].detail '2.1 GB of 5 GB' 'detail saved'
+    Assert-Equal $data.steps[1].rateFromPercent 42 'the first percent above 0 is kept for the time left'
+    Assert-Equal ([int64]$data.steps[1].rateFrom -gt 0) $true 'and when it was seen'
 
     $view = Get-BuildStepView -Data $data
     Assert-Equal $view.Rows[0].Status 'Complete' 'a done step says Complete'
@@ -84,6 +88,12 @@ try {
     $fixed.steps[1].percent = 25
     $view = Get-BuildStepView -Data $fixed -Now $t0.AddSeconds(142)
     Assert-Equal $view.Rows[1].Status '25%, about 6 min left' 'a running step with a percent says how long it still needs'
+    # DISM sat at 0% for 30 min while it scanned files, then went from 1% to 4% in 3 min: about 1.5 h left, not 13 h.
+    $fixed.steps[1] | Add-Member -NotePropertyName rateFrom -NotePropertyValue (ConvertTo-Ms $t0.AddMinutes(30))
+    $fixed.steps[1] | Add-Member -NotePropertyName rateFromPercent -NotePropertyValue 1
+    $fixed.steps[1].percent = 4
+    $view = Get-BuildStepView -Data $fixed -Now $t0.AddMinutes(33)
+    Assert-Equal $view.Rows[1].Status '4%, about 1 h 36 min left' 'time left ignores the wait before the first percent'
 
     # An error: the running step fails, with only the first line of the message.
     Stop-BuildProgress -Message "Copying Images\W11.wim to the USB stick failed: device not ready.`nAt line 12 char 3"
