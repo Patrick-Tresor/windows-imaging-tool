@@ -260,6 +260,28 @@ function Get-CaptureCheckView {
     [pscustomobject]@{ Rows = @($rows); Passed = $passed; Busy = $busy; Percent = $percent }
 }
 
-Export-ModuleMember -Function Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
+function Get-DefenderExclusionPlan {
+    # The Microsoft Defender exclusions a capture adds while DISM runs, and later removes: only the ones that were
+    # not there already, so a capture never removes an exclusion the admin set. Defender scanning each file DISM
+    # reads from the mounted disk, and each block it writes to the image, can make a capture many times slower.
+    param([string[]]$Paths = @(), [string[]]$Processes = @(), [string[]]$ExistingPaths = @(), [string[]]$ExistingProcesses = @())
+    $norm = { param($p) "$p".Trim().TrimEnd('\').ToLowerInvariant() }
+    $havePaths = @($ExistingPaths | Where-Object { $_ } | ForEach-Object { & $norm $_ })
+    $haveProcs = @($ExistingProcesses | Where-Object { $_ } | ForEach-Object { & $norm $_ })
+    [pscustomobject]@{
+        Paths     = @($Paths | Where-Object { $_ -and (& $norm $_) -notin $havePaths } | Select-Object -Unique)
+        Processes = @($Processes | Where-Object { $_ -and (& $norm $_) -notin $haveProcs } | Select-Object -Unique)
+    }
+}
+
+function Test-SlowImageTarget {
+    # True when the Images folder is on a drive a capture should not write to directly: a USB stick or disk, an
+    # SD card or a network share. DISM writes the image in many small pieces, which such drives take very slowly,
+    # so the capture goes to the PC's own disk first and the finished file is copied over.
+    param([string]$DriveType, [string]$BusType)
+    ($DriveType -in 'Removable', 'Network') -or ($BusType -in 'USB', 'SD', 'MMC', 'iSCSI')
+}
+
+Export-ModuleMember -Function Get-DefenderExclusionPlan, Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
     Test-ConvertedDiskReusable, Remove-ConvertedDisk, Get-CaptureDiskChecklist, ConvertFrom-RegQuery, Get-WindowsDisplayName,
     Write-CaptureCheckResult, Read-CaptureCheckResult, Get-CaptureCheckView

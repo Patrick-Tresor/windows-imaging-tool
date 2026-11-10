@@ -15,7 +15,7 @@ function Start-BuildProgress {
     if (-not $Path) { $script:Build = $null; return }
     $rows = New-Object System.Collections.ArrayList
     foreach ($s in $Steps) {
-        [void]$rows.Add([ordered]@{ id = [string]$s[0]; name = [string]$s[1]; state = 'pending'; percent = -1; detail = ''; started = 0; ended = 0 })
+        [void]$rows.Add([ordered]@{ id = [string]$s[0]; name = [string]$s[1]; state = 'pending'; percent = -1; detail = ''; started = 0; ended = 0; rateFrom = 0; rateFromPercent = 0 })
     }
     $script:Build = @{
         Path      = $Path
@@ -61,6 +61,7 @@ function Start-BuildStep {
     $s = Get-BuildStep $Id
     if (-not $s) { return }
     $s.state = 'running'; $s.percent = -1; $s.detail = $Detail; $s.started = (Get-BuildTime); $s.ended = 0
+    $s.rateFrom = 0; $s.rateFromPercent = 0
     Save-BuildProgress -Force
 }
 
@@ -71,6 +72,9 @@ function Set-BuildStepProgress {
     if (-not $s) { return }
     if ($s.state -ne 'running') { $s.state = 'running'; $s.started = (Get-BuildTime) }
     $s.percent = if ($Percent -lt 0) { -1 } else { [int][Math]::Min(100, [Math]::Floor($Percent)) }
+    # The time left is measured from the first percent above 0: DISM first scans every file at 0% (minutes on a
+    # big disk), and counting that wait made a 40-minute capture look like 13 hours at 4%.
+    if (-not $s.rateFrom -and $s.percent -gt 0) { $s.rateFrom = (Get-BuildTime); $s.rateFromPercent = $s.percent }
     if ($PSBoundParameters.ContainsKey('Detail')) { $s.detail = $Detail }
     Save-BuildProgress
 }
@@ -132,10 +136,11 @@ function Format-BuildElapsed {
 
 function Format-TimeLeft {
     # How long a step still needs, from how long it has run and how far it is: 'about 4 min left'. Nothing until
-    # the step has run 15 seconds and passed 2%, when the guess would still jump around.
-    param([double]$ElapsedSeconds, [double]$Percent)
-    if ($ElapsedSeconds -lt 15 -or $Percent -lt 2 -or $Percent -ge 100) { return '' }
-    $left = $ElapsedSeconds * (100 - $Percent) / $Percent
+    # the step has run 15 seconds and passed 2%, when the guess would still jump around. -FromPercent is where the
+    # step was when ElapsedSeconds started counting; the guess waits until it has moved 1% since.
+    param([double]$ElapsedSeconds, [double]$Percent, [double]$FromPercent = 0)
+    if ($ElapsedSeconds -lt 15 -or $Percent -lt 2 -or $Percent -ge 100 -or ($Percent - $FromPercent) -lt 1) { return '' }
+    $left = $ElapsedSeconds * (100 - $Percent) / ($Percent - $FromPercent)
     if ($left -lt 60) { return 'under 1 min left' }
     $minutes = [int][Math]::Ceiling($left / 60)
     if ($minutes -lt 60) { return "about $minutes min left" }
@@ -162,7 +167,10 @@ function Get-BuildStepView {
             'failed'  { 'Failed' }
             'running' {
                 if ([int]$s.percent -ge 0) {
-                    $left = Format-TimeLeft -ElapsedSeconds $secs -Percent ([int]$s.percent)
+                    $from = ConvertFrom-BuildTime $s.rateFrom
+                    $left = if ($from) {
+                        Format-TimeLeft -ElapsedSeconds ($Now - $from).TotalSeconds -Percent ([int]$s.percent) -FromPercent ([int]$s.rateFromPercent)
+                    } else { Format-TimeLeft -ElapsedSeconds $secs -Percent ([int]$s.percent) }
                     "$([int]$s.percent)%$(if ($left) { ", $left" })"
                 } else { '' }
             }

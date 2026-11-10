@@ -239,6 +239,62 @@ if ($CheckOnly) {
     exit 0
 }
 
+function Add-CaptureDefenderExclusions {
+    # While DISM runs, Microsoft Defender would scan every file it reads from the mounted disk and every block it
+    # writes, which can make a capture many times slower. Adds exclusions for the mounted disk, the image being
+    # written and DISM itself, and returns what Remove-CaptureDefenderExclusions takes off again. Nothing when
+    # Defender's real-time protection is off or another antivirus is in charge.
+    param([string[]]$Paths)
+    try {
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        if (-not $status.RealTimeProtectionEnabled) { return $null }
+        $pref = Get-MpPreference -ErrorAction Stop
+        $plan = Get-DefenderExclusionPlan -Paths $Paths -Processes @('dism.exe', 'dismhost.exe') `
+            -ExistingPaths @($pref.ExclusionPath) -ExistingProcesses @($pref.ExclusionProcess)
+        if ($plan.Paths) { Add-MpPreference -ExclusionPath $plan.Paths -ErrorAction Stop }
+        if ($plan.Processes) { Add-MpPreference -ExclusionProcess $plan.Processes -ErrorAction Stop }
+        if ($plan.Paths -or $plan.Processes) {
+            Write-DeployLog "Microsoft Defender skips $(@($plan.Paths + $plan.Processes) -join ', ') until the capture ends (removed after)."
+        }
+        $plan
+    } catch {
+        Write-DeployLog "Could not pause Microsoft Defender scanning for the capture, so it may be slow: $($_.Exception.Message)" -Level WARN
+        $null
+    }
+}
+
+function Remove-CaptureDefenderExclusions {
+    param($Plan)
+    if (-not $Plan) { return }
+    try {
+        if ($Plan.Paths) { Remove-MpPreference -ExclusionPath $Plan.Paths -ErrorAction Stop }
+        if ($Plan.Processes) { Remove-MpPreference -ExclusionProcess $Plan.Processes -ErrorAction Stop }
+        Write-DeployLog 'Microsoft Defender scans the capture folders and DISM again.'
+    } catch {
+        Write-DeployLog "Could not remove the capture's Microsoft Defender exclusions ($(@($Plan.Paths + $Plan.Processes) -join ', ')): remove them in Windows Security. $($_.Exception.Message)" -Level WARN
+    }
+}
+
+function Get-ImageTargetInfo {
+    # The kind of drive a folder is on: DriveType (Fixed, Removable, Network...) and, for a local disk, its bus
+    # (SATA, NVMe, USB...), so a USB disk that Windows calls Fixed is still seen as USB.
+    param([Parameter(Mandatory)][string]$Folder)
+    $info = [pscustomobject]@{ DriveType = ''; BusType = ''; Text = '' }
+    try {
+        if ($Folder -match '^\\\\') { $info.DriveType = 'Network' }
+        else {
+            $root = [IO.Path]::GetPathRoot($Folder)
+            $info.DriveType = "$((New-Object IO.DriveInfo($root)).DriveType)"
+            if ($info.DriveType -eq 'Fixed' -or $info.DriveType -eq 'Removable') {
+                $disk = Get-Partition -DriveLetter $root[0] -ErrorAction Stop | Get-Disk -ErrorAction Stop
+                $info.BusType = "$($disk.BusType)"
+            }
+        }
+    } catch { }
+    $info.Text = (@($info.DriveType, $info.BusType) | Where-Object { $_ }) -join ', '
+    $info
+}
+
 if (-not $Name) { throw '-Name is required.' }
 if (-not $ContentRoot) { throw '-ContentRoot is required.' }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
@@ -250,6 +306,7 @@ $staging = $null
 $swapping = $false
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
+$defender = $null     # Defender exclusions added for the capture; removed in finally
 
 Start-BuildProgress -Path $ProgressFile -Title "Capturing $Name" -LogPath $logPath -Steps @(
     , @('convert', 'Copying the VM''s disk')
@@ -323,24 +380,47 @@ try {
         }
         Write-DeployLog "Windows on this disk was not sysprepped ($($state.ImageState)): each PC deployed from this image runs sysprep at its first start." -Level WARN
     }
-    Complete-BuildStep 'read' -Detail $(try { (Get-OfflineWindowsInfo -Root $windowsRoot).Name } catch { '' })
+    $windowsInfo = try { Get-OfflineWindowsInfo -Root $windowsRoot } catch { $null }
+    Complete-BuildStep 'read' -Detail $(if ($windowsInfo) { $windowsInfo.Name } else { '' })
 
     New-Item -ItemType Directory -Path $imagesDir -Force | Out-Null
-    # The capture goes to a staging folder first, so a failed capture leaves the current image alone.
+    # The capture goes to a staging folder first, so a failed capture leaves the current image alone. On a USB
+    # drive or a network share that folder is on the PC's own disk instead (when it has room): DISM writes the
+    # image in many small pieces, which those drives take very slowly, and one copy at the end is much quicker.
+    $target = Get-ImageTargetInfo -Folder $imagesDir
     $staging = Join-Path $imagesDir ".capture-$Name"
+    if (Test-SlowImageTarget -DriveType $target.DriveType -BusType $target.BusType) {
+        $local = Join-Path $env:TEMP ".capture-$Name"
+        $free = try { [double](New-Object IO.DriveInfo([IO.Path]::GetPathRoot($local))).AvailableFreeSpace } catch { 0 }
+        # A max-compressed image is usually under 60% of the space Windows uses on the disk.
+        $need = if ($windowsInfo) { $windowsInfo.UsedBytes * 0.6 } else { 0 }
+        if ($need -gt 0 -and $free -gt $need) {
+            Write-DeployLog "The Images folder is on a slow drive ($($target.Text)), so the image is written to $local first and copied over when done."
+            $staging = $local
+        } else {
+            Write-DeployLog "The Images folder is on a slow drive ($($target.Text)) and $env:TEMP has too little free space to capture there first, so the capture will be slow." -Level WARN
+        }
+    }
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
     $wim = Join-Path $staging "$Name.wim"
 
-    Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir."
+    Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
+    $defender = Add-CaptureDefenderExclusions -Paths @($windowsRoot, $staging, $disk.Path)
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
         "/Compress:$Compression", '/CheckIntegrity', '/Verify')
     if ($Description) { $captureArgs += "/Description:$Description" }
     Start-BuildStep 'capture'
+    $captureClock = [Diagnostics.Stopwatch]::StartNew()
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
         param($pct) Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
     }
-    Complete-BuildStep 'capture' -Detail "$(Format-DiskSize (Get-Item -LiteralPath $wim).Length)"
+    $wimSize = (Get-Item -LiteralPath $wim).Length
+    $read = if ($windowsInfo) { " from $(Format-DiskSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
+    Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}." -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $read)
+    Remove-CaptureDefenderExclusions $defender
+    $defender = $null
+    Complete-BuildStep 'capture' -Detail "$(Format-DiskSize $wimSize)"
 
     if ($SplitSizeMB -gt 0) {
         Start-BuildStep 'split'
@@ -349,7 +429,7 @@ try {
         Remove-Item $wim
         Complete-BuildStep 'split'
     }
-    Start-BuildStep 'save'
+    Start-BuildStep 'save' -Detail $(if ($staging -notlike "$imagesDir*") { 'Copying the image from the PC''s disk' } else { '' })
 
     if ($existing) {
         $swapping = $true
@@ -382,6 +462,7 @@ catch {
     if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
 }
 finally {
+    Remove-CaptureDefenderExclusions $defender
     # Release the disk before the temporary copy's deletion, which needs it free.
     if ($mount) { Dismount-VMDisks $mount }
     if ($tempDisk) { Remove-ConvertedDisk $tempDisk }

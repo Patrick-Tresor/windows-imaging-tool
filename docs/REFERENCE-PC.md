@@ -110,7 +110,11 @@ On the admin PC, in the console: **Images > Capture new image...**
    was not generalized: boot it, run the prepare command again, and click **Check again**.
 4. Name the image. To replace the current image, keep the same name and tick
    **capture it as a new version**: the old one is kept in `Images\Previous`.
-5. Start. The progress window shows each step and the time left.
+5. Start. The progress window shows each step and the time left. DISM first scans every file at 0%,
+   so the time left shows once the percent starts moving. While DISM runs, Microsoft Defender skips
+   the mounted disk, the new image and DISM (the log lists them, and they are removed afterwards). A
+   content root on a USB drive or a network share gets the image written on this PC's disk first and
+   copied over at the end. The log ends the capture with its time and speed in MB/s.
 
 ## 9. Put the VM back
 

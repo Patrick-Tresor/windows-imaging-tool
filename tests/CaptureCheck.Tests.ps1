@@ -141,5 +141,25 @@ try {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Defender exclusions for the capture: only the ones not already set, so the capture never removes the admin's own.
+$plan = Get-DefenderExclusionPlan -Paths @('H:\', 'D:\Image\Images\.capture-Test', 'C:\Temp\c.vhd') -Processes @('dism.exe', 'dismhost.exe') `
+    -ExistingPaths @('h:', $null) -ExistingProcesses @('DISM.EXE')
+Assert-Equal ($plan.Paths -join ',') 'D:\Image\Images\.capture-Test,C:\Temp\c.vhd' 'defender: an excluded drive is not added again (case and trailing slash ignored)'
+Assert-Equal ($plan.Processes -join ',') 'dismhost.exe' 'defender: an excluded process is not added again'
+$plan = Get-DefenderExclusionPlan -Paths @('H:\') -Processes @('dism.exe')
+Assert-Equal "$($plan.Paths.Count),$($plan.Processes.Count)" '1,1' 'defender: nothing excluded yet adds everything'
+
+Assert-Equal (Test-SlowImageTarget -DriveType Fixed -BusType NVMe) $false 'slow target: internal NVMe disk'
+Assert-Equal (Test-SlowImageTarget -DriveType Fixed -BusType SATA) $false 'slow target: internal SATA disk'
+Assert-Equal (Test-SlowImageTarget -DriveType Fixed -BusType USB) $true 'slow target: USB disk Windows calls Fixed'
+Assert-Equal (Test-SlowImageTarget -DriveType Removable) $true 'slow target: USB stick'
+Assert-Equal (Test-SlowImageTarget -DriveType Network) $true 'slow target: network share'
+
+# Capture-VMImage.ps1 takes its Defender exclusions off again, also when the capture fails.
+$captureText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Capture-VMImage.ps1')
+$finally = $captureText.Substring($captureText.LastIndexOf('finally {'))
+Assert-Equal ($captureText -match '\$defender = Add-CaptureDefenderExclusions') $true 'capture adds Defender exclusions for DISM'
+Assert-Equal ($finally -match 'Remove-CaptureDefenderExclusions \$defender') $true 'capture removes them in finally'
+
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
 Write-Host 'All capture check tests passed.' -ForegroundColor Green
