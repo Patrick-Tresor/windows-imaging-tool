@@ -13,6 +13,10 @@
     copy is kept, and the capture reuses it with -ReuseConvertedDisk while the VM's disk files are unchanged.
     -ProgressFile writes each step for the console's progress window (src\BuildSteps.psm1).
 
+    -SysprepAtDeploy captures a VM that was only shut down (shutdown /s /t 0), not sysprepped: each PC it is
+    deployed to then runs sysprep at its first start (src\SysprepAtDeploy.psm1). A VM that was hibernated by
+    Fast Startup is refused, since its disk is not a clean copy.
+
     The image goes to the Images folder of the content root, as Capture-GoldenImage.ps1 does. With -NewVersion
     an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
     as a version in Images\Previous\ (see ImageVersions.psm1).
@@ -33,6 +37,7 @@ param(
     [string]$ResultPath,
     [string]$ReuseConvertedDisk, # a temporary VHD the check made; used when the disk has not changed since
     [string]$ProgressFile,       # step-by-step progress for the console's window
+    [switch]$SysprepAtDeploy,    # capture a VM that was not sysprepped; each PC runs sysprep at its first start
     [string]$LogPath
 )
 
@@ -42,6 +47,7 @@ Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 
 $logPath = if ($LogPath) { $LogPath } elseif ($CheckOnly) { Join-Path $env:TEMP 'Capture-VMImage-check.log' } else { Join-Path $env:TEMP 'Capture-VMImage.log' }
 $logParent = Split-Path -Parent $logPath
@@ -174,7 +180,7 @@ if ($CheckOnly) {
     $check = [ordered]@{
         state = 'running'; step = 'start'; percent = -1; detail = 'Starting the check...'; error = ''
         readPath = ''; convertedPath = ''; windowsName = ''; build = 0; usedBytes = 0; totalBytes = 0
-        imageState = ''; generalized = $false; lastError = ''; log = $logPath
+        imageState = ''; generalized = $false; hibernated = $false; lastError = ''; log = $logPath
     }
     Write-CaptureCheckResult -Path $ResultPath -Result $check
     $mount = $null
@@ -208,7 +214,8 @@ if ($CheckOnly) {
         $check.usedBytes = $info.UsedBytes; $check.totalBytes = $info.TotalBytes
         $check.imageState = "$($offline.ImageState)"; $check.lastError = "$($offline.LastError)"
         $check.generalized = Test-Generalized -Root $mount.Root
-        Write-DeployLog "Found $($info.Name), $(Format-DiskSize $info.UsedBytes) used; generalized: $($check.generalized) ($($check.imageState))"
+        $check.hibernated = Test-HibernatedWindows -Root $mount.Root
+        Write-DeployLog "Found $($info.Name), $(Format-DiskSize $info.UsedBytes) used; generalized: $($check.generalized) ($($check.imageState)); hibernated: $($check.hibernated)"
         $check.state = 'done'; $check.detail = ''
     }
     catch {
@@ -218,8 +225,9 @@ if ($CheckOnly) {
     }
     finally {
         if ($mount) { Dismount-VMDisks $mount }
-        # The copy is kept for the capture only when it can be captured, and the wizard was not closed meanwhile.
-        $keep = $check.convertedPath -and $check.state -eq 'done' -and $check.generalized -and -not (Test-Path -LiteralPath "$ResultPath.cancel")
+        # The copy is kept for the capture when the disk could be read and the wizard was not closed meanwhile. A disk
+        # that is not sysprepped can still be captured with sysprep on each PC; the wizard deletes an unused copy.
+        $keep = $check.convertedPath -and $check.state -eq 'done' -and -not (Test-Path -LiteralPath "$ResultPath.cancel")
         if ($check.convertedPath) {
             if ($keep) { Save-ConvertedDiskSource -ConvertedPath $check.convertedPath -SourcePath $check.readPath }
             else { Remove-ConvertedDisk $check.convertedPath; $check.convertedPath = '' }
@@ -306,8 +314,14 @@ try {
     $windowsRoot = $mount.Root
     if (-not (Test-Generalized -Root $windowsRoot)) {
         $state = Get-OfflineImageState -Root $windowsRoot
-        $why = if ($state.LastError) { " Last sysprep error on this disk: $($state.LastError)" } else { '' }
-        throw "Windows on this disk was not generalized (ImageState $($state.ImageState)). Boot the VM, run Prepare-Reference.ps1 in it as administrator, let sysprep shut the VM down, and run this again.$why"
+        if (-not $SysprepAtDeploy) {
+            $why = if ($state.LastError) { " Last sysprep error on this disk: $($state.LastError)" } else { '' }
+            throw "Windows on this disk was not generalized (ImageState $($state.ImageState)). Boot the VM, run Prepare-Reference.ps1 in it as administrator, let sysprep shut the VM down, and run this again (or capture with -SysprepAtDeploy).$why"
+        }
+        if (Test-HibernatedWindows -Root $windowsRoot) {
+            throw 'Windows on this disk was hibernated by Fast Startup, not shut down. Start the VM, run shutdown /s /t 0 in it, and capture again.'
+        }
+        Write-DeployLog "Windows on this disk was not sysprepped ($($state.ImageState)): each PC deployed from this image runs sysprep at its first start." -Level WARN
     }
     Complete-BuildStep 'read' -Detail $(try { (Get-OfflineWindowsInfo -Root $windowsRoot).Name } catch { '' })
 

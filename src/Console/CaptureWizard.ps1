@@ -45,6 +45,20 @@ function Show-CaptureWizard {
         }
     }
     $w.BtnCopyCmd.Add_Click({ & $copyCommand $w.TxtPrepCmd })
+    # Sysprep on each PC instead (VM disk file only): the VM is only shut down, fully (not Fast Startup's hibernation).
+    $prepCommand = $w.TxtPrepCmd.Text; $prepIntro = $w.TxtPrepIntro.Text; $prepHint = $w.TxtPrepHint.Text
+    $prepDone = "$($w.ChkPrepared.Content)"
+    $updatePrepPage = {
+        $atDeploy = (& $getChoice).SysprepAtDeploy
+        $w.TxtPrepTitle.Text = if ($atDeploy) { 'Shut the reference VM down' } else { 'Run sysprep on the reference machine' }
+        $w.TxtPrepIntro.Text = if ($atDeploy) {
+            'Run this in the VM to shut it down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
+        } else { $prepIntro }
+        $w.TxtPrepCmd.Text = if ($atDeploy) { 'shutdown /s /t 0' } else { $prepCommand }
+        $w.TxtPrepHint.Visibility = if ($atDeploy) { 'Collapsed' } else { 'Visible' }
+        $w.ChkPrepared.Content = if ($atDeploy) { 'The VM is shut down' } else { $prepDone }
+    }
+    $w.ChkSysprepAtDeploy.Add_Click({ try { & $updatePrepPage } catch { Show-WizardError $_.Exception.Message } })
 
     # Page 3 defaults.
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
@@ -91,6 +105,7 @@ function Show-CaptureWizard {
             Split       = [bool]$w.ChkSplit.IsChecked
             Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
+            SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked -and $w.RbDiskFile.IsChecked
             Mode        = if ($w.RbDiskFile.IsChecked) { 'DiskFile' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
@@ -137,7 +152,7 @@ function Show-CaptureWizard {
             $result = [pscustomobject]@{ state = 'failed'; error = 'The check stopped before it finished. Open the log to see why.'; convertedPath = '' }
         }
         $state.Result = $result
-        $view = Get-CaptureCheckView -Checklist $state.Checklist -Result $result
+        $view = Get-CaptureCheckView -Checklist $state.Checklist -Result $result -SysprepAtDeploy:((& $getChoice).SysprepAtDeploy)
         $w.LstChecks.ItemsSource = @($view.Rows)
         $w.BarCheck.Visibility = if ($view.Busy) { 'Visible' } else { 'Collapsed' }
         $w.BarCheck.IsIndeterminate = $view.Percent -lt 0
@@ -197,8 +212,8 @@ function Show-CaptureWizard {
                 elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
             }
             1 {
-                if (-not $w.ChkPrepared.IsChecked) { 'Run the prepare command on the reference machine first, then tick the box.' }
-                elseif ($c.Mode -eq 'DiskFile' -and (Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }
+                if (-not $w.ChkPrepared.IsChecked) { $(if ($c.SysprepAtDeploy) { 'Shut the VM down first, then tick the box.' } else { 'Run the prepare command on the reference machine first, then tick the box.' }) }
+                elseif ($c.Mode -eq 'DiskFile' -and (Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { $(if ($c.SysprepAtDeploy) { 'VMware still has this VM open. Shut it down, then click Next.' } else { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }) }
             }
             2 {
                 if (-not $state.CheckPassed) { 'The disk check has not passed yet. Fix the lines with a cross, then click Check again.' }
@@ -220,7 +235,8 @@ function Show-CaptureWizard {
                 "Disk file $current, captured on this PC" +
                 $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" }) +
                 $(if ($state.Result -and "$($state.Result.state)" -eq 'done') {
-                    "`r`nWindows:       $($state.Result.windowsName), $(Format-DiskSize ([double]$state.Result.usedBytes)) used, generalized" })
+                    "`r`nWindows:       $($state.Result.windowsName), $(Format-DiskSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
+                $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
             }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
             'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
@@ -258,6 +274,9 @@ function Show-CaptureWizard {
 
     $showPage = {
         $isDisk = (& $getChoice).Mode -eq 'DiskFile'
+        # Sysprep on each PC needs the disk check, so only for a VM's disk file.
+        $w.ChkSysprepAtDeploy.Visibility = if ($isDisk) { 'Visible' } else { 'Collapsed' }
+        & $updatePrepPage
         $w.Step2.Text = if ($isDisk) { '3. Check the disk' } else { '3. Check the disk (VM disk only)' }
         for ($i = 0; $i -le $state.Last; $i++) {
             $w["Page$i"].Visibility = if ($i -eq $state.Page) { 'Visible' } else { 'Collapsed' }
@@ -285,7 +304,7 @@ function Show-CaptureWizard {
             $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
             $proc = Start-Process powershell.exe -WindowStyle Minimized -PassThru -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                -Split:$c.Split -NewVersion:$c.NewVersion -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath)
+                -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath)
             $state.HandedOver = $true
             Show-BuildProgress -Owner $Owner -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Capturing $($c.Name)"
             return $true

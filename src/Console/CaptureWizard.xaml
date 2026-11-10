@@ -105,13 +105,15 @@
       <!-- Page 2: sysprep -->
       <ScrollViewer x:Name="Page1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
-          <TextBlock Style="{StaticResource Title}" Text="Run sysprep on the reference machine"/>
-          <TextBlock Style="{StaticResource Body}" Text="The tool cannot reach this machine's Windows by itself, so prepare it by hand. Run this in an elevated PowerShell window on the reference machine. It checks for a pending reboot, BitLocker and Store apps that break sysprep, then runs sysprep and shuts the machine down."/>
+          <TextBlock x:Name="TxtPrepTitle" Style="{StaticResource Title}" Text="Run sysprep on the reference machine"/>
+          <CheckBox x:Name="ChkSysprepAtDeploy" Margin="0,0,0,10"
+                    Content="Skip sysprep here: each PC runs sysprep at its first start (5-10 minutes more per PC, try it on one PC first)"/>
+          <TextBlock x:Name="TxtPrepIntro" Style="{StaticResource Body}" Text="The tool cannot reach this machine's Windows by itself, so prepare it by hand. Run this in an elevated PowerShell window on the reference machine. It checks for a pending reboot, BitLocker and Store apps that break sysprep, then runs sysprep and shuts the machine down."/>
           <DockPanel Margin="0,0,0,8">
             <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
             <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
           </DockPanel>
-          <TextBlock Style="{StaticResource Body}" Foreground="#6B7280"
+          <TextBlock x:Name="TxtPrepHint" Style="{StaticResource Body}" Foreground="#6B7280"
                      Text="Add -CheckOnly to only report problems, or -RemoveUserApps to remove the Store apps that block sysprep."/>
           <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
                     Content="The reference machine has been prepared with sysprep and is shut down"/>

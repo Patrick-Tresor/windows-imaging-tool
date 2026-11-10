@@ -262,6 +262,9 @@ try {
         -ReuseConvertedDisk 'C:\Temp\capture-check-1.vhd' -ProgressFile 'C:\Temp\p.json' -LogPath 'C:\Logs\c.log'
     Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vcp[-1]))) "& 'x.ps1' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ContentRoot 'D:\Share' -Compression max -ReuseConvertedDisk 'C:\Temp\capture-check-1.vhd' -ProgressFile 'C:\Temp\p.json' -LogPath 'C:\Logs\c.log' -NoPrompt" 'VM capture command passes the checked copy, progress file and log'
 
+    $vcs = Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'D:\Share' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -SysprepAtDeploy
+    Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vcs[-1]))) "& 'x.ps1' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ContentRoot 'D:\Share' -Compression max -SysprepAtDeploy -NoPrompt" 'VM capture command passes sysprep on each PC'
+
     $vhdxConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vhdx' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe'
     Assert-Equal $vhdxConv $null 'a VHDX needs no conversion'
     $qcowConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.qcow2' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe' -VBoxManage 'C:\VBox\VBoxManage.exe'

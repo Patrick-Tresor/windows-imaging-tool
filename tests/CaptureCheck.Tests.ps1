@@ -122,6 +122,17 @@ try {
     Assert-Equal ((Get-Row $view 'sysprep').Detail -like 'Not generalized (IMAGE_STATE_COMPLETE)*') $true 'view: says why'
     Assert-Equal $view.Passed $false 'view: not generalized does not pass'
 
+    # Sysprep on each PC: a disk that was only shut down passes; one Fast Startup hibernated does not.
+    $view = Get-CaptureCheckView -Checklist $ok -Result $notGeneralized -SysprepAtDeploy
+    Assert-Equal $view.Passed $true 'view: sysprep on each PC lets a not-sysprepped disk through'
+    Assert-Equal ((Get-Row $view 'sysprep').Mark) $tick 'view: sysprep on each PC has a tick'
+    Assert-Equal ((Get-Row $view 'sysprep').Name) 'Not sysprepped: each PC runs sysprep' 'view: sysprep on each PC says so'
+    $hibernated = $notGeneralized.PSObject.Copy()
+    $hibernated | Add-Member -NotePropertyName hibernated -NotePropertyValue $true -Force
+    $view = Get-CaptureCheckView -Checklist $ok -Result $hibernated -SysprepAtDeploy
+    Assert-Equal $view.Passed $false 'view: a hibernated disk does not pass'
+    Assert-Equal ((Get-Row $view 'sysprep').Detail -like '*shutdown /s /t 0*') $true 'view: a hibernated disk says how to shut down fully'
+
     $notGeneralized.generalized = $true
     $view = Get-CaptureCheckView -Checklist $ok -Result $notGeneralized
     Assert-Equal $view.Passed $true 'view: generalized Windows passes'

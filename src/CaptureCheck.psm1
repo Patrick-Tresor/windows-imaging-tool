@@ -214,8 +214,10 @@ function Get-CaptureCheckView {
         What the Check the disk page shows: the checklist rows, then Windows on the disk and Sysprep, each with a
         tick, a cross or a circle (waiting). Passed is true when the capture may start. Busy and Percent drive the
         progress bar while the disk is read. $Result is Read-CaptureCheckResult's, or $null before the check ran.
+        With -SysprepAtDeploy (each PC runs sysprep at its first start) a disk that is not sysprepped passes too,
+        unless Fast Startup hibernated it instead of shutting it down.
     #>
-    param([Parameter(Mandatory)]$Checklist, $Result)
+    param([Parameter(Mandatory)]$Checklist, $Result, [switch]$SysprepAtDeploy)
     $tick = [string][char]0x2713; $cross = [string][char]0x2717; $wait = [string][char]0x25CB
     $view = { param($ok, $id, $name, $detail)
         [pscustomobject]@{
@@ -243,6 +245,11 @@ function Get-CaptureCheckView {
         [void]$rows.Add((& $view $true 'windows' 'Windows on the disk' "$($Result.windowsName)$size"))
         if ($Result.generalized -eq $true) {
             [void]$rows.Add((& $view $true 'sysprep' 'Sysprep has run (generalized)' 'Ready to capture.'))
+            $passed = $true
+        } elseif ($SysprepAtDeploy -and $Result.hibernated -eq $true) {
+            [void]$rows.Add((& $view $false 'sysprep' 'VM fully shut down' 'Fast Startup hibernated Windows instead of shutting it down. Start the VM, run shutdown /s /t 0 in it, then click Check again.'))
+        } elseif ($SysprepAtDeploy) {
+            [void]$rows.Add((& $view $true 'sysprep' 'Not sysprepped: each PC runs sysprep' 'Ready to capture. Every PC deployed from this image runs sysprep at its first start (5-10 minutes and one restart more).'))
             $passed = $true
         } else {
             $why = "Not generalized ($(if ($Result.imageState) { $Result.imageState } else { 'no sysprep state' })). Boot the VM, run the prepare command, let sysprep shut it down, then click Check again."
