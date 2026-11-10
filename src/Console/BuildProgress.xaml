@@ -1,0 +1,86 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Build progress" Width="820" Height="600" MinWidth="560" MinHeight="360"
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="8,0,0,0"/>
+      <Setter Property="MinWidth" Value="90"/>
+    </Style>
+  </Window.Resources>
+
+  <DockPanel Margin="16">
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+      <DockPanel>
+        <TextBlock x:Name="TxtElapsed" DockPanel.Dock="Right" FontSize="18" Foreground="#5B6170" VerticalAlignment="Center"/>
+        <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Text="Building media" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+      <TextBlock x:Name="TxtSummary" Foreground="#5B6170" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" Text="Starting..."/>
+    </StackPanel>
+
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+      <Button x:Name="BtnClose" DockPanel.Dock="Right" Content="Close"/>
+      <Button x:Name="BtnLog" DockPanel.Dock="Right" Content="Open log" IsEnabled="False"/>
+      <Button x:Name="BtnWindow" DockPanel.Dock="Right" Content="Show build window"
+              ToolTip="The build's own window, with every line DISM and the copy print"/>
+      <TextBlock Foreground="#5B6170" VerticalAlignment="Center" TextWrapping="Wrap"
+                 Text="Closing this window does not stop the build."/>
+    </DockPanel>
+
+    <Border BorderBrush="#E1E3E8" BorderThickness="1" CornerRadius="4" Padding="16,8">
+      <ScrollViewer x:Name="ScrollSteps" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ItemsControl x:Name="LstSteps">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="0,6">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="110"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <DockPanel Grid.Row="0" Grid.Column="0">
+                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="#3B3F48" Margin="8,0,0,0"/>
+                  <TextBlock x:Name="StepName" Text="{Binding Name}" Foreground="#1F2329" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+                <ProgressBar x:Name="Bar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
+                             Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
+                             Foreground="#0F6CBD" Background="#E8EAEE" BorderThickness="0"/>
+                <TextBlock x:Name="Status" Grid.Row="1" Grid.Column="1" Grid.RowSpan="1" Text="{Binding Status}" Margin="12,0,0,0"
+                           VerticalAlignment="Center" Foreground="#5B6170"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="#5B6170" FontSize="12" Margin="0,2,0,0"
+                           TextTrimming="CharacterEllipsis"/>
+              </Grid>
+              <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding State}" Value="pending">
+                  <Setter TargetName="StepName" Property="Foreground" Value="#8A8F99"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="done">
+                  <Setter TargetName="Bar" Property="Foreground" Value="#2E9E5B"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="#2E9E5B"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="reused">
+                  <Setter TargetName="Bar" Property="Foreground" Value="#2E9E5B"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="#2E9E5B"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="skipped">
+                  <Setter TargetName="Bar" Property="Foreground" Value="#C9CDD4"/>
+                  <Setter TargetName="StepName" Property="Foreground" Value="#8A8F99"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="failed">
+                  <Setter TargetName="Bar" Property="Foreground" Value="#C4314B"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="#C4314B"/>
+                  <Setter TargetName="Status" Property="FontWeight" Value="SemiBold"/>
+                </DataTrigger>
+              </DataTemplate.Triggers>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+  </DockPanel>
+</Window>
