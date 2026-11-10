@@ -407,8 +407,8 @@ try {
 
     Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
     $defender = Add-CaptureDefenderExclusions -Paths @($windowsRoot, $staging, $disk.Path)
-    # No /Verify: it reads the whole image back after DISM writes it and took over half an hour on a Windows 11
-    # disk. /CheckIntegrity still stores checksums, so a damaged .wim is refused when it is applied.
+    # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
+    # still stores checksums, so a damaged .wim is refused when it is applied.
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
         "/Compress:$Compression", '/CheckIntegrity')
     if ($Description) { $captureArgs += "/Description:$Description" }

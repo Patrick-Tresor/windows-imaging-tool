@@ -114,8 +114,8 @@ On the admin PC, in the console: **Images > Capture new image...**
    so the time left shows once the percent starts moving. While DISM runs, Microsoft Defender skips
    the mounted disk, the new image and DISM (the log lists them, and they are removed afterwards). A
    content root on a USB drive or a network share gets the image written on this PC's disk first and
-   copied over at the end. The capture skips DISM's /Verify read-back (half an hour on
-   its own); the image keeps its checksums. The log ends the capture with its time and speed in MB/s.
+   copied over at the end. The capture skips DISM's slower /Verify checks; the image
+   keeps its checksums. The log ends the capture with its time and speed in MB/s.
 
 ## 9. Put the VM back
 
