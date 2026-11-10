@@ -831,8 +831,8 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down, sysprepped VM's
-    # disk file.
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down VM's disk file,
+    # sysprepped, or not with -SysprepAtDeploy (each PC runs sysprep at its first start).
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -842,6 +842,7 @@ function Get-VMCaptureArguments {
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
         [switch]$Split,
         [switch]$NewVersion,
+        [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,
         [string]$ProgressFile,
         [string]$LogPath
@@ -852,6 +853,7 @@ function Get-VMCaptureArguments {
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
+    if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
     if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
     if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }

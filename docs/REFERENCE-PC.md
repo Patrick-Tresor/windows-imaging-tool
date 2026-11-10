@@ -82,6 +82,24 @@ no longer be generalized.
 If the VM does not shut down and sysprep shows an error, the next `-CheckOnly` run shows the first
 error line from `C:\Windows\System32\Sysprep\Panther\setuperr.log`.
 
+### Or: sysprep on each PC instead (optional, untested on hardware)
+
+On the capture wizard's second page, **Skip sysprep here: each PC runs sysprep at its first start**
+lets you capture the VM without sysprep. Run `shutdown /s /t 0` in the VM instead (the Start menu's
+Shut down only hibernates Windows when Fast Startup is on, and the check refuses that disk).
+
+Each PC deployed from that image then:
+
+1. applies the image and drivers in WinPE as usual, and WinPE sees the image is not sysprepped;
+2. starts the VM's Windows once, with "Preparing this PC" on the logon screen (don't sign in);
+3. runs the `-CheckOnly -RemoveUserApps` checks and `sysprep /generalize /oobe /reboot` with the
+   deploy's answer file, as SYSTEM;
+4. restarts into Windows setup: name, domain join, account, apps and tasks as with a sysprepped image.
+
+It costs 5-10 minutes and one restart per PC. If the checks or sysprep fail, the PC stays a copy of
+the reference VM and its logon screen says why; the full log is `C:\Windows\Temp\SysprepAtDeploy.log`.
+Fix the VM, capture again and redeploy. Try a new image on one PC of each model before using it widely.
+
 ## 8. Capture
 
 On the admin PC, in the console: **Images > Capture new image...**

@@ -567,6 +567,9 @@ are both read. The deploy log says which entry was used.
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
       Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
+      Or, for a disk file, tick **Skip sysprep here: each PC runs sysprep at its first start** and only
+      run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
+      (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
    3. **Check the disk** (disk file only): each line gets a tick or a cross. The quick checks (the
       disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
       free space for the temporary copy) come first, then the wizard reads the Windows on the disk
