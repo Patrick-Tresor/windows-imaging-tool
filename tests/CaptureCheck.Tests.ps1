@@ -159,6 +159,7 @@ Assert-Equal (Test-SlowImageTarget -DriveType Network) $true 'slow target: netwo
 $captureText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Capture-VMImage.ps1')
 $finally = $captureText.Substring($captureText.LastIndexOf('finally {'))
 Assert-Equal ($captureText -match '\$defender = Add-CaptureDefenderExclusions') $true 'capture adds Defender exclusions for DISM'
+Assert-Equal ($captureText -match "'/Verify'") $false 'capture does not read the whole image back with /Verify'
 Assert-Equal ($finally -match 'Remove-CaptureDefenderExclusions \$defender') $true 'capture removes them in finally'
 
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
