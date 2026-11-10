@@ -33,6 +33,7 @@ Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
+Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -41,6 +42,7 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 . (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
+. (Join-Path $PSScriptRoot 'BuildProgress.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -833,10 +835,18 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     }
     if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
 
-    # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
+    # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
+    # window shows each step; the build's window (Show build window) and its log have every line.
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $progressFile = Join-Path $env:TEMP "media-build-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
+    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
+    $logPath = [IO.Path]::Combine($logDir, "media-build-$stamp.log")
+    $buildArgs += @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
     $buildArgs = @('-NoExit') + $buildArgs
-    Start-Process powershell.exe -ArgumentList $buildArgs
-    Set-Status 'Media build started in a separate window. It shows the copy progress and says USB media ready when done.'
+    $proc = Start-Process powershell.exe -ArgumentList $buildArgs -WindowStyle Minimized -PassThru
+    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } elseif ($ui.RbIso.IsChecked) { 'ISO' } else { 'PXE boot image' }
+    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Building $what"
+    Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 
 $ui.BtnWdsCheck.Add_Click({ Invoke-Safely {

@@ -548,6 +548,13 @@ are both read. The deploy log says which entry was used.
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
    Volume down while it starts.
+   From the console, a **Build progress** window lists every step (checking the content, copying WinPE,
+   mounting boot.wim, adding components and drivers, configuring WinPE, unmounting, partitioning the
+   stick, copying WinPE and the content) with its own bar, elapsed time and a tick when it is complete;
+   steps taken from the WinPE build cache say Reused. If a step fails it is marked Failed with one line;
+   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`) and
+   **Show build window** brings up the build's own window. Closing the progress window does not stop the
+   build. From the command line, `-ProgressFile` and `-LogPath` do the same.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a VM (VMware Workstation, VirtualBox, Hyper-V or others): install Windows,

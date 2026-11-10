@@ -48,11 +48,62 @@ param(
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
+    [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
+    [string]$LogPath,                # transcript of the build (the progress window's Open log button)
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
+
+if ($LogPath) {
+    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
+    try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { Write-Warning "No build log: $($_.Exception.Message)"; $LogPath = $null }
+}
+# The steps the progress window lists, in the order they run. Only the parameters decide them, so the list is
+# there before anything can fail.
+$steps = @(
+    , @('check', 'Checking the ADK and the content')
+    , @('copype', 'Copying WinPE files')
+)
+if (-not $NoVendorWinPEDrivers) { $steps += , @('pedrivers', 'Getting the WinPE driver packs') }
+$steps += @(
+    , @('mount', 'Mounting boot.wim')
+    , @('components', 'Adding WinPE components')
+    , @('drivers', 'Adding drivers to WinPE')
+)
+if (-not $NoWinPECache) { $steps += , @('cache', 'Saving WinPE for the next build') }
+$steps += @(
+    , @('configure', 'Configuring WinPE')
+    , @('unmount', 'Unmounting boot.wim')
+)
+switch ($Target) {
+    'Usb' {
+        if ($UpdateOnly) { $steps += @(@('stick', 'Checking what changed on the stick'), @('bootfiles', 'Updating WinPE on the stick')) }
+        else { $steps += @(@('stick', 'Partitioning the USB stick'), @('bootfiles', 'Copying WinPE to the stick')) }
+        if ($ContentSource) { $steps += , @('content', $(if ($UpdateOnly) { 'Copying changed images and content' } else { 'Copying images and content' })) }
+        if (-not $NoVendorWinPEDrivers) { $steps += , @('packs', 'Copying WinPE driver packs to the stick') }
+    }
+    'Iso' { $steps += , @('iso', 'Making the ISO') }
+    'Pxe' {
+        $steps += , @('pxe', 'Writing boot.wim')
+        if ($PublishToWds) { $steps += , @('wds', 'Publishing boot.wim to WDS') }
+    }
+}
+$title = switch ($Target) {
+    'Usb' { if ($UpdateOnly) { "Updating USB stick (disk $UsbDiskNumber)" } else { "Creating USB stick (disk $UsbDiskNumber)" } }
+    'Iso' { 'Creating ISO' }
+    'Pxe' { 'Creating PXE boot image' }
+}
+Start-BuildProgress -Path $ProgressFile -Title $title -Steps $steps -LogPath $LogPath
+# Any error from here on: the progress window shows the step that failed and one line, this window and the log the rest.
+trap {
+    Stop-BuildProgress -Message $_.Exception.Message
+    if ($LogPath) { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; try { Stop-Transcript | Out-Null } catch { } }
+    break
+}
+Start-BuildStep 'check'
 Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
@@ -122,13 +173,17 @@ if ($UpdateOnly) {
     $null = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
 }
 
+Complete-BuildStep 'check' -Detail $(if ($copyPlan) { '{0} files, {1} to copy' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes) } else { '' })
+
 # copype and MakeWinPEMedia expect the ADK environment variables that DandISetEnv.bat sets.
+Start-BuildStep 'copype'
 $envBat = "$adk\Deployment Tools\DandISetEnv.bat"
 cmd /c "`"$envBat`" && set" | ForEach-Object { if ($_ -match '^(.*?)=(.*)$') { Set-Item "env:$($Matches[1])" $Matches[2] } }
 
 if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
 & cmd /c "copype amd64 `"$WorkDir`""
 if ($LASTEXITCODE -ne 0) { throw 'copype failed' }
+Complete-BuildStep 'copype'
 
 $mount = Join-Path $WorkDir 'mount'
 $bootWim = Join-Path $WorkDir 'media\sources\boot.wim'
@@ -140,7 +195,9 @@ $bootWim = Join-Path $WorkDir 'media\sources\boot.wim'
 # Intel storage drivers in Dell's pack match the controller, so they cover Lenovo PCs with VMD too.
 $peSources = @(); $peProblem = $null; $vendorPacks = @()
 if (-not $NoVendorWinPEDrivers) {
+    Start-BuildStep 'pedrivers'
     foreach ($vendor in $WinPEDriverVendors) {
+        Set-BuildStepProgress 'pedrivers' -Detail "$vendor (downloaded once, then taken from the cache)"
         try {
             $pack = if ($vendor -eq 'HP') { Save-HpWinPEDriverPack } else { Save-WinPEDriverPack }
             $vendorPacks += $pack
@@ -151,6 +208,7 @@ if (-not $NoVendorWinPEDrivers) {
             Write-Warning $msg
         }
     }
+    Complete-BuildStep 'pedrivers' -Detail $(if ($peProblem) { 'Some packs missing, see the log' } else { (@($vendorPacks | ForEach-Object Source) -join ', ') })
 }
 if ($WinPEDrivers) { $peSources += [pscustomobject]@{ Path = $WinPEDrivers; Name = 'Extra WinPE drivers' } }
 if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peSources += [pscustomobject]@{ Path = "$ContentSource\Drivers\_WinPE"; Name = 'Drivers\_WinPE' } }
@@ -162,6 +220,7 @@ $pePlan = @(Get-WinPEDriverPlan -Sources $peSources)
 $peKey = Get-WinPEBuildKey -BaseWim $bootWim -Components (Get-WinPEComponentNames) -DriverPlan $pePlan
 $peCached = if ($NoWinPECache) { $null } else { Find-WinPEBuildCache -Key $peKey }
 $peReport = @()
+Start-BuildStep 'mount'
 if ($peCached) {
     Copy-Item -LiteralPath $peCached.Wim -Destination $bootWim -Force
     $peReport = @($peCached.Sources)
@@ -169,16 +228,30 @@ if ($peCached) {
 }
 
 Mount-WindowsImage -ImagePath $bootWim -Index 1 -Path $mount | Out-Null
+Complete-BuildStep 'mount'
 try {
-    if (-not $peCached) {
+    if ($peCached) {
+        $reused = "From the build of $($peCached.Built)"
+        Complete-BuildStep 'components' -State reused -Detail $reused
+        Complete-BuildStep 'drivers' -State reused -Detail $reused
+        Complete-BuildStep 'cache' -State skipped -Detail 'Same ADK and drivers as last time'
+    } else {
         # PowerShell, WMI, and storage cmdlets inside WinPE. Order matters: dependencies first.
         $ocs = "$peRoot\amd64\WinPE_OCs"
         Write-Host 'Adding the WinPE components (PowerShell, WMI, storage)...'
-        foreach ($oc in Get-WinPEComponentNames) {
+        Start-BuildStep 'components'
+        $ocNames = @(Get-WinPEComponentNames)
+        for ($n = 0; $n -lt $ocNames.Count; $n++) {
+            $oc = $ocNames[$n]
+            Set-BuildStepProgress 'components' -Percent (100 * $n / $ocNames.Count) -Detail $oc
             Add-WindowsPackage -Path $mount -PackagePath "$ocs\$oc.cab" | Out-Null
             $lang = "$ocs\en-us\$($oc)_en-us.cab"
             if (Test-Path $lang) { Add-WindowsPackage -Path $mount -PackagePath $lang | Out-Null }
         }
+        Complete-BuildStep 'components' -Detail "$($ocNames.Count) components"
+        Start-BuildStep 'drivers'
+        $infTotal = [Math]::Max(1, (@($pePlan | ForEach-Object { @($_.Infs).Count }) | Measure-Object -Sum).Sum)
+        $infDone = 0; $infAdded = 0
         foreach ($src in $pePlan) {
             # One bad driver must not lose the others.
             $infs = @($src.Infs)
@@ -190,6 +263,8 @@ try {
                 $line = Format-DriverProgressLine -Index ($i + 1) -Total $infs.Count -Path $inf.FullName -Root $src.Path -Elapsed $clock.Elapsed
                 Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Status $line -PercentComplete ([int](100 * $i / [Math]::Max(1, $infs.Count)))
                 Write-Host -NoNewline "  $line"
+                Set-BuildStepProgress 'drivers' -Percent (100 * $infDone / $infTotal) -Detail ('{0} of {1}: {2}' -f ($infDone + 1), $infTotal, $inf.Name)
+                $infDone++
                 # The same driver in two vendors' packs (Intel NICs, Intel RST) goes in once.
                 if ($infs[$i].Duplicate) { $same++; Write-Host ' already added'; continue }
                 try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name; Write-Host ' ok' }
@@ -198,17 +273,22 @@ try {
             Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Completed
             Write-Host ('Done: {0} of {1} WinPE driver(s) added{2} in {3:m\:ss}.' -f $added.Count, $infs.Count, $(if ($same) { ", $same already in from another pack" } else { '' }), $clock.Elapsed)
             if ($failed) { Write-Warning "$($failed.Count) of $($infs.Count) WinPE driver(s) from $($src.Name) could not be added: $(($failed | Select-Object -Unique) -join ', ')" }
+            $infAdded += $added.Count
             $peReport += [ordered]@{ name = $src.Name; added = $added.Count; failed = @($failed) ; vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
         }
+        Complete-BuildStep 'drivers' -Detail $(if ($pePlan) { "$infAdded driver(s) added" } else { 'No WinPE drivers' })
         if (-not $NoWinPECache) {
             # Save now, before the scripts and settings of this build go in, and keep that boot.wim for the next build.
             Write-Host 'Saving WinPE with its components and drivers for the next build...'
+            Start-BuildStep 'cache'
             Dismount-WindowsImage -Path $mount -Save | Out-Null
             try { $null = Save-WinPEBuildCache -Key $peKey -WimPath $bootWim -Sources $peReport }
             catch { Write-Warning "WinPE build not cached (the next build adds the drivers again): $($_.Exception.Message)" }
             Mount-WindowsImage -ImagePath $bootWim -Index 1 -Path $mount | Out-Null
+            Complete-BuildStep 'cache'
         }
     }
+    Start-BuildStep 'configure'
     $vmdAdded = @($peReport | ForEach-Object { $_.vmd } | Where-Object { $_ }).Count -gt 0
     if ($vmdAdded) { Write-Host "WinPE has the Intel RST/VMD storage driver ($((@($peReport | ForEach-Object { $_.vmd } | Where-Object { $_ }) | Select-Object -Unique) -join ', '))." -ForegroundColor Green }
     else { Write-Warning 'WinPE has no Intel RST/VMD storage driver: PCs with VMD on (many 11th gen and later laptops) will show no internal disk.' }
@@ -264,22 +344,28 @@ try {
     [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
         ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
+    Complete-BuildStep 'configure' -Detail $(if ($vmdAdded) { 'Intel RST/VMD storage driver in' } else { 'No Intel RST/VMD storage driver, see the log' })
 }
 catch {
     Dismount-WindowsImage -Path $mount -Discard -ErrorAction SilentlyContinue | Out-Null
     throw
 }
+Start-BuildStep 'unmount' -Detail 'Saving the changes to boot.wim'
 Dismount-WindowsImage -Path $mount -Save | Out-Null
+Complete-BuildStep 'unmount'
 
 switch ($Target) {
     'Pxe' {
         $pxeWim = Join-Path $OutputPath 'boot.wim'
+        Start-BuildStep 'pxe' -Detail $pxeWim
         Copy-Item $bootWim $pxeWim -Force
-        if ($PublishToWds) { & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List }
+        Complete-BuildStep 'pxe'
+        if ($PublishToWds) { Start-BuildStep 'wds'; & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List; Complete-BuildStep 'wds' }
         else { Write-Host "boot.wim written to $OutputPath. Publish it with Publish-WdsBootImage.ps1, or import it into WDS (Boot Images > Add Boot Image)." }
     }
     'Iso' {
         $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
+        Start-BuildStep 'iso' -Detail $iso
         if (Test-Path $iso) { Remove-Item $iso }
         # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
         # UEFI: the no-prompt EFI boot image. BIOS: etfsboot.com only prompts when boot\bootfix.bin exists.
@@ -293,14 +379,18 @@ switch ($Target) {
                 "It used $WorkDir\media with the boot files $($bootFiles.BiosBoot) and $($bootFiles.UefiBoot). " +
                 'Check that the output folder exists, has free space and the ISO is not open or attached to a VM.')
         }
+        Complete-BuildStep 'iso'
         Write-Host "ISO written to $iso"
     }
     'Usb' {
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
         $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
         $update = $null
+        # The content copy's percent, speed and time left for the progress window.
+        $onCopy = { param($p) Set-BuildStepProgress 'content' -Percent $p.Percent -Detail ('{0} of {1}, {2}/s, about {3} left' -f (Format-MediaSize $p.BytesDone), (Format-MediaSize $p.TotalBytes), (Format-MediaSize ([int64]$p.BytesPerSecond)), (Format-MediaDuration $p.SecondsLeft)) }
         if ($UpdateOnly) {
             # A stick built before: keep its partitions, refresh WinPE, copy only what changed, delete what was dropped.
+            Start-BuildStep 'stick'
             $sticks = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
             $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
             if ($copyPlan) {
@@ -310,12 +400,17 @@ switch ($Target) {
                     throw ('The update needs {0} more but the stick''s DEPLOY partition has {1} free. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $update.NeededBytes), (Format-MediaSize $sticks.Data.FreeBytes))
                 }
             }
+            Complete-BuildStep 'stick' -Detail $(if ($update) { '{0} file(s) to copy, {1} unchanged, {2} to delete' -f $update.Copy.FileCount, $update.Unchanged, @($update.Stale).Count } else { '' })
             Write-Host "Updating WinPE on ${bootLetter}:..."
+            Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
             robocopy "$WorkDir\media" "${bootLetter}:\" /MIR /NFL /NDL /NJH /NJS | Out-Null
             if ($LASTEXITCODE -ge 8) { throw "Updating the WinPE boot files on ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
+            Complete-BuildStep 'bootfiles'
             if ($update) {
+                Start-BuildStep 'content'
                 Remove-StaleMediaFiles -UpdatePlan $update -Destination "${dataLetter}:\"
-                $copied = Copy-MediaContent -Plan $update.Copy -Destination "${dataLetter}:\"
+                $copied = Copy-MediaContent -Plan $update.Copy -Destination "${dataLetter}:\" -OnProgress $onCopy
+                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
                 Write-Host ('Copied {0} files, {1}, in {2}; {3} file(s) were already up to date' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), $update.Unchanged)
             }
         }
@@ -327,8 +422,9 @@ switch ($Target) {
                     throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
                 }
             }
-            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { return }
+            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
             Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
+            Start-BuildStep 'stick' -Detail "$($disk.FriendlyName): WINPE (FAT32) and DEPLOY (NTFS)"
 
             # Two partitions on MBR: an active FAT32 one that boots both UEFI and BIOS, NTFS for images larger than 4 GB.
             Reset-UsbDisk -DiskNumber $UsbDiskNumber
@@ -339,32 +435,44 @@ switch ($Target) {
 
             $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
             $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
+            Complete-BuildStep 'stick' -Detail "WINPE on ${bootLetter}:, DEPLOY on ${dataLetter}:"
             Write-Host "Copying WinPE boot files to ${bootLetter}:..."
+            Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
             robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
             if ($LASTEXITCODE -ge 8) { throw "Copying the WinPE boot files to ${bootLetter}: failed (robocopy exit code $LASTEXITCODE)." }
             # Legacy BIOS boot code in the MBR and the partition boot sector, as MakeWinPEMedia writes it.
             $bootsect = "$adk\Deployment Tools\amd64\BCDBoot\bootsect.exe"
             & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
+            Complete-BuildStep 'bootfiles'
             # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
             New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
             if ($copyPlan) {
                 # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
                 # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
-                $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\"
+                Start-BuildStep 'content'
+                $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\" -OnProgress $onCopy
                 Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
+                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
             }
         }
         if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
         # The vendor WinPE packs on the stick too, so WinPE can load them with drvload when boot.wim lacks a driver.
         # Only the x64 drivers, with progress, and on an update only the files that changed.
-        foreach ($pack in $vendorPacks) {
+        if ($vendorPacks) { Start-BuildStep 'packs' }
+        $packCopied = 0
+        for ($n = 0; $n -lt $vendorPacks.Count; $n++) {
+            $pack = $vendorPacks[$n]
             $packPlan = (Get-MediaUpdatePlan -Plan (Get-WinPEPackCopyPlan -PackPath $pack.Path) -Destination "${dataLetter}:\").Copy
             if (-not $packPlan.FileCount) { Write-Host "$($pack.Source) is already on the stick."; continue }
             Write-Host ('Copying {0} to the stick: {1} files, {2}' -f $pack.Source, $packPlan.FileCount, (Format-MediaSize $packPlan.TotalBytes))
-            $copied = Copy-MediaContent -Plan $packPlan -Destination "${dataLetter}:\"
+            $packBase = 100 * $n / $vendorPacks.Count; $packShare = 100 / $vendorPacks.Count; $packName = $pack.Source
+            $onPack = { param($p) Set-BuildStepProgress 'packs' -Percent ($packBase + $packShare * $p.Percent / 100) -Detail ('{0}: {1} of {2}' -f $packName, (Format-MediaSize $p.BytesDone), (Format-MediaSize $p.TotalBytes)) }
+            $copied = Copy-MediaContent -Plan $packPlan -Destination "${dataLetter}:\" -OnProgress $onPack
+            $packCopied++
             Write-Host ('Copied in {0}' -f (Format-MediaDuration $copied.Seconds))
         }
+        if ($vendorPacks) { Complete-BuildStep 'packs' -Detail $(if ($packCopied) { "$packCopied pack(s) copied" } else { 'Already on the stick' }) }
         Write-Host ''
         Write-Host '==============================================' -ForegroundColor Green
         Write-Host ' USB media ready' -ForegroundColor Green
@@ -374,3 +482,5 @@ switch ($Target) {
         Write-Host '==============================================' -ForegroundColor Green
     }
 }
+Stop-BuildProgress
+if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
