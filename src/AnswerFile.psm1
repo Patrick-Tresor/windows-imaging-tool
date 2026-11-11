@@ -700,6 +700,23 @@ function Get-DefaultKeyboardId([string]$Language) {
     "$($lang):$kbd"
 }
 
+function Get-RegionalSettings([string]$Language, [string]$Fallback) {
+    # The editor asks for two languages only, the way Dell Image Assist sets International-Core:
+    # the system language is the display language, system locale and first keyboard; the fallback language covers
+    # untranslated text, gives the second keyboard and the formats (dates, numbers). fr-CA + en-US gives
+    # 0c0c:00001009; 0409:00000409 / fr-CA / fr-CA / en-US / en-US.
+    $Language = "$Language".Trim(); $Fallback = "$Fallback".Trim()
+    $first = if ($Language) { $k = Get-DefaultKeyboardId $Language; if ($k) { $k } else { $Language } } else { '' }
+    $second = if ($Fallback) { $k = Get-DefaultKeyboardId $Fallback; if ($k) { $k } else { $Fallback } } else { '' }
+    [pscustomobject]@{
+        InputLocale        = Join-InputLocale $first $second
+        SystemLocale       = $Language
+        UILanguage         = $Language
+        UILanguageFallback = $Fallback
+        UserLocale         = if ($Fallback) { $Fallback } else { $Language }
+    }
+}
+
 function Join-InputLocale([string]$Main, [string]$Second) {
     # Second keyboard after the main one, without repeating it. Windows takes up to five, the first is the default.
     $parts = [Collections.Generic.List[string]]::new()
@@ -857,4 +874,4 @@ function ConvertFrom-DeployWizardAnswerFile {
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
-    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId
+    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings
