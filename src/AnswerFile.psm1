@@ -696,7 +696,10 @@ function Get-DefaultKeyboardId([string]$Language) {
     # 4096 (0x1000) is LOCALE_CUSTOM_UNSPECIFIED: Windows makes up a culture for a tag it doesn't know.
     if (-not $c.KeyboardLayoutId -or $c.KeyboardLayoutId -eq 4096 -or $c.LCID -eq 4096) { return $null }
     $lang = '{0:x4}' -f $c.LCID
-    $kbd = '{0:x8}' -f $c.KeyboardLayoutId
+    # .NET gives fr-CA the old Canadian French layout (00000c0c); Windows Setup and Dell use Canadian French 00001009.
+    $windowsLayout = @{ 'fr-CA' = 0x1009 }
+    $layout = if ($windowsLayout.ContainsKey($c.Name)) { $windowsLayout[$c.Name] } else { $c.KeyboardLayoutId }
+    $kbd = '{0:x8}' -f $layout
     "$($lang):$kbd"
 }
 
