@@ -688,6 +688,17 @@ function Split-InputLocale([string]$Value) {
     @($parts[0], (@($parts | Select-Object -Skip 1) -join '; '))
 }
 
+function Get-DefaultKeyboardId([string]$Language) {
+    # language:keyboard ID for a language's own keyboard, as Windows Setup writes it (en-US -> 0409:00000409).
+    # Used to give the fallback language its keyboard. $null for a tag .NET doesn't know.
+    if (-not $Language) { return $null }
+    try { $c = [Globalization.CultureInfo]::GetCultureInfo($Language.Trim()) } catch { return $null }
+    if (-not $c.KeyboardLayoutId -or $c.KeyboardLayoutId -eq 4096) { return $null }
+    $lang = '{0:x4}' -f $c.LCID
+    $kbd = '{0:x8}' -f $c.KeyboardLayoutId
+    "$($lang):$kbd"
+}
+
 function Join-InputLocale([string]$Main, [string]$Second) {
     # Second keyboard after the main one, without repeating it. Windows takes up to five, the first is the default.
     $parts = [Collections.Generic.List[string]]::new()
@@ -845,4 +856,4 @@ function ConvertFrom-DeployWizardAnswerFile {
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
-    Split-InputLocale, Join-InputLocale
+    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId

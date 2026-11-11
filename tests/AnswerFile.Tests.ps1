@@ -81,6 +81,10 @@ try {
     Assert-Equal $u.SelectSingleNode('//u:Credentials/u:Password', $ns).InnerText 'p&ss' 'join password is escaped correctly'
     Assert-Equal $u.SelectSingleNode('//u:RegisteredOrganization', $ns).InnerText 'R&D <Labs>' 'special characters survive'
     Assert-Equal $u.SelectSingleNode('//u:InputLocale', $ns).InnerText 'fr-CA' 'unattend sets the input locale'
+    # New answer files start with Dell Image Assist's language settings.
+    Assert-Equal "$($default.InputLocale)|$($default.SystemLocale)|$($default.UILanguage)|$($default.UILanguageFallback)|$($default.UserLocale)" '0c0c:00001009; 0409:00000409|fr-CA|fr-CA|en-US|en-US' 'sample answer file has the French display with the US English keyboard second'
+    # The fallback language's own keyboard, as Windows Setup writes it.
+    Assert-Equal "$(Get-DefaultKeyboardId 'en-US')|$(Get-DefaultKeyboardId 'fr-FR')|$(Get-DefaultKeyboardId '')|$(Get-DefaultKeyboardId 'zz-ZZ-nope')" '0409:00000409|040c:0000040c||' 'a language gives its own keyboard ID; nothing for an empty or unknown tag'
     # Two keyboard boxes in the editor, one inputLocale list in the answer file.
     Assert-Equal (Join-InputLocale 'fr-CA' 'en-US') 'fr-CA; en-US' 'second keyboard goes after the main one'
     Assert-Equal (Join-InputLocale ' fr-CA ' '') 'fr-CA' 'no second keyboard leaves one'
@@ -95,7 +99,8 @@ try {
     [xml]$lu = New-UnattendXml -Answer $l -ComputerName 'PC-03'
     $intl = $lu.SelectSingleNode("//u:settings[@pass='oobeSystem']/u:component[@name='Microsoft-Windows-International-Core']", $ns)
     Assert-Equal (($intl.ChildNodes | ForEach-Object { "$($_.LocalName)=$($_.InnerText)" }) -join '|') 'InputLocale=0c0c:00001009; 0409:00000409|SystemLocale=fr-CA|UILanguage=fr-CA|UILanguageFallback=en-US|UserLocale=en-US' 'unattend writes every language setting in schema order'
-    [xml]$noFallback = New-UnattendXml -Answer $default -ComputerName 'PC-04'
+    $nf = $default.PSObject.Copy(); $nf.UILanguageFallback = $null
+    [xml]$noFallback = New-UnattendXml -Answer $nf -ComputerName 'PC-04'
     Assert-Equal $noFallback.SelectSingleNode('//u:UILanguageFallback', $ns) $null 'an empty fallback language is left out of the unattend'
     Assert-Equal (($u.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand/u:CommandLine', $ns) | ForEach-Object InnerText) -join ',') 'a.cmd,c.cmd' 'only FIRSTLOGON tasks go to FirstLogonCommands, in order'
     [xml]$wg = New-UnattendXml -Answer $default -ComputerName 'PC-02'

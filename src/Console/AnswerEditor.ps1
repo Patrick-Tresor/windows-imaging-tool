@@ -136,6 +136,16 @@ function Show-AnswerEditor {
     $e.CmbSystemLocale.Text = $a.SystemLocale
     $e.CmbUILanguage.Text = $a.UILanguage
     $e.CmbUILanguageFallback.Text = $a.UILanguageFallback
+    # A fallback language picked with no second keyboard gets its own keyboard there (en-US -> US keyboard), as
+    # Dell Image Assist does. Runs on open too, so an older file shows it before saving. Only fills an empty box.
+    $fillSecondKeyboard = {
+        if ($e.CmbInputLocale2.Text.Trim()) { return }
+        $id = Get-DefaultKeyboardId $e.CmbUILanguageFallback.Text
+        if ($id -and $id -ne (Get-DefaultKeyboardId $e.CmbInputLocale.Text) -and $e.CmbInputLocale.Text.Trim() -ne $id) { $e.CmbInputLocale2.Text = $id }
+    }
+    & $fillSecondKeyboard
+    $e.CmbUILanguageFallback.Add_LostFocus($fillSecondKeyboard)
+    $e.CmbUILanguageFallback.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]$fillSecondKeyboard) | Out-Null })
     $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
