@@ -261,10 +261,14 @@ function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Ov
     if ($null -eq $isWin11) { Write-DeployLog 'Could not tell whether the image is Windows 11; requirements are shown but never block.' -Level WARN }
     if ($decision.Action -eq 'Block') {
         # Each failed requirement and how to fix it is already in the log (above); the wizard gets one short line.
-        Write-DeployLog 'Fix the failed Windows 11 requirement, deploy a Windows 10 answer file, or set the Windows 11 check to Warn.' -Level ERROR
-        throw "Not ready for Windows 11 ($($decision.Summary -replace '^NOT READY: ')). Nothing was erased; see the log."
+        Write-DeployLog 'Fix the failed Windows 11 requirement, deploy a Windows 10 answer file, set the Windows 11 check to Warn, or tick Install anyway in the wizard.' -Level ERROR
+        # Data tells the wizard this is the Windows 11 check, so it can offer Install anyway on this PC.
+        $failedChecks = $decision.Summary -replace '^NOT READY: '
+        $ex = New-Object System.InvalidOperationException "Not ready for Windows 11 ($failedChecks). Nothing was erased; see the log."
+        $ex.Data['Windows11Block'] = $failedChecks
+        throw $ex
     }
-    if ($decision.Failed -and $Override) { Write-DeployLog 'Deploying anyway: -IgnoreWindows11Check' -Level WARN }
+    if ($decision.Failed -and $Override) { Write-DeployLog "Deploying Windows 11 anyway on hardware that does not meet: $($decision.Summary -replace '^NOT READY: ')" -Level WARN }
     $decision.Summary
 }
 
@@ -568,7 +572,8 @@ try {
     $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
     $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }
     $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
-    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -IgnoreWin11 $IgnoreWindows11Check.IsPresent }
+    # The wizard passes $true as IgnoreWin11 when the operator ticks Install anyway after the Windows 11 check blocked.
+    $preparePlan = { param($Answer, [bool]$IgnoreWin11) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -IgnoreWin11 ($IgnoreWindows11Check.IsPresent -or $IgnoreWin11) }
 
     # -NoPrompt and Unattended answer files start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.

@@ -171,7 +171,15 @@ driver can be added without rebuilding WinPE.
 
 - **Block**: a failed requirement stops the deploy with nothing erased. Fix it
   in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10
-  answer file, or run `Deploy-Image.ps1 -IgnoreWindows11Check` to deploy anyway.
+  answer file, or deploy anyway: the wizard then shows **Install Windows 11
+  anyway on this PC**; tick it and press Next (or run
+  `Deploy-Image.ps1 -IgnoreWindows11Check`). The log and the Ready to deploy
+  summary record which requirement was not met.
+- Older PCs (Intel 7th gen and earlier, such as a ThinkPad X1 Yoga 1st gen)
+  install and run Windows 11 from the image, because DISM does not enforce the
+  requirements. Microsoft does not support them and may not offer them feature
+  updates through Windows Update. Use **Warn** on an answer file meant for
+  older PCs so the wizard never stops on them.
 - **Warn**: the problems are logged and shown, and the deploy carries on.
 - **Off**: no check.
 
