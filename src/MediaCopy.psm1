@@ -190,6 +190,9 @@ function Copy-MediaContent {
     $done = [int64]0
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $lastShown = -1000
+    # Bytes done over the last few seconds, for the speed shown: an average since the start mixes the thousands of
+    # small driver files (slow on a stick) with the big image (fast), so neither the speed nor the time left was right.
+    $samples = New-Object System.Collections.Generic.Queue[object]
     $index = 0
     $count = @($Plan.Items).Count
 
@@ -203,7 +206,11 @@ function Copy-MediaContent {
         if (-not $force -and ($now - $lastShown) -lt 250) { return }
         Set-Variable -Name lastShown -Value $now -Scope 1
         $secs = [Math]::Max(0.001, $now / 1000.0)
-        $speed = $done / $secs
+        $average = $done / $secs
+        $samples.Enqueue(@($now, $done))
+        while ($samples.Count -gt 1 -and ($now - $samples.Peek()[0]) -gt 15000) { [void]$samples.Dequeue() }
+        $first = $samples.Peek()
+        $speed = if (($now - $first[0]) -ge 3000) { ($done - $first[1]) / (($now - $first[0]) / 1000.0) } else { $average }
         $overall = if ($total -gt 0) { [int][Math]::Min(100, [Math]::Floor($done * 100.0 / $total)) } else { 100 }
         $filePct = if ($item.Length -gt 0) { [int][Math]::Min(100, [Math]::Floor($fileDone * 100.0 / $item.Length)) } else { 100 }
         $left = if ($speed -gt 0 -and $total -gt $done) { ($total - $done) / $speed } else { 0 }
@@ -218,6 +225,7 @@ function Copy-MediaContent {
             TotalBytes     = $total
             Percent        = $overall
             BytesPerSecond = $speed
+            AverageBytesPerSecond = $average
             SecondsLeft    = $left
         }
         if ($OnProgress) { & $OnProgress $state }
@@ -273,7 +281,10 @@ function Copy-MediaContent {
             $fileDone = $item.Length
             $done = $doneBefore + $fileDone
             & $show $item $fileDone $big
-            if ($big -and -not $Quiet) { Write-Host ('  done in {0}' -f (Format-MediaDuration $fileClock.Elapsed.TotalSeconds)) }
+            if ($big -and -not $Quiet) {
+                $fileSecs = [Math]::Max(0.001, $fileClock.Elapsed.TotalSeconds)
+                Write-Host ('  done in {0} ({1}/s)' -f (Format-MediaDuration $fileSecs), (Format-MediaSize ([int64]($item.Length / $fileSecs))))
+            }
         }
         if ($item) { & $show $item $fileDone $true }
     } finally {

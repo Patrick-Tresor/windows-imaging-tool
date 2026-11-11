@@ -70,6 +70,7 @@ try {
     Assert-Equal $wim[-1].FileCount 4 "progress: file count"
     Assert-Equal $updates[-1].Percent 100 "progress: overall ends at 100%"
     Assert-Equal $updates[-1].BytesDone $plan.TotalBytes "progress: overall bytes"
+    Assert-Equal ($updates[-1].BytesPerSecond -gt 0 -and $updates[-1].AverageBytesPerSecond -gt 0) $true "progress: current and average speed"
     $rising = $true
     for ($i = 1; $i -lt $updates.Count; $i++) { if ($updates[$i].BytesDone -lt $updates[$i - 1].BytesDone) { $rising = $false } }
     Assert-Equal $rising $true "progress: never goes backwards"
@@ -101,6 +102,7 @@ try {
     $lines = & { Copy-MediaContent -Plan $one -Destination $dst -LineEvery10PercentFrom 1000 | Out-Null } 6>&1 | ForEach-Object { "$_" }
     Assert-Equal ($lines[0] -like 'Copying Images\Win11-Staff.wim (*KB)...') $true 'text: names the file and its size'
     Assert-Equal (@($lines | Where-Object { $_ -like '*done in*' }).Count) 1 'text: done line for the big file'
+    Assert-Equal (@($lines | Where-Object { $_ -like '*done in * (*/s)' }).Count) 1 'text: the done line gives the file''s speed'
 
     # Small files get no line of their own: thousands of driver files would mean thousands of slow console writes.
     Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null
