@@ -173,8 +173,6 @@ function Get-AnswerSecrets {
 
 $script:AnswerKeyFile = 'config\secrets\answer-key.txt'
 
-function Get-AnswerKeyRelativePath { $script:AnswerKeyFile }
-
 function New-AnswerKey {
     # 64 random bytes, base64: the text of answer-key.txt.
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -343,5 +341,5 @@ function Sync-AnswerFilePasswords {
 }
 
 Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Get-AnswerSecrets,
-    Get-AnswerKeyRelativePath, New-AnswerKey, Get-AnswerKeyId, Test-AnswerPasswordText, Get-AnswerPasswordKeyId, Protect-AnswerPassword,
+    New-AnswerKey, Get-AnswerKeyId, Test-AnswerPasswordText, Get-AnswerPasswordKeyId, Protect-AnswerPassword,
     Unprotect-AnswerPassword, Get-AnswerKey, Find-AnswerKey, Get-AnswerPasswordFields, Sync-AnswerFilePasswords
