@@ -24,7 +24,9 @@ tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 
 ## Admin console
 
-Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin rights).
+Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin rights). Only the console window
+opens: the PowerShell window behind it stays hidden. If the console stops on an error, a message says so and
+the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
 and click **Create folders** the first time. Then:
 
