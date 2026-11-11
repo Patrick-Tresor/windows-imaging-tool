@@ -53,6 +53,7 @@
        inputLocale can list several keyboards separated by ;, the first is the default:
        fr-CA; en-US, or as language:keyboard IDs 0c0c:00001009; 0409:00000409 (Canadian French, then US).
        uiLanguageFallback is only for untranslated text and adds no keyboard; leave empty if not needed.
+       The editor asks for the system language and the fallback language and fills these five from them.
        These defaults are the same as Dell Image Assist's: French (Canada) display, Canadian French keyboard first,
        US English keyboard second, English fallback and formats. -->
   <regional>

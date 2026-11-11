@@ -696,8 +696,28 @@ function Get-DefaultKeyboardId([string]$Language) {
     # 4096 (0x1000) is LOCALE_CUSTOM_UNSPECIFIED: Windows makes up a culture for a tag it doesn't know.
     if (-not $c.KeyboardLayoutId -or $c.KeyboardLayoutId -eq 4096 -or $c.LCID -eq 4096) { return $null }
     $lang = '{0:x4}' -f $c.LCID
-    $kbd = '{0:x8}' -f $c.KeyboardLayoutId
+    # .NET gives fr-CA the old Canadian French layout (00000c0c); Windows Setup and Dell use Canadian French 00001009.
+    $windowsLayout = @{ 'fr-CA' = 0x1009 }
+    $layout = if ($windowsLayout.ContainsKey($c.Name)) { $windowsLayout[$c.Name] } else { $c.KeyboardLayoutId }
+    $kbd = '{0:x8}' -f $layout
     "$($lang):$kbd"
+}
+
+function Get-RegionalSettings([string]$Language, [string]$Fallback) {
+    # The editor asks for two languages only, the way Dell Image Assist sets International-Core:
+    # the system language is the display language, system locale and first keyboard; the fallback language covers
+    # untranslated text, gives the second keyboard and the formats (dates, numbers). fr-CA + en-US gives
+    # 0c0c:00001009; 0409:00000409 / fr-CA / fr-CA / en-US / en-US.
+    $Language = "$Language".Trim(); $Fallback = "$Fallback".Trim()
+    $first = if ($Language) { $k = Get-DefaultKeyboardId $Language; if ($k) { $k } else { $Language } } else { '' }
+    $second = if ($Fallback) { $k = Get-DefaultKeyboardId $Fallback; if ($k) { $k } else { $Fallback } } else { '' }
+    [pscustomobject]@{
+        InputLocale        = Join-InputLocale $first $second
+        SystemLocale       = $Language
+        UILanguage         = $Language
+        UILanguageFallback = $Fallback
+        UserLocale         = if ($Fallback) { $Fallback } else { $Language }
+    }
 }
 
 function Join-InputLocale([string]$Main, [string]$Second) {
@@ -857,4 +877,4 @@ function ConvertFrom-DeployWizardAnswerFile {
 Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
-    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId
+    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

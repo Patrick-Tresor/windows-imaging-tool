@@ -53,7 +53,7 @@ function Show-AnswerEditor {
     $e.CmbImage.ItemsSource = @($images | ForEach-Object { "Images\$($_.Name)" })
     $e.CmbTimeZone.ItemsSource = @([TimeZoneInfo]::GetSystemTimeZones() | ForEach-Object Id)
     $cultures = @([Globalization.CultureInfo]::GetCultures('SpecificCultures') | Sort-Object Name | ForEach-Object Name)
-    foreach ($c in 'CmbInputLocale', 'CmbInputLocale2', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage', 'CmbUILanguageFallback') { $e[$c].ItemsSource = $cultures }
+    foreach ($c in 'CmbLanguage', 'CmbFallback') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
     $refreshTaskLibrary = {
         # The Script column offers the library's tasks, plus an empty choice for a plain command, plus any name
@@ -129,23 +129,9 @@ function Show-AnswerEditor {
     $e.TxtOrg.Text = $a.Organization
     $e.TxtProductKey.Text = $a.ProductKey
     $e.CmbTimeZone.Text = $a.TimeZone
-    $keyboards = Split-InputLocale $a.InputLocale
-    $e.CmbInputLocale.Text = $keyboards[0]
-    $e.CmbInputLocale2.Text = $keyboards[1]
-    $e.CmbUserLocale.Text = $a.UserLocale
-    $e.CmbSystemLocale.Text = $a.SystemLocale
-    $e.CmbUILanguage.Text = $a.UILanguage
-    $e.CmbUILanguageFallback.Text = $a.UILanguageFallback
-    # A fallback language picked with no second keyboard gets its own keyboard there (en-US -> US keyboard), as
-    # Dell Image Assist does. Runs on open too, so an older file shows it before saving. Only fills an empty box.
-    $fillSecondKeyboard = {
-        if ($e.CmbInputLocale2.Text.Trim()) { return }
-        $id = Get-DefaultKeyboardId $e.CmbUILanguageFallback.Text
-        if ($id -and $id -ne (Get-DefaultKeyboardId $e.CmbInputLocale.Text) -and $e.CmbInputLocale.Text.Trim() -ne $id) { $e.CmbInputLocale2.Text = $id }
-    }
-    & $fillSecondKeyboard
-    $e.CmbUILanguageFallback.Add_LostFocus($fillSecondKeyboard)
-    $e.CmbUILanguageFallback.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]$fillSecondKeyboard) | Out-Null })
+    # Two languages only; keyboards, formats and locales follow from them (Get-RegionalSettings).
+    $e.CmbLanguage.Text = if ($a.UILanguage) { $a.UILanguage } else { $a.SystemLocale }
+    $e.CmbFallback.Text = $a.UILanguageFallback
     $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
@@ -298,11 +284,8 @@ function Show-AnswerEditor {
         $a.Organization  = $e.TxtOrg.Text.Trim()
         $a.ProductKey    = $e.TxtProductKey.Text.Trim()
         $a.TimeZone      = $e.CmbTimeZone.Text.Trim()
-        $a.InputLocale   = Join-InputLocale $e.CmbInputLocale.Text $e.CmbInputLocale2.Text
-        $a.UserLocale    = $e.CmbUserLocale.Text.Trim()
-        $a.SystemLocale  = $e.CmbSystemLocale.Text.Trim()
-        $a.UILanguage    = $e.CmbUILanguage.Text.Trim()
-        $a.UILanguageFallback = $e.CmbUILanguageFallback.Text.Trim()
+        $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
+        foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.DisableSystemRestore = [bool]$e.ChkNoRestore.IsChecked
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
         $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } elseif ($e.RbNamePrompt.IsChecked) { 'Prompt' } else { 'WMI' }

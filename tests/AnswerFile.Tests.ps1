@@ -85,6 +85,13 @@ try {
     Assert-Equal "$($default.InputLocale)|$($default.SystemLocale)|$($default.UILanguage)|$($default.UILanguageFallback)|$($default.UserLocale)" '0c0c:00001009; 0409:00000409|fr-CA|fr-CA|en-US|en-US' 'sample answer file has the French display with the US English keyboard second'
     # The fallback language's own keyboard, as Windows Setup writes it.
     Assert-Equal "$(Get-DefaultKeyboardId 'en-US')|$(Get-DefaultKeyboardId 'fr-FR')|$(Get-DefaultKeyboardId '')|$(Get-DefaultKeyboardId 'zz-ZZ-nope')" '0409:00000409|040c:0000040c||' 'a language gives its own keyboard ID; nothing for an empty or unknown tag'
+    # The editor's two languages give all five International-Core settings, as in Dell Image Assist's answer file.
+    $r = Get-RegionalSettings 'fr-CA' 'en-US'
+    Assert-Equal "$($r.InputLocale)|$($r.SystemLocale)|$($r.UILanguage)|$($r.UILanguageFallback)|$($r.UserLocale)" '0c0c:00001009; 0409:00000409|fr-CA|fr-CA|en-US|en-US' 'French system with English fallback gives both keyboards and English formats'
+    $r = Get-RegionalSettings 'fr-CA' ''
+    Assert-Equal "$($r.InputLocale)|$($r.UILanguageFallback)|$($r.UserLocale)" '0c0c:00001009||fr-CA' 'no fallback: one keyboard, formats of the system language'
+    $r = Get-RegionalSettings 'en-US' 'en-US'
+    Assert-Equal $r.InputLocale '0409:00000409' 'the same language does not add a second keyboard'
     # Two keyboard boxes in the editor, one inputLocale list in the answer file.
     Assert-Equal (Join-InputLocale 'fr-CA' 'en-US') 'fr-CA; en-US' 'second keyboard goes after the main one'
     Assert-Equal (Join-InputLocale ' fr-CA ' '') 'fr-CA' 'no second keyboard leaves one'
