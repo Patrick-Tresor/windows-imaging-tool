@@ -139,7 +139,7 @@ $other = New-AnswerKey
 $enc = Protect-AnswerPassword -Password $accent -Key $key
 Assert-Equal (Test-AnswerPasswordText $enc) $true 'answer password: the encrypted form is recognized'
 Assert-Equal ($enc -match [regex]::Escape($accent)) $false 'answer password: no plain text'
-Assert-Equal (Get-AnswerPasswordKeyId $enc) (Get-AnswerKeyId $key) 'answer password: names the key it was made with'
+Assert-Equal (($enc -split ':')[1]) (Get-AnswerKeyId $key) 'answer password: names the key it was made with'
 Assert-Equal (Unprotect-AnswerPassword -Value $enc -Key $key) $accent 'answer password: decrypts with the key, accent kept'
 Assert-Equal ((Protect-AnswerPassword -Password $accent -Key $key) -ne $enc) $true 'answer password: same password, different text each time'
 Assert-Equal (Unprotect-AnswerPassword -Value (Protect-AnswerPassword -Password '' -Key $key) -Key $key) '' 'answer password: an empty password round trips'

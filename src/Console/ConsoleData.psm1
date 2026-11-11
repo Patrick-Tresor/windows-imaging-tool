@@ -352,15 +352,6 @@ function Get-AnswerFileRows {
     }
 }
 
-function New-AnswerFileFromSample {
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
-    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Answer file name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
-    if (Test-Path $dest) { throw "An answer file named $Name already exists." }
-    Copy-Item (Join-ContentPath $script:RepoRoot 'config\answer-files\Default.xml') $dest
-    $dest
-}
-
 function Import-DeployWizardAnswerFile {
     # Converts a deploy wizard answer file XML into AnswerFiles\<name>.xml. Returns the notes to show the user.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Path, [string]$Name)
@@ -393,15 +384,6 @@ function Test-SavedPassword {
     # True when a password is saved for this field: encrypted in the answer file, or in its password file.
     param([Parameter(Mandatory)][string]$ContentRoot, [string]$RelativePath, [string]$Encrypted)
     [bool]((Test-AnswerPasswordText $Encrypted) -or (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $RelativePath))
-}
-
-function Save-SecretFile {
-    # Writes one password to its own file under the content root. See the README on who can read it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath, [Parameter(Mandatory)][string]$Value)
-    if ([IO.Path]::IsPathRooted($RelativePath) -or $RelativePath -match '\.\.') { throw "Password file '$RelativePath' must be a path inside the content root." }
-    $path = Join-ContentPath $ContentRoot $RelativePath
-    New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
-    Set-Content -Path $path -Value $Value -NoNewline -Encoding utf8
 }
 
 function Split-JoinAccount {
@@ -1051,8 +1033,8 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
-    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
+    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
+    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
