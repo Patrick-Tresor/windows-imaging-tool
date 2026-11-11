@@ -81,14 +81,13 @@ function Show-DriverDownloader {
     $load = {
         param([bool]$Refresh)
         $maker = $d.CmbVendor.SelectedItem.Content
-        $os = $d.CmbOs.SelectedItem.Content
         $dlg.Cursor = 'Wait'
         $d.TxtSelection.Text = "Reading the $maker catalog..."
         $dlg.Dispatcher.Invoke([action]{}, 'Background')   # let the text paint before the download blocks
         try {
-            $state.Rows = @(Get-VendorDriverPacks -Maker $maker -Os $os -Refresh:$Refresh | Add-DriverPackLibraryStatus -ContentRoot $ContentRoot | ForEach-Object {
+            $state.Rows = @(Get-VendorDriverPacks -Maker $maker -Refresh:$Refresh | Add-DriverPackLibraryStatus -ContentRoot $ContentRoot | ForEach-Object {
                 $row = [DriverPackRow]::new()
-                $row.Model = $_.Model; $row.Release = $_.Release; $row.Version = $_.Version; $row.Released = $_.Released
+                $row.Model = $_.Model; $row.Release = ("$($_.Os) $($_.Release)" -replace '^Windows ', 'Win').Trim(); $row.Version = $_.Version; $row.Released = $_.Released
                 $row.SizeMB = $_.SizeMB; $row.Installed = $_.Installed; $row.Pack = $_
                 $row.Ids = (@($_.Skus) + @($_.MachineTypes)) -join ' '
                 $row
@@ -101,7 +100,6 @@ function Show-DriverDownloader {
     }
 
     $d.CmbVendor.Add_SelectionChanged({ & $load $false })
-    $d.CmbOs.Add_SelectionChanged({ & $load $false })
     $d.BtnReload.Add_Click({ & $load $true })
     $d.TxtSearch.Add_TextChanged({ & $applyFilter })
     # Check box clicks change Selected on the row; refresh the count when they do.

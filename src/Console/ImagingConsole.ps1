@@ -752,16 +752,15 @@ function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
     if (-not $query) { Set-Status 'Type the PC model to find, for example Latitude 5521.'; return }
     $ui.CmbDriverFound.Items.Clear(); $ui.CmbDriverFound.IsEnabled = $false; $ui.BtnDriverFoundDownload.IsEnabled = $false
-    $os = $ui.CmbDriverFindOs.SelectedItem.Content
     Set-Status "Searching the Dell, HP and Lenovo catalogs for $query..."
     $window.Cursor = [Windows.Input.Cursors]::Wait
     $window.Dispatcher.Invoke([action]{}, 'Background')   # let the status paint before the catalogs download
-    try { $r = Find-VendorDriverPackOnline -Query $query -Os $os -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) }
+    try { $r = Find-VendorDriverPackOnline -Query $query -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) }
     finally { $window.Cursor = $null }
     $script:driverFound = @($r.Packs | Select-Object -First 50)
     foreach ($p in $script:driverFound) { [void]$ui.CmbDriverFound.Items.Add((Format-VendorDriverPack $p)) }
     $err = if ($r.Errors) { " $(@($r.Errors)[0])" } else { '' }
-    if (-not $script:driverFound.Count) { Set-Status "No $os driver pack found for $query. Try fewer words or the SKU.$err"; return }
+    if (-not $script:driverFound.Count) { Set-Status "No driver pack found for $query. Try fewer words or the SKU.$err"; return }
     $ui.CmbDriverFound.SelectedIndex = 0; $ui.CmbDriverFound.IsEnabled = $true; $ui.BtnDriverFoundDownload.IsEnabled = $true
     $ui.CmbDriverFound.IsDropDownOpen = $script:driverFound.Count -gt 1
     $more = if (@($r.Packs).Count -gt 50) { ' (first 50 shown, type more of the name)' } else { '' }

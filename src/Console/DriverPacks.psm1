@@ -476,10 +476,12 @@ function Update-VendorCatalog {
 }
 
 function Get-VendorDriverPacks {
-    # The newest x64 driver pack for every model a vendor publishes, for one OS.
+    # The newest x64 driver pack for every model a vendor publishes. -Os Any (the default, Patrick 2026-11-11: no
+    # Windows 10/11 choice in the console): the Windows 11 pack, or the Windows 10 one for a model that has none
+    # (older models such as the ThinkPad T570). Each pack still says which Windows it is for (Os).
     param(
         [Parameter(Mandatory)][ValidateSet('Dell', 'HP', 'Lenovo')][string]$Maker,
-        [ValidateSet('Windows 10', 'Windows 11')][string]$Os = 'Windows 11',
+        [ValidateSet('Any', 'Windows 10', 'Windows 11')][string]$Os = 'Any',
         [string]$CatalogPath,
         [string]$CacheDir = (Get-DriverPackCacheDir),
         [switch]$Refresh
@@ -490,7 +492,9 @@ function Get-VendorDriverPacks {
         'HP'     { ConvertFrom-HpDriverPackCatalog -Path $CatalogPath }
         'Lenovo' { ConvertFrom-LenovoDriverPackCatalog -Path $CatalogPath }
     }
-    $packs | Where-Object Os -eq $Os | Select-LatestDriverPacks
+    $latest = @($packs | Where-Object { $Os -eq 'Any' -or $_.Os -eq $Os } | Select-LatestDriverPacks)
+    if ($Os -ne 'Any') { return $latest }
+    $latest | Group-Object Maker, Model | ForEach-Object { $_.Group | Sort-Object Os -Descending | Select-Object -First 1 } | Sort-Object Model
 }
 
 #endregion
@@ -696,7 +700,7 @@ function Find-VendorDriverPackOnline {
     #>
     param(
         [Parameter(Mandatory)][string]$Query,
-        [ValidateSet('Windows 10', 'Windows 11')][string]$Os = 'Windows 11',
+        [ValidateSet('Any', 'Windows 10', 'Windows 11')][string]$Os = 'Any',
         [string]$ContentRoot,
         [hashtable]$CatalogPaths = @{},
         [switch]$Refresh

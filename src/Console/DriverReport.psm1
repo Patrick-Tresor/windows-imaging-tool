@@ -81,7 +81,7 @@ function Add-UnknownModelPacks {
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Models,
-        [ValidateSet('Windows 10', 'Windows 11')][string]$Os = 'Windows 11',
+        [ValidateSet('Any', 'Windows 10', 'Windows 11')][string]$Os = 'Any',
         [hashtable]$CatalogPaths = @{},
         [switch]$Refresh
     )
@@ -100,7 +100,7 @@ function Add-UnknownModelPacks {
                 else {
                     $pack = Find-VendorPackForModel -Model $m -Packs $packs[$m.Maker]
                     if ($pack) { ('{0} {1} {2}, {3} MB' -f $pack.Model, $pack.Release, $pack.Version, $pack.SizeMB) -replace '\s+', ' ' }
-                    else { "Not in the $($m.Maker) $Os catalog" }
+                    else { "Not in the $($m.Maker)$(if ($Os -ne 'Any') { " $Os" }) catalog" }
                 }
         $m | Add-Member -NotePropertyName Pack -NotePropertyValue $pack -Force
         $m | Add-Member -NotePropertyName PackText -NotePropertyValue $text -Force -PassThru
