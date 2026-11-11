@@ -2,8 +2,7 @@
   "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml. The wds section is read only by the console and Publish-WdsBootImage.ps1.",
   "share": {
     "path": "\\\\deploy-server\\Deploy",
-    "user": "DOMAIN\\svc-deploy",
-    "passwordFile": "config\\secrets\\share.txt"
+    "user": "DOMAIN\\svc-deploy"
   },
   "defaultAnswerFile": "Default",
   "wds": {

@@ -31,7 +31,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.1 | ISO or PXE boot.wim reaching the share | WinPE maps the share (password from the WinPE password vault or the share's password file) |
 | 2.2 | Publish to WDS, PXE boot a PC | WinPE starts with F12 (or without, when prestaged) |
 | 2.3 | Dashboard | Each PC shows live progress, then the post-deploy checks |
-| 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `config\secrets\share.txt` exists and `deploy-settings.json` has no password |
+| 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, an old `config\share.cred` is gone after Save, and ISO/PXE still maps the share |
 
 ## 3. Features on the deployed PC
 
