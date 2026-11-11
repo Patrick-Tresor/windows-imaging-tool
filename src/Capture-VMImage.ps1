@@ -419,10 +419,11 @@ try {
     }
     $wimSize = (Get-Item -LiteralPath $wim).Length
     $read = if ($windowsInfo) { " from $(Format-DiskSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
-    Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}." -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $read)
+    # The compression is in the line so captures with Fast and Maximum can be compared from the logs.
+    Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}, {3} compression." -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $read, $Compression)
     Remove-CaptureDefenderExclusions $defender
     $defender = $null
-    Complete-BuildStep 'capture' -Detail "$(Format-DiskSize $wimSize)"
+    Complete-BuildStep 'capture' -Detail ("{0} in {1:hh\:mm}, {2} compression" -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $Compression)
 
     if ($SplitSizeMB -gt 0) {
         Start-BuildStep 'split'

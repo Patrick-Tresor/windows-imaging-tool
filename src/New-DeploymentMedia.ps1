@@ -46,6 +46,7 @@ param(
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
+    [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
     [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
     [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
@@ -63,10 +64,10 @@ if ($LogPath) {
 }
 # The steps the progress window lists, in the order they run. Only the parameters decide them, so the list is
 # there before anything can fail.
-$steps = @(
-    , @('check', 'Checking the ADK and the content')
-    , @('copype', 'Copying WinPE files')
-)
+$appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig -and -not $NoAppDownloads
+$steps = @(, @('check', 'Checking the ADK and the content'))
+if ($appDownloads) { $steps += , @('apps', 'Downloading online applications') }
+$steps += , @('copype', 'Copying WinPE files')
 if (-not $NoVendorWinPEDrivers) { $steps += , @('pedrivers', 'Getting the WinPE driver packs') }
 $steps += @(
     , @('mount', 'Mounting boot.wim')
@@ -111,6 +112,7 @@ Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -174,6 +176,20 @@ if ($UpdateOnly) {
 }
 
 Complete-BuildStep 'check' -Detail $(if ($copyPlan) { '{0} files, {1} to copy' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes) } else { '' })
+
+if ($appDownloads -and $copyPlan) {
+    # Applications that download at first boot (Find an app online, the Download tick box): download them here
+    # once, so an offline stick installs them without internet. Cached for the next build; a failure only warns.
+    Start-BuildStep 'apps'
+    $appCache = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'AppDownloads')
+    $onApp = { param($name, $i, $count) Set-BuildStepProgress 'apps' -Percent ([int](100 * ($i - 1) / [Math]::Max(1, $count))) -Detail $name }
+    $dl = Get-MediaAppDownloads -Plan $copyPlan -CacheRoot $appCache -OnApp $onApp
+    $copyPlan = Add-MediaCopyItems -Plan $copyPlan -Items $dl.Items
+    foreach ($f in $dl.Failed) { Write-Warning "$f was not downloaded onto the stick: the PC downloads it at first boot, so it needs internet." }
+    $appDetail = if (-not $dl.Items -and -not $dl.Failed) { 'No online applications' }
+                 else { '{0} on the stick{1}' -f @($dl.Items).Count, $(if ($dl.Failed) { ", not downloaded: $($dl.Failed -join ', ')" }) }
+    Complete-BuildStep 'apps' -Detail $appDetail
+} elseif ($appDownloads) { Start-BuildStep 'apps'; Complete-BuildStep 'apps' -Detail 'No content to copy' }
 
 # copype and MakeWinPEMedia expect the ADK environment variables that DandISetEnv.bat sets.
 Start-BuildStep 'copype'

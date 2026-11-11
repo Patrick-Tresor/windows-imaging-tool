@@ -182,7 +182,7 @@
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -257,6 +257,10 @@
             <Label Grid.Row="14" Content="Passwords on USB"/>
             <CheckBox x:Name="ChkSecretsOnMedia" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
                       Content="Also copy the password files (config\secrets) to the stick as plain text. Not needed: the answer files already carry their passwords encrypted. Not recommended: anyone with the stick can read them."/>
+
+            <Label Grid.Row="16" Content="Online apps on USB"/>
+            <CheckBox x:Name="ChkAppDownloads" Grid.Row="16" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="True" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
+                      Content="Download the applications that install from the internet (Find an app online, Download tick box) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
           <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">

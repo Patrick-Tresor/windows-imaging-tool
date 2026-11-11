@@ -734,6 +734,74 @@ function Get-AppDownload {
     throw "could not download $($d.downloadUrl) (no internet?)"
 }
 
+function Get-MediaAppDownloads {
+    <#
+    .SYNOPSIS
+        For a media copy plan (Get-MediaCopyPlan): downloads, on the console PC, the installer of every application
+        in the plan that has a downloadUrl and no installer in its folder, so an offline USB stick installs it without
+        internet. Downloads go to -CacheRoot (not into the content root) and are reused by the next build: one with
+        a downloadSha256 while its hash matches, one without for -MaxAgeDays (a "latest" link changes over time).
+        Returns Items (Relative, Source, Length) to add to the plan and Failed (app names). A failed download is not
+        an error: that PC downloads the installer at first boot, as before.
+    #>
+    param(
+        [Parameter(Mandatory)]$Plan,
+        [Parameter(Mandatory)][string]$CacheRoot,
+        [int]$MaxAgeDays = 7,
+        [scriptblock]$Log = { param($m) Write-Host $m },
+        [int]$Attempts = 2,
+        [int]$WaitSeconds = 5,
+        [scriptblock]$Downloader,
+        [scriptblock]$OnApp
+    )
+    $inPlan = @{}
+    foreach ($i in @($Plan.Items)) { $inPlan[$i.Relative.ToLowerInvariant()] = $true }
+    $jsons = @($Plan.Items | Where-Object { $_.Relative -match '\\app\.json$' -and ($_.Relative -replace '\\app\.json$', '') -match '\\' })
+    $items = @(); $failed = @(); $n = 0
+    foreach ($j in $jsons) {
+        $n++
+        $relDir = $j.Relative -replace '\\app\.json$', ''
+        $name = ($relDir -split '\\')[-1]
+        $def = $null
+        try { $def = ConvertTo-AppDefinition -Name $name -Json ([IO.File]::ReadAllText($j.Source) | ConvertFrom-Json) } catch { continue }
+        if (-not $def.downloadUrl -or -not $def.installer) { continue }
+        $rel = "$relDir\$($def.installer)"
+        if ($inPlan.ContainsKey($rel.ToLowerInvariant())) { continue }   # the installer is already in the folder
+        if ($OnApp) { & $OnApp $name $n $jsons.Count }
+        $cacheDir = [IO.Path]::Combine($CacheRoot, $relDir)
+        $cached = [IO.Path]::Combine($cacheDir, $def.installer)
+        if ([IO.File]::Exists($cached)) {
+            $keep = if ($def.downloadSha256) { (Get-FileHash -LiteralPath $cached -Algorithm SHA256).Hash -eq $def.downloadSha256.ToUpperInvariant() }
+                    else { ((Get-Date) - [IO.File]::GetLastWriteTime($cached)).TotalDays -lt $MaxAgeDays }
+            if (-not $keep) { [IO.File]::Delete($cached) }
+        }
+        [void][IO.Directory]::CreateDirectory($cacheDir)
+        $dlArgs = @{ Definition = $def; AppFolder = $cacheDir; Log = $Log; Attempts = $Attempts; WaitSeconds = $WaitSeconds }
+        if ($Downloader) { $dlArgs.Downloader = $Downloader }
+        try {
+            if ([IO.File]::Exists($cached)) { & $Log "  ${name}: $($def.installer) reused from the last build" }
+            else { & $Log "  ${name}: downloading $($def.downloadUrl)"; Get-AppDownload @dlArgs }
+            $items += [pscustomobject]@{ Relative = $rel; Source = $cached; Length = [int64](New-Object IO.FileInfo $cached).Length }
+        } catch {
+            & $Log "  ${name}: not downloaded ($($_.Exception.Message)); the PC downloads it at first boot"
+            $failed += $name
+        }
+    }
+    [pscustomobject]@{ Items = $items; Failed = $failed }
+}
+
+function Add-MediaCopyItems {
+    # Adds extra files (Relative, Source, Length) to a media copy plan; returns the new plan.
+    param([Parameter(Mandatory)]$Plan, [object[]]$Items)
+    if (-not $Items) { return $Plan }
+    $all = @($Plan.Items) + @($Items)
+    $total = [int64]0
+    foreach ($i in $all) { $total += $i.Length }
+    $out = $Plan.PSObject.Copy()
+    $out.Items = $all; $out.TotalBytes = $total; $out.FileCount = $all.Count
+    $out
+}
+
 function Invoke-AppInstall {
     <#
     .SYNOPSIS
@@ -782,5 +850,6 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Get-AppKnownDownload,
     ConvertFrom-WingetSearch, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
+    Get-MediaAppDownloads, Add-MediaCopyItems,
     Save-AppPack, Export-AppPack, Import-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
