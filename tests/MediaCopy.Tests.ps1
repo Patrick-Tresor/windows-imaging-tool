@@ -1,5 +1,5 @@
 # Plain-PowerShell tests for copying a USB stick's content with progress (src/MediaCopy.psm1).
-# Run: powershell -File tests\MediaCopy.Tests.ps1 (the copy compiles a small C# helper); exits non-zero when a check fails.
+# Run: powershell -File tests\MediaCopy.Tests.ps1 on Windows (the copy uses CopyFileEx); exits non-zero when a check fails.
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -46,10 +46,12 @@ try {
     Assert-Equal ($plan.Missing -join ';') 'Gone' 'plan: missing folder reported'
     Assert-Equal ($plan.Directories -contains 'Drivers\Empty') $true 'plan: empty folders are created too'
 
-    Assert-Equal (Test-NativeCopy) $true 'copy helper compiles'
+    Assert-Equal (Test-NativeCopy) $true 'CopyFileEx is available'
     $updates = New-Object System.Collections.ArrayList
     if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
     New-Item -ItemType Directory -Path $dst | Out-Null
+    # A read-only source (driver files out of a vendor cab often are) must not give a read-only file on the stick.
+    [IO.File]::SetAttributes((Join-T $src 'AnswerFiles\Staff.xml'), [IO.FileAttributes]::ReadOnly)
     # LineEvery10PercentFrom 1000 makes the image count as a big file: it reports at its start and end.
     $result = Copy-MediaContent -Plan $plan -Destination $dst -LineEvery10PercentFrom 1000 -Quiet -OnProgress { param($s) [void]$updates.Add($s) }
     Assert-Equal $result.FileCount 4 "copy: files copied"
@@ -70,16 +72,19 @@ try {
     Assert-Equal $wim[-1].FileCount 4 "progress: file count"
     Assert-Equal $updates[-1].Percent 100 "progress: overall ends at 100%"
     Assert-Equal $updates[-1].BytesDone $plan.TotalBytes "progress: overall bytes"
+    Assert-Equal ($updates[-1].BytesPerSecond -gt 0 -and $updates[-1].AverageBytesPerSecond -gt 0) $true "progress: current and average speed"
     $rising = $true
     for ($i = 1; $i -lt $updates.Count; $i++) { if ($updates[$i].BytesDone -lt $updates[$i - 1].BytesDone) { $rising = $false } }
     Assert-Equal $rising $true "progress: never goes backwards"
 
     # Write-through made each chunk wait for the stick and halved the copy speed.
     Assert-Equal ((Get-Content -Raw (Join-Path $repo 'src/MediaCopy.psm1')) -match 'FileOptions\]::WriteThrough') $false 'copy: no write-through (slow on USB sticks)'
-    # CopyFileEx unbuffered waited for the stick on every block: 3 MB/s where the chunked copy did 40 MB/s.
+    # The copy Explorer uses (CopyFileEx, buffered): unbuffered gave 3 MB/s on Patrick's stick, a FileStream chunk
+    # copy 6-7 MB/s, Explorer about 40 MB/s.
     $copySource = Get-Content -Raw (Join-Path $repo 'src/MediaCopy.psm1')
-    Assert-Equal ($copySource -match 'CopyFileEx\(|NoBuffering|WriteThrough') $false 'copy: no unbuffered or write-through copy (slow on USB sticks)'
-    Assert-Equal ($copySource -match '8 \* 1024 \* 1024') $true 'copy: 8 MB chunks'
+    Assert-Equal ($copySource -match 'CopyFileEx\(source, destination, callback, IntPtr\.Zero, IntPtr\.Zero, 0\)') $true 'copy: CopyFileEx with no flags (buffered, as Explorer)'
+    Assert-Equal ($copySource -match '0x1000|CopyFileNoBuffering|FileOptions\.WriteThrough') $false 'copy: no unbuffered or write-through copy (slow on USB sticks)'
+    Assert-Equal ([IO.File]::GetAttributes((Join-T $dst 'AnswerFiles\Staff.xml')).HasFlag([IO.FileAttributes]::ReadOnly)) $false 'copy: a read-only source gives a plain file on the stick'
 
     # Copying over an older, bigger file on the stick leaves exactly the new file.
     New-TestFile (Join-T $dst 'config\deploy-settings.json') 9000
@@ -101,6 +106,7 @@ try {
     $lines = & { Copy-MediaContent -Plan $one -Destination $dst -LineEvery10PercentFrom 1000 | Out-Null } 6>&1 | ForEach-Object { "$_" }
     Assert-Equal ($lines[0] -like 'Copying Images\Win11-Staff.wim (*KB)...') $true 'text: names the file and its size'
     Assert-Equal (@($lines | Where-Object { $_ -like '*done in*' }).Count) 1 'text: done line for the big file'
+    Assert-Equal (@($lines | Where-Object { $_ -like '*done in * (*/s)' }).Count) 1 'text: the done line gives the file''s speed'
 
     # Small files get no line of their own: thousands of driver files would mean thousands of slow console writes.
     Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null

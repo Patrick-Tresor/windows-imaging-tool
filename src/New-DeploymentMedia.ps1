@@ -503,7 +503,7 @@ switch ($Target) {
                 # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
                 Start-BuildStep 'content'
                 $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\" -OnProgress $onCopy
-                Write-Host ('Copied {0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
+                Write-Host ('Copied {0} files, {1}, in {2} ({3}/s on average)' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), (Format-MediaSize ([int64]($copied.Bytes / [Math]::Max(0.001, $copied.Seconds)))))
                 Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
             }
         }
