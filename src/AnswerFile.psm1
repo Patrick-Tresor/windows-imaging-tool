@@ -693,7 +693,8 @@ function Get-DefaultKeyboardId([string]$Language) {
     # Used to give the fallback language its keyboard. $null for a tag .NET doesn't know.
     if (-not $Language) { return $null }
     try { $c = [Globalization.CultureInfo]::GetCultureInfo($Language.Trim()) } catch { return $null }
-    if (-not $c.KeyboardLayoutId -or $c.KeyboardLayoutId -eq 4096) { return $null }
+    # 4096 (0x1000) is LOCALE_CUSTOM_UNSPECIFIED: Windows makes up a culture for a tag it doesn't know.
+    if (-not $c.KeyboardLayoutId -or $c.KeyboardLayoutId -eq 4096 -or $c.LCID -eq 4096) { return $null }
     $lang = '{0:x4}' -f $c.LCID
     $kbd = '{0:x8}' -f $c.KeyboardLayoutId
     "$($lang):$kbd"
