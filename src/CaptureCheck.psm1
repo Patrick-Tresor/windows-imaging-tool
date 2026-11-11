@@ -274,6 +274,43 @@ function Get-DefenderExclusionPlan {
     }
 }
 
+function Add-DefenderScanExclusions {
+    <#
+    .SYNOPSIS
+        Adds temporary Microsoft Defender exclusions (only the ones not there already, see Get-DefenderExclusionPlan)
+        and returns what Remove-DefenderScanExclusions takes off again. Nothing when real-time protection is off or
+        another antivirus is in charge, or when it can't (not admin, policy): the work then only runs slower.
+    #>
+    param([string[]]$Paths = @(), [string[]]$Processes = @(), [string]$Reason = 'this build')
+    try {
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        if (-not $status.RealTimeProtectionEnabled) { return $null }
+        $pref = Get-MpPreference -ErrorAction Stop
+        $plan = Get-DefenderExclusionPlan -Paths $Paths -Processes $Processes -ExistingPaths @($pref.ExclusionPath) -ExistingProcesses @($pref.ExclusionProcess)
+        if ($plan.Paths) { Add-MpPreference -ExclusionPath $plan.Paths -ErrorAction Stop }
+        if ($plan.Processes) { Add-MpPreference -ExclusionProcess $plan.Processes -ErrorAction Stop }
+        if ($plan.Paths -or $plan.Processes) {
+            Write-Host "Microsoft Defender skips $(@($plan.Paths + $plan.Processes) -join ', ') until $Reason ends (removed after)." -ForegroundColor DarkGray
+            return $plan
+        }
+        $null
+    } catch {
+        Write-Host "Could not pause Microsoft Defender scanning for $Reason, so it may be slower: $($_.Exception.Message)" -ForegroundColor DarkGray
+        $null
+    }
+}
+
+function Remove-DefenderScanExclusions {
+    param($Plan)
+    if (-not $Plan) { return }
+    try {
+        if ($Plan.Paths) { Remove-MpPreference -ExclusionPath $Plan.Paths -ErrorAction Stop }
+        if ($Plan.Processes) { Remove-MpPreference -ExclusionProcess $Plan.Processes -ErrorAction Stop }
+    } catch {
+        Write-Warning "Could not remove the Microsoft Defender exclusions $(@($Plan.Paths + $Plan.Processes) -join ', '): remove them in Windows Security. $($_.Exception.Message)"
+    }
+}
+
 function Test-SlowImageTarget {
     # True when the Images folder is on a drive a capture should not write to directly: a USB stick or disk, an
     # SD card or a network share. DISM writes the image in many small pieces, which such drives take very slowly,
@@ -282,6 +319,6 @@ function Test-SlowImageTarget {
     ($DriveType -in 'Removable', 'Network') -or ($BusType -in 'USB', 'SD', 'MMC', 'iSCSI')
 }
 
-Export-ModuleMember -Function Get-DefenderExclusionPlan, Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
+Export-ModuleMember -Function Get-DefenderExclusionPlan, Add-DefenderScanExclusions, Remove-DefenderScanExclusions, Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
     Test-ConvertedDiskReusable, Remove-ConvertedDisk, Get-CaptureDiskChecklist, ConvertFrom-RegQuery, Get-WindowsDisplayName,
     Write-CaptureCheckResult, Read-CaptureCheckResult, Get-CaptureCheckView

@@ -99,8 +99,10 @@ $title = switch ($Target) {
 }
 Start-BuildProgress -Path $ProgressFile -Title $title -Steps $steps -LogPath $LogPath
 # Any error from here on: the progress window shows the step that failed and one line, this window and the log the rest.
+$defenderPlans = @()
 trap {
     Stop-BuildProgress -Message $_.Exception.Message
+    foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }
     if ($LogPath) { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; try { Stop-Transcript | Out-Null } catch { } }
     break
 }
@@ -113,6 +115,7 @@ Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -231,10 +234,20 @@ if ($ContentSource -and (Test-Path "$ContentSource\Drivers\_WinPE")) { $peSource
 # x64 drivers only (Dell's pack also has x86), each driver once.
 $pePlan = @(Get-WinPEDriverPlan -Sources $peSources)
 
-# Adding the components and a hundred or so drivers to boot.wim takes many minutes, one DISM call each. The result
+# Adding the components and a few hundred drivers to boot.wim takes minutes. The result
 # is kept in the cache and reused while the ADK, the components and every driver .inf stay the same.
 $peKey = Get-WinPEBuildKey -BaseWim $bootWim -Components (Get-WinPEComponentNames) -DriverPlan $pePlan
 $peCached = if ($NoWinPECache) { $null } else { Find-WinPEBuildCache -Key $peKey }
+if (-not $NoWinPECache -and -not $peCached) {
+    # Says why the drivers go in again: a new driver pack version, another ADK, or the first build.
+    $cacheDir = Get-WinPEBuildCacheDir
+    $saved = @(if ([IO.Directory]::Exists($cacheDir)) { [IO.Directory]::GetDirectories($cacheDir) | ForEach-Object { [IO.Path]::GetFileName($_) } })
+    Write-Host ("No saved WinPE build matches this one (key {0}; saved: {1}). A driver pack, the ADK or the components changed, so the components and drivers go in again; this build is saved for the next one." -f $peKey, $(if ($saved) { $saved -join ', ' } else { 'none' })) -ForegroundColor DarkGray
+    foreach ($peSrc in $pePlan) { Write-Host "  WinPE driver source: $($peSrc.Name) ($($peSrc.Path)), $(@($peSrc.Infs).Count) .inf" -ForegroundColor DarkGray }
+}
+# Defender scanning every file DISM writes into the mounted boot.wim (and, below, every file copied to the stick)
+# can make the build many times slower. Temporary exclusions, removed at the end or on an error.
+$defenderPlans += @(Add-DefenderScanExclusions -Paths @($WorkDir) -Processes @('dism.exe', 'dismhost.exe') -Reason 'the build' | Where-Object { $_ })
 $peReport = @()
 Start-BuildStep 'mount'
 if ($peCached) {
@@ -266,31 +279,45 @@ try {
         }
         Complete-BuildStep 'components' -Detail "$($ocNames.Count) components"
         Start-BuildStep 'drivers'
-        $infTotal = [Math]::Max(1, (@($pePlan | ForEach-Object { @($_.Infs).Count }) | Measure-Object -Sum).Sum)
-        $infDone = 0; $infAdded = 0
-        foreach ($src in $pePlan) {
-            # One bad driver must not lose the others.
-            $infs = @($src.Infs)
-            Write-Host "Adding $($infs.Count) WinPE driver(s) from $($src.Name) ($($src.Path)). Each takes a few seconds:"
-            $added = @(); $failed = @(); $same = 0
+        # All the drivers in one DISM run over one staging folder: one servicing session instead of one per
+        # driver (that took about 10 seconds a driver, 45 minutes for Dell's and HP's packs).
+        $infTotal = (@($pePlan | ForEach-Object { @($_.Infs | Where-Object { -not $_.Duplicate }).Count }) | Measure-Object -Sum).Sum
+        $infSame = (@($pePlan | ForEach-Object { @($_.Infs | Where-Object Duplicate).Count }) | Measure-Object -Sum).Sum
+        $infAdded = 0
+        if ($infTotal) {
             $clock = [Diagnostics.Stopwatch]::StartNew()
-            for ($i = 0; $i -lt $infs.Count; $i++) {
-                $inf = $infs[$i].File
-                $line = Format-DriverProgressLine -Index ($i + 1) -Total $infs.Count -Path $inf.FullName -Root $src.Path -Elapsed $clock.Elapsed
-                Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Status $line -PercentComplete ([int](100 * $i / [Math]::Max(1, $infs.Count)))
-                Write-Host -NoNewline "  $line"
-                Set-BuildStepProgress 'drivers' -Percent (100 * $infDone / $infTotal) -Detail ('{0} of {1}: {2}' -f ($infDone + 1), $infTotal, $inf.Name)
-                $infDone++
-                # The same driver in two vendors' packs (Intel NICs, Intel RST) goes in once.
-                if ($infs[$i].Duplicate) { $same++; Write-Host ' already added'; continue }
-                try { Add-WindowsDriver -Path $mount -Driver $inf.FullName -ErrorAction Stop | Out-Null; $added += $inf.Name; Write-Host ' ok' }
-                catch { $failed += $inf.Name; Write-Host ' FAILED' -ForegroundColor Yellow; Write-Verbose "Not added: $($inf.FullName): $($_.Exception.Message)" }
+            Set-BuildStepProgress 'drivers' -Percent 0 -Detail "Gathering $infTotal driver(s)"
+            $staging = Join-Path $WorkDir 'pedrivers'
+            $staged = @(New-WinPEDriverStaging -Plan $pePlan -Destination $staging)
+            Write-Host ('Adding {0} WinPE driver(s) from {1} in one DISM run{2}...' -f $staged.Count, (@($pePlan | ForEach-Object Name) -join ', '), $(if ($infSame) { " ($infSame already in another pack)" } else { '' }))
+            $dismOut = Join-Path $WorkDir 'dism-add-driver.txt'
+            $dism = Join-Path $env:SystemRoot 'System32\dism.exe'
+            $dismArgs = "/Image:`"$mount`" /Add-Driver /Driver:`"$staging`" /Recurse /English"
+            $p = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"`"$dism`" $dismArgs > `"$dismOut`" 2>&1`"" -NoNewWindow -PassThru
+            $null = $p.Handle   # PowerShell 5.1 only keeps ExitCode if the handle was read before exit
+            while (-not $p.WaitForExit(2000)) {
+                $text = Read-SharedText $dismOut
+                $info = Get-NativeProgress -Text $text
+                $last = [regex]::Matches($text, '(?m)- ([^\r\n]*?\.inf)\b')
+                $name = if ($last.Count) { Split-Path $last[$last.Count - 1].Groups[1].Value -Leaf } else { '' }
+                if ($info -and $info.Total) {
+                    Set-BuildStepProgress 'drivers' -Percent $info.Percent -Detail ('{0} of {1}: {2}' -f ($info.Done + 1), $info.Total, $name)
+                } else { Set-BuildStepProgress 'drivers' -Detail 'DISM is reading the drivers' }
             }
-            Write-Progress -Activity "Adding WinPE drivers from $($src.Name)" -Completed
-            Write-Host ('Done: {0} of {1} WinPE driver(s) added{2} in {3:m\:ss}.' -f $added.Count, $infs.Count, $(if ($same) { ", $same already in from another pack" } else { '' }), $clock.Elapsed)
-            if ($failed) { Write-Warning "$($failed.Count) of $($infs.Count) WinPE driver(s) from $($src.Name) could not be added: $(($failed | Select-Object -Unique) -join ', ')" }
-            $infAdded += $added.Count
-            $peReport += [ordered]@{ name = $src.Name; added = $added.Count; failed = @($failed) ; vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
+            Get-NativeLogLines -Text (Read-SharedText $dismOut) | Where-Object { $_ -notmatch 'successfully installed' } | ForEach-Object { Write-Host "  $_" }
+            $installed = $null
+            try { $installed = @(Get-WindowsDriver -Path $mount -ErrorAction Stop | ForEach-Object { Split-Path "$($_.OriginalFileName)" -Leaf }) }
+            catch { Write-Warning "Could not list the drivers in boot.wim ($($_.Exception.Message)); using DISM's exit code $($p.ExitCode) instead." }
+            $peReport = @(if ($null -ne $installed) { Get-WinPEDriverResults -Plan $pePlan -Staged $staged -InstalledNames $installed }
+                          else { Get-WinPEDriverResults -Plan $pePlan -Staged $staged -ExitCode $p.ExitCode })
+            Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+            foreach ($r in $peReport) {
+                $infAdded += $r.added
+                if (@($r.failed).Count) { Write-Warning "$(@($r.failed).Count) WinPE driver(s) from $($r.name) could not be added: $((@($r.failed) | Select-Object -Unique) -join ', '). DISM's log: $env:SystemRoot\Logs\DISM\dism.log" }
+            }
+            Write-Host ('Done: {0} of {1} WinPE driver(s) added in {2:m\:ss}.' -f $infAdded, $staged.Count, $clock.Elapsed)
+        } else {
+            $peReport = @(Get-WinPEDriverResults -Plan $pePlan -Staged @())
         }
         Complete-BuildStep 'drivers' -Detail $(if ($pePlan) { "$infAdded driver(s) added" } else { 'No WinPE drivers' })
         if (-not $NoWinPECache) {
@@ -409,6 +436,7 @@ switch ($Target) {
             Start-BuildStep 'stick'
             $sticks = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
             $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
+            $defenderPlans += @(Add-DefenderScanExclusions -Paths @("${bootLetter}:\", "${dataLetter}:\") -Reason 'the copy to the stick' | Where-Object { $_ })
             if ($copyPlan) {
                 $update = Get-MediaUpdatePlan -Plan $copyPlan -Destination "${dataLetter}:\"
                 Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-MediaSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
@@ -438,7 +466,7 @@ switch ($Target) {
                     throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
                 }
             }
-            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
+            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }; Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
             Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
             Start-BuildStep 'stick' -Detail "$($disk.FriendlyName): WINPE (FAT32) and DEPLOY (NTFS)"
 
@@ -452,6 +480,7 @@ switch ($Target) {
             $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
             $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
             Complete-BuildStep 'stick' -Detail "WINPE on ${bootLetter}:, DEPLOY on ${dataLetter}:"
+            $defenderPlans += @(Add-DefenderScanExclusions -Paths @("${bootLetter}:\", "${dataLetter}:\") -Reason 'the copy to the stick' | Where-Object { $_ })
             Write-Host "Copying WinPE boot files to ${bootLetter}:..."
             Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
             robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
@@ -498,5 +527,7 @@ switch ($Target) {
         Write-Host '==============================================' -ForegroundColor Green
     }
 }
+foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }
+$defenderPlans = @()
 Stop-BuildProgress
 if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }

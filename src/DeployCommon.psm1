@@ -83,6 +83,8 @@ function Get-NativeProgress {
     param([AllowEmptyString()][string]$Text)
     if (-not $Text) { return $null }
     $drivers = [regex]::Matches($Text, 'Installing (\d+) of (\d+)')
+    # DISM on a French or German console PC: "Installation de 12 sur 76 - C:\...\x.inf", "12 von 76 - ...".
+    if (-not $drivers.Count) { $drivers = [regex]::Matches($Text, '(?m)\b(\d+) \p{L}+ (\d+) - [^\r\n]*\.inf\b') }
     if ($drivers.Count) {
         $m = $drivers[$drivers.Count - 1]
         $n = [int]$m.Groups[1].Value; $total = [int]$m.Groups[2].Value
@@ -282,6 +284,76 @@ function Get-WinPEDriverPlan {
             [pscustomobject]@{ File = $inf; Key = $key; Duplicate = -not $seen.Add($key) }
         })
         [pscustomobject]@{ Name = $src.Name; Path = $src.Path; Infs = $infs }
+    })
+}
+
+function New-WinPEDriverStaging {
+    <#
+    .SYNOPSIS
+        Copies every driver of a Get-WinPEDriverPlan that goes into boot.wim (x64 only, each driver once) into one
+        folder, so a single DISM /Add-Driver /Recurse adds them all in one servicing session. One Add-WindowsDriver
+        call per driver opens and closes the image's registry each time: about 10 seconds a driver, 45 minutes for
+        Dell's and HP's WinPE packs. Each source gets its own numbered subfolder with its folder layout (a driver's
+        .sys and .cat files sit next to its .inf or below it). Other .inf files there (duplicates, x86) are left out,
+        so DISM only sees the ones the plan picked.
+        Returns one row per staged .inf: SourceIndex (0-based, in plan order), Name, Staged path.
+    #>
+    param([object[]]$Plan, [Parameter(Mandatory)][string]$Destination)
+    if ([IO.Directory]::Exists($Destination)) { [IO.Directory]::Delete($Destination, $true) }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $rows = New-Object System.Collections.ArrayList
+    $plan = @($Plan | Where-Object { $_ })
+    for ($n = 0; $n -lt $plan.Count; $n++) {
+        $src = $plan[$n]
+        $keep = @($src.Infs | Where-Object { -not $_.Duplicate })
+        if (-not $keep) { continue }
+        $base = (Resolve-Path -LiteralPath $src.Path).ProviderPath.TrimEnd('\', '/')
+        $wanted = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach ($k in $keep) { [void]$wanted.Add($k.File.FullName) }
+        # Each driver's folder once, and not a folder that is inside one already taken.
+        $top = New-Object System.Collections.ArrayList
+        foreach ($d in @($keep | ForEach-Object { $_.File.DirectoryName.TrimEnd('\', '/') } | Sort-Object -Unique)) {
+            $inside = $false
+            foreach ($t in $top) { if ($d -ieq $t -or $d.StartsWith("$t$sep", [StringComparison]::OrdinalIgnoreCase)) { $inside = $true; break } }
+            if (-not $inside) { [void]$top.Add($d) }
+        }
+        foreach ($d in $top) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $d -Recurse -File -Force)) {
+                $rel = $f.FullName.Substring($base.Length).TrimStart('\', '/')
+                if ($f.Extension -ieq '.inf' -and -not $wanted.Contains($f.FullName)) { continue }
+                $target = [IO.Path]::Combine($Destination, "$($n + 1)", $rel)
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+                [IO.File]::Copy($f.FullName, $target, $true)
+                if ($f.Extension -ieq '.inf') { [void]$rows.Add([pscustomobject]@{ SourceIndex = $n; Name = $f.Name; Staged = $target }) }
+            }
+        }
+    }
+    @($rows)
+}
+
+function Get-WinPEDriverResults {
+    <#
+    .SYNOPSIS
+        The WinPE driver report (one entry per plan source: name, added, failed, vmd) after one DISM run over the
+        New-WinPEDriverStaging folder. InstalledNames are the .inf names of the drivers now in the image
+        (Get-WindowsDriver's OriginalFileName), so it works whatever language DISM prints in. Without them
+        (Get-WindowsDriver failed), ExitCode 0 counts every staged driver as added.
+    #>
+    param([object[]]$Plan, [object[]]$Staged, [string[]]$InstalledNames, [int]$ExitCode = 0)
+    $left = @{}
+    $known = $PSBoundParameters.ContainsKey('InstalledNames') -and $null -ne $InstalledNames
+    foreach ($i in @($InstalledNames | Where-Object { $_ })) { $k = "$i".ToLowerInvariant(); $left[$k] = 1 + [int]$left[$k] }
+    $plan = @($Plan | Where-Object { $_ })
+    @(for ($n = 0; $n -lt $plan.Count; $n++) {
+        $added = @(); $failed = @()
+        foreach ($r in @($Staged | Where-Object { $_.SourceIndex -eq $n })) {
+            $k = $r.Name.ToLowerInvariant()
+            $ok = if ($known) { [int]$left[$k] -gt 0 } else { $ExitCode -eq 0 }
+            if ($ok) { if ($known) { $left[$k]-- }; $added += $r.Name } else { $failed += $r.Name }
+        }
+        [ordered]@{ name = $plan[$n].Name; added = $added.Count; failed = @($failed)
+            vmd = @($added | Where-Object { $_ -match '^(iaStorVD|iaStorAC|iaStorAVC|iaVROC|iaStorE)\.inf$' } | Select-Object -Unique) }
     })
 }
 
@@ -778,6 +850,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment
