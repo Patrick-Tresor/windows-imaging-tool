@@ -6,6 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/AppPack.psm1') -Force
+Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 
 $failures = 0
 function Assert-Equal($Actual, $Expected, $Name) {
@@ -226,6 +227,39 @@ Installers:
     Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $false 'a download with another SHA256 is deleted'
     $hd.downloadSha256 = 'xyz'
     Assert-Equal @(@(Test-AppPack -Definition $hd) -like '*64 hexadecimal*').Count 1 'a SHA256 must be 64 hexadecimal characters'
+
+    # Online applications downloaded onto the stick at build time (Get-MediaAppDownloads, New-DeploymentMedia.ps1).
+    $mRoot = Join-Path $tmp 'media-content'
+    foreach ($a in 'Online', 'Hashed', 'HasFile', 'Local', 'Broken') { New-Item -ItemType Directory -Path (Join-Path $mRoot "Applications/$a") -Force | Out-Null }
+    $mjson = @{
+        Online  = @{ installer = 'o.exe'; command = 'o.exe /S'; downloadUrl = 'https://x.example/o.exe' }
+        Hashed  = @{ installer = 'h.exe'; command = 'h.exe /S'; downloadUrl = 'https://x.example/h.exe'; downloadSha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' }
+        HasFile = @{ installer = 'f.exe'; command = 'f.exe /S'; downloadUrl = 'https://x.example/f.exe' }
+        Local   = @{ installer = 'l.msi'; command = 'msiexec /i l.msi /qn' }
+        Broken  = @{ installer = 'b.exe'; command = 'b.exe /S'; downloadUrl = 'https://x.example/b.exe' }
+    }
+    foreach ($k in $mjson.Keys) { $mjson[$k] | ConvertTo-Json | Set-Content (Join-Path $mRoot "Applications/$k/app.json") }
+    'already here' | Set-Content (Join-Path $mRoot 'Applications/HasFile/f.exe')
+    'msi' | Set-Content (Join-Path $mRoot 'Applications/Local/l.msi')
+    $mPlan = Get-MediaCopyPlan -ContentRoot $mRoot -Folders @('Applications')
+    $mCache = Join-Path $tmp 'app-cache'
+    $script:mUrls = @()
+    $mDl = { param($Url, $Path) $script:mUrls += $Url; if ($Url -like '*b.exe') { throw '403' }; [IO.File]::WriteAllText($Path, 'abc') }
+    $r1 = Get-MediaAppDownloads -Plan $mPlan -CacheRoot $mCache -Log { param($m) } -WaitSeconds 0 -Downloader $mDl
+    Assert-Equal (@($r1.Items | ForEach-Object Relative | Sort-Object) -join '|') 'Applications\Hashed\h.exe|Applications\Online\o.exe' 'stick build: only online apps without their installer are downloaded'
+    Assert-Equal ($r1.Failed -join '|') 'Broken' 'stick build: a refused download is reported, not an error'
+    Assert-Equal (@($script:mUrls | Where-Object { $_ -like '*b.exe' }).Count) 2 'stick build: a failed download is tried again once'
+    Assert-Equal ([IO.File]::Exists((Join-Path $mRoot 'Applications/Online/o.exe'))) $false 'stick build: nothing is written into the content root'
+    $mAll = Add-MediaCopyItems -Plan $mPlan -Items $r1.Items
+    Assert-Equal "$($mAll.FileCount)|$($mAll.TotalBytes)" "$($mPlan.FileCount + 2)|$($mPlan.TotalBytes + 6)" 'stick build: the downloads are added to the copy plan and its total'
+    $script:mUrls = @()
+    $null = Get-MediaAppDownloads -Plan $mPlan -CacheRoot $mCache -Log { param($m) } -WaitSeconds 0 -Downloader $mDl
+    Assert-Equal (@($script:mUrls | Where-Object { $_ -notlike '*b.exe' }).Count) 0 'stick build: the next build reuses the downloads'
+    [IO.File]::SetLastWriteTime((Join-Path $mCache 'Applications/Online/o.exe'), (Get-Date).AddDays(-8))
+    [IO.File]::WriteAllText((Join-Path $mCache 'Applications/Hashed/h.exe'), 'changed')
+    $script:mUrls = @()
+    $null = Get-MediaAppDownloads -Plan $mPlan -CacheRoot $mCache -Log { param($m) } -WaitSeconds 0 -Downloader $mDl
+    Assert-Equal (@($script:mUrls | Where-Object { $_ -notlike '*b.exe' } | Sort-Object) -join '|') 'https://x.example/h.exe|https://x.example/o.exe' 'stick build: a week-old download or one with the wrong SHA256 is downloaded again'
 
     [xml]$odt = Get-Content -Raw (Join-Path $repo 'config/office-configuration.xml')
     Assert-Equal "$($odt.Configuration.Display.Level)|$($odt.Configuration.Display.AcceptEULA)" 'None|TRUE' 'the sample Office configuration installs silently'
