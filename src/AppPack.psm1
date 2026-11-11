@@ -284,12 +284,6 @@ function Get-AppTemplates {
     @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
 }
 
-function Get-AppCatalog {
-    # The templates the PC can download by itself at first boot (they have a download address).
-    param([object[]]$Templates = (Get-AppTemplates))
-    @($Templates | Where-Object { $_.PSObject.Properties['download'] -and $_.download.url })
-}
-
 function New-AppFromCatalog {
     <#
     .SYNOPSIS
@@ -847,7 +841,7 @@ function Invoke-AppInstall {
 
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
-    Get-AppTemplates, Get-AppCatalog, New-AppFromCatalog, Get-AppKnownDownload,
+    Get-AppTemplates, New-AppFromCatalog, Get-AppKnownDownload,
     ConvertFrom-WingetSearch, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Get-MediaAppDownloads, Add-MediaCopyItems,
