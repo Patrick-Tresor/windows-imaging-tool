@@ -1005,6 +1005,210 @@ function Save-WdsSettings {
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
 }
 
+#region Deploy settings page
+
+$script:SharePasswordFile = 'config\secrets\share.txt'
+
+function Get-UncRoot([string]$Path) {
+    # \\server\share\Status -> \\server\share; $null for anything that is not a UNC path.
+    if ("$Path".Trim() -match '^(\\\\[^\\/]+\\[^\\/]+)') { $Matches[1] } else { $null }
+}
+
+function Test-ExampleShare([string]$Path) {
+    # The example values from the repo's deploy-settings.json and the docs, which point at no real server.
+    $h = if ("$Path" -match '^\\\\([^\\/]+)') { $Matches[1] } else { '' }
+    $h -in @('deploy-server', 'server', 'yourserver')
+}
+
+function Get-DeploySettingsView {
+    <#
+    .SYNOPSIS
+        The Deploy Settings page's view of config\deploy-settings.json: USB only or network share, the account, whether
+        its password is saved (never the password itself), and where PCs report for the Dashboard.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $share = if ($s.PSObject.Properties['share'] -and $s.share) { $s.share } else { [pscustomobject]@{} }
+    $get = { param($o, $n) if ($o.PSObject.Properties[$n]) { "$($o.$n)".Trim() } else { '' } }
+    $path = & $get $share 'path'
+    $file = & $get $share 'passwordFile'
+    if (-not $file) { $file = $script:SharePasswordFile }
+    $full = Join-ContentPath $ContentRoot $file
+    $report = if ($s.PSObject.Properties['reporting'] -and $s.reporting) { & $get $s.reporting 'path' } else { '' }
+    [pscustomobject]@{
+        Mode           = if ($path) { 'Share' } else { 'Usb' }
+        SharePath      = $path
+        ShareUser      = & $get $share 'user'
+        PasswordFile   = $file
+        PasswordSaved  = [bool]((Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -gt 0)
+        ReportPath     = $report
+        VersionsToKeep = if ($s.PSObject.Properties['versionsToKeep']) { "$($s.versionsToKeep)" } else { '0' }
+    }
+}
+
+function Get-DeploySettingsProblems {
+    <#
+    .SYNOPSIS
+        What stops the Deploy Settings page from saving, one short sentence each; empty when it can save.
+        ReportPath: a separate share for the Dashboard, or empty to report where the deployment comes from.
+    #>
+    param(
+        [ValidateSet('Usb', 'Share')][string]$Mode = 'Usb',
+        [string]$SharePath,
+        [string]$ShareUser,
+        [bool]$PasswordSaved,
+        [string]$NewPassword,
+        [string]$ReportPath,
+        [bool]$ReportElsewhere,
+        [string]$VersionsToKeep = '0'
+    )
+    $out = @()
+    $SharePath = "$SharePath".Trim(); $ShareUser = "$ShareUser".Trim(); $ReportPath = "$ReportPath".Trim()
+    if ($Mode -eq 'Share') {
+        if (-not $SharePath) { $out += 'Type the network share, for example \\SERVER01\Deploy.' }
+        elseif (-not (Get-UncRoot $SharePath)) { $out += "The network share must look like \\SERVER01\Deploy, not $SharePath." }
+        elseif (Test-ExampleShare $SharePath) { $out += "$SharePath is the example value. Type your own server and share." }
+    }
+    if ($ReportElsewhere) {
+        if (-not $ReportPath) { $out += 'Type the share PCs report to, for example \\SERVER01\Deploy\Status.' }
+        elseif (-not (Get-UncRoot $ReportPath)) { $out += "The Dashboard share must look like \\SERVER01\Deploy\Status, not $ReportPath." }
+        elseif (Test-ExampleShare $ReportPath) { $out += "$ReportPath is the example value. Type your own server and share." }
+    }
+    if ($Mode -eq 'Share' -or $ReportElsewhere) {
+        if ($ShareUser) {
+            if ($ShareUser -notmatch '^[^\\@\s]+\\[^\\@\s]+$' -and $ShareUser -notmatch '^[^\\@\s]+@[^\\@\s]+\.[^\\@\s]+$') {
+                $out += "The account must look like DOMAIN\user or user@domain.com, not $ShareUser."
+            } elseif ($ShareUser -match '^DOMAIN\\') { $out += "$ShareUser is the example value. Type your own domain and account." }
+            elseif (-not $PasswordSaved -and -not $NewPassword) { $out += "Type the password of $ShareUser." }
+        }
+    }
+    $keep = 0
+    if (-not [int]::TryParse("$VersionsToKeep".Trim(), [ref]$keep) -or $keep -lt 0) { $out += 'Older image versions to keep must be 0 or more (0 keeps every version).' }
+    $out
+}
+
+function Save-DeploySettingsPage {
+    <#
+    .SYNOPSIS
+        Saves the share, account, Dashboard and versions parts of the Deploy Settings page. A typed password goes to
+        config\secrets\share.txt (never in deploy-settings.json); the media build puts it in the boot image encrypted.
+        A password file kept outside config\secrets (the old default, config\share.cred) is moved there.
+        Returns whether anything WinPE reads changed, so the page can say the stick needs updating.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [ValidateSet('Usb', 'Share')][string]$Mode = 'Usb',
+        [string]$SharePath,
+        [string]$ShareUser,
+        [string]$NewPassword,
+        [string]$ReportPath,
+        [int]$VersionsToKeep = 0
+    )
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    $before = ($s | ConvertTo-Json -Depth 5 -Compress)
+    $useAccount = $Mode -eq 'Share' -or "$ReportPath".Trim()
+    if (-not $s.PSObject.Properties['share'] -or -not $s.share) { $s | Add-Member -NotePropertyName share -NotePropertyValue ([pscustomobject]@{}) -Force }
+    $oldFile = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
+    $file = if ($oldFile -and (ConvertTo-SecretKey $oldFile).StartsWith('config\secrets\')) { $oldFile } else { $script:SharePasswordFile }
+    $passwordChanged = $false
+    if ($useAccount -and "$ShareUser".Trim()) {
+        $full = Join-ContentPath $ContentRoot $file
+        $oldFull = if ($oldFile -and $oldFile -ne $file) { Join-ContentPath $ContentRoot $oldFile } else { $null }
+        $text = if ($NewPassword) { $NewPassword }
+                elseif ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($oldFull))).Trim() }
+                else { $null }
+        if ($text) {
+            New-Item -ItemType Directory -Path (Split-Path $full -Parent) -Force | Out-Null
+            [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding($true)))
+            $passwordChanged = [bool]$NewPassword
+        }
+        if ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { Remove-Item -LiteralPath $oldFull -Force }
+        $user = "$ShareUser".Trim()
+    } else { $user = ''; $file = '' }
+    $set = { param($o, $n, $v) if ($o.PSObject.Properties[$n]) { $o.$n = $v } else { $o | Add-Member -NotePropertyName $n -NotePropertyValue $v } }
+    & $set $s.share 'path' $(if ($Mode -eq 'Share') { "$SharePath".Trim().TrimEnd('\') } else { '' })
+    & $set $s.share 'user' $user
+    & $set $s.share 'passwordFile' $file
+    if ($s.share.PSObject.Properties['encryptedPassword']) { $s.share.PSObject.Properties.Remove('encryptedPassword') }
+    if (-not $s.PSObject.Properties['reporting'] -or -not $s.reporting) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) -Force }
+    & $set $s.reporting 'path' "$ReportPath".Trim().TrimEnd('\')
+    & $set $s 'versionsToKeep' $VersionsToKeep
+    $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$($o.share.passwordFile)|$($o.reporting.path)" }
+    $old = $before | ConvertFrom-Json
+    $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
+    Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+    [pscustomobject]@{ MediaOutOfDate = ($passwordChanged -or (& $winpe $s) -ne $oldWinpe) }
+}
+
+function Get-ShareErrorText([int]$Code) {
+    # net use's error number, as one short sentence for the admin console.
+    switch ($Code) {
+        5    { 'access denied: the account may not open this share' }
+        53   { 'the server was not found (check the name and the network)' }
+        67   { 'the share was not found on that server' }
+        86   { 'wrong password' }
+        1219 { 'this PC is already connected to that server with another account; disconnect it (net use) or test from another PC' }
+        1326 { 'wrong user name or password' }
+        1327 { 'the account may not sign in (account restriction)' }
+        1330 { 'the password has expired' }
+        1331 { 'the account is disabled' }
+        1909 { 'the account is locked out' }
+        default { if ($Code -lt 0) { 'net use gave no error number' } else { "net use error $Code" } }
+    }
+}
+
+function Test-ShareConnection {
+    <#
+    .SYNOPSIS
+        Signs in to the share with the account (net use), checks it has an Images folder and that the Dashboard's
+        Status folder can be written, then disconnects. A connection this PC already had is used as it is and left open.
+        Ok is false on the first problem; Message is one line for the page. Never throws.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SharePath,
+        [string]$User,
+        [string]$Password,
+        [string]$StatusPath,          # empty: <share>\Status
+        [switch]$StatusOnly,          # SharePath is only the Dashboard's share (USB deploys): no Images folder expected
+        [string]$NetExe = 'net.exe'
+    )
+    $ErrorActionPreference = 'Continue'
+    $SharePath = $SharePath.Trim().TrimEnd('\')
+    $status = if ("$StatusPath".Trim()) { "$StatusPath".Trim().TrimEnd('\') } elseif ($StatusOnly) { $SharePath } else { $SharePath + '\Status' }
+    $opened = @()
+    $fail = { param($m) [pscustomobject]@{ Ok = $false; Message = $m } }
+    try {
+        foreach ($root in @(@(Get-UncRoot $SharePath; Get-UncRoot $status) | Where-Object { $_ } | Select-Object -Unique)) {
+            if (-not $User) { continue }
+            $listed = @(& $NetExe use 2>&1 | ForEach-Object { "$_" }) -match [regex]::Escape($root)
+            if ($listed) { continue }
+            if (-not $Password) { return & $fail "No password for $User. Type it first." }
+            $out = @(& $NetExe use $root $Password "/user:$User" /persistent:no 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                $text = (@($out) | ForEach-Object { "$_" }) -join "`n"
+                $code = if ($text -match 'System error (\d+)') { [int]$Matches[1] } elseif ($text -match '\b(\d{1,5})\b') { [int]$Matches[1] } else { -1 }
+                return & $fail "Could not connect to ${root}: $(Get-ShareErrorText $code)."
+            }
+            $opened += $root
+        }
+        if (-not $StatusOnly -and -not [IO.Directory]::Exists($SharePath)) { return & $fail "Connected, but $SharePath does not exist or the account can't open it." }
+        $notes = @()
+        if (-not $StatusOnly -and -not [IO.Directory]::Exists([IO.Path]::Combine($SharePath, 'Images'))) { $notes += 'no Images folder there yet (is this the content root?)' }
+        try {
+            [void][IO.Directory]::CreateDirectory($status)
+            $probe = [IO.Path]::Combine($status, ".write-test-$([guid]::NewGuid().ToString('N')).tmp")
+            [IO.File]::WriteAllText($probe, 'test')
+            [IO.File]::Delete($probe)
+        } catch { return & $fail "Connected, but the account can't write to $status, so the Dashboard gets no progress: $($_.Exception.Message)" }
+        $msg = "Connected$(if ($User) { " as $User" }). The Dashboard folder $status can be written."
+        if ($notes) { $msg += " Note: $($notes -join '; ')." }
+        [pscustomobject]@{ Ok = $true; Message = $msg }
+    } catch { & $fail "Test failed: $($_.Exception.Message)" }
+    finally { foreach ($r in $opened) { & $NetExe use $r /delete /y 2>&1 | Out-Null } }
+}
+
+#endregion
+
 function Get-DeploymentLogs {
     # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
     # or SERVICE-<name>_... (Update-OfflineImage.ps1).
@@ -1031,6 +1235,7 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
+    Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
