@@ -4,8 +4,6 @@
 # Get-Win11ReadinessFacts reads the hardware; everything else is pure so it can be tested off Windows.
 # PowerShell 5.1 compatible (WinPE-WMI, WinPE-SecureStartup, WinPE-DismCmdlets).
 
-$script:Modes = 'Block', 'Warn', 'Off'
-
 function Get-CpuWin11Support {
     <#
     .SYNOPSIS
