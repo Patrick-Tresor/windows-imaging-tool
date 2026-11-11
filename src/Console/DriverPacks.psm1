@@ -75,7 +75,10 @@ function ConvertFrom-DellDriverPackCatalog {
             $brand = $b.SelectSingleNode("*[local-name()='Display']").InnerText.Trim()
             foreach ($m in $b.SelectNodes("*[local-name()='Model']")) {
                 $display = $m.SelectSingleNode("*[local-name()='Display']")
-                $name = "$brand $(if ($display) { $display.InnerText.Trim() } else { $m.GetAttribute('name') })".Trim()
+                $model = if ($display) { $display.InnerText.Trim() } else { "$($m.GetAttribute('name'))".Trim() }
+                # Newer entries already name the brand (Display "Latitude 5531" under brand Latitude), which gave
+                # "Latitude Latitude 5531": a folder name and model that match no PC.
+                $name = if ($brand -and $model -like "$brand *") { $model } else { "$brand $model".Trim() }
                 if (-not $models.Contains($name)) { $models[$name] = [Collections.Generic.List[string]]::new() }
                 $models[$name].Add($m.GetAttribute('systemID'))
             }

@@ -14,6 +14,28 @@ function Assert-Equal($Actual, $Expected, $Name) {
     else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
 }
 
+# Dell names newer models with the brand already in the model's Display ("Latitude 5531" under brand Latitude):
+# the console showed "Dell Latitude Latitude 5531" and the folder and model matched no PC.
+$brandXml = Join-Path ([IO.Path]::GetTempPath()) ("dell-brand-" + [guid]::NewGuid() + '.xml')
+try {
+    Set-Content -Path $brandXml -Encoding utf8 -Value @'
+<?xml version="1.0" encoding="utf-8"?>
+<DriverPackManifest xmlns="openmanage/cm/dm" baseLocation="downloads.dell.com">
+  <DriverPackage dateTime="2025-06-10T10:00:00-05:00" path="F/1/Latitude-5531-Win11-A10.cab" releaseID="R5531" size="2907000000" type="win" vendorVersion="A10">
+    <SupportedOperatingSystems><OperatingSystem osCode="Windows11" osArch="x64"/></SupportedOperatingSystems>
+    <SupportedSystems>
+      <Brand prefix="LAT"><Display lang="en">Latitude</Display>
+        <Model systemID="0B13" name="5531"><Display lang="en">Latitude 5531</Display></Model>
+        <Model systemID="0B14" name="5431"><Display lang="en">5431</Display></Model>
+      </Brand>
+    </SupportedSystems>
+  </DriverPackage>
+</DriverPackManifest>
+'@
+    $named = @(ConvertFrom-DellDriverPackCatalog -Path $brandXml)
+    Assert-Equal (($named | ForEach-Object Model | Sort-Object) -join ',') 'Latitude 5431,Latitude 5531' 'dell: the brand is not repeated when the model already names it'
+} finally { Remove-Item $brandXml -Force -ErrorAction SilentlyContinue }
+
 # Dell: one row per model and OS, WinPE packs skipped, SHA256 preferred over MD5.
 $dell = @(ConvertFrom-DellDriverPackCatalog -Path (Join-Path $fixtures 'DriverPackCatalog.xml'))
 Assert-Equal $dell.Count 3 'dell: WinPE packs are skipped'
@@ -240,7 +262,7 @@ $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
 Assert-Equal ($start -match "-WindowStyle Hidden -PassThru") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
-Assert-Equal ($start -match 'Show-BuildProgress .*-Noun .download. -Hidden') $true 'download: progress shown in the console'
+Assert-Equal ($start -match 'Add-DriverDownloadJob -Panel \$script:ui.GrpDriverDownloads -List \$script:ui.LstDriverDownloads') $true 'download: progress shown on the Driver Library page'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
 Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
 
