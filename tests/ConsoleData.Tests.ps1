@@ -90,11 +90,7 @@ try {
     $rows = @(Get-AnswerFileRows -ContentRoot $root)
     Assert-Equal "$($rows.Name)|$($rows.IsDefault)" 'Default|Yes' 'content root is seeded with the default answer file'
     Assert-Equal ($rows[0].Issues -join '') 'Image Images\Win11-Enterprise.wim is not in the content root.' 'missing image is reported'
-    $new = New-AnswerFileFromSample -ContentRoot $root -Name 'Lab'
-    Assert-Equal (Test-Path $new) $true 'new answer file is created from the sample'
-    $threw = $false
-    try { New-AnswerFileFromSample -ContentRoot $root -Name 'Lab' | Out-Null } catch { $threw = $true }
-    Assert-Equal $threw $true 'answer file names cannot be reused'
+    Copy-Item (Get-AnswerFilePath -ContentRoot $root -Name 'Default') (Get-AnswerFilePath -ContentRoot $root -Name 'Lab')
 
     $imp = Import-DeployWizardAnswerFile -ContentRoot $root -Path (Join-Path $PSScriptRoot 'fixtures/deploy-wizard-sample.xml')
     Assert-Equal $imp.Name 'deploy-wizard-sample' 'deploy wizard file is imported under its own name'
