@@ -163,7 +163,7 @@ try {
         Skus = @(); MachineTypes = @('21KC'); Id = '21KC'; FileName = 'pack.zip'
     }
     $r = Install-VendorDriverPack -ContentRoot $root -Pack $zipPack -DownloadDir (Split-Path $zip) -KeepDownload 6>$null
-    Assert-Equal "$($r.Path)|$($r.InfCount)|$($r.Entries)" 'Lenovo\ThinkPad X1 Carbon Gen 12|1|2' 'install extracts and registers a pack'
+    Assert-Equal "$($r.Path)|$($r.InfCount)|$($r.Entries)" 'Lenovo\ThinkPad X1 Carbon Gen 12|1|1' 'install extracts and registers a pack as one entry'
     Assert-Equal ((Get-InstalledDriverPack -ContentRoot $root -Pack $zipPack).version) '24H2' 'install writes pack.json'
     Assert-Equal (Test-Path (Join-Path $root 'Drivers/Lenovo/ThinkPad X1 Carbon Gen 12.new')) $false 'staging folder is gone'
 
