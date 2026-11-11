@@ -67,6 +67,7 @@ function Show-AppPackEditor {
         $e.TxtPublisher.Text = $d.publisher
         $e.TxtNotes.Text = $d.notes
         if ($d.installer) { $e.CmbInstaller.Text = $d.installer }
+        $e.TxtDownloadUrl.Text = $d.downloadUrl
         $e.CmbType.Text = $d.installerType
         $e.TxtCommand.Text = $d.command
         $e.TxtUninstall.Text = $d.uninstallCommand
@@ -110,6 +111,7 @@ function Show-AppPackEditor {
             version          = $e.TxtVersion.Text.Trim()
             publisher        = $e.TxtPublisher.Text.Trim()
             installer        = $e.CmbInstaller.Text.Trim()
+            downloadUrl      = $e.TxtDownloadUrl.Text.Trim()
             installerType    = $e.CmbType.Text.Trim()
             command          = $e.TxtCommand.Text.Trim()
             uninstallCommand = $e.TxtUninstall.Text.Trim()
@@ -200,7 +202,9 @@ function Show-AppPackEditor {
         $t = $templates[$i - 1]
         $typed = $e.TxtName.Text.Trim()
         $name = if (-not $isNew) { $Name } elseif ($typed -and $typed -ne 'NewApp') { $typed } else { $t.name }
-        $d = New-AppDefinitionFromTemplate -Template $t -Installer $e.CmbInstaller.Text.Trim() -Name $name
+        # No installer picked and the template has a download: the PC downloads it at first boot.
+        $online = -not $e.TxtSource.Text.Trim() -and -not $e.CmbInstaller.Text.Trim() -and $t.PSObject.Properties['download'] -and $t.download.url
+        $d = New-AppDefinitionFromTemplate -Template $t -Installer $e.CmbInstaller.Text.Trim() -Name $name -Online:$online
         if (-not $d.version) { $d.version = $e.TxtVersion.Text.Trim() }
         if (-not $d.command -and $e.CmbInstaller.Text) {
             # Templates without known switches: use the inspected installer type.
@@ -240,7 +244,7 @@ function Show-AppPackEditor {
         try {
             $d = & $collect
             $src = $e.TxtSource.Text.Trim()
-            if ($isNew -and -not $src) { throw 'Pick the installer file or folder (Installer).' }
+            if ($isNew -and -not $src -and -not $d.downloadUrl) { throw 'Pick the installer file or folder, or fill in Download from (Installer).' }
             $warnings = @(Test-AppPack -Definition $d | Where-Object { $_ -like 'Warning:*' })
             if ($warnings -and [Windows.MessageBox]::Show($win, "$($warnings -join "`n")`n`nSave anyway?", 'Application', 'YesNo', 'Warning') -ne 'Yes') { return }
             $win.Cursor = 'Wait'

@@ -9,6 +9,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 |---|---|---|
 | **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
 | **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
+| **Sysprep at deploy** (`src/SysprepAtDeploy.psm1`, `src/Invoke-SysprepAtDeploy.ps1`) | WinPE, then the deployed PC's first start | Optional, for an image captured without sysprep (`Capture-VMImage.ps1 -SysprepAtDeploy`). After applying the image, WinPE sees it is not generalized and sets `HKLM\SYSTEM\Setup` SetupType 2 + CmdLine offline. At the first start that hook starts a SYSTEM task and waits for it, so no logon screen appears; the task runs `Prepare-Reference.ps1 -CheckOnly -RemoveUserApps` and `sysprep /generalize /oobe /reboot /unattend`, and removes the task and its PreventDeviceEncryption value before sysprep. The deploy screen and the PC show nothing about sysprep; only a failure turns the hook off and is shown on the logon screen and logged to `C:\Windows\Temp\SysprepAtDeploy.log`. |
 | **Image versions** (`src/ImageVersions.psm1`, `src/Invoke-ImageVersion.ps1`) | WinPE and the admin workstation | Keeps earlier images, rolls back, and resolves the version an answer file is pinned to. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
@@ -86,6 +87,17 @@ qcow2 or raw disk is first converted to a temporary VHD with qemu-img or
 VirtualBox (`Get-DiskConversionCommand`). A VMware disk with snapshots is read at
 the newest delta (`Resolve-VmdkCurrentDisk` in `VMwareVM.psm1`). The VM, its
 disk and its snapshots are not changed.
+
+Before that, the wizard's Check the disk page (disk file only) runs the quick checks of
+`Get-CaptureDiskChecklist` (`CaptureCheck.psm1`), then `Capture-VMImage.ps1 -CheckOnly
+-ResultPath` in a hidden PowerShell. It mounts the disk read-only, reads the edition
+from a copy of the SOFTWARE hive and the sysprep state, and writes a JSON result the
+page reads twice a second (`Get-CaptureCheckView`). The temporary VHD it made is kept
+with a `.source` note (names, sizes and times of the VM's disk files); the capture
+gets it with `-ReuseConvertedDisk` and uses it only while that note still matches
+(`Test-ConvertedDiskReusable`). The capture then reports its steps with `-ProgressFile`
+to the same Build progress window as a media build, which shows the time left for a
+step with a percent (`Format-TimeLeft` in `BuildSteps.psm1`).
 
 ## Image versions
 

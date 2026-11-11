@@ -486,14 +486,18 @@ function Get-ApplicationList {
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Applications'
     $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
+    $templates = @(Get-AppTemplates)
     Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'
+        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'; Download = ''; KnownDownload = ''
                            UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
                            Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
         try {
             $d = Read-AppPack -AppRoot $root -Name $_.Name
             $row.Definition = $d
             $row.DisplayName = $d.displayName; $row.Version = $d.version; $row.Type = $d.installerType; $row.Command = $d.command
+            $row.Download = $d.downloadUrl
+            $known = Get-AppKnownDownload -Definition $d -Templates $templates
+            if ($known) { $row.KnownDownload = $known.download.url }
             $row.Detection = if ($d.detection.rules) { (@($d.detection.rules | ForEach-Object { "$($_.type) $($_.target)" }) -join " $($d.detection.match) ") } else { 'none' }
             $for = @($d.requirements.makers) + @($d.requirements.models)
             if ($for) { $row.For = $for -join ', ' }
@@ -505,20 +509,50 @@ function Get-ApplicationList {
     }
 }
 
+function Set-ApplicationOnline {
+    <#
+    .SYNOPSIS
+        The Applications tab's "Download it from the internet" tick box. On: the application becomes its catalog
+        version (download address, command and files from the template that knows it), so the PC downloads it when it
+        installs it. Off: the download address is removed and the installer in the folder is used again.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][bool]$On)
+    $root = Join-Path $ContentRoot 'Applications'
+    $dir = Join-Path $root $Name
+    # The settings from before the tick (installer in the pack) are kept here, and come back on untick.
+    $local = Join-Path $dir 'app-local.json'
+    $d = Read-AppPack -AppRoot $root -Name $Name
+    if ($On) {
+        if ($d.downloadUrl) { return $d }
+        $t = Get-AppKnownDownload -Definition $d
+        if (-not $t) { throw "There is no known download for $Name. Pick its installer, or find the application online on the Applications tab." }
+        Copy-Item -LiteralPath (Join-Path $dir 'app.json') -Destination $local -Force
+        New-AppFromCatalog -AppRoot $root -Template $t -Name $Name -Overwrite | Out-Null
+    } elseif (Test-Path -LiteralPath $local) {
+        Move-Item -LiteralPath $local -Destination (Join-Path $dir 'app.json') -Force
+    } else {
+        $d.downloadUrl = ''
+        try { Save-AppPack -AppRoot $root -Definition $d -Overwrite | Out-Null }
+        catch { throw "$Name has no installer in its folder, so it must keep downloading. Edit it to add the installer first." }
+    }
+    Read-AppPack -AppRoot $root -Name $Name
+}
+
 function New-Application {
     # Creates Applications\<name>: copies the installer (a file, or a folder's contents) and writes app.json.
     # The simple form (-Command, -SuccessCodes) or a full -Definition from the application pack builder.
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$Source,
+        # Empty for an application the PC downloads at first boot (downloadUrl in -Definition).
+        [string]$Source,
         [string]$Command,
         [int[]]$SuccessCodes = @(0, 3010),
         $Definition
     )
     if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
     if (-not $Definition) {
-        $leaf = if (Test-Path $Source -PathType Leaf) { Split-Path $Source -Leaf } else { '' }
+        $leaf = if ($Source -and (Test-Path $Source -PathType Leaf)) { Split-Path $Source -Leaf } else { '' }
         $Definition = ConvertTo-AppDefinition -Name $Name -Json ([pscustomobject]@{ command = $Command; successCodes = $SuccessCodes; installer = $leaf })
     }
     $Definition.name = $Name
@@ -797,8 +831,8 @@ function Get-ImageUpdateArguments {
 }
 
 function Get-VMCaptureArguments {
-    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down, sysprepped VM's
-    # disk file.
+    # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down VM's disk file,
+    # sysprepped, or not with -SysprepAtDeploy (each PC runs sysprep at its first start).
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -807,7 +841,11 @@ function Get-VMCaptureArguments {
         [string]$Description,
         [ValidateSet('fast', 'max')][string]$Compression = 'max',
         [switch]$Split,
-        [switch]$NewVersion
+        [switch]$NewVersion,
+        [switch]$SysprepAtDeploy,
+        [string]$ReuseConvertedDisk,
+        [string]$ProgressFile,
+        [string]$LogPath
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
@@ -815,6 +853,10 @@ function Get-VMCaptureArguments {
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
+    if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
+    if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }
+    if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
+    if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
     @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
@@ -970,7 +1012,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
+    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,

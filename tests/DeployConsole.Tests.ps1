@@ -37,6 +37,8 @@ $redraw = "[=====    20.0%    ]`r[=======   31.5%   ]"
 Assert-Equal (Get-NativeProgress -Text $redraw).Percent 31 'a bar redrawn with CR reads its last value'
 Assert-Equal (Get-NativeProgress -Text 'Applying image') '' 'no progress before the first bar'
 Assert-Equal (Get-NativeProgress -Text '') '' 'no output, no progress'
+Assert-Equal (Get-NativeProgress -Text "    (12.03/100%)`r    (45.50/100%)`r").Percent 45 'qemu-img progress reads the percent, not the 100'
+Assert-Equal (Get-NativeProgress -Text "0%...10%...20%...30%").Percent 30 'VBoxManage progress reads its last value'
 
 $drivers = "Searching for driver packages to install...`r`nFound 76 driver package(s) to install.`r`n" +
     "Installing 1 of 76 - E:\Drivers\Dell\Latitude 5521\a.inf: The driver package was successfully installed.`r`n" +

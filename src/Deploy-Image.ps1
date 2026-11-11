@@ -35,6 +35,7 @@ Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 
 # Passwords: from the content root's password files when they are there (network share, or a stick built with
 # -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
@@ -442,6 +443,47 @@ function Connect-StatusFolder([string]$Root, $Settings) {
     }
 }
 
+function Set-SysprepAtDeploy([string]$UnattendXml) {
+    # The image was captured without sysprep: copy the first-start sysprep script to the new Windows and make it run
+    # once at its next start (src\SysprepAtDeploy.psm1). Its offline registry is loaded with reg.exe, as WinPE has
+    # no other way to write it; it is always unloaded again, or bcdboot and the restart would find it in use.
+    $ErrorActionPreference = 'Continue'   # reg.exe query writes to stderr for a missing value; failures still throw
+    $folder = 'W:\ProgramData\ImagingTool\Sysprep'
+    New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop | Out-Null
+    Copy-Item (Join-Path $PSScriptRoot 'Invoke-SysprepAtDeploy.ps1'), (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1'),
+        (Join-Path $PSScriptRoot 'Prepare-Reference.ps1') $folder -Force -ErrorAction Stop
+    # sysprep /unattend caches its own copy in Windows\Panther; the script deletes this one as soon as sysprep returns.
+    $UnattendXml | Set-Content -Path (Join-Path $folder 'unattend.xml') -Encoding utf8 -ErrorAction Stop
+    $hive = 'HKLM\ImagingToolTarget'
+    # reg.exe output goes to the log only: the deploy screen shows nothing about sysprep.
+    $quietReg = {
+        param([string[]]$RegArgs)
+        Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ("  > reg.exe $($RegArgs -join ' ')") -ErrorAction SilentlyContinue
+        $out = & reg.exe @RegArgs 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "reg.exe $($RegArgs[0]) failed (exit $LASTEXITCODE): $out" }
+    }
+    & $quietReg @('load', $hive, 'W:\Windows\System32\config\SYSTEM')
+    try {
+        $controlSet = Get-ControlSetName -Lines @(& reg.exe query "$hive\Select" /v Current 2>$null)
+        $hasPrevent = Test-RegQueryHasValue -Name 'PreventDeviceEncryption' -Lines @(& reg.exe query "$hive\$controlSet\Control\BitLocker" /v PreventDeviceEncryption 2>$null)
+        foreach ($regArgs in (Get-SysprepHookRegArgs -HiveKey $hive -Command (Get-SysprepHookCommand) -ControlSet $controlSet -PreventDeviceEncryption:(-not $hasPrevent))) {
+            & $quietReg $regArgs
+        }
+    }
+    finally {
+        [GC]::Collect()
+        for ($i = 0; $i -lt 5; $i++) {
+            & reg.exe unload $hive 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 1
+        }
+        if ($LASTEXITCODE -ne 0) { Write-DeployLog "Could not unload the new Windows' registry ($hive)." -Level WARN }
+    }
+    [pscustomobject]@{ preventDeviceEncryptionSet = (-not $hasPrevent); controlSet = $controlSet } |
+        ConvertTo-Json | Set-Content -Path (Join-Path $folder 'sysprep.json') -Encoding utf8 -ErrorAction Stop
+    Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ('{0:yyyy-MM-dd HH:mm:ss} [INFO] Sysprep set up for the first start of this PC.' -f (Get-Date)) -ErrorAction SilentlyContinue
+}
+
 function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
     # POSTIMAGE tasks run here in WinPE with the new Windows at %OSDRIVE% (W:) and content at %DEPLOYROOT%.
     # Plain commands stop the deployment when they fail; library tasks only when they are set to (stopOnFailure).
@@ -665,6 +707,13 @@ try {
         }
     }
 
+    # An image captured from a VM that was only shut down (the capture wizard's "sysprep on each PC" choice) is
+    # generalized by this PC at its first start; everything below is the same as for a sysprepped image.
+    $imageState = Get-OfflineImageState -Root 'W:\'
+    $sysprepOnPC = -not $imageState.Generalized
+    # Only the log says so: whoever deploys sees the usual steps.
+    if ($sysprepOnPC) { Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ('{0:yyyy-MM-dd HH:mm:ss} [INFO] The image was not sysprepped ({1}), so this PC runs sysprep at its first start.' -f (Get-Date), $imageState.ImageState) -ErrorAction SilentlyContinue }
+
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
     New-Item -ItemType Directory -Path 'W:\Windows\Panther' -Force | Out-Null
@@ -707,6 +756,10 @@ try {
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
+
+    if ($sysprepOnPC) {
+        Set-SysprepAtDeploy -UnattendXml $unattendXml
+    }
 
     # 6. POSTIMAGE tasks, then boot files.
     Set-DeployStatus -Step 'Running post-image tasks' -Percent 86

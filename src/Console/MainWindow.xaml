@@ -340,7 +340,7 @@
             <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
             <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
           </StackPanel>
-          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+          <WrapPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnAppEdit" Content="Edit"/>
             <Button x:Name="BtnAppTest" Content="Test detection"/>
@@ -349,9 +349,31 @@
             <Button x:Name="BtnAppDelete" Content="Delete"/>
             <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
             <Button x:Name="BtnAppsOpen" Content="Open folder"/>
-          </StackPanel>
+          </WrapPanel>
+          <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="200"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Find an app online:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox x:Name="TxtAppFind" Grid.Column="1" VerticalContentAlignment="Center"
+                     ToolTip="Type the application's name (VLC, 7-Zip, Notepad++, Adobe Reader...) and press Enter or Search"/>
+            <Button x:Name="BtnAppFind" Grid.Column="2" Content="Search" Margin="6,0,0,0" IsDefault="False"/>
+            <ComboBox x:Name="CmbAppFound" Grid.Column="3" Margin="6,0,0,0" IsEnabled="False"
+                      ToolTip="Results from Microsoft's winget catalog: name, id and latest version"/>
+            <Button x:Name="BtnAppFoundAdd" Grid.Column="4" Content="Add" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
+                    ToolTip="Adds the application: the PC downloads it from the publisher when it installs it and checks the file's SHA256"/>
+          </Grid>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <CheckBox x:Name="ChkAppOnline" IsEnabled="False" Content="Download it from the internet when the PC installs it (no installer to keep in the pack)"
+                      ToolTip="Uses the publisher's link the console already knows for this application. Untick to use the installer in the pack again."/>
+            <TextBlock x:Name="TxtAppOnline" Foreground="#5B6170" TextWrapping="Wrap" Margin="22,2,0,0"/>
+          </StackPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
@@ -359,6 +381,7 @@
               <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
               <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
               <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
+              <DataGridTextColumn Header="Download link" Binding="{Binding Download}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
               <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
             </DataGrid.Columns>

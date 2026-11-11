@@ -90,6 +90,11 @@ function Get-NativeProgress {
             return [pscustomobject]@{ Percent = [int][Math]::Floor(100 * ($n - 1) / $total); Done = $n - 1; Total = $total }
         }
     }
+    # qemu-img convert -p prints "    (45.00/100%)": the first number is the percent, not the 100.
+    $qemu = [regex]::Matches($Text, '\((\d{1,3})(?:[.,]\d+)?/100%\)')
+    if ($qemu.Count) {
+        return [pscustomobject]@{ Percent = [Math]::Min(100, [int]$qemu[$qemu.Count - 1].Groups[1].Value); Done = $null; Total = $null }
+    }
     $found = [regex]::Matches($Text, '(\d{1,3})(?:[.,]\d+)?\s?%')
     if (-not $found.Count) { return $null }
     $pct = [Math]::Min(100, [int]$found[$found.Count - 1].Groups[1].Value)
@@ -125,7 +130,8 @@ function Invoke-NativeWithProgress {
     )
     Write-DeployLog "> $FilePath $($ArgumentList -join ' ')"
     $out = Join-Path $env:TEMP ("native-{0}.txt" -f [guid]::NewGuid().ToString('N'))
-    $quoted = @($FilePath) + $ArgumentList | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }
+    # Quoted when cmd would split or act on it: spaces, and & | < > ^ ( ) (an image description like "Office&Teams").
+    $quoted = @($FilePath) + $ArgumentList | ForEach-Object { if ($_ -match '[\s&|<>^()]') { "`"$_`"" } else { $_ } }
     # cmd's redirection keeps the output off the console; Read-SharedText reads it while the tool writes.
     $p = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$($quoted -join ' ') > `"$out`" 2>&1`"" -NoNewWindow -PassThru
     $null = $p.Handle   # PowerShell 5.1 only keeps ExitCode if the handle was read before exit

@@ -8,17 +8,50 @@
     powershell.exe -ExecutionPolicy Bypass -File .\src\Console\ImagingConsole.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    # Hide this PowerShell's black console window, so only the console's own window shows (ImagingConsole.cmd).
+    [switch]$HideConsole
+)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -or [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
-    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    # The elevated copy runs hidden too: started from a PowerShell prompt, it still opens its own console window.
+    Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-WindowStyle', 'Hidden',
+        '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-HideConsole')
     return
+}
+
+if ($HideConsole) {
+    # -WindowStyle Hidden can leave the window up for a moment, or for good when it was opened another way (the .cmd
+    # run as administrator from an older copy, a shortcut); hiding it here catches those. Tools the console runs
+    # inline (cmd /c, winget, dism) share this hidden window, so they don't flash one either.
+    try {
+        Add-Type -Namespace ImagingTool -Name ConsoleWindow -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+'@
+        $h = [ImagingTool.ConsoleWindow]::GetConsoleWindow()
+        if ($h -ne [IntPtr]::Zero) { [void][ImagingTool.ConsoleWindow]::ShowWindow($h, 0) }   # 0 = SW_HIDE
+    } catch { }
 }
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+
+# With the console window hidden, an error that stops the console before (or after) its window opens would leave
+# nothing on screen. Show it in a message box and keep it in %LOCALAPPDATA%\ImagingConsole\console-error.log.
+trap {
+    $msg = "$($_.Exception.Message)"
+    $where = "$($_.InvocationInfo.PositionMessage)"
+    $log = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'console-error.log')
+    try {
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($log))
+        [IO.File]::AppendAllText($log, ('{0:yyyy-MM-dd HH:mm:ss} {1}{2}{3}{2}{2}' -f (Get-Date), $msg, [Environment]::NewLine, $where))
+    } catch { }
+    try { [void][Windows.MessageBox]::Show("The imaging console stopped: $msg`n`nDetails: $log", 'Imaging Console', 'OK', 'Error') } catch { }
+    break
+}
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'WheelScroll.psm1') -Force
@@ -31,8 +64,10 @@ Import-Module (Join-Path $srcDir 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
+Import-Module (Join-Path $srcDir 'CaptureCheck.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
+Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -41,6 +76,7 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 . (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
+. (Join-Path $PSScriptRoot 'BuildProgress.ps1')
 
 # A real .NET type so the editable grid can add rows and bind two-way.
 class DriverRow {
@@ -375,7 +411,7 @@ $ui.BtnImagesRefresh.Add_Click({ Invoke-Safely { Update-Images; Set-Status 'Imag
 $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Set-Status 'Capture started in a separate window. Click Refresh on the Images tab when it finishes.'
+        Set-Status 'Capture started. Click Refresh on the Images tab when it finishes.'
     }
 } })
 $ui.BtnImageVersions.Add_Click({ Invoke-Safely {
@@ -479,13 +515,63 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+# Click, not Checked: selecting a row sets the box too and must not change the application.
+$ui.ChkAppOnline.Add_Click({ Invoke-Safely {
+    $row = $ui.GridApps.SelectedItem
+    if (-not $row) { return }
+    $on = [bool]$ui.ChkAppOnline.IsChecked
+    try { Set-ApplicationOnline -ContentRoot $script:root -Name $row.Name -On $on | Out-Null }
+    finally {
+        Update-Apps
+        $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $row.Name)[0]
+    }
+    Set-Status $(if ($on) { "$($row.Name) downloads from the internet when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
+} })
+# Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
+$script:appFound = @()
+function Find-AppOnline {
+    $query = $ui.TxtAppFind.Text.Trim()
+    if (-not $query) { Set-Status 'Type the name of an application to find.'; return }
+    $ui.CmbAppFound.Items.Clear(); $ui.CmbAppFound.IsEnabled = $false; $ui.BtnAppFoundAdd.IsEnabled = $false
+    Set-Status "Searching the winget catalog for $query..."
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    try { $script:appFound = @(Find-WingetPackage -Query $query) }
+    finally { $window.Cursor = $null }
+    foreach ($p in $script:appFound) { [void]$ui.CmbAppFound.Items.Add("$($p.Name)  ($($p.Id) $($p.Version))") }
+    if (-not $script:appFound.Count) { Set-Status "Nothing found online for $query. Try another name."; return }
+    $ui.CmbAppFound.SelectedIndex = 0; $ui.CmbAppFound.IsEnabled = $true; $ui.BtnAppFoundAdd.IsEnabled = $true
+    $ui.CmbAppFound.IsDropDownOpen = $script:appFound.Count -gt 1
+    Set-Status "$($script:appFound.Count) found for $query. Pick one and click Add."
+}
+$ui.BtnAppFind.Add_Click({ Invoke-Safely { Find-AppOnline } })
+$ui.TxtAppFind.Add_KeyDown({ param($s, $e)
+    if ($e.Key -eq [Windows.Input.Key]::Return) { $e.Handled = $true; Invoke-Safely { Find-AppOnline } } })
+$ui.BtnAppFoundAdd.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $i = $ui.CmbAppFound.SelectedIndex
+    if ($i -lt 0 -or $i -ge $script:appFound.Count) { return }
+    $p = $script:appFound[$i]
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    try { $d = New-AppFromWinget -AppRoot (Join-Path $script:root 'Applications') -Id $p.Id -Version $p.Version -DisplayName $p.Name }
+    finally { $window.Cursor = $null }
+    Update-Apps; Update-Answers
+    $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $d.name)[0]
+    Set-Status "Added $($d.name) $($p.Version): the PC downloads it from the publisher when it installs it"
+} })
 $ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
 $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
 
 $ui.GridApps.Add_SelectionChanged({
     $row = $ui.GridApps.SelectedItem
+    $ui.ChkAppOnline.IsChecked = [bool]($row -and $row.Download)
+    $ui.ChkAppOnline.IsEnabled = [bool]($row -and ($row.Download -or $row.KnownDownload))
+    $ui.TxtAppOnline.Text = if (-not $row) { '' }
+        elseif ($row.Download) { "Downloads from $($row.Download)" }
+        elseif ($row.KnownDownload) { "Can download from $($row.KnownDownload)" }
+        else { 'No known download for this application: it installs from the installer in its pack.' }
     $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
         $lines = @("Install: $($row.Command)")
+        if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
         if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
         $lines += @($row.Issues | ForEach-Object { "- $_" })
         $lines -join "`r`n"
@@ -783,10 +869,18 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     }
     if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
 
-    # Its own window: the build takes minutes, shows ADK output, and must not freeze the console.
+    # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
+    # window shows each step; the build's window (Show build window) and its log have every line.
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $progressFile = Join-Path $env:TEMP "media-build-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
+    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
+    $logPath = [IO.Path]::Combine($logDir, "media-build-$stamp.log")
+    $buildArgs += @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
     $buildArgs = @('-NoExit') + $buildArgs
-    Start-Process powershell.exe -ArgumentList $buildArgs
-    Set-Status 'Media build started in a separate window. It shows the copy progress and says USB media ready when done.'
+    $proc = Start-Process powershell.exe -ArgumentList $buildArgs -WindowStyle Minimized -PassThru
+    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } elseif ($ui.RbIso.IsChecked) { 'ISO' } else { 'PXE boot image' }
+    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Building $what"
+    Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 
 $ui.BtnWdsCheck.Add_Click({ Invoke-Safely {

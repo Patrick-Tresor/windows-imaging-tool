@@ -24,7 +24,9 @@ tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 
 ## Admin console
 
-Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin rights).
+Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin rights). Only the console window
+opens: the PowerShell window behind it stays hidden. If the console stops on an error, a message says so and
+the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
 and click **Create folders** the first time. Then:
 
@@ -258,6 +260,45 @@ firmware) on editions other than Enterprise, so the unattend also creates a
 startup task, `ImagingTool\FirstBoot`, that starts it five minutes after boot.
 Only the first of the two runs it; the first line of `FirstBoot.log` says which.
 Old `app.json` files with only `command` and `successCodes` still work.
+
+Two installers need more than a silent switch:
+
+- **Microsoft 365 Apps (Office).** `OfficeSetup.exe` from office.com exits 0
+  without installing anything. Use the Office Deployment Tool's `setup.exe`
+  with a `configuration.xml` next to it (template `Microsoft-365-Apps`, sample in
+  `config\office-configuration.xml`). It downloads Office at first boot unless
+  you run `setup.exe /download configuration.xml` first and keep the files
+  in the pack.
+- **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
+  without it. Add the `DotNet-Desktop-Runtime-8` application and list it
+  before Dell Command | Update in the answer file.
+
+Some applications are ready to download with nothing to get first, because
+`config\app-templates.json` has a `download` address for them: .NET 8 Desktop
+Runtime, Microsoft 365 Apps (Office Deployment Tool plus
+`config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
+The PC needs internet at first boot; it tries for about five minutes, and a
+failed download marks the application failed in `FirstBoot.log`. An
+application the console already knows (by its name or installer, for
+example an Office pack built from `OfficeSetup.exe`) can switch: select it
+on the Applications tab and tick **Download it from the internet when the PC
+installs it**. No link to paste: it uses the publisher's link from the
+catalog, and unticking brings back the pack's own installer. The **Download
+link** column shows which packs download, and the builder's **Download from**
+box takes any other address. When the installer file is
+in the pack folder anyway, it is used and nothing is downloaded.
+
+**Find an app online** (on the Applications tab) is for any other
+application: type its name (VLC, 7-Zip, Notepad++, Adobe Reader...), press
+Enter or click **Search**, pick the right result and click **Add**. The
+search uses Microsoft's winget catalog, so the console PC needs winget (App
+Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
+the publisher's download address, the silent switches and the file's SHA256
+from the catalog; nothing big is downloaded when you add it. The PC downloads
+the installer at first boot and refuses it if its SHA256 changed (the
+publisher replaced the file): add the application again to get the new
+version. Packs whose catalog entry gives no silent switch say so in their
+notes; test those on a VM first.
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
@@ -509,19 +550,37 @@ are both read. The deploy log says which entry was used.
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
    Volume down while it starts.
+   From the console, a **Build progress** window lists every step (checking the content, copying WinPE,
+   mounting boot.wim, adding components and drivers, configuring WinPE, unmounting, partitioning the
+   stick, copying WinPE and the content) with its own bar, elapsed time and a tick when it is complete;
+   steps taken from the WinPE build cache say Reused. If a step fails it is marked Failed with one line;
+   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`) and
+   **Show build window** brings up the build's own window. Closing the progress window does not stop the
+   build. From the command line, `-ProgressFile` and `-LogPath` do the same.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a VM (VMware Workstation, VirtualBox, Hyper-V or others): install Windows,
-   apps and updates, no OEM drivers.
+   apps and updates, no OEM drivers. Step by step, including audit mode and keeping the Microsoft Store
+   in the image: [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md).
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
       below), an **ISO** for a VM or PC that boots from one, or a **USB stick** for a
       physical PC.
    2. Run the prepare command the wizard shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker and
-      Store apps that break sysprep, then runs sysprep and shuts down.
-   3. Name the image and choose compression.
-   4. Review and click Start (disk file) or Build and start.
+      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
+      Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
+      Or, for a disk file, tick **Skip sysprep here: each PC runs sysprep at its first start** and only
+      run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
+      (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
+   3. **Check the disk** (disk file only): each line gets a tick or a cross. The quick checks (the
+      disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
+      free space for the temporary copy) come first, then the wizard reads the Windows on the disk
+      and shows its edition, version, size and whether sysprep has run. Next stays off until every
+      line has a tick, so a disk that was not generalized is caught here, not after the capture
+      started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
+   4. Name the image and choose compression.
+   5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
+      window with each step (copy, read, capture, save), its bar and the time left.
    The image is saved to the content root's `Images` folder (disk file), the share's
    `Images` folder, or the USB stick, and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
