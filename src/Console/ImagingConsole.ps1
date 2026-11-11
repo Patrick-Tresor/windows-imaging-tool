@@ -744,6 +744,40 @@ $ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
     }
 } })
 
+# Find a model online: type the PC model, pick the pack, download it (in its own window, like Download from vendor...).
+$script:driverFound = @()
+function Find-DriverPackOnline {
+    $query = $ui.TxtDriverFind.Text.Trim()
+    if (-not $query) { Set-Status 'Type the PC model to find, for example Latitude 5521.'; return }
+    $ui.CmbDriverFound.Items.Clear(); $ui.CmbDriverFound.IsEnabled = $false; $ui.BtnDriverFoundDownload.IsEnabled = $false
+    $os = $ui.CmbDriverFindOs.SelectedItem.Content
+    Set-Status "Searching the Dell, HP and Lenovo catalogs for $query..."
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    $window.Dispatcher.Invoke([action]{}, 'Background')   # let the status paint before the catalogs download
+    try { $r = Find-VendorDriverPackOnline -Query $query -Os $os -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) }
+    finally { $window.Cursor = $null }
+    $script:driverFound = @($r.Packs | Select-Object -First 50)
+    foreach ($p in $script:driverFound) { [void]$ui.CmbDriverFound.Items.Add((Format-VendorDriverPack $p)) }
+    $err = if ($r.Errors) { " $(@($r.Errors)[0])" } else { '' }
+    if (-not $script:driverFound.Count) { Set-Status "No $os driver pack found for $query. Try fewer words or the SKU.$err"; return }
+    $ui.CmbDriverFound.SelectedIndex = 0; $ui.CmbDriverFound.IsEnabled = $true; $ui.BtnDriverFoundDownload.IsEnabled = $true
+    $ui.CmbDriverFound.IsDropDownOpen = $script:driverFound.Count -gt 1
+    $more = if (@($r.Packs).Count -gt 50) { ' (first 50 shown, type more of the name)' } else { '' }
+    Set-Status "$($script:driverFound.Count) found for $query$more. Pick one and click Download.$err"
+}
+$ui.BtnDriverFind.Add_Click({ Invoke-Safely { Find-DriverPackOnline } })
+$ui.TxtDriverFind.Add_KeyDown({ param($s, $e)
+    if ($e.Key -eq [Windows.Input.Key]::Return) { $e.Handled = $true; Invoke-Safely { Find-DriverPackOnline } } })
+$ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $i = $ui.CmbDriverFound.SelectedIndex
+    if ($i -lt 0 -or $i -ge $script:driverFound.Count) { return }
+    $p = $script:driverFound[$i]
+    if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
+    Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir
+    Set-Status "Downloading the $($p.Maker) $($p.Model) driver pack ($($p.SizeMB) MB) in a separate window. Click Refresh when it finishes."
+} })
+
 $ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-UnknownModels -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {

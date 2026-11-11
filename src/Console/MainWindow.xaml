@@ -103,6 +103,28 @@
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Driver library"/>
               <TextBlock Style="{StaticResource Hint}" Text="Each row maps a PC to a driver folder. The deploy matches SKU first, then Lenovo machine type, then exact model, then model pattern (wildcards allowed). Run Get-HardwareIdentity in WinPE to see a PC's values. Edit cells directly, then Save."/>
+              <Grid Margin="0,4,0,10">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="220"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Find a model online:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="TxtDriverFind" Grid.Column="1" VerticalContentAlignment="Center"
+                         ToolTip="Type the PC model (Latitude 5521, EliteBook 840 G9, ThinkPad T14 Gen 4), a Dell or HP SKU or a Lenovo machine type, then press Enter or Search"/>
+                <ComboBox x:Name="CmbDriverFindOs" Grid.Column="2" Width="100" Margin="6,0,0,0" SelectedIndex="0" ToolTip="Windows version of the driver pack">
+                  <ComboBoxItem Content="Windows 11"/><ComboBoxItem Content="Windows 10"/>
+                </ComboBox>
+                <Button x:Name="BtnDriverFind" Grid.Column="3" Content="Search" Margin="6,0,0,0" IsDefault="False"
+                        ToolTip="Searches the Dell, HP and Lenovo driver pack catalogs"/>
+                <ComboBox x:Name="CmbDriverFound" Grid.Column="4" Margin="6,0,0,0" IsEnabled="False"
+                          ToolTip="Driver packs found in the vendor catalogs: model, Windows version, release date and size"/>
+                <Button x:Name="BtnDriverFoundDownload" Grid.Column="5" Content="Download" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
+                        ToolTip="Downloads the pack from the vendor, checks it, extracts it to Drivers\Maker\Model and adds it to the library"/>
+              </Grid>
             </StackPanel>
 
             <GroupBox DockPanel.Dock="Bottom" Header="Import a driver pack" Margin="0,12,0,0" Padding="10">

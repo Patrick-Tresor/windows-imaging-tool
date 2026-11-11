@@ -359,6 +359,13 @@ vendor's public catalog of enterprise driver packs:
 | HP | `hpia.hpcloud.hp.com/downloads/driverpackcatalog/HPClientDriverPackCatalog.cab` | SoftPaq .exe (`/s /e /f <dir>`) | platform ID = baseboard product |
 | Lenovo | `download.lenovo.com/cdrt/td/catalogv2.xml` | SCCM pack .exe (`/VERYSILENT /DIR=<dir> /EXTRACT=YES`) | machine type |
 
+**Find a model online** on the Driver Library tab searches all three catalogs at
+once (`Find-VendorDriverPackOnline`): type the model ("Latitude 5521",
+"EliteBook 840 G9", "T14 Gen 4"), a Dell/HP SKU or a Lenovo machine type, pick
+the pack and click **Download**. Every word must match (a number as a whole
+word); a maker name in the query reads only that catalog. The download runs in
+its own window through the same job file as **Download from vendor...**.
+
 Catalogs are cached for a day in `%LOCALAPPDATA%\ImagingConsole\VendorCatalogs`.
 For each model and OS only the newest x64 pack is offered (highest Windows
 release, then newest date; Dell WinPE packs are skipped). Installing a pack:
