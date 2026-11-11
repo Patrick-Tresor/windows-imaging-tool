@@ -331,7 +331,7 @@
                 <CheckBox x:Name="ChkPeHp" Content="HP" IsChecked="True"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
-                         Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Each pack makes WinPE bigger and the build a few minutes longer."/>
+                         Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Models with no driver pack get these drivers in Windows too. Each pack makes WinPE bigger and the build a few minutes longer."/>
             </StackPanel>
 
             <Label Grid.Row="12" Content="WinPE password" VerticalAlignment="Top"/>

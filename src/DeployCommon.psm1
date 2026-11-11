@@ -618,6 +618,27 @@ function Find-DriverCatalogMatch {
     [pscustomobject]@{ Status = 'None'; MatchedBy = $null; Path = $null }
 }
 
+function Find-WinPEFallbackPack {
+    <#
+    .SYNOPSIS
+        The folder a maker fallback uses when its own folder is missing: the maker's vendor WinPE pack on the
+        stick (Drivers\_WinPE\Dell-WinPE11-A11, HP-WinPE-sp173204), newest first. A maker with no WinPE pack
+        (Lenovo) gets the whole Drivers\_WinPE folder: its Intel RST/VMD and NIC drivers match those PCs too, and
+        without the RST/VMD driver Windows can't boot from an SSD behind VMD. $null when there are no WinPE drivers.
+        .NET calls only: in WinPE the stick may have no PowerShell drive.
+    #>
+    param([string]$Maker, [Parameter(Mandatory)][string]$WinPEDriverRoot)
+    if (-not [IO.Directory]::Exists($WinPEDriverRoot)) { return $null }
+    $packs = @([IO.Directory]::GetDirectories($WinPEDriverRoot) | Sort-Object -Descending)
+    if ($Maker) {
+        $own = $packs | Where-Object { [IO.Path]::GetFileName($_) -like "$Maker-WinPE*" } | Select-Object -First 1
+        if ($own) { return $own }
+    }
+    $hasInf = @([IO.Directory]::GetFiles($WinPEDriverRoot, '*.inf', [IO.SearchOption]::AllDirectories)).Count -gt 0
+    if ($hasInf) { return $WinPEDriverRoot.TrimEnd('\', '/') }
+    $null
+}
+
 function Resolve-DriverPack {
     # Picks the most specific catalog entry for this PC. Returns a full path, or $null for inbox drivers only.
     # -Detailed returns the Find-DriverCatalogMatch result with FullPath added (MissingFolder when it is not there).
@@ -625,8 +646,10 @@ function Resolve-DriverPack {
         [Parameter(Mandatory)]$Identity,
         [Parameter(Mandatory)][string]$CatalogPath,
         [Parameter(Mandatory)][string]$DriverRoot,
+        [string]$WinPEDriverRoot,   # Drivers\_WinPE on the stick: the vendor WinPE packs, used when a maker fallback folder is missing
         [switch]$Detailed
     )
+    if (-not $WinPEDriverRoot) { $WinPEDriverRoot = [IO.Path]::Combine($DriverRoot, '_WinPE') }
     $m = Find-DriverCatalogMatch -Identity $Identity -CatalogPath $CatalogPath
     switch ($m.Status) {
         'Matched'   { Write-DeployLog "Driver catalog match: $($m.Path)" }
@@ -642,6 +665,15 @@ function Resolve-DriverPack {
             Write-DeployLog "Driver folder missing: $full" -Level WARN
             $full = $null
             if ($m.Status -eq 'Matched') { $m.Status = 'MissingFolder' }
+        }
+    }
+    if ($m.Status -eq 'Fallback' -and -not $full) {
+        # No fallback folder: the vendor WinPE packs every stick carries (storage, network) stand in for it.
+        $pe = Find-WinPEFallbackPack -Maker $Identity.Maker -WinPEDriverRoot $WinPEDriverRoot
+        if ($pe) {
+            $full = $pe
+            $m.Path = $pe
+            Write-DeployLog "Using the WinPE storage and network drivers instead: $pe"
         }
     }
     if (-not $Detailed) { return $full }
@@ -851,6 +883,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

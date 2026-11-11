@@ -242,6 +242,9 @@ function Get-MediaDriverPacks {
         if ($exists) { $size = [int64](Get-ChildItem -Path $full -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum }
         $what = @($row.Models | Where-Object { $_ }) -join ', '
         if ($row.Fallback) { $what = (@("$($row.Maker) fallback for unlisted models") + @($row.Models)) -join ', ' }
+        # A maker fallback with no folder is left out: there is nothing to copy, and the deploy gives unlisted
+        # models the WinPE driver packs on the stick instead (Find-WinPEFallbackPack).
+        if ($row.Fallback -and -not $exists) { continue }
         $state = if (-not $exists) { '  - folder missing, nothing to copy' } else { '  ({0:N1} GB)' -f ($size / 1GB) }
         [pscustomobject]@{
             Path     = $row.Path
