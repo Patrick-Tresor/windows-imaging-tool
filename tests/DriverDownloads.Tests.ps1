@@ -42,7 +42,9 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         $win.Show()
         $pf = Join-Path $dir 'progress.json'
         Start-BuildProgress -Path $pf -Title 'Downloading the Dell Latitude 5531 driver pack' -Steps @(, @('pack1', 'Dell Latitude 5531'))
-        Start-BuildStep 'pack1'; Set-BuildStepProgress 'pack1' -Percent 12 -Detail 'Downloading 2773 MB'
+        Start-BuildStep 'pack1'
+        Start-Sleep -Milliseconds 350   # progress is written at most about three times a second
+        Set-BuildStepProgress 'pack1' -Percent 12 -Detail 'Downloading 2773 MB'
         $row = Add-DriverDownloadJob -Panel $grp -List $lst -ProgressFile $pf -LogPath (Join-Path $dir 'x.log') -Title 'Dell Latitude 5531 driver pack' `
             -OnFinished { $script:refreshed++ }
         $win.Dispatcher.Invoke([action]{}, 'Background')
