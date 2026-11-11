@@ -211,9 +211,6 @@ try {
     Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
     Assert-Equal (Unprotect-AnswerPassword -Value $back.BitLocker.PinEncrypted -Key (Get-AnswerKey -ContentRoot $root)) '246810' 'the PIN is saved encrypted in the answer file'
     Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file in plain text'
-    $threw = $false
-    try { Save-SecretFile -ContentRoot $root -RelativePath '..\outside.txt' -Value 'x' } catch { $threw = $true }
-    Assert-Equal $threw $true 'password files must stay inside the content root'
 
     # Offline image updates.
     Assert-Equal (Test-Path (Join-Path $root 'Updates')) $true 'content root gets an Updates folder'

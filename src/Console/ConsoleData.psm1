@@ -355,15 +355,6 @@ function Test-SavedPassword {
     [bool]((Test-AnswerPasswordText $Encrypted) -or (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $RelativePath))
 }
 
-function Save-SecretFile {
-    # Writes one password to its own file under the content root. See the README on who can read it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath, [Parameter(Mandatory)][string]$Value)
-    if ([IO.Path]::IsPathRooted($RelativePath) -or $RelativePath -match '\.\.') { throw "Password file '$RelativePath' must be a path inside the content root." }
-    $path = Join-ContentPath $ContentRoot $RelativePath
-    New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
-    Set-Content -Path $path -Value $Value -NoNewline -Encoding utf8
-}
-
 function Split-JoinAccount {
     # "CORP\svc-join" typed as the join account -> user svc-join, domain CORP, whatever the account's domain box held:
     # Windows signs in as domain\user, so keeping both made CORP\svc-join into OTHER\CORP\svc-join and the join failed.
@@ -1012,7 +1003,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, New-AnswerFileFromSample, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-SecretFile, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
+    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
     Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
