@@ -114,7 +114,7 @@ function Add-DriverDownloadJob {
     $row.Steps = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildStepRow]'
     $List.ItemsSource.Insert(0, $row)
     $script:DriverDownloads[$row.Id] = @{ Row = $row; ProgressFile = $ProgressFile; LogPath = $LogPath; Process = $Process
-        Started = [DateTime]::UtcNow; OnFinished = $OnFinished; Done = $false; FinishedRan = $false }
+        Started = [DateTime]::UtcNow; OnFinished = $OnFinished; Done = $false; FinishedRan = $false; RemoveTimer = $null }
     $Panel.Visibility = 'Visible'
     if (-not $script:DriverDownloadTimer) {
         $script:DriverDownloadTimer = New-Object Windows.Threading.DispatcherTimer
@@ -136,6 +136,7 @@ function Invoke-DriverDownloadAction {
         }
         'remove' {
             if ($ctx -and -not $ctx.Done) { return }   # a running download stays listed
+            if ($ctx -and $ctx.RemoveTimer) { $ctx.RemoveTimer.Stop() }
             $script:DriverDownloads.Remove($Row.Id)
             [void]$script:DriverDownloadList.ItemsSource.Remove($Row)
             if ($script:DriverDownloadList.ItemsSource.Count -eq 0) { $script:DriverDownloadPanel.Visibility = 'Collapsed' }
@@ -149,12 +150,25 @@ function Update-DriverDownloads {
     if ($script:DriverDownloadTimer -and -not @($script:DriverDownloads.Values | Where-Object { -not $_.Done }).Count) { $script:DriverDownloadTimer.Stop() }
 }
 
+# Seconds a download that worked stays listed ("Done in ...") before it takes itself off the list (Patrick,
+# 2026-11-11: close by itself when the download is done). A failed one stays until Remove, for its log.
+$script:DriverDownloadKeepSeconds = 5
+
 function Complete-DriverDownloadJob {
-    # Marks a download finished (OK or failed) and runs OnFinished once: the library refreshes.
+    # Marks a download finished (OK or failed), runs OnFinished once (the library refreshes) and, when it worked,
+    # removes it from the list after DriverDownloadKeepSeconds.
     param([Parameter(Mandatory)]$Ctx, [Parameter(Mandatory)][string]$Outcome)
     $Ctx.Done = $true
     $Ctx.Row.Outcome = $Outcome
     $Ctx.Row.Finished = $true
+    if ($Outcome -eq 'ok' -and -not $Ctx.RemoveTimer) {
+        $t = New-Object Windows.Threading.DispatcherTimer
+        $t.Interval = [TimeSpan]::FromSeconds($script:DriverDownloadKeepSeconds)
+        $t.Tag = $Ctx.Row
+        $t.Add_Tick({ param($sender) $sender.Stop(); Invoke-DriverDownloadAction -Row $sender.Tag -Action 'remove' })
+        $Ctx.RemoveTimer = $t
+        $t.Start()
+    }
     if ($Ctx.FinishedRan -or -not $Ctx.OnFinished) { return }
     $Ctx.FinishedRan = $true
     try { & $Ctx.OnFinished } catch { }
