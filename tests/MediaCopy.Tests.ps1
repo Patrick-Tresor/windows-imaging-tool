@@ -86,6 +86,14 @@ try {
     $again = Get-MediaCopyPlan -ContentRoot $src -Folders 'config'
     $null = Copy-MediaContent -Plan $again -Destination $dst -Quiet
     Assert-Equal ([IO.File]::ReadAllBytes((Join-T $dst 'config\deploy-settings.json')).Length) 50 'copy: an old bigger file is replaced, not left longer'
+    # A read-only or hidden file already on the stick (CopyFileEx kept the source's attributes) is replaced too.
+    $old = Join-T $dst 'config\deploy-settings.json'
+    [IO.File]::WriteAllText($old, 'old')
+    [IO.File]::SetAttributes($old, [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden)
+    $msg = ''
+    try { $null = Copy-MediaContent -Plan $again -Destination $dst -Quiet } catch { $msg = $_.Exception.Message }
+    Assert-Equal $msg '' 'copy: a read-only file on the stick does not stop the copy'
+    Assert-Equal ([IO.File]::ReadAllBytes($old).Length) 50 'copy: a read-only file on the stick is replaced'
 
     # Big files get a line of their own and a done line, so the console shows the copy moving without a progress bar.
     Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null

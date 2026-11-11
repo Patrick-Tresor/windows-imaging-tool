@@ -320,7 +320,11 @@ try {
             $peReport = @(Get-WinPEDriverResults -Plan $pePlan -Staged @())
         }
         Complete-BuildStep 'drivers' -Detail $(if ($pePlan) { "$infAdded driver(s) added" } else { 'No WinPE drivers' })
-        if (-not $NoWinPECache) {
+        # A DISM run that added nothing (it failed as a whole) must not be cached: the next builds would reuse a
+        # WinPE without its storage and network drivers while the key stays the same.
+        $peCacheThis = -not $NoWinPECache -and -not ($infTotal -and $infAdded -eq 0)
+        if ($infTotal -and $infAdded -eq 0) { Write-Warning "No WinPE driver could be added (DISM exit code $($p.ExitCode)). This WinPE is not saved for the next build. DISM's log: $env:SystemRoot\Logs\DISM\dism.log" }
+        if ($peCacheThis) {
             # Save now, before the scripts and settings of this build go in, and keep that boot.wim for the next build.
             Write-Host 'Saving WinPE with its components and drivers for the next build...'
             Start-BuildStep 'cache'
@@ -329,6 +333,8 @@ try {
             catch { Write-Warning "WinPE build not cached (the next build adds the drivers again): $($_.Exception.Message)" }
             Mount-WindowsImage -ImagePath $bootWim -Index 1 -Path $mount | Out-Null
             Complete-BuildStep 'cache'
+        } elseif (-not $NoWinPECache) {
+            Complete-BuildStep 'cache' -State skipped -Detail 'Not saved: no WinPE driver was added'
         }
     }
     Start-BuildStep 'configure'

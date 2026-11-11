@@ -114,6 +114,9 @@ try {
     Assert-Equal ([IO.File]::ReadAllText((Join-Path $stage '1/winpe/x64/storage/iaStorVD.sys'))) 'rst-sys' 'staging: a driver keeps its .sys next to the .inf'
     Assert-Equal ([IO.File]::Exists((Join-Path $stage '1/winpe/x86/storage/iaStorVD.sys'))) $false 'staging: Dell x86 folder left out'
     Assert-Equal ([IO.File]::Exists((Join-Path $stage '3/a.sys'))) $true 'staging: files next to a root .inf come along'
+    # Driver files out of a vendor cab are often read-only: the next staging still empties the folder.
+    $ro = Join-Path $stage '1/winpe/x64/storage/iaStorVD.sys'
+    [IO.File]::SetAttributes($ro, [IO.FileAttributes]::ReadOnly)
     $again = @(New-WinPEDriverStaging -Plan $plan3 -Destination $stage)
     Assert-Equal $again.Count 5 'staging: a second run starts from an empty folder'
     Assert-Equal (@(New-WinPEDriverStaging -Plan @() -Destination $stage).Count) 0 'staging: no drivers, nothing staged'
@@ -140,6 +143,7 @@ Assert-Equal ($build -match '(?s)Save-WinPEBuildCache.*Deploy''') $true 'build: 
 Assert-Equal ($build -match 'Get-WinPEPackCopyPlan -PackPath \$pack\.Path') $true 'build: vendor packs go to the stick with the plan'
 Assert-Equal ($build -match 'Copy-Item -Path \(Join-Path \$pack\.Path') $false 'build: no whole-pack Copy-Item to the stick'
 Assert-Equal ($build -match 'New-WinPEDriverStaging') $true 'build: WinPE drivers staged for one DISM run'
+Assert-Equal ($build -match '\$peCacheThis = -not \$NoWinPECache -and -not \(\$infTotal -and \$infAdded -eq 0\)') $true 'build: a DISM run that added nothing is not cached'
 Assert-Equal ($build -match '/Add-Driver /Driver:') $true 'build: one DISM /Add-Driver over the staging folder'
 Assert-Equal ($build -match 'Add-WindowsDriver') $false 'build: no Add-WindowsDriver call per driver (about 10 s each)'
 Assert-Equal ($build -match 'Add-DefenderScanExclusions -Paths @\(\$WorkDir\)') $true 'build: Defender skips the WinPE work folder while DISM runs'
