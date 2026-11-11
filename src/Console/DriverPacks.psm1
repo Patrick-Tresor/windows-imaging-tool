@@ -326,6 +326,14 @@ function Get-DownloadKind {
     if ($n -ge 4 -and [Text.Encoding]::ASCII.GetString($bytes, 0, 4) -eq 'MSCF') { return 'Cab' }
     if ($n -ge 2 -and $bytes[0] -eq 0x1F -and $bytes[1] -eq 0x8B) { return 'Gzip' }
     if ($n -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) { return 'Zip' }
+    # UTF-16 XML (with a byte order mark, or '<' then a zero byte), as Dell writes some of its catalogs.
+    if ($n -ge 4 -and (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or ($bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) -or
+        ($bytes[0] -eq 0x3C -and $bytes[1] -eq 0) -or ($bytes[0] -eq 0 -and $bytes[1] -eq 0x3C))) {
+        $enc = if ($bytes[0] -eq 0xFE -or $bytes[0] -eq 0) { [Text.Encoding]::BigEndianUnicode } else { [Text.Encoding]::Unicode }
+        $text = $enc.GetString($bytes, 0, $n - ($n % 2)).TrimStart([char]0xFEFF, ' ', "`t", "`r", "`n")
+        if ($text -match '^(?i)<(!doctype html|html)') { return 'Html' }
+        if ($text.StartsWith('<')) { return 'Xml' }
+    }
     $text = [Text.Encoding]::UTF8.GetString($bytes, 0, $n).TrimStart([char]0xFEFF, ' ', "`t", "`r", "`n")
     if ($text -match '^(?i)<(!doctype html|html)') { return 'Html' }
     if ($text.StartsWith('<')) { return 'Xml' }
@@ -340,6 +348,73 @@ function Expand-GzipFile {
         $out = [IO.File]::Create($Destination)
         try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
     } finally { $in.Dispose() }
+}
+
+function Resolve-CatalogDownload {
+    <#
+    .SYNOPSIS
+        Turns a downloaded vendor catalog into the catalog XML at Xml, whatever came down: the XML itself, a gzip,
+        or a cab (also a cab inside a cab). In a cab it takes the largest file that really is XML, whatever its name
+        or extension, also when expand.exe put it next to the cab instead of in the folder it was given (Patrick's
+        console PC, 2026-11-10: "The Dell catalog (Cab) did not contain DriverPackCatalog.xml", folder empty).
+        On failure the download is kept and the error lists what the cab held.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Download,
+        [Parameter(Mandatory)][string]$Xml,
+        [string]$Maker = 'vendor',
+        [string]$Url
+    )
+    $dir = Split-Path $Download
+    $kind = Get-DownloadKind -Path $Download
+    $seen = @()
+    switch ($kind) {
+        'Xml'  { if ($Download -ne $Xml) { Copy-Item $Download $Xml -Force } }
+        'Gzip' { Expand-GzipFile -Path $Download -Destination $Xml }
+        'Cab'  {
+            $started = (Get-Date).AddSeconds(-5)
+            $unpack = Join-Path $dir 'unpacked'
+            if (Test-Path $unpack) { Remove-Item $unpack -Recurse -Force }
+            $cabs = @($Download)
+            $found = $null
+            for ($level = 0; $level -lt 3 -and -not $found -and $cabs; $level++) {
+                $next = @()
+                foreach ($cab in $cabs) {
+                    $to = Join-Path $unpack "$level-$([IO.Path]::GetFileNameWithoutExtension($cab))"
+                    # Expand-CabFile throws when nothing lands in $to; the file may still be next to the cab.
+                    try { Expand-CabFile -Cab $cab -Destination $to } catch { $seen += "extract error: $($_.Exception.Message)" }
+                    # What came out: the folder it was given, plus anything new next to the cab.
+                    $files = @(Get-ChildItem -Path $to -Recurse -File -ErrorAction SilentlyContinue) + @(Get-ChildItem -Path (Split-Path $cab) -File |
+                        Where-Object { $_.FullName -ne $cab -and $_.FullName -ne $Download -and $_.FullName -ne $Xml -and $_.LastWriteTime -ge $started })
+                    foreach ($f in @($files | Sort-Object FullName -Unique | Sort-Object Length -Descending)) {
+                        $k = Get-DownloadKind -Path $f.FullName
+                        $seen += "$($f.Name) ($k, $($f.Length) bytes)"
+                        if ($k -eq 'Xml' -and -not $found) { $found = $f.FullName }
+                        elseif ($k -eq 'Cab') { $next += $f.FullName }
+                        elseif ($k -eq 'Gzip' -and -not $found) {
+                            $g = "$($f.FullName).xml"
+                            Expand-GzipFile -Path $f.FullName -Destination $g
+                            if ((Get-DownloadKind -Path $g) -eq 'Xml') { $found = $g }
+                        }
+                    }
+                }
+                $cabs = $next
+            }
+            if ($found) { Move-Item $found $Xml -Force }
+            Remove-Item $unpack -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        default {
+            $size = (Get-Item $Download).Length
+            Remove-Item $Download -Force
+            throw ("The $Maker catalog download from $Url is not a catalog ($kind, $size bytes). " +
+                $(if ($kind -eq 'Html') { 'A proxy or firewall probably answered instead of the vendor; allow that address.' } else { 'Try again later.' }))
+        }
+    }
+    if (-not (Test-Path $Xml)) {
+        $held = if ($seen) { $seen -join ', ' } else { 'no files' }
+        throw "The $Maker catalog ($kind) gave no catalog XML; it held $held. The download was kept as $Download."
+    }
+    if ($Download -ne $Xml) { Remove-Item $Download -Force -ErrorAction SilentlyContinue }
 }
 
 function Update-VendorCatalog {
@@ -360,35 +435,7 @@ function Update-VendorCatalog {
     Save-WebFile -Url $info.Url -Destination $download -DisplayName "$Maker driver pack catalog"
     # Check what really came down: expand.exe "succeeds" on a file that is not a cab and leaves no XML behind.
     # Dell's CDN or a proxy can send the XML itself, a gzip, or an HTML page instead of the cab.
-    $kind = Get-DownloadKind -Path $download
-    switch ($kind) {
-        'Cab'  {
-            $unpack = Join-Path $dir 'unpacked'
-            if (Test-Path $unpack) { Remove-Item $unpack -Recurse -Force }
-            Expand-CabFile -Cab $download -Destination $unpack
-            $inner = Get-ChildItem -Path $unpack -Filter *.xml -Recurse -File | Sort-Object Length -Descending | Select-Object -First 1
-            if ($inner) { Move-Item $inner.FullName $xml -Force }
-            Remove-Item $unpack -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        'Gzip' { Expand-GzipFile -Path $download -Destination $xml }
-        'Xml'  { if ($download -ne $xml) { Copy-Item $download $xml -Force } }
-        default {
-            $size = (Get-Item $download).Length
-            Remove-Item $download -Force
-            throw ("The $Maker catalog download from $($info.Url) is not a catalog ($kind, $size bytes). " +
-                $(if ($kind -eq 'Html') { 'A proxy or firewall probably answered instead of the vendor; allow that address.' } else { 'Try again later.' }))
-        }
-    }
-    if ($download -ne $xml) { Remove-Item $download -Force -ErrorAction SilentlyContinue }
-    if (-not (Test-Path $xml)) {
-        # Use the catalog XML the cab holds, whatever its exact name.
-        $found = Get-ChildItem -Path $dir -Filter *.xml -File | Where-Object Name -ne $info.Xml | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($found) { Move-Item $found.FullName $xml -Force }
-    }
-    if (-not (Test-Path $xml)) {
-        $have = @(Get-ChildItem -Path $dir -File | ForEach-Object Name) -join ', '
-        throw "The $Maker catalog ($kind) did not contain $($info.Xml). The folder $dir has: $(if ($have) { $have } else { 'nothing' })."
-    }
+    Resolve-CatalogDownload -Download $download -Xml $xml -Maker $Maker -Url $info.Url
     (Get-Item $xml).LastWriteTime = Get-Date
     $xml
 }
@@ -638,7 +685,7 @@ function Format-VendorDriverPack {
 #endregion
 
 Export-ModuleMember -Function Invoke-VendorExtract, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
-    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Update-VendorCatalog, Get-VendorDriverPacks,
+    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Resolve-CatalogDownload, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack,
     Find-VendorDriverPack, Find-VendorDriverPackOnline, Format-VendorDriverPack
