@@ -115,9 +115,6 @@
                 <TextBlock Grid.Column="0" Text="Find a model online:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <TextBox x:Name="TxtDriverFind" Grid.Column="1" VerticalContentAlignment="Center"
                          ToolTip="Type the PC model (Latitude 5521, EliteBook 840 G9, ThinkPad T14 Gen 4), a Dell or HP SKU or a Lenovo machine type, then press Enter or Search"/>
-                <ComboBox x:Name="CmbDriverFindOs" Grid.Column="2" Width="100" Margin="6,0,0,0" SelectedIndex="0" ToolTip="Windows version of the driver pack">
-                  <ComboBoxItem Content="Windows 11"/><ComboBoxItem Content="Windows 10"/>
-                </ComboBox>
                 <Button x:Name="BtnDriverFind" Grid.Column="3" Content="Search" Margin="6,0,0,0" IsDefault="False"
                         ToolTip="Searches the Dell, HP and Lenovo driver pack catalogs"/>
                 <ComboBox x:Name="CmbDriverFound" Grid.Column="4" Margin="6,0,0,0" IsEnabled="False"

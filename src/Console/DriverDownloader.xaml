@@ -34,15 +34,11 @@
     <StackPanel DockPanel.Dock="Top">
       <TextBlock FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" Text="Download driver packs from the vendor"/>
       <TextBlock Foreground="#5B6170" TextWrapping="Wrap" Margin="0,0,0,12"
-                 Text="Lists the newest enterprise driver pack for every model in the Dell, HP or Lenovo catalog. Tick the models you deploy, then Download. Each pack is checked (hash and vendor signature), extracted to Drivers\Maker\Model and matched by its SKUs or machine types and model name. Packs are 0.5 to 3 GB each."/>
+                 Text="Lists the newest enterprise driver pack for every model in the Dell, HP or Lenovo catalog: Windows 11, or Windows 10 for an older model that has no Windows 11 pack. Tick the models you deploy, then Download. Each pack is checked (hash and vendor signature), extracted to Drivers\Maker\Model and matched by its SKUs or machine types and model name. Packs are 0.5 to 3 GB each."/>
       <DockPanel Margin="0,0,0,10">
         <Label Content="Maker"/>
         <ComboBox x:Name="CmbVendor" Width="100" SelectedIndex="0">
           <ComboBoxItem Content="Dell"/><ComboBoxItem Content="HP"/><ComboBoxItem Content="Lenovo"/>
-        </ComboBox>
-        <Label Content="Windows" Margin="12,0,0,0"/>
-        <ComboBox x:Name="CmbOs" Width="110" SelectedIndex="0">
-          <ComboBoxItem Content="Windows 11"/><ComboBoxItem Content="Windows 10"/>
         </ComboBox>
         <Button x:Name="BtnReload" DockPanel.Dock="Right" Content="Refresh catalog" ToolTip="Download the vendor's catalog again (it is cached for a day)"/>
         <Label Content="Search" Margin="12,0,0,0"/>
@@ -70,7 +66,7 @@
         </DataGridTemplateColumn>
         <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="2*" IsReadOnly="True"/>
         <DataGridTextColumn Header="SKUs / machine types" Binding="{Binding Ids}" Width="*" IsReadOnly="True"/>
-        <DataGridTextColumn Header="Release" Binding="{Binding Release}" Width="65" IsReadOnly="True"/>
+        <DataGridTextColumn Header="Windows" Binding="{Binding Release}" Width="95" IsReadOnly="True"/>
         <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80" IsReadOnly="True"/>
         <DataGridTextColumn Header="Released" Binding="{Binding Released}" Width="85" IsReadOnly="True"/>
         <DataGridTextColumn Header="Size (MB)" Binding="{Binding SizeMB}" Width="70" IsReadOnly="True"/>

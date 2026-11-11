@@ -257,5 +257,28 @@ try {
     Assert-Equal "$($v.Failed) $($v.Summary)" 'True Failed: 1 of 2 packs failed, see the rows below.' 'progress: the summary says how many failed'
 } finally { Remove-Item $pf -Force -ErrorAction SilentlyContinue }
 
+# No Windows 10/11 choice (Patrick, 2026-11-11): the Windows 11 pack, or Windows 10 for a model without one.
+$anyXml = Join-Path ([IO.Path]::GetTempPath()) ("lenovo-any-" + [guid]::NewGuid() + '.xml')
+try {
+    Set-Content -Path $anyXml -Encoding utf8 -Value @'
+<?xml version="1.0" encoding="utf-8"?>
+<ModelList>
+  <Model name="ThinkPad T570 (Type 20H9, 20HA)">
+    <Types><Type>20H9</Type><Type>20HA</Type></Types>
+    <SCCM os="win10" version="20H2" date="2020-12-08">https://download.lenovo.com/pccbbs/mobiles/tp_t570_w1020h2.exe</SCCM>
+  </Model>
+  <Model name="ThinkPad T14 Gen 4 (Type 21HD, 21HE)">
+    <Types><Type>21HD</Type></Types>
+    <SCCM os="win10" version="22H2" date="2026-05-01">https://download.lenovo.com/pccbbs/mobiles/t14_w1022h2.exe</SCCM>
+    <SCCM os="win11" version="24H2" date="2026-04-02">https://download.lenovo.com/pccbbs/mobiles/t14_w1124h2.exe</SCCM>
+  </Model>
+</ModelList>
+'@
+    $any = @(Get-VendorDriverPacks -Maker Lenovo -CatalogPath $anyXml)
+    Assert-Equal (($any | ForEach-Object { "$($_.Model)=$($_.Os)" }) -join ',') 'ThinkPad T14 Gen 4=Windows 11,ThinkPad T570=Windows 10' 'any windows: 11 when there is one, else 10'
+    $r = Find-VendorDriverPackOnline -Query 'lenovo t570' -CatalogPaths @{ Lenovo = $anyXml }
+    Assert-Equal ((Format-VendorDriverPack @($r.Packs)[0]) -like 'Lenovo ThinkPad T570 - Windows 10 20H2*') $true 'find online: an older model gets its Windows 10 pack, and says so'
+} finally { Remove-Item $anyXml -Force -ErrorAction SilentlyContinue }
+
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green

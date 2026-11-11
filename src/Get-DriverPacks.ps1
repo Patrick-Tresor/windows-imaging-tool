@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory)][string]$ContentRoot,
     [Parameter(Mandatory, ParameterSetName = 'Model')][ValidateSet('Dell', 'HP', 'Lenovo')][string]$Maker,
     [Parameter(ParameterSetName = 'Model')][string[]]$Model = '*',
-    [Parameter(ParameterSetName = 'Model')][Parameter(ParameterSetName = 'Unknown')][ValidateSet('Windows 10', 'Windows 11')][string]$Os = 'Windows 11',
+    [Parameter(ParameterSetName = 'Model')][Parameter(ParameterSetName = 'Unknown')][ValidateSet('Any', 'Windows 10', 'Windows 11')][string]$Os = 'Any',
     [Parameter(ParameterSetName = 'Model')][Parameter(ParameterSetName = 'Unknown')][switch]$List,
     # Every model on the console's Unknown Models report that has a vendor pack.
     [Parameter(Mandatory, ParameterSetName = 'Unknown')][switch]$UnknownModels,

@@ -32,10 +32,6 @@
       <TextBlock Foreground="#5B6170" TextWrapping="Wrap" Margin="0,0,0,12"
                  Text="Every deployment records which drivers the PC got. These models got the maker's generic fallback, Windows inbox drivers only, or a catalog entry whose folder is missing. Models with a pack in the vendor catalog are ticked: click Download to fetch them all. A model leaves this list once the library covers it. Already-deployed PCs keep their drivers until they are reimaged."/>
       <DockPanel Margin="0,0,0,10">
-        <Label Content="Packs for"/>
-        <ComboBox x:Name="CmbOs" Width="110" SelectedIndex="0">
-          <ComboBoxItem Content="Windows 11"/><ComboBoxItem Content="Windows 10"/>
-        </ComboBox>
         <Button x:Name="BtnOpenReports" DockPanel.Dock="Right" Content="Open reports folder"/>
         <Button x:Name="BtnRefresh" DockPanel.Dock="Right" Content="Refresh" ToolTip="Read the reports again and download the vendor catalogs again"/>
         <TextBlock/>

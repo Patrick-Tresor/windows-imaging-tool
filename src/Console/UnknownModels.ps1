@@ -48,13 +48,12 @@ function Show-UnknownModels {
 
     $load = {
         param([bool]$Refresh)
-        $os = $u.CmbOs.SelectedItem.Content
         $dlg.Cursor = 'Wait'
         $u.TxtSelection.Text = 'Reading the deployment reports and vendor catalogs...'
         $dlg.Dispatcher.Invoke([action]{}, 'Background')   # let the text paint before the catalog downloads block
         try {
             $models = @(Get-UnknownModels -ContentRoot $ContentRoot)
-            $state.Rows = @(Add-UnknownModelPacks -Models $models -Os $os -Refresh:$Refresh | ForEach-Object {
+            $state.Rows = @(Add-UnknownModelPacks -Models $models -Refresh:$Refresh | ForEach-Object {
                 $row = [UnknownModelRow]::new()
                 foreach ($p in 'Maker', 'Model', 'Ids', 'PCs', 'Computers', 'LastSeen', 'Drivers', 'PackText') { $row.$p = $_.$p }
                 $row.HasPack = [bool]$_.Pack
@@ -70,7 +69,6 @@ function Show-UnknownModels {
         & $updateSelection
     }
 
-    $u.CmbOs.Add_SelectionChanged({ & $load $false })
     $u.BtnRefresh.Add_Click({ & $load $true })
     $u.GridModels.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{ & $updateSelection })
 
