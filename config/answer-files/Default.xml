@@ -52,13 +52,15 @@
   <!-- Time zone IDs: tzutil /l. Locales: language tags such as en-US, fr-CA.
        inputLocale can list several keyboards separated by ;, the first is the default:
        fr-CA; en-US, or as language:keyboard IDs 0c0c:00001009; 0409:00000409 (Canadian French, then US).
-       uiLanguageFallback is only for untranslated text and adds no keyboard; leave empty if not needed. -->
+       uiLanguageFallback is only for untranslated text and adds no keyboard; leave empty if not needed.
+       These defaults are the same as Dell Image Assist's: French (Canada) display, Canadian French keyboard first,
+       US English keyboard second, English fallback and formats. -->
   <regional>
     <timeZone>Eastern Standard Time</timeZone>
-    <inputLocale>en-US</inputLocale>
-    <systemLocale>en-US</systemLocale>
-    <uiLanguage>en-US</uiLanguage>
-    <uiLanguageFallback></uiLanguageFallback>
+    <inputLocale>0c0c:00001009; 0409:00000409</inputLocale>
+    <systemLocale>fr-CA</systemLocale>
+    <uiLanguage>fr-CA</uiLanguage>
+    <uiLanguageFallback>en-US</uiLanguageFallback>
     <userLocale>en-US</userLocale>
   </regional>
 
