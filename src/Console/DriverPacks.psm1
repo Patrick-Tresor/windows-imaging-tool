@@ -297,7 +297,9 @@ function Expand-CabFile {
 
 function Save-WebFile {
     # BITS survives large files and flaky links; Invoke-WebRequest is the fallback where BITS is unavailable.
-    param([string]$Url, [string]$Destination, [string]$DisplayName)
+    # -OnProgress { param($percent) } gets the percent about twice a second (BITS only), for the console's progress
+    # window: the BITS job then runs in the background with no progress bar of its own.
+    param([string]$Url, [string]$Destination, [string]$DisplayName, [scriptblock]$OnProgress)
     # Downloads to .part and renames, so an interrupted download is never mistaken for a finished one.
     New-Item -ItemType Directory -Path (Split-Path $Destination) -Force | Out-Null
     $part = "$Destination.part"
@@ -305,7 +307,8 @@ function Save-WebFile {
     $done = $false
     if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
         try {
-            Start-BitsTransfer -Source $Url -Destination $part -DisplayName $DisplayName
+            if ($OnProgress) { Wait-BitsDownload -Url $Url -Destination $part -DisplayName $DisplayName -OnProgress $OnProgress }
+            else { Start-BitsTransfer -Source $Url -Destination $part -DisplayName $DisplayName }
             $done = $true
         } catch { Write-Warning "BITS download failed ($($_.Exception.Message)), retrying with Invoke-WebRequest." }
     }
@@ -315,6 +318,38 @@ function Save-WebFile {
         try { Invoke-WebRequest -Uri $Url -OutFile $part -UseBasicParsing } finally { $ProgressPreference = $old }
     }
     Move-Item $part $Destination -Force
+}
+
+function Get-BitsPercent {
+    # Percent of a BITS job, or -1 while its size is unknown (BITS reports UInt64.MaxValue until it knows).
+    param($Transferred, $Total)
+    $t = [double]"0$Total"
+    if ($t -le 0 -or $t -ge [double][uint64]::MaxValue) { return -1 }
+    [Math]::Min(100, [Math]::Floor(100 * [double]"0$Transferred" / $t))
+}
+
+function Wait-BitsDownload {
+    # An asynchronous BITS job, watched every half second. A transient error that lasts 2 minutes gives up.
+    param([string]$Url, [string]$Destination, [string]$DisplayName, [scriptblock]$OnProgress)
+    $job = Start-BitsTransfer -Source $Url -Destination $Destination -DisplayName $DisplayName -Asynchronous
+    $troubleSince = $null
+    try {
+        while ($job.JobState -in 'Queued', 'Connecting', 'Transferring', 'TransientError') {
+            if ($job.JobState -eq 'TransientError') {
+                if (-not $troubleSince) { $troubleSince = Get-Date }
+                elseif (((Get-Date) - $troubleSince).TotalMinutes -ge 2) { throw "the server stopped answering ($($job.ErrorDescription))".Trim() }
+            } else { $troubleSince = $null }
+            $pct = Get-BitsPercent -Transferred $job.BytesTransferred -Total $job.BytesTotal
+            try { & $OnProgress $pct } catch { }
+            Start-Sleep -Milliseconds 500
+        }
+        if ($job.JobState -ne 'Transferred') { throw "$($job.JobState): $($job.ErrorDescription)".Trim() }
+        Complete-BitsTransfer -BitsJob $job
+        $job = $null
+        try { & $OnProgress 100 } catch { }
+    } finally {
+        if ($job) { Remove-BitsTransfer -BitsJob $job -ErrorAction SilentlyContinue }
+    }
 }
 
 function Get-DownloadKind {
@@ -571,16 +606,23 @@ function Install-VendorDriverPack {
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)]$Pack,
         [string]$DownloadDir = (Join-Path ([IO.Path]::GetTempPath()) 'ImagingConsole-Downloads'),
-        [switch]$KeepDownload
+        [switch]$KeepDownload,
+        # { param($stage, $percent) }: 'download' with its percent, then 'check', 'extract' and 'register' (-1).
+        [scriptblock]$OnStage
     )
+    $stage = { param($s, $p = -1) if ($OnStage) { try { & $OnStage $s $p } catch { } } }
     $relative = Get-DriverPackFolder $Pack
     $dest = Join-ContentPath $ContentRoot "Drivers\$relative"
     $file = Join-Path $DownloadDir $Pack.FileName
 
     if (-not (Test-Path $file) -or ($Pack.Hash -and (Get-FileHash $file -Algorithm $Pack.HashType).Hash -ne $Pack.Hash)) {
         Write-Host "Downloading $($Pack.FileName) ($($Pack.SizeMB) MB)..."
-        Save-WebFile -Url $Pack.Url -Destination $file -DisplayName "$($Pack.Maker) $($Pack.Model)"
+        & $stage 'download' 0
+        # Called from inside Save-WebFile, so $stage and $OnStage are found up the call stack.
+        $onPct = if ($OnStage) { { param($pct) & $stage 'download' $pct } }
+        Save-WebFile -Url $Pack.Url -Destination $file -DisplayName "$($Pack.Maker) $($Pack.Model)" -OnProgress $onPct
     }
+    & $stage 'check'
     if ($Pack.Hash) {
         $actual = (Get-FileHash $file -Algorithm $Pack.HashType).Hash
         if ($actual -ne $Pack.Hash) {
@@ -592,6 +634,7 @@ function Install-VendorDriverPack {
     }
 
     Write-Host "Extracting to Drivers\$relative..."
+    & $stage 'extract'
     $staging = "$dest.new"
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
     Expand-VendorDriverPack -File $file -Maker $Pack.Maker -Destination $staging
@@ -609,6 +652,7 @@ function Install-VendorDriverPack {
         downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm')
     } | ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
 
+    & $stage 'register'
     $entries = Register-DriverPack -ContentRoot $ContentRoot -Pack $Pack -Path $relative
     if (-not $KeepDownload) { Remove-Item $file -Force }
     [pscustomobject]@{ Path = $relative; InfCount = $infs; Entries = $entries }
@@ -671,10 +715,16 @@ function Find-VendorDriverPackOnline {
     [pscustomobject]@{ Packs = $found; Errors = $errors }
 }
 
+function Format-DriverPackName {
+    # "Lenovo ThinkPad T570", "HP EliteBook 840 G9" (HP names already start with HP).
+    param([Parameter(Mandatory)]$Pack)
+    if ("$($Pack.Model)" -like "$($Pack.Maker)*") { "$($Pack.Model)" } else { "$($Pack.Maker) $($Pack.Model)" }
+}
+
 function Format-VendorDriverPack {
     # One line for the results list: "Dell Latitude 5521 - Windows 11 A08, 2025-10-01, 1650 MB - in library".
     param([Parameter(Mandatory)]$Pack)
-    $name = if ($Pack.Model -like "$($Pack.Maker)*") { $Pack.Model } else { "$($Pack.Maker) $($Pack.Model)" }
+    $name = Format-DriverPackName $Pack
     $ver = (@($Pack.Os, $Pack.Release) + $(if ($Pack.Version -ne $Pack.Release) { $Pack.Version }) | Where-Object { $_ }) -join ' '
     $line = "$name - $ver" + $(if ($Pack.Released) { ", $($Pack.Released)" }) + $(if ($Pack.SizeMB) { ", $($Pack.SizeMB) MB" })
     if ($Pack.Installed -like 'Yes*') { $line += ' - already in the library' }
@@ -685,7 +735,7 @@ function Format-VendorDriverPack {
 #endregion
 
 Export-ModuleMember -Function Invoke-VendorExtract, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
-    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Resolve-CatalogDownload, Update-VendorCatalog, Get-VendorDriverPacks,
+    ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Get-BitsPercent, Resolve-CatalogDownload, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack,
-    Find-VendorDriverPack, Find-VendorDriverPackOnline, Format-VendorDriverPack
+    Find-VendorDriverPack, Find-VendorDriverPackOnline, Format-DriverPackName, Format-VendorDriverPack

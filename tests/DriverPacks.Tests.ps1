@@ -94,6 +94,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ("driverpacks-test-" + [guid]::NewG
 & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
+    Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows
     $relative = Get-DriverPackFolder $d
     Assert-Equal $relative 'Dell\Latitude 5440' 'pack folder is Maker\Model'
     $count = Register-DriverPack -ContentRoot $root -Pack $d -Path $relative
@@ -227,6 +228,34 @@ if ($makecab -and (Test-Path $makecab)) {
         Assert-Equal (Test-Path $dl) $true 'catalog cab: no XML keeps the download'
     } finally { Remove-Item $cabDir -Recurse -Force -ErrorAction SilentlyContinue }
 } else { Write-Host 'SKIP catalog cab tests: no makecab.exe' }
+
+# Seamless downloads (Patrick, 2026-11-11): the console runs Get-DriverPacks.ps1 hidden and shows its progress.
+Assert-Equal (Get-BitsPercent -Transferred 512 -Total 1024) 50 'bits: percent from bytes'
+Assert-Equal (Get-BitsPercent -Transferred 0 -Total ([uint64]::MaxValue)) -1 'bits: unknown size is -1'
+Assert-Equal (Get-BitsPercent -Transferred 5 -Total 0) -1 'bits: no size yet is -1'
+Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad T570' })) 'Lenovo ThinkPad T570' 'name: maker and model'
+Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'HP'; Model = 'HP EliteBook 840 G9' })) 'HP EliteBook 840 G9' 'name: HP not twice'
+$dl = Get-Content -Raw (Join-Path $repo 'src/Console/DriverDownloader.ps1')
+$start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
+$start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
+Assert-Equal ($start -match "-WindowStyle Hidden -PassThru") $true 'download: the worker runs hidden'
+Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
+Assert-Equal ($start -match 'Show-BuildProgress .*-Noun .download. -Hidden') $true 'download: progress shown in the console'
+$gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
+Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
+
+$bs = Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force -PassThru
+$pf = Join-Path ([IO.Path]::GetTempPath()) ("dlprogress-" + [guid]::NewGuid() + '.json')
+try {
+    Start-BuildProgress -Path $pf -Title 'Downloading 2 driver packs' -Steps @(@('pack1', 'Dell Latitude 5531'), @('pack2', 'Lenovo ThinkPad T570'))
+    Start-BuildStep 'pack1'; Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'Downloading 1650 MB'
+    Complete-BuildStep 'pack1' -State failed -Detail 'hash check failed'
+    Start-BuildStep 'pack2'; Complete-BuildStep 'pack2' -Detail '105 drivers in Drivers\Lenovo\ThinkPad T570'
+    Stop-BuildProgress -Message '1 of 2 packs failed, see the rows below.'
+    $v = Get-BuildStepView -Data (Read-BuildProgress -Path $pf)
+    Assert-Equal (($v.Rows | ForEach-Object { "$($_.Status)|$($_.Percent)" }) -join ',') 'Failed|40,Complete|100' 'progress: a failed pack keeps its bar, the next one completes'
+    Assert-Equal "$($v.Failed) $($v.Summary)" 'True Failed: 1 of 2 packs failed, see the rows below.' 'progress: the summary says how many failed'
+} finally { Remove-Item $pf -Force -ErrorAction SilentlyContinue }
 
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green

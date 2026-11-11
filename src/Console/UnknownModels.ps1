@@ -97,7 +97,7 @@ function Show-UnknownModels {
         try {
             $packs = @($state.Rows | Where-Object Selected | ForEach-Object { $_.Source.Pack } | Sort-Object Maker, Model -Unique)   # two SKUs of one model share a pack
             if (-not $packs) { Show-ReportError 'No model with a vendor pack is ticked.'; return }
-            Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -KeepDownload:$u.ChkKeep.IsChecked
+            Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -Owner $Owner -KeepDownload:$u.ChkKeep.IsChecked
             $state.Changed = $true
             $dlg.Close()
         } catch { Show-ReportError $_.Exception.Message }

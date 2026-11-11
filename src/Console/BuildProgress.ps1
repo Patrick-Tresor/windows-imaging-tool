@@ -58,7 +58,13 @@ function Show-BuildProgress {
         [string]$LogPath,
         # The build's powershell.exe (Start-Process -PassThru), to bring its window up and notice it closing.
         $Process,
-        [string]$Title = 'Building media'
+        [string]$Title = 'Building media',
+        # What runs, for the window's wording: 'build' (media) or 'download' (driver packs).
+        [string]$Noun = 'build',
+        # The process runs hidden (driver pack downloads): no Show build window button.
+        [switch]$Hidden,
+        # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
+        [scriptblock]$OnFinished
     )
 
     [xml]$bxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'BuildProgress.xaml')
@@ -71,6 +77,9 @@ function Show-BuildProgress {
         $b[$name] = $dlg.FindName($name)
     }
     $b.TxtTitle.Text = $Title
+    $dlg.Title = if ($Noun -eq 'build') { 'Build progress' } else { "$((Get-Culture).TextInfo.ToTitleCase($Noun)) progress" }
+    $b.TxtNote.Text = "Closing this window does not stop the $Noun."
+    if ($Hidden) { $b.BtnWindow.Visibility = 'Collapsed' }
     $b.BtnLog.IsEnabled = [bool]$LogPath
     $timer = New-Object Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(500)
@@ -78,7 +87,8 @@ function Show-BuildProgress {
     # the timer's and the window's Tag, and each build window keeps its own.
     $rows = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildStepRow]'
     $b.LstSteps.ItemsSource = $rows
-    $ctx = @{ B = $b; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow }
+    $ctx = @{ B = $b; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
+        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished }
     $timer.Tag = $ctx
     $dlg.Tag = $ctx
     $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
@@ -106,6 +116,14 @@ function Show-BuildProgress {
     $dlg.Show()
 }
 
+function Invoke-BuildFinished {
+    # The OnFinished callback, once; a failure in it must not break the progress window.
+    param($Ctx)
+    if ($Ctx.FinishedRan -or -not $Ctx.OnFinished) { return }
+    $Ctx.FinishedRan = $true
+    try { & $Ctx.OnFinished } catch { }
+}
+
 function Update-BuildProgressWindow {
     # One timer tick: read the progress file and redraw what changed.
     param([Parameter(Mandatory)]$Ctx)
@@ -116,10 +134,11 @@ function Update-BuildProgressWindow {
         if (-not $data) {
             # Nothing yet: the build is still starting, or it stopped before its first line (a bad parameter).
             $gone = $proc -and $proc.HasExited
-            $b.TxtSummary.Text = if ($gone) { 'The build window closed before the build started.' }
-                elseif (([DateTime]::UtcNow - $Ctx.Started).TotalSeconds -gt 60) { 'The build has not started. Click Show build window to see why.' }
+            $n = $Ctx.Noun
+            $b.TxtSummary.Text = if ($gone) { $(if ($Ctx.Hidden) { "The $n stopped before it started. Click Open log to see why." } else { "The $n window closed before the $n started." }) }
+                elseif (([DateTime]::UtcNow - $Ctx.Started).TotalSeconds -gt 60) { $(if ($Ctx.Hidden) { "The $n has not started. Click Open log to see why." } else { "The $n has not started. Click Show build window to see why." }) }
                 else { 'Starting...' }
-            if ($gone) { $Ctx.Timer.Stop() }
+            if ($gone) { $Ctx.Timer.Stop(); Invoke-BuildFinished $Ctx }
             return
         }
         $view = Get-BuildStepView -Data $data
@@ -130,9 +149,11 @@ function Update-BuildProgressWindow {
         if ($view.Finished) {
             $Ctx.Timer.Stop()
             if (-not $view.Failed) { $b.BtnClose.Content = 'Done' }
+            Invoke-BuildFinished $Ctx
         } elseif ($proc -and $proc.HasExited) {
             $Ctx.Timer.Stop()
-            $b.TxtSummary.Text = 'The build window was closed before the build finished.'
+            Invoke-BuildFinished $Ctx
+            $b.TxtSummary.Text = if ($Ctx.Hidden) { "The $($Ctx.Noun) stopped before the end. Click Open log to see why." } else { "The $($Ctx.Noun) window was closed before the $($Ctx.Noun) finished." }
             $b.TxtSummary.Foreground = ConvertTo-BuildBrush '#C4314B'
         }
     } catch { $b.TxtSummary.Text = "Can't read the build progress: $($_.Exception.Message)" }
