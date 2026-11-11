@@ -88,10 +88,29 @@ foreach ($f in 'Invoke-SysprepAtDeploy.ps1', 'SysprepAtDeploy.psm1', 'Prepare-Re
 # The hook removes everything of its own before sysprep, so nothing reaches the generalized Windows.
 $script = [IO.File]::ReadAllText((Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1'))
 $sysprepAt = $script.IndexOf('$proc = Start-Process -FilePath $sysprep')
-foreach ($cleanup in '& schtasks.exe /Delete /TN $taskName /F', 'Restore-Notice', "-Name PreventDeviceEncryption") {
+foreach ($cleanup in '& schtasks.exe /Delete /TN $taskName /F', "-Name PreventDeviceEncryption") {
     $at = $script.LastIndexOf($cleanup, $sysprepAt)
     Assert-Equal ($at -gt 0 -and $at -lt $sysprepAt) $true "the run stage cleans up before sysprep: $cleanup"
 }
+
+# Nothing on screen while sysprep runs; the logon screen only speaks up when it failed.
+Assert-Equal ($script.Contains('Get-SysprepBusyNotice') -or $script.Contains('Preparing this PC')) $false 'no notice on the logon screen while sysprep runs'
+$hookAt = $script.IndexOf("if (`$Stage -eq 'Hook')")
+Assert-Equal ($script.IndexOf('Set-Notice', $hookAt) -lt 0) $true 'the hook stage sets no logon notice'
+
+# Seamless: the hook waits for the Run stage (no logon screen meanwhile) and keeps the startup command until the end.
+Assert-Equal (Test-SysprepHookDone -State 'running') $false 'hook keeps waiting while the checks run'
+Assert-Equal (Test-SysprepHookDone -State 'sysprep') $false 'hook keeps waiting while sysprep runs'
+foreach ($st in 'done', 'failed', 'restart') { Assert-Equal (Test-SysprepHookDone -State $st) $true "hook stops waiting: $st" }
+$hookPart = $script.Substring($hookAt)
+Assert-Equal ($hookPart.Contains('Clear-StartupHook') -or $hookPart.Contains("-Name SetupType")) $false 'the hook does not turn the startup command off before sysprep'
+Assert-Equal ($hookPart.Contains('while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes))')) $true 'the hook waits for the task'
+$failAt = $script.IndexOf('function Stop-WithFailure')
+Assert-Equal ($script.IndexOf('Clear-StartupHook', $failAt) -lt $script.IndexOf('function Invoke-RunStage')) $true 'a failure turns the startup command off'
+# The deploy screen says nothing about sysprep: only the log file does.
+$setPart = $deploy.Substring($deploy.IndexOf('function Set-SysprepAtDeploy'), $deploy.IndexOf('function Invoke-Phase(') - $deploy.IndexOf('function Set-SysprepAtDeploy'))
+Assert-Equal ($setPart.Contains('Write-DeployLog ''Sysprep') -or $setPart.Contains("Invoke-Native -FilePath 'reg.exe'")) $false 'setting up sysprep prints nothing on the deploy screen'
+Assert-Equal ($deploy.Contains("Set-DeployStatus -Step 'Setting up sysprep")) $false 'no sysprep step in the deploy progress'
 
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
 Write-Host 'All sysprep at deploy tests passed.' -ForegroundColor Green

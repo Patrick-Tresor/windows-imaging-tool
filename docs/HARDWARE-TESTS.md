@@ -47,7 +47,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.1b | Check the disk page, VM not sysprepped or still open | Cross on Sysprep has run or VM shut down, Next stays off |
 | 4.1c | Capture progress window | Each step with its bar, the capture step shows a percent and the time left |
 | 4.1d | Sysprep on each PC: capture a VM shut down with `shutdown /s /t 0`, not sysprepped | Check the disk passes with "Not sysprepped: each PC runs sysprep"; a VM shut down from the Start menu with Fast Startup gets a cross |
-| 4.1e | Deploy that image to the Dell 5521, then an HP and a Lenovo | First start shows "Preparing this PC", restarts by itself, then setup, name, domain join, apps and tasks as usual; `C:\Windows\Temp\SysprepAtDeploy.log` ends with "Sysprep finished" |
+| 4.1e | Deploy that image to the Dell 5521, then an HP and a Lenovo | First start shows only the spinner (no logon screen, no message), restarts by itself, then setup, name, domain join, apps and tasks as usual; `C:\Windows\Temp\SysprepAtDeploy.log` ends with "Sysprep finished" |
 | 4.1f | Same, with a Store app installed for one user only in the VM | The app is removed and sysprep still runs; with a missing Store the logon screen says sysprep failed |
 | 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
 | 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |

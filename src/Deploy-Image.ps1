@@ -447,7 +447,7 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
     # The image was captured without sysprep: copy the first-start sysprep script to the new Windows and make it run
     # once at its next start (src\SysprepAtDeploy.psm1). Its offline registry is loaded with reg.exe, as WinPE has
     # no other way to write it; it is always unloaded again, or bcdboot and the restart would find it in use.
-    $ErrorActionPreference = 'Continue'   # reg.exe query writes to stderr for a missing value; Invoke-Native still throws
+    $ErrorActionPreference = 'Continue'   # reg.exe query writes to stderr for a missing value; failures still throw
     $folder = 'W:\ProgramData\ImagingTool\Sysprep'
     New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop | Out-Null
     Copy-Item (Join-Path $PSScriptRoot 'Invoke-SysprepAtDeploy.ps1'), (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1'),
@@ -455,12 +455,19 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
     # sysprep /unattend caches its own copy in Windows\Panther; the script deletes this one as soon as sysprep returns.
     $UnattendXml | Set-Content -Path (Join-Path $folder 'unattend.xml') -Encoding utf8 -ErrorAction Stop
     $hive = 'HKLM\ImagingToolTarget'
-    Invoke-Native -FilePath 'reg.exe' -ArgumentList @('load', $hive, 'W:\Windows\System32\config\SYSTEM')
+    # reg.exe output goes to the log only: the deploy screen shows nothing about sysprep.
+    $quietReg = {
+        param([string[]]$RegArgs)
+        Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ("  > reg.exe $($RegArgs -join ' ')") -ErrorAction SilentlyContinue
+        $out = & reg.exe @RegArgs 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "reg.exe $($RegArgs[0]) failed (exit $LASTEXITCODE): $out" }
+    }
+    & $quietReg @('load', $hive, 'W:\Windows\System32\config\SYSTEM')
     try {
         $controlSet = Get-ControlSetName -Lines @(& reg.exe query "$hive\Select" /v Current 2>$null)
         $hasPrevent = Test-RegQueryHasValue -Name 'PreventDeviceEncryption' -Lines @(& reg.exe query "$hive\$controlSet\Control\BitLocker" /v PreventDeviceEncryption 2>$null)
         foreach ($regArgs in (Get-SysprepHookRegArgs -HiveKey $hive -Command (Get-SysprepHookCommand) -ControlSet $controlSet -PreventDeviceEncryption:(-not $hasPrevent))) {
-            Invoke-Native -FilePath 'reg.exe' -ArgumentList $regArgs
+            & $quietReg $regArgs
         }
     }
     finally {
@@ -474,7 +481,7 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
     }
     [pscustomobject]@{ preventDeviceEncryptionSet = (-not $hasPrevent); controlSet = $controlSet } |
         ConvertTo-Json | Set-Content -Path (Join-Path $folder 'sysprep.json') -Encoding utf8 -ErrorAction Stop
-    Write-DeployLog 'Sysprep runs at the first start of this PC, then Windows restarts into setup (about 5-10 minutes more).'
+    Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ('{0:yyyy-MM-dd HH:mm:ss} [INFO] Sysprep set up for the first start of this PC.' -f (Get-Date)) -ErrorAction SilentlyContinue
 }
 
 function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
@@ -704,7 +711,8 @@ try {
     # generalized by this PC at its first start; everything below is the same as for a sysprepped image.
     $imageState = Get-OfflineImageState -Root 'W:\'
     $sysprepOnPC = -not $imageState.Generalized
-    if ($sysprepOnPC) { Write-DeployLog "The image was not sysprepped ($($imageState.ImageState)), so this PC runs sysprep at its first start." -Level WARN }
+    # Only the log says so: whoever deploys sees the usual steps.
+    if ($sysprepOnPC) { Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ('{0:yyyy-MM-dd HH:mm:ss} [INFO] The image was not sysprepped ({1}), so this PC runs sysprep at its first start.' -f (Get-Date), $imageState.ImageState) -ErrorAction SilentlyContinue }
 
     # 4. Unattend generated from the answer file. Setup blanks the passwords in it after use.
     Set-DeployStatus -Step 'Writing Windows settings' -Percent 80
@@ -750,7 +758,6 @@ try {
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
 
     if ($sysprepOnPC) {
-        Set-DeployStatus -Step 'Setting up sysprep for the first start' -Percent 85
         Set-SysprepAtDeploy -UnattendXml $unattendXml
     }
 
