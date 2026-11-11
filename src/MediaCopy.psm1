@@ -88,40 +88,36 @@ function Get-MediaCopyPlan {
 
 $script:NativeCopySource = @'
 using System;
-using System.Runtime.InteropServices;
+using System.IO;
 using System.Threading;
 
 namespace ImagingTool {
-    // Copies one file with CopyFileEx on a background thread; PowerShell polls Done for the progress bar.
+    // Copies one file on a background thread in 8 MB chunks; PowerShell polls Done for the progress bar.
+    // Writes go through the Windows cache, so reading the next chunk overlaps with the stick writing the last one.
+    // A big file is flushed to the stick every 256 MB and at its end, so the progress shows what is really on it.
+    // CopyFileEx unbuffered (robocopy /J style) waited for the stick on every small block: 3 MB/s on a stick that
+    // takes 40 MB/s this way.
     public class MediaFileCopy {
-        delegate uint ProgressRoutine(long total, long transferred, long streamSize, long streamTransferred,
-            uint streamNumber, uint reason, IntPtr source, IntPtr destination, IntPtr data);
-
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        static extern bool CopyFileEx(string source, string destination, ProgressRoutine progress, IntPtr data,
-            IntPtr cancel, uint flags);
-
-        const uint CopyFileNoBuffering = 0x1000;
+        const int Chunk = 8 * 1024 * 1024;
+        const long FlushEvery = 256L * 1024 * 1024;
         long done;
         readonly string source;
         readonly string destination;
-        readonly uint flags;
-        ProgressRoutine callback;
+        readonly bool big;
         Thread thread;
 
         public volatile bool Cancel;
-        public int Error;
+        public string ErrorMessage;
 
-        public MediaFileCopy(string source, string destination, bool unbuffered) {
+        public MediaFileCopy(string source, string destination, bool big) {
             this.source = source;
             this.destination = destination;
-            this.flags = unbuffered ? CopyFileNoBuffering : 0;
+            this.big = big;
         }
 
         public long Done { get { return Interlocked.Read(ref done); } }
 
         public void Start() {
-            callback = OnProgress;
             thread = new Thread(Run);
             thread.IsBackground = true;
             thread.Start();
@@ -130,23 +126,41 @@ namespace ImagingTool {
         public bool Wait(int milliseconds) { return thread.Join(milliseconds); }
 
         void Run() {
-            if (!CopyFileEx(source, destination, callback, IntPtr.Zero, IntPtr.Zero, flags)) {
-                Error = Marshal.GetLastWin32Error();
+            try {
+                Copy();
+            } catch (Exception e) {
+                ErrorMessage = e.Message;
+                try { File.Delete(destination); } catch { }
             }
         }
 
-        uint OnProgress(long total, long transferred, long streamSize, long streamTransferred, uint streamNumber,
-            uint reason, IntPtr source, IntPtr destination, IntPtr data) {
-            Interlocked.Exchange(ref done, transferred);
-            return Cancel ? 1u : 0u;  // PROGRESS_CANCEL : PROGRESS_CONTINUE
+        void Copy() {
+            var buffer = new byte[Chunk];
+            long total = 0, sinceFlush = 0;
+            using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan))
+            using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.None)) {
+                if (input.Length > 0) { output.SetLength(input.Length); output.Position = 0; }
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0) {
+                    if (Cancel) throw new OperationCanceledException("The copy was cancelled.");
+                    output.Write(buffer, 0, read);
+                    total += read;
+                    sinceFlush += read;
+                    if (big && sinceFlush >= FlushEvery) { output.Flush(true); sinceFlush = 0; }
+                    Interlocked.Exchange(ref done, total);
+                }
+                if (output.Length != total) output.SetLength(total);
+                if (big) output.Flush(true);
+            }
+            // Same modified time as the source: an update of the stick compares it to skip unchanged files.
+            File.SetLastWriteTimeUtc(destination, File.GetLastWriteTimeUtc(source));
         }
     }
 }
 '@
 
 function Test-NativeCopy {
-    # True when CopyFileEx is there (Windows), compiling the helper the first time.
-    if ([IO.Path]::DirectorySeparatorChar -ne '\') { return $false }
+    # True once the copy helper is compiled (the first call compiles it).
     if (-not ('ImagingTool.MediaFileCopy' -as [type])) { Add-Type -TypeDefinition $script:NativeCopySource }
     $true
 }
@@ -154,21 +168,21 @@ function Test-NativeCopy {
 function Copy-MediaContent {
     <#
     .SYNOPSIS
-        Copies a Get-MediaCopyPlan to Destination with Windows' own CopyFileEx (what Explorer and robocopy use) on a
-        background thread, unbuffered for big files like robocopy /J, while PowerShell only reads the byte count for
-        the progress bar. Returns what it copied.
+        Copies a Get-MediaCopyPlan to Destination on a background thread (ImagingTool.MediaFileCopy: 8 MB chunks,
+        cached writes, big files flushed every 256 MB), while PowerShell only reads the byte count for the progress
+        bar. Returns what it copied.
     .PARAMETER OnProgress
         Called with each progress update (tests use it; the build shows Write-Progress and text lines instead).
     #>
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)][string]$Destination,
-        # Files at least this big are copied unbuffered and get their own text lines and progress updates.
+        # Files at least this big are flushed to the stick as they go and get their own text lines and progress updates.
         [int64]$LineEvery10PercentFrom = 256MB,
         [scriptblock]$OnProgress,
         [switch]$Quiet
     )
-    if (-not (Test-NativeCopy)) { throw 'Copying to the USB stick needs Windows.' }
+    $null = Test-NativeCopy
     $total = [int64]$Plan.TotalBytes
     $done = [int64]0
     $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -250,9 +264,8 @@ function Copy-MediaContent {
                 # Ctrl+C: stop the copy thread too.
                 if (-not $job.Wait(0)) { $job.Cancel = $true; [void]$job.Wait(5000) }
             }
-            if ($job.Error) {
-                $msg = (New-Object ComponentModel.Win32Exception($job.Error)).Message
-                throw "Copying $($item.Relative) to the USB stick failed: $msg Is the stick full or was it unplugged?"
+            if ($job.ErrorMessage) {
+                throw "Copying $($item.Relative) to the USB stick failed: $($job.ErrorMessage) Is the stick full or was it unplugged?"
             }
             $fileDone = $item.Length
             $done = $doneBefore + $fileDone

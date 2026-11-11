@@ -1,5 +1,5 @@
 # Plain-PowerShell tests for copying a USB stick's content with progress (src/MediaCopy.psm1).
-# Run: powershell -File tests\MediaCopy.Tests.ps1 on Windows (the copy uses CopyFileEx); exits non-zero when a check fails.
+# Run: powershell -File tests\MediaCopy.Tests.ps1 (the copy compiles a small C# helper); exits non-zero when a check fails.
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -46,7 +46,7 @@ try {
     Assert-Equal ($plan.Missing -join ';') 'Gone' 'plan: missing folder reported'
     Assert-Equal ($plan.Directories -contains 'Drivers\Empty') $true 'plan: empty folders are created too'
 
-    Assert-Equal (Test-NativeCopy) $true 'CopyFileEx is available'
+    Assert-Equal (Test-NativeCopy) $true 'copy helper compiles'
     $updates = New-Object System.Collections.ArrayList
     if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
     New-Item -ItemType Directory -Path $dst | Out-Null
@@ -76,6 +76,16 @@ try {
 
     # Write-through made each chunk wait for the stick and halved the copy speed.
     Assert-Equal ((Get-Content -Raw (Join-Path $repo 'src/MediaCopy.psm1')) -match 'FileOptions\]::WriteThrough') $false 'copy: no write-through (slow on USB sticks)'
+    # CopyFileEx unbuffered waited for the stick on every block: 3 MB/s where the chunked copy did 40 MB/s.
+    $copySource = Get-Content -Raw (Join-Path $repo 'src/MediaCopy.psm1')
+    Assert-Equal ($copySource -match 'CopyFileEx\(|NoBuffering|WriteThrough') $false 'copy: no unbuffered or write-through copy (slow on USB sticks)'
+    Assert-Equal ($copySource -match '8 \* 1024 \* 1024') $true 'copy: 8 MB chunks'
+
+    # Copying over an older, bigger file on the stick leaves exactly the new file.
+    New-TestFile (Join-T $dst 'config\deploy-settings.json') 9000
+    $again = Get-MediaCopyPlan -ContentRoot $src -Folders 'config'
+    $null = Copy-MediaContent -Plan $again -Destination $dst -Quiet
+    Assert-Equal ([IO.File]::ReadAllBytes((Join-T $dst 'config\deploy-settings.json')).Length) 50 'copy: an old bigger file is replaced, not left longer'
 
     # Big files get a line of their own and a done line, so the console shows the copy moving without a progress bar.
     Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null
