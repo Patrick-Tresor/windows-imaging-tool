@@ -251,7 +251,7 @@
       </TabItem>
 
       <!-- Media -->
-      <TabItem Header="Media">
+      <TabItem x:Name="TabMedia" Header="Media">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
@@ -548,52 +548,112 @@
       </TabItem>
 
       <!-- Settings -->
-      <TabItem Header="Deploy Settings">
+      <TabItem x:Name="TabSettings" Header="Deploy Settings">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel>
+          <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+            <StackPanel.Resources>
+              <Style x:Key="SettingsHead" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Margin" Value="0,18,0,4"/>
+              </Style>
+            </StackPanel.Resources>
             <TextBlock Style="{StaticResource SectionTitle}" Text="Deploy settings"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Saved to config\deploy-settings.json in the content root. The network share is how WinPE finds the content root when it boots from ISO or PXE; it is baked into media, so rebuild media after changing it. Everything else about a deployment is in the answer files."/>
+            <TextBlock Style="{StaticResource Hint}" Text="How PCs reach the deployment, where they report, and what they check at the end. Everything else about a deployment is in the answer files."/>
+
+            <!-- 1. Where the deployment comes from -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="1. Where PCs get the deployment"/>
+            <RadioButton x:Name="RbSettingsUsb" GroupName="SettingsMode" Margin="0,4"
+                         Content="USB stick only. Everything is on the stick; no network needed."/>
+            <RadioButton x:Name="RbSettingsShare" GroupName="SettingsMode" Margin="0,4"
+                         Content="Network share. Needed for ISO and PXE boot. A USB stick still deploys from the stick first."/>
+            <Grid x:Name="PnlSharePath" Margin="22,6,0,0">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Label Content="Share"/>
+              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="The content root on your server, for example \\SERVER01\Deploy."/>
+            </Grid>
+
+            <!-- 2. The account -->
+            <StackPanel x:Name="PnlShareAccount">
+              <TextBlock Style="{StaticResource SettingsHead}" Text="2. Account WinPE signs in with"/>
+              <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="An Active Directory account that can read the share (and write to its Status folder). Leave it empty if the share allows guests. The password is saved in config\secrets on this content root, never on the stick: each build puts it in the boot image, encrypted."/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Account"/>
+                <TextBox x:Name="TxtShareUser" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="CORP\svc-deploy or svc-deploy@corp.example.com"/>
+                <Label Grid.Row="2" Content="Password"/>
+                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+                  <PasswordBox x:Name="PwdShare" Width="320" Padding="4,3" VerticalContentAlignment="Center"/>
+                  <TextBlock x:Name="TxtSharePwState" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#5B6170"/>
+                </StackPanel>
+                <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+                  <Button x:Name="BtnShareTest" Content="Test connection"/>
+                  <TextBlock x:Name="TxtShareTest" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" MaxWidth="560"/>
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+
+            <!-- 3. Dashboard -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Where PCs report progress (Dashboard)"/>
+            <RadioButton x:Name="RbReportDefault" GroupName="SettingsReport" Margin="0,4"
+                         Content="Same place as the deployment: the share's Status folder, or the stick's for USB deploys."/>
+            <RadioButton x:Name="RbReportShare" GroupName="SettingsReport" Margin="0,4"
+                         Content="A network folder, so USB deploys show up live too:"/>
+            <Grid Margin="22,6,0,0">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Label Content="Status folder"/>
+              <TextBox x:Name="TxtReportPath" Grid.Column="1" ToolTip="For example \\SERVER01\Deploy\Status. WinPE maps it with the account above."/>
+            </Grid>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="After the restart, Windows reports as the computer account: give Domain Computers Modify on the Status folder, or the PC shows Stalled after first boot."/>
+
+            <!-- 4. Deployments -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Deployments"/>
             <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="20"/><RowDefinition/>
-                <RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
-                <RowDefinition Height="20"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
-              </Grid.RowDefinitions>
-              <Label Content="Network share"/>
-              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="\\server\Deploy. Leave empty for USB only."/>
-              <Label Grid.Row="2" Content="Share user"/>
-              <TextBox x:Name="TxtShareUser" Grid.Row="2" Grid.Column="1" ToolTip="DOMAIN\user. Leave empty for guest access."/>
-              <Label Grid.Row="4" Content="Password file"/>
-              <TextBox x:Name="TxtSharePwFile" Grid.Row="4" Grid.Column="1" ToolTip="Relative to the content root; keep it in config\secrets. The stick never gets it as plain text: the build puts the password in the boot image, encrypted (in the vault with a WinPE password)."/>
-              <Label Grid.Row="6" Content="Default answer file"/>
-              <ComboBox x:Name="CmbDefaultAnswer" Grid.Row="6" Grid.Column="1" Width="320" HorizontalAlignment="Left"/>
-              <Label Grid.Row="8" Content="Versions to keep"/>
-              <TextBox x:Name="TxtVersionsToKeep" Grid.Row="8" Grid.Column="1" Width="80" HorizontalAlignment="Left"
-                       ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. 0 keeps all. Versions an answer file is pinned to are never deleted."/>
-              <Label Grid.Row="10" Content="Status share (optional)"/>
-              <TextBox x:Name="TxtReportPath" Grid.Row="10" Grid.Column="1"
-                       ToolTip="Where PCs report progress for the Dashboard. Empty: the content root's Status folder. Set a \\server\share\Status path so USB deployments report to a server too. Rebuild media after changing it."/>
-              <Label Grid.Row="12" Content="Post-deploy checks"/>
-              <CheckBox x:Name="ChkChecksEnabled" Grid.Row="12" Grid.Column="1" VerticalAlignment="Center"
-                        Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and report pass/fail to the Dashboard"/>
-              <Label Grid.Row="14" Content="BitLocker check"/>
-              <ComboBox x:Name="CmbCheckBitLocker" Grid.Row="14" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+              <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+              <Label Content="Default answer file"/>
+              <ComboBox x:Name="CmbDefaultAnswer" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="Used when nothing else picks one (naming list, the wizard)."/>
+              <Label Grid.Row="2" Content="Older image versions to keep"/>
+              <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+                <TextBox x:Name="TxtVersionsToKeep" Width="80"
+                         ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. Versions an answer file is pinned to are never deleted."/>
+                <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#5B6170"/>
+              </StackPanel>
+            </Grid>
+
+            <!-- 5. Checks -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="5. Checks after deploy"/>
+            <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
+                      Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and show pass or fail on the Dashboard"/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+              <Label Content="BitLocker check"/>
+              <ComboBox x:Name="CmbCheckBitLocker" Grid.Column="1" Width="320" HorizontalAlignment="Left"
                         ToolTip="Auto: required when the answer file turns BitLocker on, otherwise only reported. Report: a warning, never a failure.">
                 <ComboBoxItem Content="Auto"/><ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
               </ComboBox>
-              <Label Grid.Row="16" Content="Device driver check"/>
-              <ComboBox x:Name="CmbCheckDevices" Grid.Row="16" Grid.Column="1" Width="320" HorizontalAlignment="Left"
+              <Label Grid.Row="2" Content="Device driver check"/>
+              <ComboBox x:Name="CmbCheckDevices" Grid.Row="2" Grid.Column="1" Width="320" HorizontalAlignment="Left"
                         ToolTip="Any device with an error in Device Manager (no driver, cannot start). Disabled devices are ignored.">
                 <ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
               </ComboBox>
-              <Label Grid.Row="18" Content="Ignore devices"/>
-              <TextBox x:Name="TxtCheckIgnore" Grid.Row="18" Grid.Column="1"
+              <Label Grid.Row="4" Content="Ignore devices"/>
+              <TextBox x:Name="TxtCheckIgnore" Grid.Row="4" Grid.Column="1"
                        ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
-            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+
+            <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
+              <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#B91C1C" TextWrapping="Wrap" MaxWidth="700"/>
             </StackPanel>
+            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="#FFFBEB" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4">
+              <DockPanel>
+                <Button x:Name="BtnSettingsMedia" DockPanel.Dock="Right" Content="Open the Media tab" Margin="12,0,0,0"/>
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and republish PXE) before the next deploy."/>
+              </DockPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
       </TabItem>
