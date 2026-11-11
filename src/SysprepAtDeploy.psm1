@@ -113,6 +113,14 @@ function Get-SysprepFailureNotice {
     }
 }
 
+function Get-SysprepWaitMinutes { 45 }
+
+function Test-SysprepHookDone {
+    # Whether the hook can stop waiting for the Run stage: it finished, failed, or Windows is restarting.
+    param([string]$State)
+    $State -in 'done', 'failed', 'restart'
+}
+
 Export-ModuleMember -Function Get-SysprepAtDeployFolder, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Test-RebootPendingFor, Get-SysprepOutcome,
-    Get-SysprepFailureNotice
+    Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone

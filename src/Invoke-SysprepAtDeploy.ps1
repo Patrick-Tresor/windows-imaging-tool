@@ -6,15 +6,18 @@
     SysprepAtDeploy.psm1, sysprep.json and the deploy's answer file, and makes Windows run it once at its next
     start, before the logon screen (-Stage Hook, from HKLM\SYSTEM\Setup CmdLine).
 
-    -Stage Hook turns that startup command off again and starts the SYSTEM task ImagingTool\SysprepAtDeploy, which runs this with -Stage Run once the PC has fully
-    started (all services up). When the task cannot be created there, the Run stage runs right away instead.
+    -Stage Hook starts the SYSTEM task ImagingTool\SysprepAtDeploy, which runs this with -Stage Run (the Task
+    Scheduler and every other service are up by then), and waits for it. While the hook waits, Windows does not
+    show its logon screen, so whoever deploys sees the boot spinner until the PC restarts into setup, as with a
+    sysprepped image. The startup command stays set until sysprep has run, so a restart Windows needs first comes
+    back to the hook. When the task cannot be created, the Run stage runs in the hook itself.
 
     -Stage Run restarts first when Windows waits for one (up to 3 times), runs Prepare-Reference.ps1 -CheckOnly
     -RemoveUserApps (BitLocker, Store apps that break sysprep, a missing Microsoft Store), then
     sysprep /generalize /oobe /reboot /unattend. After the restart Windows setup applies the answer file and
     SetupComplete.cmd starts FirstBoot.ps1, as with a sysprepped image.
 
-    When anything fails, the logon screen says so (the PC is still a copy of the reference VM) and the details
+    When anything fails, the startup command is turned off, the logon screen says so (the PC is still a copy of the reference VM) and the details
     are in C:\Windows\Temp\SysprepAtDeploy.log.
 #>
 [CmdletBinding()]
@@ -48,9 +51,36 @@ function Set-Notice([string]$Caption, [string]$Text) {
     } catch { Write-Log "Could not set the logon notice: $($_.Exception.Message)" 'WARN' }
 }
 
+$script:InHook = $false
+
+function Wait-ForRestart {
+    # In the hook, returning would let Windows carry on with this boot (and, after sysprep, with the startup
+    # command sysprep set for the next one), so wait for the restart already under way.
+    if ($script:InHook) { Start-Sleep -Seconds 600 }
+}
+
+function Set-RunState([string]$State) {
+    # What the waiting hook reads: running, restart, sysprep, done or failed.
+    try { [IO.File]::WriteAllText([IO.Path]::Combine($folder, 'state.txt'), $State) } catch { }
+}
+
+function Get-RunState {
+    $path = [IO.Path]::Combine($folder, 'state.txt')
+    try { if ([IO.File]::Exists($path)) { return [IO.File]::ReadAllText($path).Trim() } } catch { }
+    ''
+}
+
+function Clear-StartupHook {
+    # Windows then shows its logon screen after this boot, and never runs the hook again.
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name SetupType -Value 0 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value '' -ErrorAction SilentlyContinue
+}
+
 function Stop-WithFailure([string]$Reason) {
     # Leaves the PC as it is (a copy of the reference VM that never generalized) and says so on the logon screen.
     Write-Log $Reason 'ERROR'
+    Clear-StartupHook
+    Set-RunState 'failed'
     & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
     $notice = Get-SysprepFailureNotice -Reason $Reason -LogPath $logPath
     Set-Notice -Caption $notice.Caption -Text $notice.Text
@@ -65,6 +95,7 @@ function Invoke-RunStage {
     $attempt = if ([IO.File]::Exists($attemptFile)) { [int]([IO.File]::ReadAllText($attemptFile).Trim()) } else { 0 }
     $attempt++
     [IO.File]::WriteAllText($attemptFile, "$attempt")
+    Set-RunState 'running'
     Write-Log "Run $attempt on $env:COMPUTERNAME (still the reference VM's name until sysprep)"
 
     $pending = [bool](@(
@@ -72,9 +103,11 @@ function Invoke-RunStage {
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
     ) | Where-Object { Test-Path $_ })
     if (Test-RebootPendingFor -Pending $pending -Attempt $attempt) {
-        # The startup task runs this again after the restart.
+        # The hook (still set) starts this again after the restart, without a logon screen in between.
         Write-Log 'Windows is waiting for a restart (servicing or Windows Update); restarting before sysprep.' 'WARN'
-        & shutdown.exe /r /t 5 /c 'Restarting before sysprep (deployment)' 2>&1 | Out-Null
+        Set-RunState 'restart'
+        & shutdown.exe /r /t 0 2>&1 | Out-Null
+        Wait-ForRestart
         exit 0
     }
     if ($pending) { Write-Log 'A restart is still pending after several restarts; trying sysprep anyway.' 'WARN' }
@@ -101,6 +134,7 @@ function Invoke-RunStage {
     $unattend = [IO.Path]::Combine($folder, 'unattend.xml')
     $sysprepArgs = Get-SysprepArguments -UnattendPath $unattend
     Write-Log "Running sysprep $($sysprepArgs -join ' ')"
+    Set-RunState 'sysprep'
     $sysprep = [IO.Path]::Combine($env:WINDIR, 'System32\Sysprep\sysprep.exe')
     $proc = Start-Process -FilePath $sysprep -ArgumentList $sysprepArgs -Wait -PassThru -ErrorAction Stop
     # sysprep keeps its own copy in Windows\Panther; this one holds the deploy's passwords.
@@ -113,33 +147,50 @@ function Invoke-RunStage {
     $errLog = [IO.Path]::Combine($env:WINDIR, 'System32\Sysprep\Panther\setuperr.log')
     $errors = if ([IO.File]::Exists($errLog)) { [IO.File]::ReadAllLines($errLog) } else { @() }
     $outcome = Get-SysprepOutcome -ImageState $state -ExitCode $proc.ExitCode -ErrorLines $errors
-    if ($outcome.Ok) { Write-Log 'Sysprep finished; Windows restarts into setup.'; exit 0 }
+    if ($outcome.Ok) { Set-RunState 'done'; Write-Log 'Sysprep finished; Windows restarts into setup.'; Wait-ForRestart; exit 0 }
     Stop-WithFailure $outcome.Reason
 }
 
 try {
     if ($Stage -eq 'Hook') {
-        # Once is enough: a failure below must not start this again at every boot.
-        Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name SetupType -Value 0 -Type DWord -ErrorAction Stop
-        Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value '' -ErrorAction Stop
-        Write-Log 'First start of a deployed image that was not sysprepped'
-        # The task runs once all services are up (Store apps, BitLocker and sysprep need them), and again after
-        # a restart, until it removes itself.
+        # A hook that keeps coming back (a restart loop) gives up: the Run stage allows 3 restarts.
+        $hookFile = [IO.Path]::Combine($folder, 'hook-runs.txt')
+        $hookRuns = 1 + $(if ([IO.File]::Exists($hookFile)) { [int]([IO.File]::ReadAllText($hookFile).Trim()) } else { 0 })
+        [IO.File]::WriteAllText($hookFile, "$hookRuns")
+        if ($hookRuns -gt 5) { Stop-WithFailure "The first start was interrupted $($hookRuns - 1) times before sysprep could finish." }
+        Write-Log "First start of a deployed image that was not sysprepped (start $hookRuns)"
+        Set-RunState ''
         $run = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$folder\Invoke-SysprepAtDeploy.ps1`" -Stage Run"
-        $created = & schtasks.exe /Create /TN $taskName /TR $run /SC ONSTART /RU SYSTEM /RL HIGHEST /DELAY 0000:30 /F 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "Could not create the task $taskName ($created); running sysprep now instead." 'WARN'
+        $created = & schtasks.exe /Create /TN $taskName /TR $run /SC ONSTART /DELAY 0000:30 /RU SYSTEM /RL HIGHEST /F 2>&1
+        $ok = $LASTEXITCODE -eq 0
+        if ($ok) {
+            $started = & schtasks.exe /Run /TN $taskName 2>&1
+            $ok = $LASTEXITCODE -eq 0
+            if (-not $ok) { Write-Log "Could not start the task $taskName ($started)." 'WARN' }
+        } else { Write-Log "Could not create the task $taskName ($created)." 'WARN' }
+        if (-not $ok) {
+            Write-Log 'Running sysprep here instead.' 'WARN'
+            & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+            $script:InHook = $true
             $Stage = 'Run'
             Invoke-RunStage
         }
-        $started = & schtasks.exe /Run /TN $taskName 2>&1
-        if ($LASTEXITCODE -eq 0) { Write-Log "Task $taskName started" }
-        else {
-            # The task's start-up trigger runs it after a restart.
-            Write-Log "Could not start the task now ($started); restarting so it runs at startup." 'WARN'
-            & shutdown.exe /r /t 10 /c 'Restarting to run sysprep (deployment)' 2>&1 | Out-Null
+        Write-Log "Task $taskName started; waiting for it (no logon screen meanwhile)"
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $state = ''
+        while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes)) {
+            Start-Sleep -Seconds 5
+            $state = Get-RunState
+            if (Test-SysprepHookDone -State $state) { break }
         }
-        exit 0
+        if ($state -in 'done', 'restart') {
+            # Windows is restarting. Returning now would let Windows carry on with the startup command sysprep has
+            # just set for the next start, so wait for the restart instead.
+            Start-Sleep -Seconds 600
+            exit 0
+        }
+        if ($state -ne 'failed') { Stop-WithFailure "Sysprep did not finish within $(Get-SysprepWaitMinutes) minutes (last state: $(if ($state) { $state } else { 'not started' }))." }
+        exit 1
     }
     Invoke-RunStage
 }
