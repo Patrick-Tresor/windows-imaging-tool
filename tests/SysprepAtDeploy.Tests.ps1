@@ -88,10 +88,15 @@ foreach ($f in 'Invoke-SysprepAtDeploy.ps1', 'SysprepAtDeploy.psm1', 'Prepare-Re
 # The hook removes everything of its own before sysprep, so nothing reaches the generalized Windows.
 $script = [IO.File]::ReadAllText((Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1'))
 $sysprepAt = $script.IndexOf('$proc = Start-Process -FilePath $sysprep')
-foreach ($cleanup in '& schtasks.exe /Delete /TN $taskName /F', 'Restore-Notice', "-Name PreventDeviceEncryption") {
+foreach ($cleanup in '& schtasks.exe /Delete /TN $taskName /F', "-Name PreventDeviceEncryption") {
     $at = $script.LastIndexOf($cleanup, $sysprepAt)
     Assert-Equal ($at -gt 0 -and $at -lt $sysprepAt) $true "the run stage cleans up before sysprep: $cleanup"
 }
+
+# Nothing on screen while sysprep runs; the logon screen only speaks up when it failed.
+Assert-Equal ($script.Contains('Get-SysprepBusyNotice') -or $script.Contains('Preparing this PC')) $false 'no notice on the logon screen while sysprep runs'
+$hookAt = $script.IndexOf("if (`$Stage -eq 'Hook')")
+Assert-Equal ($script.IndexOf('Set-Notice', $hookAt) -lt 0) $true 'the hook stage sets no logon notice'
 
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
 Write-Host 'All sysprep at deploy tests passed.' -ForegroundColor Green

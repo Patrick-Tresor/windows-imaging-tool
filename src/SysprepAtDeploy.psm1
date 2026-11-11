@@ -113,13 +113,6 @@ function Get-SysprepFailureNotice {
     }
 }
 
-function Get-SysprepBusyNotice {
-    [pscustomobject]@{
-        Caption = 'Preparing this PC'
-        Text    = 'Windows is running sysprep for the deployment. Do not sign in: the PC restarts by itself in a few minutes.'
-    }
-}
-
 Export-ModuleMember -Function Get-SysprepAtDeployFolder, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Test-RebootPendingFor, Get-SysprepOutcome,
-    Get-SysprepFailureNotice, Get-SysprepBusyNotice
+    Get-SysprepFailureNotice

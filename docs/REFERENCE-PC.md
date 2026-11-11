@@ -91,7 +91,7 @@ Shut down only hibernates Windows when Fast Startup is on, and the check refuses
 Each PC deployed from that image then:
 
 1. applies the image and drivers in WinPE as usual, and WinPE sees the image is not sysprepped;
-2. starts the VM's Windows once, with "Preparing this PC" on the logon screen (don't sign in);
+2. starts the VM's Windows once, with no message on screen (don't sign in if the logon screen shows);
 3. runs the `-CheckOnly -RemoveUserApps` checks and `sysprep /generalize /oobe /reboot` with the
    deploy's answer file, as SYSTEM;
 4. restarts into Windows setup: name, domain join, account, apps and tasks as with a sysprepped image.

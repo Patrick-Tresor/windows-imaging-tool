@@ -6,8 +6,7 @@
     SysprepAtDeploy.psm1, sysprep.json and the deploy's answer file, and makes Windows run it once at its next
     start, before the logon screen (-Stage Hook, from HKLM\SYSTEM\Setup CmdLine).
 
-    -Stage Hook turns that startup command off again, puts a "Preparing this PC" notice on the logon screen and
-    starts the SYSTEM task ImagingTool\SysprepAtDeploy, which runs this with -Stage Run once the PC has fully
+    -Stage Hook turns that startup command off again and starts the SYSTEM task ImagingTool\SysprepAtDeploy, which runs this with -Stage Run once the PC has fully
     started (all services up). When the task cannot be created there, the Run stage runs right away instead.
 
     -Stage Run restarts first when Windows waits for one (up to 3 times), runs Prepare-Reference.ps1 -CheckOnly
@@ -41,27 +40,12 @@ function Read-Plan {
     [pscustomobject]@{}
 }
 
-function Save-OriginalNotice {
-    # The reference's own logon notice, if it had one, comes back once sysprep starts.
-    $path = [IO.Path]::Combine($folder, 'notice.json')
-    if ([IO.File]::Exists($path)) { return }
-    $p = Get-ItemProperty -Path $noticeKey -ErrorAction SilentlyContinue
-    [pscustomobject]@{ caption = "$($p.legalnoticecaption)"; text = "$($p.legalnoticetext)" } | ConvertTo-Json |
-        Set-Content -LiteralPath $path -Encoding utf8
-}
-
 function Set-Notice([string]$Caption, [string]$Text) {
     try {
         if (-not (Test-Path $noticeKey)) { New-Item -Path $noticeKey -Force -ErrorAction Stop | Out-Null }
         Set-ItemProperty -Path $noticeKey -Name legalnoticecaption -Value $Caption -ErrorAction Stop
         Set-ItemProperty -Path $noticeKey -Name legalnoticetext -Value $Text -ErrorAction Stop
     } catch { Write-Log "Could not set the logon notice: $($_.Exception.Message)" 'WARN' }
-}
-
-function Restore-Notice {
-    $path = [IO.Path]::Combine($folder, 'notice.json')
-    $old = if ([IO.File]::Exists($path)) { [IO.File]::ReadAllText($path) | ConvertFrom-Json } else { $null }
-    Set-Notice -Caption $(if ($old) { "$($old.caption)" } else { '' }) -Text $(if ($old) { "$($old.text)" } else { '' })
 }
 
 function Stop-WithFailure([string]$Reason) {
@@ -106,10 +90,9 @@ function Invoke-RunStage {
         Stop-WithFailure "The checks before sysprep failed. $(if ($problem) { $problem.Trim() } else { "Prepare-Reference exit $prepareExit." })"
     }
 
-    # Nothing of ours may survive into the generalized Windows: the task would run again after setup, the notice
-    # would stay on every logon, and device encryption has to be allowed again.
+    # Nothing of ours may survive into the generalized Windows: the task would run again after setup, and device
+    # encryption has to be allowed again. Nothing is shown on screen while this runs; only a failure is.
     & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
-    Restore-Notice
     if ($plan.PSObject.Properties['preventDeviceEncryptionSet'] -and $plan.preventDeviceEncryptionSet) {
         Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' -Name PreventDeviceEncryption -ErrorAction SilentlyContinue
         Write-Log 'Device encryption allowed again'
@@ -140,9 +123,6 @@ try {
         Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name SetupType -Value 0 -Type DWord -ErrorAction Stop
         Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value '' -ErrorAction Stop
         Write-Log 'First start of a deployed image that was not sysprepped'
-        Save-OriginalNotice
-        $busy = Get-SysprepBusyNotice
-        Set-Notice -Caption $busy.Caption -Text $busy.Text
         # The task runs once all services are up (Store apps, BitLocker and sysprep need them), and again after
         # a restart, until it removes itself.
         $run = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$folder\Invoke-SysprepAtDeploy.ps1`" -Stage Run"
