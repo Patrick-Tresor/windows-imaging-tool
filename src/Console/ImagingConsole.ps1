@@ -8,17 +8,50 @@
     powershell.exe -ExecutionPolicy Bypass -File .\src\Console\ImagingConsole.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    # Hide this PowerShell's black console window, so only the console's own window shows (ImagingConsole.cmd).
+    [switch]$HideConsole
+)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -or [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
-    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    # The elevated copy runs hidden too: started from a PowerShell prompt, it still opens its own console window.
+    Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-WindowStyle', 'Hidden',
+        '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-HideConsole')
     return
+}
+
+if ($HideConsole) {
+    # -WindowStyle Hidden can leave the window up for a moment, or for good when it was opened another way (the .cmd
+    # run as administrator from an older copy, a shortcut); hiding it here catches those. Tools the console runs
+    # inline (cmd /c, winget, dism) share this hidden window, so they don't flash one either.
+    try {
+        Add-Type -Namespace ImagingTool -Name ConsoleWindow -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+'@
+        $h = [ImagingTool.ConsoleWindow]::GetConsoleWindow()
+        if ($h -ne [IntPtr]::Zero) { [void][ImagingTool.ConsoleWindow]::ShowWindow($h, 0) }   # 0 = SW_HIDE
+    } catch { }
 }
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+
+# With the console window hidden, an error that stops the console before (or after) its window opens would leave
+# nothing on screen. Show it in a message box and keep it in %LOCALAPPDATA%\ImagingConsole\console-error.log.
+trap {
+    $msg = "$($_.Exception.Message)"
+    $where = "$($_.InvocationInfo.PositionMessage)"
+    $log = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'console-error.log')
+    try {
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($log))
+        [IO.File]::AppendAllText($log, ('{0:yyyy-MM-dd HH:mm:ss} {1}{2}{3}{2}{2}' -f (Get-Date), $msg, [Environment]::NewLine, $where))
+    } catch { }
+    try { [void][Windows.MessageBox]::Show("The imaging console stopped: $msg`n`nDetails: $log", 'Imaging Console', 'OK', 'Error') } catch { }
+    break
+}
 $srcDir = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'WheelScroll.psm1') -Force
