@@ -250,18 +250,41 @@ function Get-NamingGridRows {
 function Update-Settings {
     if (-not (Test-ContentRoot $script:root)) { return }
     $s = Get-DeploySettings -ContentRoot $script:root
-    $ui.TxtSharePath.Text   = $s.share.path
-    $ui.TxtShareUser.Text   = $s.share.user
-    $ui.TxtSharePwFile.Text = $s.share.passwordFile
+    $v = Get-DeploySettingsView -ContentRoot $script:root
+    $ui.RbSettingsShare.IsChecked = $v.Mode -eq 'Share'
+    $ui.RbSettingsUsb.IsChecked   = $v.Mode -ne 'Share'
+    $ui.TxtSharePath.Text = $v.SharePath
+    $ui.TxtShareUser.Text = $v.ShareUser
+    $ui.PwdShare.Password = ''
+    $script:sharePwSaved = $v.PasswordSaved
+    $ui.TxtShareTest.Text = ''
+    $ui.TxtSettingsProblem.Text = ''
+    $ui.RbReportShare.IsChecked   = [bool]$v.ReportPath
+    $ui.RbReportDefault.IsChecked = -not $v.ReportPath
+    $ui.TxtReportPath.Text = $v.ReportPath
     $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
-    $ui.TxtVersionsToKeep.Text = if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep } else { 0 }
-    $ui.TxtReportPath.Text = if ($s.PSObject.Properties['reporting']) { $s.reporting.path } else { '' }
+    $ui.TxtVersionsToKeep.Text = $v.VersionsToKeep
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
     Select-ComboText $ui.CmbCheckBitLocker (& $get 'bitLocker' 'Auto')
     Select-ComboText $ui.CmbCheckDevices (& $get 'deviceErrors' 'Required')
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
+    Update-SettingsState
+}
+
+function Update-SettingsState {
+    # Greys out what the chosen options don't use, and says whether the share password is saved.
+    $share = [bool]$ui.RbSettingsShare.IsChecked
+    $report = [bool]$ui.RbReportShare.IsChecked
+    $ui.PnlSharePath.IsEnabled = $share
+    $ui.TxtReportPath.IsEnabled = $report
+    $ui.PnlShareAccount.IsEnabled = $share -or $report
+    $ui.PnlShareAccount.Opacity = if ($share -or $report) { 1 } else { 0.5 }
+    $ui.TxtSharePwState.Text = if ($ui.PwdShare.Password) { 'New password, saved when you click Save.' }
+                               elseif ($script:sharePwSaved) { 'Password saved.' }
+                               elseif ($ui.TxtShareUser.Text.Trim()) { 'No password saved yet.' }
+                               else { '' }
 }
 
 function Select-ComboText($Combo, [string]$Text) {
@@ -1153,17 +1176,52 @@ $ui.BtnWdsCheck.Add_Click({ Invoke-Safely {
 
 #region Settings
 
+function Set-ShareTestText([string]$Text, [string]$Color) {
+    $ui.TxtShareTest.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($Color)
+    $ui.TxtShareTest.Text = $Text
+}
+foreach ($rb in 'RbSettingsUsb', 'RbSettingsShare', 'RbReportDefault', 'RbReportShare') {
+    $ui[$rb].Add_Checked({ Invoke-Safely { Update-SettingsState } })
+}
+$ui.PwdShare.Add_PasswordChanged({ Update-SettingsState })
+$ui.TxtShareUser.Add_TextChanged({ Update-SettingsState })
+
+$ui.BtnShareTest.Add_Click({ Invoke-Safely {
+    $share = if ($ui.RbSettingsShare.IsChecked) { $ui.TxtSharePath.Text.Trim() } else { '' }
+    $report = if ($ui.RbReportShare.IsChecked) { $ui.TxtReportPath.Text.Trim() } else { '' }
+    $target = if ($share) { $share } elseif ($report) { $report } else { '' }
+    if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' '#B91C1C'; return }
+    $user = $ui.TxtShareUser.Text.Trim()
+    $pw = $ui.PwdShare.Password
+    if ($user -and -not $pw -and $script:sharePwSaved) {
+        $v = Get-DeploySettingsView -ContentRoot $script:root
+        $pw = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes((Join-ContentPath $script:root $v.PasswordFile)))).Trim()
+    }
+    Set-ShareTestText "Connecting to $target..." '#5B6170'
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    try {
+        $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks
+        $r = Test-ShareConnection -SharePath $target -User $user -Password $pw -StatusPath $report -StatusOnly:(-not $share)
+    } finally { $window.Cursor = $null; $pw = $null }
+    Set-ShareTestText $r.Message $(if ($r.Ok) { '#15803D' } else { '#B91C1C' })
+    Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
+} })
+
+$ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
+
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
+    $mode = if ($ui.RbSettingsShare.IsChecked) { 'Share' } else { 'Usb' }
+    $reportElsewhere = [bool]$ui.RbReportShare.IsChecked
+    $problems = @(Get-DeploySettingsProblems -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password -ReportPath $ui.TxtReportPath.Text `
+        -ReportElsewhere $reportElsewhere -VersionsToKeep $ui.TxtVersionsToKeep.Text)
+    if ($problems) { $ui.TxtSettingsProblem.Text = $problems[0]; Set-Status "Not saved: $($problems[0])"; return }
+    $ui.TxtSettingsProblem.Text = ''
+    $r = Save-DeploySettingsPage -ContentRoot $script:root -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -NewPassword $ui.PwdShare.Password -ReportPath $(if ($reportElsewhere) { $ui.TxtReportPath.Text } else { '' }) `
+        -VersionsToKeep ([int]$ui.TxtVersionsToKeep.Text.Trim())
     $s = Get-DeploySettings -ContentRoot $script:root
-    $s.share.path         = $ui.TxtSharePath.Text.Trim()
-    $s.share.user         = $ui.TxtShareUser.Text.Trim()
-    $s.share.passwordFile = $ui.TxtSharePwFile.Text.Trim()
-    $keep = 0
-    if (-not [int]::TryParse($ui.TxtVersionsToKeep.Text.Trim(), [ref]$keep) -or $keep -lt 0) { Show-Error 'Versions to keep must be 0 or more (0 keeps every version).'; return }
-    if ($s.PSObject.Properties['versionsToKeep']) { $s.versionsToKeep = $keep } else { $s | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue $keep }
-    if (-not $s.PSObject.Properties['reporting']) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) }
-    $s.reporting.path     = $ui.TxtReportPath.Text.Trim()
     $checks = [pscustomobject]@{
         enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
         bitLocker     = "$($ui.CmbCheckBitLocker.SelectedItem.Content)"
@@ -1174,6 +1232,7 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
     Update-Answers; Update-Settings; Update-Dashboard
+    if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
     Set-Status 'Deploy settings saved'
 } })
 

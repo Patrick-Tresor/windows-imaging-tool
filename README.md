@@ -71,8 +71,16 @@ and click **Create folders** the first time. Then:
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-- **Deploy Settings**: the network share WinPE uses to find the content root,
-  and the default answer file.
+- **Deploy Settings**: five short sections. 1) USB stick only, or a network
+  share (needed for ISO and PXE). 2) The Active Directory account WinPE signs in
+  with: type its password in the console (saved to `config\secrets\share.txt`,
+  never on the stick) and click **Test connection** to check the sign-in and
+  that the Dashboard's `Status` folder can be written. 3) Where PCs report for
+  the Dashboard. 4) Default answer file and how many older image versions to
+  keep. 5) Post-deploy checks. Save refuses the example values
+  (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
+  account not written `DOMAIN\user` or `user@domain`, and says when the stick
+  needs updating because WinPE reads these settings from the boot image.
 - **Computers**: the computers in your Active Directory, to reimage them over
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
@@ -530,9 +538,9 @@ is set), and it writes **as the computer account**: give `Domain Computers`
 modify rights on the `Status` folder. Without that, the PC shows as Stalled
 after first boot even though it finished; its `C:\Windows\Temp\FirstBoot.log`
 has the result. USB deployments write to the stick's `Status` folder, unless
-**Status share** is set on the Deploy Settings tab (for example
-`\\deploy-server\Deploy\Status`), in which case WinPE maps it as `R:` with the
-share account and reports there.
+**A network folder** is chosen under "Where PCs report progress" on the Deploy
+Settings tab (for example `\\SERVER01\Deploy\Status`), in which case WinPE maps
+it as `R:` with the share account and reports there.
 
 ### Post-deploy checks
 
