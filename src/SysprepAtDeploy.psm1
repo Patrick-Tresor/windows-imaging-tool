@@ -7,8 +7,6 @@
 
 $script:Folder = 'C:\ProgramData\ImagingTool\Sysprep'
 
-function Get-SysprepAtDeployFolder { $script:Folder }
-
 function Test-HibernatedWindows {
     <#
     .SYNOPSIS
@@ -121,6 +119,6 @@ function Test-SysprepHookDone {
     $State -in 'done', 'failed', 'restart'
 }
 
-Export-ModuleMember -Function Get-SysprepAtDeployFolder, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
+Export-ModuleMember -Function Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Test-RebootPendingFor, Get-SysprepOutcome,
     Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone
