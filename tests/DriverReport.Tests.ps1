@@ -50,6 +50,25 @@ try {
     $pack = Resolve-DriverPack -Identity (New-Pc Dell 'Latitude 5440' '0B0B' $null 'x') -CatalogPath $catalog -DriverRoot $drivers 6>$null
     Assert-Equal ([IO.Path]::GetFileName($pack)) 'Latitude 5440' 'deploy: without -Detailed it still returns the folder'
 
+    # A maker fallback with no folder uses the vendor WinPE packs on the stick (Drivers\_WinPE).
+    $pe = Join-Path $root 'WinPEDrivers'
+    foreach ($d in 'Dell-WinPE11-A11/x64/network', 'HP-WinPE-sp173204/storage') {
+        New-Item -ItemType Directory -Path (Join-Path $pe $d) -Force | Out-Null
+        Set-Content (Join-Path (Join-Path $pe $d) 'drv.inf') 'inf'
+    }
+    $dellPc = New-Pc Dell 'Latitude 9999' 'FFF1' $null 'SN-D'
+    $m = Resolve-DriverPack -Identity $dellPc -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
+    Assert-Equal "$($m.Status) $([IO.Path]::GetFileName($m.FullPath))" 'Fallback Dell-WinPE11-A11' 'fallback folder missing: Dell WinPE pack instead'
+    $m = Resolve-DriverPack -Identity (New-Pc HP 'HP ProBook 999' '9999' $null 'SN-H') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
+    Assert-Equal "$($m.Status) $([IO.Path]::GetFileName($m.FullPath))" 'Fallback HP-WinPE-sp173204' 'fallback folder missing: HP WinPE pack instead'
+    $m = Resolve-DriverPack -Identity (New-Pc Lenovo 'ThinkPad X1 Yoga' $null '20FQ' 'SN-L') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
+    Assert-Equal "$($m.Status) $($m.FullPath -eq $pe)" 'Fallback True' 'fallback folder missing, no Lenovo pack: all WinPE drivers'
+    $m = Resolve-DriverPack -Identity $dellPc -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot (Join-Path $root 'none') -Detailed 6>$null
+    Assert-Equal "$($m.Status) $([bool]$m.FullPath)" 'Fallback False' 'fallback folder missing, no WinPE drivers: inbox only'
+    $m = Resolve-DriverPack -Identity (New-Pc HP 'HP EliteBook 840 14 inch G9 Notebook PC' '8A86' $null 'x') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
+    Assert-Equal "$($m.Status) $([bool]$m.FullPath)" 'MissingFolder False' 'a listed model with no folder does not get the WinPE pack'
+    Remove-Item -Recurse -Force $pe
+
     $reports = Get-DriverReportDir $root
     Assert-Equal (@(Get-ChildItem $reports -Filter *.json).Count) 6 'one report file per PC'
     Assert-Equal (Test-Path (Join-Path $reports 'To_be_filled_by_O.E.M..json')) $true 'serial is made safe for a file name'

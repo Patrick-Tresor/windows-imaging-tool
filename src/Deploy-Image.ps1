@@ -207,7 +207,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) 
     Assert-JoinAccount -Root $Root -Answer $Answer
 
     $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
-    $driverMatch = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot -Detailed
+    $driverMatch = Resolve-DriverPack -Identity $Hardware -CatalogPath (Join-Path $Root 'config\driver-catalog.json') -DriverRoot $driverRoot -WinPEDriverRoot (Join-Path $Root 'Drivers\_WinPE') -Detailed
 
     # The wizard offers every application in the library, not only the answer file's.
     $appRoot = Resolve-ContentPath $Root $Answer.AppLocation
@@ -630,7 +630,7 @@ try {
 
     $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
     $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot
-    Set-DeployStatus -Fields @{ driverPack = $(if ($driverPack) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { 'inbox only' }) }
+    Set-DeployStatus -Fields @{ driverPack = $(if (-not $driverPack) { 'inbox only' } elseif ($driverPack.StartsWith($driverRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { $driverPack }) }
     if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.

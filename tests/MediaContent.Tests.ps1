@@ -97,6 +97,15 @@ try {
     Assert-Equal ($packs[2].Label -like '*folder missing*') $true 'driver packs: missing folder in label'
     Assert-Equal $packs[3].Fallback $true 'driver packs: maker fallback flagged'
     Assert-Equal ($packs[3].Label -like '*Dell fallback for unlisted models*') $true 'driver packs: fallback in label'
+    $savedCatalog = Get-Content -Raw (Join-Path $root 'config/driver-catalog.json')
+    Set-Content (Join-Path $root 'config/driver-catalog.json') '{ "entries": [], "fallbacks": { "HP": "HP\\_Generic", "Lenovo": "Lenovo\\_Generic" } }'
+    New-Item -ItemType Directory -Path (Join-Path $root 'Drivers/HP/_Generic') -Force | Out-Null
+    Set-Content (Join-Path $root 'Drivers/HP/_Generic/a.inf') 'inf'
+    $fb = @(Get-MediaDriverPacks -ContentRoot $root)
+    Assert-Equal ($fb.Path -join ';') 'HP\_Generic' 'fallback with a folder: listed'
+    Assert-Equal (@($fb | Where-Object { $_.Label -like '*folder missing*' }).Count) 0 'fallback with no folder: not listed'
+    Set-Content (Join-Path $root 'config/driver-catalog.json') $savedCatalog
+    Remove-Item -Recurse -Force (Join-Path $root 'Drivers/HP/_Generic')
 
     $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default'
     Assert-Equal ($c.Folders -contains 'Drivers') $true 'no pack choice: whole driver folder'
