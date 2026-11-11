@@ -120,13 +120,16 @@ try {
     $relative = Get-DriverPackFolder $d
     Assert-Equal $relative 'Dell\Latitude 5440' 'pack folder is Maker\Model'
     $count = Register-DriverPack -ContentRoot $root -Pack $d -Path $relative
-    Assert-Equal $count 3 'one entry per SKU plus the model name'
+    # One row per pack (Patrick, 2026-11-11: a SKU row and a model row looked like the same driver twice).
+    Assert-Equal $count 1 'one entry for the pack'
     $entries = @((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell')
-    Assert-Equal (@($entries | Where-Object sku -eq '0B0B').Count) 1 'the existing SKU entry is replaced, not duplicated'
-    Assert-Equal (@($entries | Where-Object { $_.model -eq 'Latitude 5440' }).Count) 1 'the existing model entry is replaced'
+    $mine = @($entries | Where-Object path -eq 'Dell\Latitude 5440')
+    Assert-Equal $mine.Count 1 'the old SKU and model rows are replaced by one'
+    Assert-Equal "$($mine[0].sku)|$($mine[0].model)" '0B0B, 0C1D|Latitude 5440' 'the entry holds every SKU and the model'
     Assert-Equal (@($entries | Where-Object modelPattern).Count) 1 'unrelated entries are kept'
     Register-DriverPack -ContentRoot $root -Pack $d -Path $relative | Out-Null
-    Assert-Equal (@((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell').Count) 4 'registering twice adds nothing'
+    Assert-Equal (@((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell').Count) 2 'registering twice adds nothing'
+    Assert-Equal @(Get-DriverCatalogRows -ContentRoot $root | Where-Object Path -eq 'Dell\Latitude 5440').Count 1 'the library shows the pack once'
 
     # The deploy picks the downloaded pack for a PC with the new SKU.
     New-Item -ItemType Directory -Path (Join-Path $root 'Drivers/Dell/Latitude 5440') -Force | Out-Null
@@ -134,6 +137,11 @@ try {
     $hw = [pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440'; MachineType = $null; Sku = '0C1D' }
     $pack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config/driver-catalog.json') -DriverRoot (Join-Path $root 'Drivers') 6>$null
     Assert-Equal ([IO.Path]::GetFileName($pack)) 'Latitude 5440' 'deploy matches the downloaded pack by SKU'
+    $hwModel = [pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440'; MachineType = $null; Sku = '0FFF' }
+    $byModel = Find-DriverCatalogMatch -Identity $hwModel -CatalogPath (Join-Path $root 'config/driver-catalog.json')
+    Assert-Equal "$($byModel.MatchedBy)|$($byModel.Path)" 'model|Dell\Latitude 5440' 'an unknown SKU still matches the pack by model'
+    Assert-Equal (& $common { Test-CatalogIdMatch '0B0B, 0C1D' '0c1d' }) $true 'a SKU list matches any of its SKUs'
+    Assert-Equal (& $common { Test-CatalogIdMatch '0B0B' '0B0' }) $false 'a SKU list matches whole SKUs only'
 
     # Library status from pack.json.
     Assert-Equal ((@($d) | Add-DriverPackLibraryStatus -ContentRoot $root).Installed) '' 'not downloaded yet'

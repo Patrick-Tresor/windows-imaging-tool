@@ -530,24 +530,27 @@ function Add-DriverPackLibraryStatus {
 }
 
 function Register-DriverPack {
-    # Points the pack's SKUs (Dell, HP), machine types (Lenovo) and model name at its folder in driver-catalog.json.
-    # Existing entries for the same maker and key are replaced, so a re-download or an update does not leave duplicates.
+    # Points the pack at its folder in driver-catalog.json with ONE entry: its SKUs (Dell, HP), machine types (Lenovo)
+    # and model name together (Patrick, 2026-11-11: a SKU row and a model row for the same pack looked like the same
+    # driver twice). The deploy matches the SKU, then the machine type, then the model, all in that entry.
+    # Existing entries for the same maker that share a SKU, machine type or (with no SKU or type) the model are
+    # replaced, so a re-download, an update or an older two-row registration leaves no duplicates.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Pack, [Parameter(Mandatory)][string]$Path)
-    $new = @(
-        foreach ($s in $Pack.Skus) { [pscustomobject]@{ Maker = $Pack.Maker; Sku = $s; Path = $Path } }
-        foreach ($t in $Pack.MachineTypes) { [pscustomobject]@{ Maker = $Pack.Maker; MachineType = $t; Path = $Path } }
-        [pscustomobject]@{ Maker = $Pack.Maker; Model = $Pack.Model; Path = $Path }
-    )
+    $skus = @($Pack.Skus | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    $types = @($Pack.MachineTypes | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    $new = [pscustomobject]@{ Maker = $Pack.Maker; Model = $Pack.Model; Sku = ($skus -join ', '); MachineType = ($types -join ', ')
+        ModelPattern = $null; Path = $Path }
+    $split = { param($v) @("$v" -split '\s*[,;]\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     $keep = Get-DriverCatalogRows -ContentRoot $ContentRoot | Where-Object {
         $r = $_
         -not ($r.Maker -eq $Pack.Maker -and (
-            ($r.Sku -and $r.Sku -in $Pack.Skus) -or
-            ($r.MachineType -and $r.MachineType -in $Pack.MachineTypes) -or
+            @(& $split $r.Sku | Where-Object { $_ -in $skus }).Count -or
+            @(& $split $r.MachineType | Where-Object { $_ -in $types }).Count -or
             ($r.Model -and $r.Model -eq $Pack.Model -and -not $r.Sku -and -not $r.MachineType)))
     }
-    # New entries go first: the deploy takes the first match, and these are the most exact.
-    Save-DriverCatalog -ContentRoot $ContentRoot -Rows @($new + @($keep))
-    $new.Count
+    # The new entry goes first: the deploy takes the first match, and it is the most exact.
+    Save-DriverCatalog -ContentRoot $ContentRoot -Rows @(@($new) + @($keep))
+    1
 }
 
 function Test-VendorSignature {
