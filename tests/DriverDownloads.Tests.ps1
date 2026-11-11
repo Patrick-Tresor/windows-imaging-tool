@@ -68,6 +68,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Stop-BuildProgress
         Update-DriverDownloads
         Assert-Equal "$($row2.Finished)|$($row2.Outcome)" 'True|ok' 'a finished download is marked done'
+        $t2 = $script:DriverDownloads[$row2.Id].RemoveTimer
+        Assert-Equal "$($t2.IsEnabled)|$($t2.Interval.TotalSeconds)" 'True|5' 'a download that worked takes itself off the list after 5 seconds'
         Assert-Equal "$($row.Finished)" 'False' 'the other download keeps running'
         Assert-Equal $script:refreshed 0 'no refresh until the download that asked for one ends'
 
@@ -78,6 +80,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Update-DriverDownloads
         Assert-Equal "$($row.Finished)|$($row.Outcome)|$($row.Summary)" 'True|failed|Failed: 1 of 1 packs failed.' 'a failed download says so'
         Assert-Equal $script:refreshed 1 'the library refreshes once when a download ends'
+        Assert-Equal ($null -eq $script:DriverDownloads[$row.Id].RemoveTimer) $true 'a failed download stays listed for its log'
         Assert-Equal $script:DriverDownloadTimer.IsEnabled $false 'reading stops when nothing runs'
 
         $win.Dispatcher.Invoke([action]{}, 'Background')
@@ -89,7 +92,10 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal $remove.IsEnabled $true 'Remove is enabled once the download ended'
         $remove.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent, $remove))
         Assert-Equal @($lst.ItemsSource).Count 1 'Remove takes the download off the list'
-        Invoke-DriverDownloadAction -Row $row2 -Action 'remove'
+        # The 5-second timer firing: the same remove, and the list hides when it is empty.
+        $t2.Stop()
+        Invoke-DriverDownloadAction -Row $t2.Tag -Action 'remove'
+        Assert-Equal @($lst.ItemsSource).Count 0 'the finished download is gone'
         Assert-Equal $grp.Visibility 'Collapsed' 'the list hides when it is empty'
     } finally {
         if ($script:DriverDownloadTimer) { $script:DriverDownloadTimer.Stop() }
