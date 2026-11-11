@@ -133,6 +133,19 @@ try {
     Assert-Equal "$(@($w.SecretRows).Count)|$($w.Pages[1].Controls.Count)" '0|1' 'wizard passwords: none missing leaves only the note'
     Update-DeployWizardLayout -Wiz $w
 
+    # Install anyway (Windows 11 check) sits between the page and the error line, only while it is shown.
+    $w.Win11Anyway = New-Object Windows.Forms.CheckBox -Property @{ Text = 'Install Windows 11 anyway on this PC (it does not meet the requirements)'; Visible = $false }
+    $form.Controls.Add($w.Win11Anyway)
+    $pageBottom = $w.Pages[0].Bottom
+    $w.Win11Anyway.Visible = $true
+    Update-DeployWizardLayout -Wiz $w
+    Test-Fits $w.Win11Anyway 'wizard:'
+    Assert-Equal ($w.Pages[0].Bottom -le $w.Win11Anyway.Top -and $w.Win11Anyway.Bottom -le $w.Error.Top) $true 'wizard: page, Install anyway and error stack'
+    Assert-Equal ($w.Pages[0].Bottom -lt $pageBottom) $true 'wizard: the page makes room for Install anyway'
+    $w.Win11Anyway.Visible = $false
+    Update-DeployWizardLayout -Wiz $w
+    Assert-Equal $w.Pages[0].Bottom $pageBottom 'wizard: hidden Install anyway takes no room'
+
     $domainDiskTop = $w.DiskLabel.Top; $ouTop = $w.OuLabel.Top
     $w.IsDomain = $false; $w.OuLabel.Visible = $false; $w.OuBox.Visible = $false
     Update-DeployWizardLayout -Wiz $w
