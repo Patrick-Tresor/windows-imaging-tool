@@ -135,6 +135,9 @@ namespace ImagingTool {
         }
 
         void Copy() {
+            // A read-only or hidden file already on the stick (an update, or a stick built before) can't be
+            // overwritten with FileMode.Create: make it a plain file first.
+            if (File.Exists(destination)) File.SetAttributes(destination, FileAttributes.Normal);
             var buffer = new byte[Chunk];
             long total = 0, sinceFlush = 0;
             using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan))

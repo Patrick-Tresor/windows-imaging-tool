@@ -299,7 +299,8 @@ function New-WinPEDriverStaging {
         Returns one row per staged .inf: SourceIndex (0-based, in plan order), Name, Staged path.
     #>
     param([object[]]$Plan, [Parameter(Mandatory)][string]$Destination)
-    if ([IO.Directory]::Exists($Destination)) { [IO.Directory]::Delete($Destination, $true) }
+    # Remove-Item -Force: driver files out of a vendor cab are often read-only, which Directory.Delete refuses.
+    if ([IO.Directory]::Exists($Destination)) { Remove-Item -LiteralPath $Destination -Recurse -Force }
     [void][IO.Directory]::CreateDirectory($Destination)
     $sep = [IO.Path]::DirectorySeparatorChar
     $rows = New-Object System.Collections.ArrayList
