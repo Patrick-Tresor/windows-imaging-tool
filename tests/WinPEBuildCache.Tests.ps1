@@ -98,6 +98,38 @@ try {
     Assert-Equal ($drvload -join ',') 'e1d.inf,iaStorVD.inf' 'stick: WinPE finds the x64 drivers to load'
     $flat = Get-WinPEPackCopyPlan -PackPath $hp
     Assert-Equal $flat.FileCount 2 'stick: a pack without architecture folders is copied whole'
+
+    # One staging folder for one DISM run: each picked driver once, with its files, nothing else DISM would add.
+    $extra = Join-Path $root 'packs/Extra'
+    New-TextFile (Join-Path $extra 'a.inf') 'a'
+    New-TextFile (Join-Path $extra 'a.sys') 'a-sys'
+    New-TextFile (Join-Path $extra 'sub/b.inf') 'b'
+    New-TextFile (Join-Path $extra 'x86/c.inf') 'c32'
+    $plan3 = @(Get-WinPEDriverPlan -Sources ($sources + [pscustomobject]@{ Name = 'Extra'; Path = $extra }))
+    $stage = Join-Path $root 'stage'
+    $staged = @(New-WinPEDriverStaging -Plan $plan3 -Destination $stage)
+    Assert-Equal (($staged | ForEach-Object { '{0}:{1}' -f $_.SourceIndex, $_.Name }) -join ',') '0:e1d.inf,0:iaStorVD.inf,1:hpsas.inf,2:a.inf,2:b.inf' 'staging: every picked driver once, by source'
+    $infsStaged = @(Get-ChildItem -LiteralPath $stage -Recurse -Filter *.inf -File | ForEach-Object { $_.FullName.Substring($stage.Length + 1) -replace '\\', '/' } | Sort-Object)
+    Assert-Equal ($infsStaged -join ',') '1/winpe/x64/network/e1d.inf,1/winpe/x64/storage/iaStorVD.inf,2/storage/hpsas.inf,3/a.inf,3/sub/b.inf' 'staging: no duplicate or x86 .inf for DISM to add'
+    Assert-Equal ([IO.File]::ReadAllText((Join-Path $stage '1/winpe/x64/storage/iaStorVD.sys'))) 'rst-sys' 'staging: a driver keeps its .sys next to the .inf'
+    Assert-Equal ([IO.File]::Exists((Join-Path $stage '1/winpe/x86/storage/iaStorVD.sys'))) $false 'staging: Dell x86 folder left out'
+    Assert-Equal ([IO.File]::Exists((Join-Path $stage '3/a.sys'))) $true 'staging: files next to a root .inf come along'
+    $again = @(New-WinPEDriverStaging -Plan $plan3 -Destination $stage)
+    Assert-Equal $again.Count 5 'staging: a second run starts from an empty folder'
+    Assert-Equal (@(New-WinPEDriverStaging -Plan @() -Destination $stage).Count) 0 'staging: no drivers, nothing staged'
+
+    # The report from the drivers the image lists afterwards, whatever language DISM printed in.
+    $report = @(Get-WinPEDriverResults -Plan $plan3 -Staged $staged -InstalledNames @('iastorvd.inf', 'E1D.INF', 'a.inf', 'b.inf'))
+    Assert-Equal (($report | ForEach-Object { '{0}={1}/{2}' -f $_.name, $_.added, (@($_.failed) -join '+') }) -join ',') 'Dell=2/,HP=0/hpsas.inf,Extra=2/' 'report: added and failed per source'
+    Assert-Equal (@($report[0].vmd) -join ',') 'iaStorVD.inf' 'report: Intel RST/VMD driver found'
+    Assert-Equal (@($report[1].vmd).Count) 0 'report: no VMD driver in HP here'
+    $twice = @(Get-WinPEDriverResults -Plan $plan3 -Staged @($staged + [pscustomobject]@{ SourceIndex = 1; Name = 'e1d.inf'; Staged = 'x' }) -InstalledNames @('e1d.inf'))
+    Assert-Equal "$($twice[0].added)|$($twice[1].added)|$(@($twice[1].failed) -join ',')" '1|0|hpsas.inf,e1d.inf' 'report: one installed copy counts once'
+    $byExit = @(Get-WinPEDriverResults -Plan $plan3 -Staged $staged -ExitCode 0)
+    Assert-Equal (($byExit | ForEach-Object { $_.added }) -join ',') '2,1,2' 'report: without the image list, exit code 0 means all added'
+    $byFail = @(Get-WinPEDriverResults -Plan $plan3 -Staged $staged -ExitCode 2)
+    Assert-Equal (($byFail | ForEach-Object { @($_.failed).Count }) -join ',') '2,1,2' 'report: without the image list, a failed run marks them failed'
+    Assert-Equal (@(Get-WinPEDriverResults -Plan $plan3 -Staged @()).Count) 3 'report: one entry per source even with no drivers'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
@@ -107,6 +139,10 @@ Assert-Equal ($build -match 'Find-WinPEBuildCache -Key \$peKey') $true 'build: l
 Assert-Equal ($build -match '(?s)Save-WinPEBuildCache.*Deploy''') $true 'build: caches boot.wim before the Deploy folder goes in'
 Assert-Equal ($build -match 'Get-WinPEPackCopyPlan -PackPath \$pack\.Path') $true 'build: vendor packs go to the stick with the plan'
 Assert-Equal ($build -match 'Copy-Item -Path \(Join-Path \$pack\.Path') $false 'build: no whole-pack Copy-Item to the stick'
+Assert-Equal ($build -match 'New-WinPEDriverStaging') $true 'build: WinPE drivers staged for one DISM run'
+Assert-Equal ($build -match '/Add-Driver /Driver:') $true 'build: one DISM /Add-Driver over the staging folder'
+Assert-Equal ($build -match 'Add-WindowsDriver') $false 'build: no Add-WindowsDriver call per driver (about 10 s each)'
+Assert-Equal ($build -match 'Add-DefenderScanExclusions -Paths @\(\$WorkDir\)') $true 'build: Defender skips the WinPE work folder while DISM runs'
 
 if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All WinPE build cache checks passed' -ForegroundColor Green
