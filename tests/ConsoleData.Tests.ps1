@@ -18,6 +18,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-test-" + [guid]::NewGuid(
 & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
+    Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows
     Assert-Equal (Test-ContentRoot $root) $true 'content root is created and recognized'
 
     # Seed a driver folder and import a second pack from a folder.
@@ -281,6 +282,25 @@ try {
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# The example driver rows (Patrick, 2026-11-11: "remove all the demo driver"): a new content root has none, and
+# an old one loses them unless a pack was put in their folder.
+$root = Join-Path ([IO.Path]::GetTempPath()) ("sample-drivers-" + [guid]::NewGuid())
+try {
+    Initialize-ContentRoot -Path $root
+    Assert-Equal ((Get-DriverCatalog -ContentRoot $root).entries.model -join ',') 'Virtual Machine' 'new content root: no example driver rows'
+    Assert-Equal (Remove-SampleDriverEntries -ContentRoot $root) 0 'new content root: nothing to remove'
+    Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force
+    $cat = Get-DriverCatalog -ContentRoot $root
+    $cat.entries = @($cat.entries) + @([pscustomobject]@{ maker = 'Dell'; model = 'Latitude 5521'; path = 'Dell\Latitude 5521' })
+    $cat | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $root 'config/driver-catalog.json')
+    New-Item -ItemType Directory -Path (Join-Path $root 'Drivers/HP/EliteBook 840 G9') -Force | Out-Null
+    Set-Content (Join-Path $root 'Drivers/HP/EliteBook 840 G9/a.inf') '[Version]'
+    Assert-Equal (Remove-SampleDriverEntries -ContentRoot $root) 5 'old content root: the empty example rows are removed'
+    $left = @((Get-DriverCatalog -ContentRoot $root).entries | ForEach-Object { "$($_.maker) $($_.model)$($_.sku)" })
+    Assert-Equal ($left -join ',') 'HP 8A86,HP HP EliteBook 840 14 inch G9 Notebook PC,Microsoft Corporation Virtual Machine,Dell Latitude 5521' 'old content root: rows with drivers and own rows stay'
+    Assert-Equal ((Get-DriverCatalog -ContentRoot $root).fallbacks.Dell) 'Dell\_Generic WinPE-Storage-Net' 'old content root: fallbacks stay'
+} finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green

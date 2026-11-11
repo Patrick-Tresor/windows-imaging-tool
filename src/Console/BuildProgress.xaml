@@ -24,7 +24,7 @@
       <Button x:Name="BtnLog" DockPanel.Dock="Right" Content="Open log" IsEnabled="False"/>
       <Button x:Name="BtnWindow" DockPanel.Dock="Right" Content="Show build window"
               ToolTip="The build's own window, with every line DISM and the copy print"/>
-      <TextBlock Foreground="#5B6170" VerticalAlignment="Center" TextWrapping="Wrap"
+      <TextBlock x:Name="TxtNote" Foreground="#5B6170" VerticalAlignment="Center" TextWrapping="Wrap"
                  Text="Closing this window does not stop the build."/>
     </DockPanel>
 

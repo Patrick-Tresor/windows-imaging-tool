@@ -23,6 +23,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ("driverreport-test-" + [guid]::New
 & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
+    Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows
     $catalog = Join-Path $root 'config/driver-catalog.json'
     $drivers = Join-Path $root 'Drivers'
     New-Item -ItemType Directory -Path (Join-Path $drivers 'Dell/Latitude 5440') -Force | Out-Null

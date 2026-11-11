@@ -15,20 +15,33 @@ class DriverPackRow {
 }
 
 function Start-DriverPackDownload {
-    # Hands the packs to Get-DriverPacks.ps1 in its own window through a job file. Also used by the Unknown Models window.
+    # Hands the packs to Get-DriverPacks.ps1 through a job file. It runs hidden, in its own process so the console
+    # stays usable, and the console's progress window shows each pack: download percent, time left, then checking,
+    # extracting and adding it to the library (Patrick, 2026-11-11: no PowerShell window with the BITS bar).
+    # When it ends the driver library refreshes by itself. Also used by the Download from vendor and Unknown Models windows.
     param(
         [Parameter(Mandatory)][object[]]$Packs,
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$SrcDir,
+        [Parameter(Mandatory)]$Owner,
         [switch]$KeepDownload
     )
-    $job = Join-Path ([IO.Path]::GetTempPath()) ('driverpacks-{0:yyyyMMdd-HHmmss}.json' -f (Get-Date))
-    ConvertTo-Json -InputObject $Packs -Depth 4 | Set-Content -Path $job -Encoding utf8
-    $runArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $job = Join-Path ([IO.Path]::GetTempPath()) "driverpacks-$stamp-$tag.json"
+    ConvertTo-Json -InputObject @($Packs) -Depth 4 | Set-Content -Path $job -Encoding utf8
+    $progressFile = Join-Path ([IO.Path]::GetTempPath()) "driverpacks-$stamp-$tag-progress.json"
+    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }), 'ImagingConsole', 'Logs')
+    $logPath = [IO.Path]::Combine($logDir, "driverpacks-$stamp.log")
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
         '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Get-DriverPacks.ps1')),
-        '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job))
+        '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job),
+        '-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
     if ($KeepDownload) { $runArgs += '-KeepDownload' }
-    Start-Process powershell.exe -ArgumentList $runArgs
+    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle Hidden -PassThru
+    $title = if (@($Packs).Count -eq 1) { "Downloading the $(Format-DriverPackName @($Packs)[0]) driver pack" } else { "Downloading $(@($Packs).Count) driver packs" }
+    Show-BuildProgress -Owner $Owner -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title $title -Noun 'download' -Hidden `
+        -OnFinished { try { Update-Drivers } catch { } }
 }
 
 function Show-DriverDownloader {
@@ -107,7 +120,7 @@ function Show-DriverDownloader {
         try {
             $packs = @($state.Rows | Where-Object Selected | ForEach-Object Pack)
             if (-not $packs) { Show-DownloaderError 'Tick at least one model.'; return }
-            Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -KeepDownload:$d.ChkKeep.IsChecked
+            Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -Owner $Owner -KeepDownload:$d.ChkKeep.IsChecked
             $state.Started = $true
             $dlg.Close()
         } catch { Show-DownloaderError $_.Exception.Message }

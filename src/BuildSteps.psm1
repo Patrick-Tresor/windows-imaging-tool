@@ -80,13 +80,15 @@ function Set-BuildStepProgress {
 }
 
 function Complete-BuildStep {
-    # Done; -State reused (taken from the WinPE build cache) or skipped (nothing to do this time).
-    param([Parameter(Mandatory)][string]$Id, [string]$Detail, [ValidateSet('done', 'reused', 'skipped')][string]$State = 'done')
+    # Done; -State reused (taken from the WinPE build cache), skipped (nothing to do this time) or failed (this step
+    # only, the others go on: one driver pack of several).
+    param([Parameter(Mandatory)][string]$Id, [string]$Detail, [ValidateSet('done', 'reused', 'skipped', 'failed')][string]$State = 'done')
     $s = Get-BuildStep $Id
     if (-not $s) { return }
     $now = Get-BuildTime
     if (-not $s.started) { $s.started = $now }
-    $s.state = $State; $s.percent = 100; $s.ended = $now
+    $s.state = $State; $s.ended = $now
+    if ($State -ne 'failed') { $s.percent = 100 }
     if ($PSBoundParameters.ContainsKey('Detail')) { $s.detail = $Detail }
     Save-BuildProgress -Force
 }

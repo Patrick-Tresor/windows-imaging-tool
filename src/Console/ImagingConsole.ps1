@@ -204,6 +204,8 @@ function Update-MediaAnswers {
 function Update-Drivers {
     $script:drivers.Clear()
     if (Test-ContentRoot $script:root) {
+        # The example rows new content roots used to get (Latitude 5440, EliteBook 840 G9...): gone unless they hold drivers.
+        try { $gone = Remove-SampleDriverEntries -ContentRoot $script:root; if ($gone) { Set-Status "Removed $gone example rows from the driver library" } } catch { }
         foreach ($r in Get-DriverCatalogRows -ContentRoot $script:root) {
             $row = [DriverRow]::new()
             foreach ($p in 'Maker', 'Model', 'Sku', 'MachineType', 'ModelPattern', 'Path', 'Status') { $row.$p = $r.$p }
@@ -740,7 +742,7 @@ $ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item
 $ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-DriverDownloader -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Set-Status 'Driver pack download started in a separate window. Click Refresh when it finishes.'
+        Set-Status 'Driver pack download started. The library refreshes when it is done.'
     }
 } })
 
@@ -774,15 +776,15 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     if ($i -lt 0 -or $i -ge $script:driverFound.Count) { return }
     $p = $script:driverFound[$i]
     if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
-    Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir
-    Set-Status "Downloading the $($p.Maker) $($p.Model) driver pack ($($p.SizeMB) MB) in a separate window. Click Refresh when it finishes."
+    Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window
+    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The library refreshes when it is done."
 } })
 
 $ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-UnknownModels -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
         Update-Drivers
-        Set-Status 'Driver library updated. If a download started in a separate window, click Refresh when it finishes.'
+        Set-Status 'Driver library updated. A download that started refreshes it again when it is done.'
     }
 } })
 

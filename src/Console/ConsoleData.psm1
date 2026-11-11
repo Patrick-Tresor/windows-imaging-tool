@@ -103,6 +103,46 @@ function Get-DriverCatalog {
     Get-Content -Raw (Join-ContentPath $ContentRoot 'config\driver-catalog.json') | ConvertFrom-Json
 }
 
+# The example rows the repo's driver-catalog.json used to seed every new content root with (Patrick, 2026-11-11:
+# "remove all the demo driver"). Remove-SampleDriverEntries takes them out of existing content roots.
+$script:SampleDriverEntries = @(
+    'Dell|sku|0B0B|Dell\Latitude 5440', 'Dell|model|Latitude 5440|Dell\Latitude 5440',
+    'Dell|modelPattern|OptiPlex 70*0*|Dell\OptiPlex 7000 Series',
+    'HP|sku|8A86|HP\EliteBook 840 G9', 'HP|model|HP EliteBook 840 14 inch G9 Notebook PC|HP\EliteBook 840 G9',
+    'Lenovo|machineType|21HD|Lenovo\ThinkPad T14 Gen 4', 'Lenovo|model|ThinkPad T14 Gen 4|Lenovo\ThinkPad T14 Gen 4'
+)
+
+function Remove-SampleDriverEntries {
+    <#
+    .SYNOPSIS
+        Removes the example rows the content root was created with, only while their folder has no drivers (a pack
+        downloaded or imported into that folder keeps its rows). Returns how many were removed.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $path = Join-ContentPath $ContentRoot 'config\driver-catalog.json'
+    if (-not (Test-Path -LiteralPath $path)) { return 0 }
+    $catalog = Get-DriverCatalog -ContentRoot $ContentRoot
+    $keep = [Collections.Generic.List[object]]::new()
+    $removed = 0
+    foreach ($e in @($catalog.entries)) {
+        $sample = $false
+        foreach ($k in 'sku', 'machineType', 'model', 'modelPattern') {
+            $props = @($e.PSObject.Properties | Where-Object { $_.Value -and $_.Name -in 'sku', 'machineType', 'model', 'modelPattern' })
+            if ($props.Count -eq 1 -and $e.$k -and ("$($e.maker)|$k|$($e.$k)|$($e.path)" -in $script:SampleDriverEntries)) { $sample = $true }
+        }
+        if ($sample) {
+            $full = Join-ContentPath $ContentRoot "Drivers\$($e.path)"
+            if (@(Get-ChildItem -Path $full -Filter *.inf -Recurse -File -ErrorAction SilentlyContinue).Count) { $sample = $false }
+        }
+        if ($sample) { $removed++ } else { $keep.Add($e) }
+    }
+    if ($removed) {
+        $catalog.entries = @($keep)
+        $catalog | ConvertTo-Json -Depth 5 | Set-Content -Path $path -Encoding utf8
+    }
+    $removed
+}
+
 function Get-DriverCatalogRows {
     # Flattens catalog entries into uniform rows for a grid, with a status column showing whether the folder is populated.
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -1006,7 +1046,7 @@ function Get-DeploymentLogs {
 
 #endregion
 
-Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot,
+Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
     Get-DeploymentLogs,
