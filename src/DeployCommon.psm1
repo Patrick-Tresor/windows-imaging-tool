@@ -510,6 +510,13 @@ exit
 "@
 }
 
+function Test-CatalogIdMatch {
+    # Whether a catalog entry's sku or machineType (one value, or several split by commas or semicolons) holds $Value.
+    param($List, $Value)
+    if (-not "$List".Trim() -or -not "$Value".Trim()) { return $false }
+    @("$List" -split '\s*[,;]\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -contains "$Value".Trim()
+}
+
 function Find-DriverCatalogMatch {
     # The most specific catalog entry for a PC, without logging, so the console can re-check reported PCs.
     # Status: Matched, InboxOnly (an entry with no path), Fallback (maker fallback), None.
@@ -522,8 +529,9 @@ function Find-DriverCatalogMatch {
     $mine = @($catalog.entries | Where-Object { $_.maker -eq $Identity.Maker })
 
     $by = 'sku'
-    $match = $mine | Where-Object { $_.sku -and $_.sku -eq $Identity.Sku } | Select-Object -First 1
-    if (-not $match) { $by = 'machineType';  $match = $mine | Where-Object { $_.machineType -and $_.machineType -eq $Identity.MachineType } | Select-Object -First 1 }
+    # sku and machineType may list several values ("0B0B, 0C1D"): a downloaded pack is one entry for all its IDs.
+    $match = $mine | Where-Object { Test-CatalogIdMatch $_.sku $Identity.Sku } | Select-Object -First 1
+    if (-not $match) { $by = 'machineType';  $match = $mine | Where-Object { Test-CatalogIdMatch $_.machineType $Identity.MachineType } | Select-Object -First 1 }
     if (-not $match) { $by = 'model';        $match = $mine | Where-Object { $_.model -and $_.model -eq $Identity.Model } | Select-Object -First 1 }
     if (-not $match) { $by = 'modelPattern'; $match = $mine | Where-Object { $_.modelPattern -and $Identity.Model -like $_.modelPattern } | Select-Object -First 1 }
 

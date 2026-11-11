@@ -154,6 +154,78 @@
               </Grid>
             </GroupBox>
 
+            <!-- Driver pack downloads run in the background; their progress stays here, under the library, until removed. -->
+            <GroupBox x:Name="GrpDriverDownloads" DockPanel.Dock="Bottom" Header="Downloads" Margin="0,12,0,0" Padding="10,6" Visibility="Collapsed">
+              <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="LstDriverDownloads">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Margin="0,4,0,8">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Tag="remove" Content="Remove" Margin="6,0,0,0" Padding="10,2" MinWidth="70"
+                                  IsEnabled="{Binding Finished}" ToolTip="Takes this finished download off the list"/>
+                          <Button DockPanel.Dock="Right" Tag="log" Content="Open log" Margin="6,0,0,0" Padding="10,2" MinWidth="70"/>
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" Foreground="#5B6170" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                        <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="#5B6170" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
+                        <ItemsControl ItemsSource="{Binding Steps}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid Margin="0,3">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="*"/>
+                                  <ColumnDefinition Width="190"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                  <RowDefinition Height="Auto"/>
+                                  <RowDefinition Height="Auto"/>
+                                  <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <DockPanel Grid.Row="0" Grid.Column="0">
+                                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="#3B3F48" Margin="8,0,0,0"/>
+                                  <TextBlock x:Name="DlStepName" Text="{Binding Name}" Foreground="#1F2329" TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                                <ProgressBar x:Name="DlBar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
+                                             Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
+                                             Foreground="#0F6CBD" Background="#E8EAEE" BorderThickness="0"/>
+                                <TextBlock x:Name="DlStatus" Grid.Row="1" Grid.Column="1" Text="{Binding Status}" Margin="12,0,0,0"
+                                           VerticalAlignment="Center" Foreground="#5B6170"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="#5B6170" FontSize="12" Margin="0,2,0,0"
+                                           TextTrimming="CharacterEllipsis"/>
+                              </Grid>
+                              <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding State}" Value="pending">
+                                  <Setter TargetName="DlStepName" Property="Foreground" Value="#8A8F99"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding State}" Value="done">
+                                  <Setter TargetName="DlBar" Property="Foreground" Value="#2E9E5B"/>
+                                  <Setter TargetName="DlStatus" Property="Foreground" Value="#2E9E5B"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding State}" Value="failed">
+                                  <Setter TargetName="DlBar" Property="Foreground" Value="#C4314B"/>
+                                  <Setter TargetName="DlStatus" Property="Foreground" Value="#C4314B"/>
+                                  <Setter TargetName="DlStatus" Property="FontWeight" Value="SemiBold"/>
+                                </DataTrigger>
+                              </DataTemplate.Triggers>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding Outcome}" Value="ok">
+                          <Setter TargetName="DlSummary" Property="Foreground" Value="#2E9E5B"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding Outcome}" Value="failed">
+                          <Setter TargetName="DlSummary" Property="Foreground" Value="#C4314B"/>
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </GroupBox>
+
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>

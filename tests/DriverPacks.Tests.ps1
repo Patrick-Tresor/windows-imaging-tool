@@ -14,6 +14,28 @@ function Assert-Equal($Actual, $Expected, $Name) {
     else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
 }
 
+# Dell names newer models with the brand already in the model's Display ("Latitude 5531" under brand Latitude):
+# the console showed "Dell Latitude Latitude 5531" and the folder and model matched no PC.
+$brandXml = Join-Path ([IO.Path]::GetTempPath()) ("dell-brand-" + [guid]::NewGuid() + '.xml')
+try {
+    Set-Content -Path $brandXml -Encoding utf8 -Value @'
+<?xml version="1.0" encoding="utf-8"?>
+<DriverPackManifest xmlns="openmanage/cm/dm" baseLocation="downloads.dell.com">
+  <DriverPackage dateTime="2025-06-10T10:00:00-05:00" path="F/1/Latitude-5531-Win11-A10.cab" releaseID="R5531" size="2907000000" type="win" vendorVersion="A10">
+    <SupportedOperatingSystems><OperatingSystem osCode="Windows11" osArch="x64"/></SupportedOperatingSystems>
+    <SupportedSystems>
+      <Brand prefix="LAT"><Display lang="en">Latitude</Display>
+        <Model systemID="0B13" name="5531"><Display lang="en">Latitude 5531</Display></Model>
+        <Model systemID="0B14" name="5431"><Display lang="en">5431</Display></Model>
+      </Brand>
+    </SupportedSystems>
+  </DriverPackage>
+</DriverPackManifest>
+'@
+    $named = @(ConvertFrom-DellDriverPackCatalog -Path $brandXml)
+    Assert-Equal (($named | ForEach-Object Model | Sort-Object) -join ',') 'Latitude 5431,Latitude 5531' 'dell: the brand is not repeated when the model already names it'
+} finally { Remove-Item $brandXml -Force -ErrorAction SilentlyContinue }
+
 # Dell: one row per model and OS, WinPE packs skipped, SHA256 preferred over MD5.
 $dell = @(ConvertFrom-DellDriverPackCatalog -Path (Join-Path $fixtures 'DriverPackCatalog.xml'))
 Assert-Equal $dell.Count 3 'dell: WinPE packs are skipped'
@@ -98,13 +120,16 @@ try {
     $relative = Get-DriverPackFolder $d
     Assert-Equal $relative 'Dell\Latitude 5440' 'pack folder is Maker\Model'
     $count = Register-DriverPack -ContentRoot $root -Pack $d -Path $relative
-    Assert-Equal $count 3 'one entry per SKU plus the model name'
+    # One row per pack (Patrick, 2026-11-11: a SKU row and a model row looked like the same driver twice).
+    Assert-Equal $count 1 'one entry for the pack'
     $entries = @((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell')
-    Assert-Equal (@($entries | Where-Object sku -eq '0B0B').Count) 1 'the existing SKU entry is replaced, not duplicated'
-    Assert-Equal (@($entries | Where-Object { $_.model -eq 'Latitude 5440' }).Count) 1 'the existing model entry is replaced'
+    $mine = @($entries | Where-Object path -eq 'Dell\Latitude 5440')
+    Assert-Equal $mine.Count 1 'the old SKU and model rows are replaced by one'
+    Assert-Equal "$($mine[0].sku)|$($mine[0].model)" '0B0B, 0C1D|Latitude 5440' 'the entry holds every SKU and the model'
     Assert-Equal (@($entries | Where-Object modelPattern).Count) 1 'unrelated entries are kept'
     Register-DriverPack -ContentRoot $root -Pack $d -Path $relative | Out-Null
-    Assert-Equal (@((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell').Count) 4 'registering twice adds nothing'
+    Assert-Equal (@((Get-DriverCatalog -ContentRoot $root).entries | Where-Object maker -eq 'Dell').Count) 2 'registering twice adds nothing'
+    Assert-Equal @(Get-DriverCatalogRows -ContentRoot $root | Where-Object Path -eq 'Dell\Latitude 5440').Count 1 'the library shows the pack once'
 
     # The deploy picks the downloaded pack for a PC with the new SKU.
     New-Item -ItemType Directory -Path (Join-Path $root 'Drivers/Dell/Latitude 5440') -Force | Out-Null
@@ -112,6 +137,11 @@ try {
     $hw = [pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440'; MachineType = $null; Sku = '0C1D' }
     $pack = Resolve-DriverPack -Identity $hw -CatalogPath (Join-Path $root 'config/driver-catalog.json') -DriverRoot (Join-Path $root 'Drivers') 6>$null
     Assert-Equal ([IO.Path]::GetFileName($pack)) 'Latitude 5440' 'deploy matches the downloaded pack by SKU'
+    $hwModel = [pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440'; MachineType = $null; Sku = '0FFF' }
+    $byModel = Find-DriverCatalogMatch -Identity $hwModel -CatalogPath (Join-Path $root 'config/driver-catalog.json')
+    Assert-Equal "$($byModel.MatchedBy)|$($byModel.Path)" 'model|Dell\Latitude 5440' 'an unknown SKU still matches the pack by model'
+    Assert-Equal (& $common { Test-CatalogIdMatch '0B0B, 0C1D' '0c1d' }) $true 'a SKU list matches any of its SKUs'
+    Assert-Equal (& $common { Test-CatalogIdMatch '0B0B' '0B0' }) $false 'a SKU list matches whole SKUs only'
 
     # Library status from pack.json.
     Assert-Equal ((@($d) | Add-DriverPackLibraryStatus -ContentRoot $root).Installed) '' 'not downloaded yet'
@@ -133,7 +163,7 @@ try {
         Skus = @(); MachineTypes = @('21KC'); Id = '21KC'; FileName = 'pack.zip'
     }
     $r = Install-VendorDriverPack -ContentRoot $root -Pack $zipPack -DownloadDir (Split-Path $zip) -KeepDownload 6>$null
-    Assert-Equal "$($r.Path)|$($r.InfCount)|$($r.Entries)" 'Lenovo\ThinkPad X1 Carbon Gen 12|1|2' 'install extracts and registers a pack'
+    Assert-Equal "$($r.Path)|$($r.InfCount)|$($r.Entries)" 'Lenovo\ThinkPad X1 Carbon Gen 12|1|1' 'install extracts and registers a pack as one entry'
     Assert-Equal ((Get-InstalledDriverPack -ContentRoot $root -Pack $zipPack).version) '24H2' 'install writes pack.json'
     Assert-Equal (Test-Path (Join-Path $root 'Drivers/Lenovo/ThinkPad X1 Carbon Gen 12.new')) $false 'staging folder is gone'
 
@@ -240,7 +270,7 @@ $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
 Assert-Equal ($start -match "-WindowStyle Hidden -PassThru") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
-Assert-Equal ($start -match 'Show-BuildProgress .*-Noun .download. -Hidden') $true 'download: progress shown in the console'
+Assert-Equal ($start -match 'Add-DriverDownloadJob -Panel \$script:ui.GrpDriverDownloads -List \$script:ui.LstDriverDownloads') $true 'download: progress shown on the Driver Library page'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
 Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
 

@@ -776,7 +776,7 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     $p = $script:driverFound[$i]
     if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
     Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window
-    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The library refreshes when it is done."
+    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). Its progress is under the library, which refreshes when it is done."
 } })
 
 $ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
