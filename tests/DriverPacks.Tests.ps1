@@ -222,7 +222,8 @@ if ($makecab -and (Test-Path $makecab)) {
         New-TestCab $junk $dl
         $msg = $null
         try { Resolve-CatalogDownload -Download $dl -Xml $out -Maker Dell } catch { $msg = $_.Exception.Message }
-        Assert-Equal "$msg" "The Dell catalog (Cab) gave no catalog XML; it held readme.bin (Unknown, 4 bytes). The download was kept as $dl." 'catalog cab: no XML lists what it held'
+        # makecab stores a single file under the cab's own name, so only the kind and size are checked.
+        Assert-Equal ("$msg" -replace 'it held \S+ \(', 'it held <file> (') "The Dell catalog (Cab) gave no catalog XML; it held <file> (Unknown, 4 bytes). The download was kept as $dl." 'catalog cab: no XML lists what it held'
         Assert-Equal (Test-Path $dl) $true 'catalog cab: no XML keeps the download'
     } finally { Remove-Item $cabDir -Recurse -Force -ErrorAction SilentlyContinue }
 } else { Write-Host 'SKIP catalog cab tests: no makecab.exe' }
