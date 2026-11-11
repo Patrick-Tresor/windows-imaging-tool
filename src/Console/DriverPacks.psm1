@@ -569,7 +569,76 @@ function Install-VendorDriverPack {
 
 #endregion
 
+#region Find a model online
+
+function Find-VendorDriverPack {
+    <#
+    .SYNOPSIS
+        The catalog packs that match what the admin typed: a model name in any form ("Latitude 5521", "dell 5521",
+        "EliteBook 840 G9", "t14 gen 4"), or a SKU / machine type ("0A6B", "21HD"). Every word must be found in the
+        maker, model, SKUs or machine types: a word of digits must match a whole word (5440 is not 15440), other
+        words the start of one. An exact SKU or machine type comes first, then the shortest model names.
+    #>
+    param([Parameter(Mandatory)][string]$Query, [object[]]$Packs)
+    $words = @($Query.Trim() -split '[\s,;]+' | Where-Object { $_ })
+    if (-not $words) { return }
+    $q = $Query.Trim().ToUpperInvariant()
+    @($Packs | Where-Object {
+        $text = "$($_.Maker) $($_.Model) $(@($_.Skus) -join ' ') $(@($_.MachineTypes) -join ' ')"
+        $all = $true
+        foreach ($w in $words) {
+            $e = [regex]::Escape($w)
+            $pattern = if ($w -match '^\d+$') { "(?<![0-9A-Za-z])$e(?![0-9A-Za-z])" } else { "(?<![0-9A-Za-z])$e" }
+            if ($text -notmatch "(?i)$pattern") { $all = $false; break }
+        }
+        $all
+    } | Sort-Object @{ e = { if (@($_.Skus) -contains $q -or @($_.MachineTypes) -contains $q) { 0 } else { 1 } } },
+        @{ e = { $_.Model.Length } }, Maker, Model)
+}
+
+function Find-VendorDriverPackOnline {
+    <#
+    .SYNOPSIS
+        Searches the Dell, HP and Lenovo catalogs (downloaded once a day into the cache) for a model, for the
+        console's Find a model online box. A maker in the query (dell, hp, lenovo) reads only that catalog.
+        Returns Packs (with the library's Installed status) and Errors (one line per catalog that could not be read).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Query,
+        [ValidateSet('Windows 10', 'Windows 11')][string]$Os = 'Windows 11',
+        [string]$ContentRoot,
+        [hashtable]$CatalogPaths = @{},
+        [switch]$Refresh
+    )
+    $makers = @('Dell', 'HP', 'Lenovo' | Where-Object { $Query -match "(?i)(?<![0-9A-Za-z])$_(?![0-9A-Za-z])" })
+    if (-not $makers) { $makers = @('Dell', 'HP', 'Lenovo') }
+    $all = [Collections.Generic.List[object]]::new()
+    $errors = @()
+    foreach ($m in $makers) {
+        try {
+            foreach ($p in @(Get-VendorDriverPacks -Maker $m -Os $Os -CatalogPath $CatalogPaths[$m] -Refresh:$Refresh)) { $all.Add($p) }
+        } catch { $errors += "Could not read the $m catalog: $($_.Exception.Message)" }
+    }
+    $found = @(Find-VendorDriverPack -Query $Query -Packs $all)
+    if ($ContentRoot) { $found = @($found | Add-DriverPackLibraryStatus -ContentRoot $ContentRoot) }
+    [pscustomobject]@{ Packs = $found; Errors = $errors }
+}
+
+function Format-VendorDriverPack {
+    # One line for the results list: "Dell Latitude 5521 - Windows 11 A08, 2025-10-01, 1650 MB - in library".
+    param([Parameter(Mandatory)]$Pack)
+    $name = if ($Pack.Model -like "$($Pack.Maker)*") { $Pack.Model } else { "$($Pack.Maker) $($Pack.Model)" }
+    $ver = (@($Pack.Os, $Pack.Release) + $(if ($Pack.Version -ne $Pack.Release) { $Pack.Version }) | Where-Object { $_ }) -join ' '
+    $line = "$name - $ver" + $(if ($Pack.Released) { ", $($Pack.Released)" }) + $(if ($Pack.SizeMB) { ", $($Pack.SizeMB) MB" })
+    if ($Pack.Installed -like 'Yes*') { $line += ' - already in the library' }
+    elseif ($Pack.Installed -like 'Update*') { $line += ' - newer than the library''s' }
+    $line
+}
+
+#endregion
+
 Export-ModuleMember -Function Invoke-VendorExtract, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
-    Expand-VendorDriverPack, Install-VendorDriverPack
+    Expand-VendorDriverPack, Install-VendorDriverPack,
+    Find-VendorDriverPack, Find-VendorDriverPackOnline, Format-VendorDriverPack

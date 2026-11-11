@@ -164,5 +164,31 @@ try {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Find a model online: what the admin types against all three catalogs.
+$cats = @{ Dell = (Join-Path $fixtures 'DriverPackCatalog.xml'); HP = (Join-Path $fixtures 'HPClientDriverPackCatalog.xml'); Lenovo = (Join-Path $fixtures 'catalogv2.xml') }
+$every = @(foreach ($m in 'Dell', 'HP', 'Lenovo') { Get-VendorDriverPacks -Maker $m -Os 'Windows 11' -CatalogPath $cats[$m] })
+function Get-Found([string]$q) { (@(Find-VendorDriverPack -Query $q -Packs $every) | ForEach-Object { "$($_.Maker) $($_.Model)" }) -join ',' }
+Assert-Equal (Get-Found 'Latitude 5440') 'Dell Latitude 5440' 'find: model name'
+Assert-Equal (Get-Found 'dell 5540') 'Dell Latitude 5540' 'find: maker and number, any case'
+Assert-Equal (Get-Found '544') '' 'find: a number must match a whole word'
+Assert-Equal (Get-Found 'lat') 'Dell Latitude 5440,Dell Latitude 5540' 'find: a word matches the start of a word'
+Assert-Equal (Get-Found 'elitebook 840 g9') 'HP HP EliteBook 840 14 inch G9 Notebook PC' 'find: HP model in any order of words found'
+Assert-Equal (Get-Found 't14 gen 4') 'Lenovo ThinkPad T14 Gen 4' 'find: Lenovo model'
+Assert-Equal (Get-Found '21he') 'Lenovo ThinkPad T14 Gen 4' 'find: Lenovo machine type'
+Assert-Equal (Get-Found '0C1D') 'Dell Latitude 5440' 'find: Dell SKU'
+Assert-Equal (Get-Found 'Latitude 9999') '' 'find: every word must match'
+Assert-Equal (Get-Found '   ') '' 'find: blank finds nothing'
+$r = Find-VendorDriverPackOnline -Query 'lenovo t14' -CatalogPaths $cats
+Assert-Equal "$(@($r.Packs).Count) $($r.Packs[0].Model) $(@($r.Errors).Count)" '1 ThinkPad T14 Gen 4 0' 'find online: maker word reads only that catalog'
+$r = Find-VendorDriverPackOnline -Query 'thinkpad' -CatalogPaths @{ Dell = (Join-Path $fixtures 'missing.xml'); HP = $cats.HP; Lenovo = $cats.Lenovo }
+Assert-Equal "$(@($r.Packs).Count) $(@($r.Errors).Count) $(@($r.Errors)[0] -like 'Could not read the Dell catalog*')" '1 1 True' 'find online: one broken catalog does not stop the others'
+$d5440 = $every | Where-Object Model -eq 'Latitude 5440'
+Assert-Equal (Format-VendorDriverPack $d5440) 'Dell Latitude 5440 - Windows 11 A07, 2026-06-10, 1536 MB' 'format: maker, model, version, date, size'
+$hp9 = $every | Where-Object Maker -eq 'HP'
+Assert-Equal ((Format-VendorDriverPack $hp9) -like 'HP EliteBook 840 14 inch G9 Notebook PC - Windows 11 24H2 1.00 A 4*') $true 'format: HP model is not prefixed twice'
+$lt = ($every | Where-Object Model -eq 'ThinkPad T14 Gen 4').PSObject.Copy()
+$lt | Add-Member -NotePropertyName Installed -NotePropertyValue 'Yes (Windows 11 24H2)' -Force
+Assert-Equal ((Format-VendorDriverPack $lt) -like '*- already in the library') $true 'format: library status'
+
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green
