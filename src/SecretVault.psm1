@@ -197,10 +197,6 @@ function Test-AnswerPasswordText([string]$Value) {
     "$Value" -match '^aes256:[0-9a-f]{8}:[A-Za-z0-9+/=]+$'
 }
 
-function Get-AnswerPasswordKeyId([string]$Value) {
-    if (Test-AnswerPasswordText $Value) { ($Value -split ':')[1] } else { '' }
-}
-
 function Protect-AnswerPassword {
     <#
     .SYNOPSIS
@@ -341,5 +337,5 @@ function Sync-AnswerFilePasswords {
 }
 
 Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Get-AnswerSecrets,
-    New-AnswerKey, Get-AnswerKeyId, Test-AnswerPasswordText, Get-AnswerPasswordKeyId, Protect-AnswerPassword,
+    New-AnswerKey, Get-AnswerKeyId, Test-AnswerPasswordText, Protect-AnswerPassword,
     Unprotect-AnswerPassword, Get-AnswerKey, Find-AnswerKey, Get-AnswerPasswordFields, Sync-AnswerFilePasswords
