@@ -50,7 +50,7 @@
       ] },
       "timeoutMinutes": 15,
       "verify": false,
-      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application. From the internet... adds it with Microsoft's link to the newest .NET 8, downloaded at first boot."
+      "notes": "From dotnet.microsoft.com (.NET 8, Desktop Runtime, Windows x64). Dell Command | Update 5 needs it, so list it before that application. The Applications tab's download tick box gives it Microsoft's link to the newest .NET 8, downloaded at first boot."
     },
     {
       "name": "Microsoft-365-Apps",
@@ -70,7 +70,7 @@
       ] },
       "timeoutMinutes": 90,
       "verify": true,
-      "notes": "From the internet... adds the Office Deployment Tool's setup.exe (downloaded at first boot) and config\\office-configuration.xml as configuration.xml; Office itself then downloads from Microsoft. Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
+      "notes": "The Applications tab's download tick box adds the Office Deployment Tool's setup.exe (downloaded at first boot) and config\\office-configuration.xml as configuration.xml; Office itself then downloads from Microsoft. Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
     },
     {
       "name": "Teams",
@@ -85,7 +85,7 @@
       "detection": { "match": "all", "rules": [ { "type": "appx", "target": "MSTeams" } ] },
       "timeoutMinutes": 20,
       "verify": false,
-      "notes": "Choose the folder with teamsbootstrapper.exe and MSTeams-x64.msix (both from Microsoft's Teams admin download page), so it installs offline for every user. From the internet... downloads the bootstrapper at first boot, and it downloads Teams for every user (-p)."
+      "notes": "Choose the folder with teamsbootstrapper.exe and MSTeams-x64.msix (both from Microsoft's Teams admin download page), so it installs offline for every user. With the download tick box, the PC downloads the bootstrapper at first boot, and it downloads Teams for every user (-p)."
     },
     {
       "name": "Zoom",
