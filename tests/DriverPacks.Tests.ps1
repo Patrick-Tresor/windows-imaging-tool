@@ -40,11 +40,12 @@ try {
         Xml  = [Text.Encoding]::UTF8.GetBytes("$([char]0xFEFF)<?xml version=`"1.0`"?><DriverPackManifest/>")
         Html = [Text.Encoding]::ASCII.GetBytes("`r`n<!DOCTYPE html><html><body>Access denied</body></html>")
         Unknown = [byte[]](1, 2, 3)
+        Utf16 = [Text.Encoding]::Unicode.GetPreamble() + [Text.Encoding]::Unicode.GetBytes('<?xml version="1.0" encoding="utf-16"?><DriverPackManifest/>')
     }
     foreach ($k in $samples.Keys) {
         $f = Join-Path $kindDir "$k.bin"
         [IO.File]::WriteAllBytes($f, $samples[$k])
-        Assert-Equal (Get-DownloadKind -Path $f) $k "download kind: $k"
+        Assert-Equal (Get-DownloadKind -Path $f) $(if ($k -eq 'Utf16') { 'Xml' } else { $k }) "download kind: $k"
     }
 } finally { Remove-Item $kindDir -Recurse -Force -ErrorAction SilentlyContinue }
 
@@ -189,6 +190,41 @@ Assert-Equal ((Format-VendorDriverPack $hp9) -like 'HP EliteBook 840 14 inch G9 
 $lt = ($every | Where-Object Model -eq 'ThinkPad T14 Gen 4').PSObject.Copy()
 $lt | Add-Member -NotePropertyName Installed -NotePropertyValue 'Yes (Windows 11 24H2)' -Force
 Assert-Equal ((Format-VendorDriverPack $lt) -like '*- already in the library') $true 'format: library status'
+
+# A catalog cab whose XML has another name or extension, is UTF-16, or sits in a cab inside the cab (the Dell
+# catalog on Patrick's console PC, 2026-11-10, came out with no DriverPackCatalog.xml). makecab.exe is Windows only.
+$makecab = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\makecab.exe' }
+if ($makecab -and (Test-Path $makecab)) {
+    $cabDir = Join-Path ([IO.Path]::GetTempPath()) ("cab-" + [guid]::NewGuid())
+    $srcDir = Join-Path $cabDir 'src'
+    $dlDir = Join-Path $cabDir 'dl'   # only the download in it, as in the vendor cache folder
+    New-Item -ItemType Directory -Path $srcDir, $dlDir | Out-Null
+    try {
+        function New-TestCab([string]$Source, [string]$Cab) { & $makecab $Source $Cab | Out-Null; if ($LASTEXITCODE) { throw "makecab exited $LASTEXITCODE" } }
+        $src = Join-Path $srcDir 'catalog.bin'
+        [IO.File]::WriteAllBytes($src, [Text.Encoding]::Unicode.GetPreamble() + [Text.Encoding]::Unicode.GetBytes('<?xml version="1.0" encoding="utf-16"?><DriverPackManifest version="9"/>'))
+        $dl = Join-Path $dlDir 'DriverPackCatalog.cab'
+        New-TestCab $src $dl
+        $out = Join-Path $dlDir 'DriverPackCatalog.xml'
+        Resolve-CatalogDownload -Download $dl -Xml $out -Maker Dell
+        Assert-Equal "$(([xml](Get-Content -Raw $out)).DocumentElement.version) $(Test-Path $dl)" '9 False' 'catalog cab: UTF-16 XML under another name is found, cab removed'
+
+        Remove-Item $out -Force
+        $inner = Join-Path $srcDir 'inner.cab'
+        New-TestCab $src $inner
+        New-TestCab $inner $dl
+        Resolve-CatalogDownload -Download $dl -Xml $out -Maker Dell
+        Assert-Equal (Test-Path $out) $true 'catalog cab: XML in a cab inside the cab is found'
+
+        Remove-Item $out -Force
+        $junk = Join-Path $srcDir 'readme.bin'
+        [IO.File]::WriteAllBytes($junk, [byte[]](1, 2, 3, 4))
+        New-TestCab $junk $dl
+        $msg = $null
+        try { Resolve-CatalogDownload -Download $dl -Xml $out -Maker Dell } catch { $msg = $_.Exception.Message }
+        Assert-Equal "$($msg -like '*gave no catalog XML; it held readme.bin (Unknown, 4 bytes)*') $(Test-Path $dl)" 'True True' 'catalog cab: no XML lists what it held and keeps the download'
+    } finally { Remove-Item $cabDir -Recurse -Force -ErrorAction SilentlyContinue }
+} else { Write-Host 'SKIP catalog cab tests: no makecab.exe' }
 
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green
