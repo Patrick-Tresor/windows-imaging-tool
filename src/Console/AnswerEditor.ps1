@@ -53,7 +53,7 @@ function Show-AnswerEditor {
     $e.CmbImage.ItemsSource = @($images | ForEach-Object { "Images\$($_.Name)" })
     $e.CmbTimeZone.ItemsSource = @([TimeZoneInfo]::GetSystemTimeZones() | ForEach-Object Id)
     $cultures = @([Globalization.CultureInfo]::GetCultures('SpecificCultures') | Sort-Object Name | ForEach-Object Name)
-    foreach ($c in 'CmbInputLocale', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage', 'CmbUILanguageFallback') { $e[$c].ItemsSource = $cultures }
+    foreach ($c in 'CmbInputLocale', 'CmbInputLocale2', 'CmbUserLocale', 'CmbSystemLocale', 'CmbUILanguage', 'CmbUILanguageFallback') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
     $refreshTaskLibrary = {
         # The Script column offers the library's tasks, plus an empty choice for a plain command, plus any name
@@ -129,7 +129,9 @@ function Show-AnswerEditor {
     $e.TxtOrg.Text = $a.Organization
     $e.TxtProductKey.Text = $a.ProductKey
     $e.CmbTimeZone.Text = $a.TimeZone
-    $e.CmbInputLocale.Text = $a.InputLocale
+    $keyboards = Split-InputLocale $a.InputLocale
+    $e.CmbInputLocale.Text = $keyboards[0]
+    $e.CmbInputLocale2.Text = $keyboards[1]
     $e.CmbUserLocale.Text = $a.UserLocale
     $e.CmbSystemLocale.Text = $a.SystemLocale
     $e.CmbUILanguage.Text = $a.UILanguage
@@ -286,7 +288,7 @@ function Show-AnswerEditor {
         $a.Organization  = $e.TxtOrg.Text.Trim()
         $a.ProductKey    = $e.TxtProductKey.Text.Trim()
         $a.TimeZone      = $e.CmbTimeZone.Text.Trim()
-        $a.InputLocale   = $e.CmbInputLocale.Text.Trim()
+        $a.InputLocale   = Join-InputLocale $e.CmbInputLocale.Text $e.CmbInputLocale2.Text
         $a.UserLocale    = $e.CmbUserLocale.Text.Trim()
         $a.SystemLocale  = $e.CmbSystemLocale.Text.Trim()
         $a.UILanguage    = $e.CmbUILanguage.Text.Trim()

@@ -198,7 +198,11 @@
             <Label Grid.Row="3" Content="Time zone"/>
             <ComboBox x:Name="CmbTimeZone" Grid.Row="3" Grid.Column="1" IsEditable="True"/>
             <Label Grid.Row="4" Content="Keyboards (input locale)"/>
-            <ComboBox x:Name="CmbInputLocale" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Type fr-CA for one keyboard, or several as language:keyboard IDs separated by ; with the default first. Canadian French then US English: 0c0c:00001009; 0409:00000409"/>
+            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+              <ComboBox x:Name="CmbInputLocale" IsEditable="True" Width="260" ToolTip="Main keyboard, the default at sign-in, for example fr-CA. A language:keyboard ID such as 0c0c:00001009 works too."/>
+              <TextBlock Text="second keyboard" VerticalAlignment="Center" Margin="12,0,8,0" Foreground="#5B6170"/>
+              <ComboBox x:Name="CmbInputLocale2" IsEditable="True" Width="260" ToolTip="Optional second typing language, switched with Windows+Space, for example en-US for the US keyboard. Leave empty for one keyboard."/>
+            </StackPanel>
             <Label Grid.Row="5" Content="Formats (user locale)"/>
             <ComboBox x:Name="CmbUserLocale" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left"/>
             <Label Grid.Row="6" Content="System locale"/>
