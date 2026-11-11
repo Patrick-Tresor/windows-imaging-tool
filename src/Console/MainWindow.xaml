@@ -598,6 +598,69 @@
         </ScrollViewer>
       </TabItem>
 
+      <!-- Computers in Active Directory -->
+      <TabItem x:Name="TabComputers" Header="Computers">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <DockPanel MinHeight="520" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+            <StackPanel DockPanel.Dock="Top">
+              <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab."/>
+            </StackPanel>
+            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+              <Label Content="Domain"/>
+              <TextBox x:Name="TxtAdDomain" Width="170" Margin="0,0,12,0" ToolTip="For example corp.local. Empty = the domain this PC is joined to."/>
+              <Label Content="Domain controller"/>
+              <TextBox x:Name="TxtAdServer" Width="150" Margin="0,0,12,0" ToolTip="Optional. Needed only when this PC is not joined to the domain, e.g. dc01.corp.local."/>
+              <Label Content="Account"/>
+              <TextBox x:Name="TxtAdUser" Width="150" Margin="0,0,12,0" ToolTip="Optional: CORP\admin. Empty = the account you are signed in with. The password is asked once and not saved."/>
+              <Button x:Name="BtnAdConnect" Content="Connect" Style="{StaticResource Primary}"/>
+            </WrapPanel>
+            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+              <Label Content="OU"/>
+              <ComboBox x:Name="CmbAdOu" Width="240" Margin="0,0,12,0" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
+              <Label Content="Name"/>
+              <TextBox x:Name="TxtAdName" Width="110" Margin="0,0,12,0" ToolTip="Part of a name (LAB) or a pattern (LAB-*). Empty = all."/>
+              <CheckBox x:Name="ChkAdServers" Content="Servers" VerticalAlignment="Center" Margin="0,0,12,0"/>
+              <CheckBox x:Name="ChkAdDisabled" Content="Disabled accounts" VerticalAlignment="Center" Margin="0,0,12,0"/>
+              <Button x:Name="BtnAdSearch" Content="Search"/>
+              <Button x:Name="BtnAdOnline" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
+            </WrapPanel>
+            <GroupBox DockPanel.Dock="Bottom" Header="Reimage the selected PCs" Padding="8" Margin="0,12,0,0">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="6"/><RowDefinition/><RowDefinition Height="6"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
+                <Label Content="Answer file"/>
+                <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
+                <WrapPanel Grid.Row="2" Grid.ColumnSpan="2">
+                  <CheckBox x:Name="ChkAdKeepName" IsChecked="True" Margin="0,0,16,0" Content="Keep each PC's name"/>
+                  <CheckBox x:Name="ChkAdKeepOu" IsChecked="True" Content="Join it back into its OU"/>
+                </WrapPanel>
+                <DockPanel Grid.Row="4" Grid.ColumnSpan="2">
+                  <Button x:Name="BtnAdBuildBoot" DockPanel.Dock="Right" Content="Build network boot image" Margin="8,0,0,0"
+                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
+                  <TextBlock x:Name="TxtAdBoot" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="#5B6170"/>
+                </DockPanel>
+                <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal">
+                  <Button x:Name="BtnAdReimage" Content="Reimage..." Style="{StaticResource Primary}"/>
+                  <Button x:Name="BtnAdCancel" Content="Cancel reimage" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
+                </StackPanel>
+              </Grid>
+            </GroupBox>
+            <DataGrid x:Name="GridAd" IsReadOnly="True" SelectionMode="Extended">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120"/>
+                <DataGridTextColumn Header="OU" Binding="{Binding OUPath}" Width="*"/>
+                <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystem}" Width="*"/>
+                <DataGridTextColumn Header="Last logon" Binding="{Binding LastLogonText}" Width="85"/>
+                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="55"/>
+                <DataGridTextColumn Header="Reimage" Binding="{Binding Reimage}" Width="*"/>
+                <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </DockPanel>
+        </ScrollViewer>
+      </TabItem>
+
       <!-- Dashboard -->
       <TabItem x:Name="TabDashboard" Header="Dashboard">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

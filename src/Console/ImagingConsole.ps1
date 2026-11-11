@@ -68,6 +68,8 @@ Import-Module (Join-Path $srcDir 'CaptureCheck.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
+Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
+Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -381,7 +383,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Dashboard; Update-Logs
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Computers; Update-Dashboard; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -393,7 +395,10 @@ $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $path = Select-Folder 'Choose the content root: a USB DEPLOY volume, a local folder, or the network share'
     if (-not $path) { return }
     $script:root = $path
-    Save-ConsoleConfig ([pscustomobject]@{ contentRoot = $path })
+    # Keeps the rest of console.json (the Computers tab's Active Directory settings).
+    $cfg = Get-ConsoleConfig
+    $cfg | Add-Member -NotePropertyName contentRoot -NotePropertyValue $path -Force
+    Save-ConsoleConfig $cfg
     if (-not (Test-ContentRoot $path)) { Set-Status 'This folder is not a content root yet. Click Create folders.' }
     Update-All
 } })
@@ -825,6 +830,215 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
     $ui.TxtModel.Text = ''; $ui.TxtSku.Text = ''; $ui.TxtMachineType.Text = ''; $ui.TxtSource.Text = ''
     Set-Status "Imported $($result.InfCount) drivers to Drivers\$($result.Path)"
     if ($result.InfCount -eq 0) { Show-Error 'No .inf files were found after import. The pack may need extracting first.' }
+} })
+
+#endregion
+
+#region Computers (Active Directory)
+
+$script:adRows = @()
+$script:adOnline = @{}
+$script:adCredential = $null
+$script:adCredentialUser = ''
+$script:adLoaded = $false
+
+function Get-AdSettings {
+    # The Computers tab's domain, domain controller, account and OU, kept in console.json (never a password).
+    $c = Get-ConsoleConfig
+    if ($c.PSObject.Properties['activeDirectory'] -and $c.activeDirectory) { return $c.activeDirectory }
+    [pscustomobject]@{ domain = ''; server = ''; user = ''; searchBase = '' }
+}
+
+function Save-AdSettings {
+    $c = Get-ConsoleConfig
+    $ad = [pscustomobject]@{
+        domain = $ui.TxtAdDomain.Text.Trim(); server = $ui.TxtAdServer.Text.Trim(); user = $ui.TxtAdUser.Text.Trim()
+        searchBase = $(if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' })
+    }
+    $c | Add-Member -NotePropertyName activeDirectory -NotePropertyValue $ad -Force
+    Save-ConsoleConfig $c
+}
+
+function Get-AdCredential {
+    # The account typed on the tab, for Active Directory and the PCs; its password is asked once per console session
+    # and kept in memory only. $null = the account the console runs as.
+    $user = $ui.TxtAdUser.Text.Trim()
+    if (-not $user) { return $null }
+    if ($script:adCredential -and $script:adCredentialUser -eq $user) { return $script:adCredential }
+    $cred = Get-Credential -UserName $user -Message 'Password for Active Directory and the PCs to reimage'
+    if (-not $cred) { throw 'No password given.' }
+    $script:adCredential = $cred; $script:adCredentialUser = $user
+    $cred
+}
+
+function Get-ReimageShare {
+    # Reimage jobs go on the deployment share, where WinPE looks for them.
+    "$((Get-DeploySettings -ContentRoot $script:root).share.path)".Trim()
+}
+
+function Update-AdBootStatus {
+    if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
+    $boot = Get-NetworkBootImage -ContentRoot $script:root
+    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
+    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share)." }
+    $ui.TxtAdBoot.Foreground = if ($problems) { '#B45309' } else { '#15803D' }
+}
+
+function Show-AdRows {
+    $states = @{}
+    if ($script:adRows -and (Test-ContentRoot $script:root)) {
+        $share = Get-ReimageShare
+        if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
+    }
+    $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
+        $on = if ($script:adOnline.ContainsKey($_.Address)) { if ($script:adOnline[$_.Address]) { 'Yes' } else { 'No' } } else { '' }
+        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $on -Force
+        $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
+    })
+}
+
+function Update-Computers {
+    if (-not $script:adLoaded) {
+        $script:adLoaded = $true
+        $ad = Get-AdSettings
+        $ui.TxtAdDomain.Text = if ($ad.domain) { "$($ad.domain)" } else { Get-AdDefaultDomain }
+        $ui.TxtAdServer.Text = "$($ad.server)"; $ui.TxtAdUser.Text = "$($ad.user)"
+        $ou = if ($ad.searchBase) { [pscustomobject]@{ Path = (ConvertTo-AdFriendlyPath "$($ad.searchBase)"); DN = "$($ad.searchBase)" } }
+              else { [pscustomobject]@{ Path = '(whole domain)'; DN = '' } }
+        $ui.CmbAdOu.ItemsSource = @($ou)
+        $ui.CmbAdOu.SelectedIndex = 0
+    }
+    $answers = @(if (Test-ContentRoot $script:root) { Get-ChildItem (Join-Path $script:root 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName })
+    $picked = $ui.CmbAdAnswer.SelectedItem
+    $ui.CmbAdAnswer.ItemsSource = $answers
+    $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif (Test-ContentRoot $script:root) { (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile } else { $null }
+    Update-AdBootStatus
+    Show-AdRows
+}
+
+function Search-AdComputers {
+    $cred = Get-AdCredential
+    $base = if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' }
+    $window.Cursor = 'Wait'
+    try {
+        Set-Status 'Searching Active Directory...'
+        $script:adRows = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $ui.TxtAdName.Text `
+            -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+        Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
+        $script:adOnline = if ($script:adRows) { Test-WinRMReachable -ComputerName @($script:adRows | ForEach-Object Address) } else { @{} }
+    } finally { $window.Cursor = $null }
+    Save-AdSettings
+    Show-AdRows
+    $on = @($script:adRows | Where-Object { $script:adOnline[$_.Address] }).Count
+    Set-Status "$($script:adRows.Count) computer(s) found, $on online"
+}
+
+$ui.BtnAdConnect.Add_Click({ Invoke-Safely {
+    $cred = Get-AdCredential
+    $window.Cursor = 'Wait'
+    try {
+        Set-Status 'Reading the OUs from Active Directory...'
+        $ous = @(Get-AdOrganizationalUnits -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -Credential $cred)
+    } finally { $window.Cursor = $null }
+    $keep = "$((Get-AdSettings).searchBase)"
+    $items = @([pscustomobject]@{ Path = '(whole domain)'; DN = '' }) + $ous
+    $ui.CmbAdOu.ItemsSource = $items
+    $sel = @($items | Where-Object { $_.DN -eq $keep })
+    $ui.CmbAdOu.SelectedItem = if ($sel) { $sel[0] } else { $items[0] }
+    Search-AdComputers
+} })
+
+$ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
+$ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke-Safely { Search-AdComputers } } })
+
+$ui.BtnAdOnline.Add_Click({ Invoke-Safely {
+    if (-not $script:adRows) { Show-Error 'Click Connect or Search first.'; return }
+    $window.Cursor = 'Wait'
+    try { $script:adOnline = Test-WinRMReachable -ComputerName @($script:adRows | ForEach-Object Address) } finally { $window.Cursor = $null }
+    Show-AdRows
+    Set-Status "$(@($script:adRows | Where-Object { $script:adOnline[$_.Address] }).Count) of $($script:adRows.Count) PCs answer on PowerShell remoting"
+} })
+
+$ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $adk = Update-AdkStatus
+    if (-not $adk.Ready) { Show-Error ("Can't build media on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return }
+    if (-not (Get-ReimageShare)) { Show-Error 'Set Network share on the Deploy Settings tab first: WinPE loads the image from there.'; return }
+    $out = Join-Path $script:root 'Boot'
+    New-Item -ItemType Directory -Path $out -Force | Out-Null
+    # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
+    $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
+        '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Pxe', '-OutputPath', (ConvertTo-Arg $out))
+    if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
+    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
+    if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $progressFile = Join-Path $env:TEMP "network-boot-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
+    $logPath = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'Logs', "network-boot-$stamp.log")
+    $buildArgs += @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
+    $proc = Start-Process powershell.exe -ArgumentList $buildArgs -WindowStyle Minimized -PassThru
+    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
+    Set-Status 'Network boot image build started.'
+} })
+
+$ui.BtnAdReimage.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = @($ui.GridAd.SelectedItems)
+    if (-not $rows) { Show-Error 'Select one or more PCs first (Ctrl+click or Shift+click for several).'; return }
+    $answer = $ui.CmbAdAnswer.SelectedItem
+    if (-not $answer) { Show-Error 'Choose the answer file to deploy.'; return }
+    $self = @($rows | Where-Object { $_.Name -eq "$env:COMPUTERNAME".ToUpperInvariant() })
+    if ($self) { Show-Error "$($self[0].Name) is this PC, the one running the console: reimage it from the USB stick."; return }
+    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot (Get-NetworkBootImage -ContentRoot $script:root))
+    if ($problems) { Show-Error $problems[0]; return }
+    $share = Get-ReimageShare
+    if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
+        Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
+    }
+    $off = @($rows | Where-Object { $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address] })
+    $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
+        'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
+    if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
+    if (-not (Confirm-Action $text)) { return }
+
+    $cred = Get-AdCredential
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
+    ConvertTo-Json -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } }) | Set-Content -Path $targetsFile -Encoding utf8
+    $progressFile = Join-Path $env:TEMP "reimage-$stamp-$tag.json"
+    $logPath = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'Logs', "reimage-$stamp.log")
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
+        '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
+        '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile),
+        '-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
+    if ($ui.ChkAdKeepName.IsChecked) { $runArgs += '-KeepNames' }
+    if ($ui.ChkAdKeepOu.IsChecked) { $runArgs += '-KeepOU' }
+    if ($cred) {
+        # For the hidden process: protected with this Windows account (DPAPI), deleted as soon as it is read.
+        $credFile = Join-Path $env:TEMP "reimage-$stamp-$tag-cred.xml"
+        $cred | Export-Clixml -Path $credFile
+        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
+    }
+    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle Hidden -PassThru
+    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Reimaging $($rows.Count) PC(s) with $answer" `
+        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
+    Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard."
+} })
+
+$ui.BtnAdCancel.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = @($ui.GridAd.SelectedItems)
+    if (-not $rows) { Show-Error 'Select the PCs whose reimage to cancel.'; return }
+    $share = Get-ReimageShare
+    if (-not $share) { return }
+    $n = 0
+    foreach ($r in $rows) {
+        $job = Find-ReimageJobByName -ContentRoot $share -ComputerName $r.Name
+        if ($job) { Remove-ReimageJob -ContentRoot $share -Serial $job.serial; $n++ }
+    }
+    Show-AdRows
+    Set-Status "Cancelled $n waiting reimage(s). A PC already restarting into WinPE then waits for someone at its screen."
 } })
 
 #endregion
