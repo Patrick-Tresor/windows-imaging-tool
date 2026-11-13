@@ -6,6 +6,9 @@
     Installs the applications in order, applies options, runs FIRSTBOOT tasks, turns on BitLocker, runs the post-deploy checks
     (PostDeployChecks.psm1), then removes what it staged in C:\Temp. The checks and their state stay in C:\ProgramData\ImagingTool,
     where Test-Deployment.ps1 can run them again later.
+    Each step is recorded in C:\Temp\firstboot-progress.json (FirstBootState.psm1). When the PC restarts in the middle
+    (an installer or a task that restarts it), the startup task starts this again and it carries on after the last
+    finished step; the step the restart cut short is not run again. It gives up after 5 starts.
     When firstboot.json has a status folder, reports progress to the console's dashboard from 90 to 100 %.
     That folder is a UNC path written as the computer account (SYSTEM), so the share must let Domain Computers
     write to it; if it cannot be reached the deployment still finishes and the dashboard shows it as Stalled.
@@ -21,15 +24,22 @@ function Write-Log([string]$Message) { Add-Content -Path $log -Value ('{0:yyyy-M
 $deployDir = $PSScriptRoot
 # Two ways in: SetupComplete.cmd, or the startup task for when Windows skips SetupComplete.cmd (it does with an OEM
 # product key, which Dell, HP and Lenovo PCs have in the firmware, on editions other than Enterprise).
-# Whichever comes second finds firstboot.started and stops, so nothing installs twice.
+# Only one run goes at a time (firstboot.lock); the other stops, so nothing installs twice. The task stays until first
+# boot has finished, so a restart in the middle starts it again.
 $taskName = 'ImagingTool\FirstBoot'
-function Get-FirstBootCleanupCommand([string]$Dir) {
+function Get-FirstBootCleanupCommand([string]$Dir, [switch]$KeepScript) {
+    # -KeepScript: the startup task could not be deleted, so FirstBoot.ps1 (admins only) stays where the task points;
+    # its next start sees first boot finished and tries again. Nobody else can then put a script there.
+    # firstboot-progress.json stays as the record that first boot finished.
     $d = $Dir.TrimEnd('\')
     $folders = 'Apps', 'Tasks' | ForEach-Object { "rd /s /q `"$d\$_`"" }
-    $files = 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'firstboot.json', 'deployed.json' |
-        ForEach-Object { "del /f /q `"$d\$_`"" }
+    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
+    if (-not $KeepScript) { $names = @('FirstBoot.ps1', 'FirstBootState.psm1') + $names }
+    $files = $names | ForEach-Object { "del /f /q `"$d\$_`"" }
     (@($folders) + @($files)) -join ' & '
 }
+Import-Module ([IO.Path]::Combine($deployDir, 'FirstBootState.psm1')) -Force
+$progressPath = [IO.Path]::Combine($deployDir, 'firstboot-progress.json')
 if ($FromTask) {
     # Let Windows setup finish (SetupComplete.cmd, when it runs, runs before that and claims the run first).
     for ($i = 0; $i -lt 120; $i++) {
@@ -38,18 +48,26 @@ if ($FromTask) {
         Start-Sleep -Seconds 30
     }
 }
-try {
-    $claim = [IO.File]::Open([IO.Path]::Combine($deployDir, 'firstboot.started'), [IO.FileMode]::CreateNew)
-    $claim.Close()
-} catch {
-    Write-Log "First boot already started earlier; this run ($(if ($FromTask) { 'startup task' } else { 'SetupComplete.cmd' })) stops"
-    if ($FromTask) { & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null }
+$who = if ($FromTask) { 'startup task' } else { 'SetupComplete.cmd' }
+# Held until this process ends (a restart ends it too).
+$script:FirstBootLock = Get-FirstBootLock -Path ([IO.Path]::Combine($deployDir, 'firstboot.lock'))
+if (-not $script:FirstBootLock) { Write-Log "First boot is running already; this run ($who) stops"; exit 0 }
+$progress = Read-FirstBootProgress -Path $progressPath
+if ((Get-FirstBootStepState -Progress $progress -Step 'finished') -eq 'Done') {
+    & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+    Write-Log "First boot finished earlier; this run ($who) stops. Startup task $taskName removed: exit $LASTEXITCODE"
     exit 0
 }
-Write-Log $(if ($FromTask) { 'Started by the startup task: Windows did not run SetupComplete.cmd (OEM product key?)' } else { 'Started by SetupComplete.cmd' })
-# One run is enough: the task would otherwise start this again at every boot.
-& schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
-Write-Log "Startup task $taskName removed: exit $LASTEXITCODE"
+$progress.runs = [int]$progress.runs + 1
+Save-FirstBootProgress -Progress $progress -Path $progressPath
+$giveUp = -not (Test-FirstBootRunsLeft -Progress $progress)
+if ($progress.runs -gt 1) {
+    Write-Log "Started again by the $who after a restart (start $($progress.runs)); carrying on after the last finished step"
+} else {
+    Write-Log $(if ($FromTask) { 'Started by the startup task: Windows did not run SetupComplete.cmd (OEM product key?)' } else { 'Started by SetupComplete.cmd' })
+}
+if ($giveUp) { Write-Log "WARNING: the PC restarted during first boot $($progress.runs - 1) times; the steps left are skipped (see the lines above for the last one that ran)" }
+function Save-Progress { try { Save-FirstBootProgress -Progress $progress -Path $progressPath } catch { Write-Log "Could not save first boot progress: $($_.Exception.Message)" } }
 $plan = Get-Content -Raw (Join-Path $deployDir 'firstboot.json') | ConvertFrom-Json
 Write-Log "First boot for answer file $($plan.answerFile)"
 # A PC that ran sysprep at its first start (image captured without sysprep): its scripts are done. The answer file
@@ -84,20 +102,33 @@ Set-Progress 'First boot: starting' 91
 Import-Module (Join-Path $deployDir 'AppPack.psm1') -Force
 $total = @($plan.applications).Count
 $n = 0
-$appResults = @()
+# Results of earlier starts (before a restart) are kept.
+$appResults = @($progress.appResults)
 
 foreach ($plain in $plan.applications) {
     $app = ConvertTo-AppDefinition -Name $plain.name -Json $plain
     $dir = Join-Path $deployDir "Apps\$($app.name)"
     $n++
-    Write-Log "Installing $($app.name)"
-    Set-Progress "Installing $($app.name) ($n of $total)" (91 + [int](7 * ($n - 1) / [Math]::Max(1, $total)))
-    $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -Log { param($m) Write-Log $m } }
-         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+    $step = "app:$n"
+    $state = Get-FirstBootStepState -Progress $progress -Step $step
+    if ($state -eq 'Done' -or $giveUp) { continue }
+    if ($state -eq 'Interrupted') {
+        Write-Log "$($app.name): the PC restarted during its install; not run again"
+        $r = try { Get-InterruptedAppResult -Detection (Test-AppDetection -Definition $app -AppFolder $dir) }
+             catch { Get-InterruptedAppResult -Detection ([pscustomobject]@{ HasRules = $false; Detected = $false }) }
+    } else {
+        Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
+        Write-Log "Installing $($app.name)"
+        Set-Progress "Installing $($app.name) ($n of $total)" (91 + [int](7 * ($n - 1) / [Math]::Max(1, $total)))
+        $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -Log { param($m) Write-Log $m } }
+             catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+    }
     $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
     Write-Log "  $($app.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
     # ok and exitCode are what the post-deploy checks read.
     $appResults += [pscustomobject]@{ name = $app.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; rebootNeeded = $r.RebootNeeded; message = $r.Message }
+    $progress.appResults = @($appResults)
+    Complete-FirstBootStep -Progress $progress -Step $step; Save-Progress
     if (-not $ok) {
         Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed ($($r.Status))"
     }
@@ -105,17 +136,21 @@ foreach ($plain in $plan.applications) {
 # Kept after C:\Temp is cleared, for whoever checks the PC (and the deployment dashboard).
 $appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
-if ($plan.disableSystemRestore) {
-    Disable-ComputerRestore -Drive "$env:SystemDrive\"
-    Write-Log 'System Restore disabled'
-}
-if ($plan.enableAdministrator) {
-    # By SID (RID 500): the account is "Administrateur" on French Windows, and net user Administrator failed there.
-    $admin = Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' | Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
-    if ($admin) {
-        & net.exe user $admin.Name /active:yes | Out-Null
-        Write-Log "Built-in Administrator ($($admin.Name)) enabled: exit $LASTEXITCODE"
-    } else { Write-Log 'WARNING: built-in Administrator account not found; not enabled' }
+if (-not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'options') -ne 'Done') {
+    Start-FirstBootStep -Progress $progress -Step 'options'; Save-Progress
+    if ($plan.disableSystemRestore) {
+        Disable-ComputerRestore -Drive "$env:SystemDrive\"
+        Write-Log 'System Restore disabled'
+    }
+    if ($plan.enableAdministrator) {
+        # By SID (RID 500): the account is "Administrateur" on French Windows, and net user Administrator failed there.
+        $admin = Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' | Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
+        if ($admin) {
+            & net.exe user $admin.Name /active:yes | Out-Null
+            Write-Log "Built-in Administrator ($($admin.Name)) enabled: exit $LASTEXITCODE"
+        } else { Write-Log 'WARNING: built-in Administrator account not found; not enabled' }
+    }
+    Complete-FirstBootStep -Progress $progress -Step 'options'; Save-Progress
 }
 
 function Enable-DeployBitLocker($cfg) {
@@ -176,36 +211,54 @@ function Enable-DeployBitLocker($cfg) {
 
 # FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
 # C:\Temp\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
-if (@($plan.tasks).Count) { Set-Progress 'Running first boot tasks' 98 }
+if (@($plan.tasks).Count -and -not $giveUp) { Set-Progress 'Running first boot tasks' 98 }
 Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
-$taskResults = @()
+$taskResults = @($progress.taskResults)
+$k = 0
 foreach ($t in @($plan.tasks)) {
+    $k++
+    $step = "task:$k"
+    $state = Get-FirstBootStepState -Progress $progress -Step $step
+    if ($state -eq 'Done' -or $giveUp) { continue }
     if ($t -is [string]) { $t = [pscustomobject]@{ name = $t; command = $t; task = $null; arguments = '' } }
-    if (-not $t.task) {
+    $label = if ($t.task) { "$($t.name)" } else { "$($t.command)" }
+    if ($state -eq 'Interrupted') {
+        Write-Log "FIRSTBOOT task ${label}: the PC restarted while it ran; not run again"
+        $r = Get-InterruptedTaskResult
+        $taskResults += [pscustomobject]@{ name = $label; status = $r.Status; ok = $false; exitCode = $null; message = $r.Message }
+    } elseif (-not $t.task) {
+        Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
         Write-Log "FIRSTBOOT task: $($t.command)"
         $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($t.command)" -Wait -PassThru -WindowStyle Hidden
         Write-Log "  exit $($p.ExitCode)"
         $taskResults += [pscustomobject]@{ name = $t.command; status = 'Ran'; ok = $true; exitCode = $p.ExitCode; message = "exit $($p.ExitCode)" }
-        continue
+    } else {
+        Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
+        $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
+        Write-Log "FIRSTBOOT task $($def.name)"
+        Set-Progress "Running task $($def.name)" 98
+        $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
+                       -LogPath "$env:WINDIR\Temp\Task-$($def.name).log" -Log { param($m) Write-Log $m } }
+             catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
+        $ok = $r.Status -eq 'Succeeded'
+        Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+        $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
+        if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
     }
-    $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
-    Write-Log "FIRSTBOOT task $($def.name)"
-    Set-Progress "Running task $($def.name)" 98
-    $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
-                   -LogPath "$env:WINDIR\Temp\Task-$($def.name).log" -Log { param($m) Write-Log $m } }
-         catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
-    $ok = $r.Status -eq 'Succeeded'
-    Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
-    $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
-    if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
+    $progress.taskResults = @($taskResults)
+    Complete-FirstBootStep -Progress $progress -Step $step; Save-Progress
 }
 # Kept after C:\Temp is cleared, next to FirstBoot-apps.json.
 if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
-if ($plan.bitlocker) {
+# Run again when a restart cut it short: it leaves a drive that is already encrypting as it is.
+if ($plan.bitlocker -and -not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'bitlocker') -ne 'Done') {
+    Start-FirstBootStep -Progress $progress -Step 'bitlocker'; Save-Progress
     try { Enable-DeployBitLocker $plan.bitlocker }
     catch { Write-Log "BitLocker FAILED: $($_.Exception.Message)" }
+    Complete-FirstBootStep -Progress $progress -Step 'bitlocker'; Save-Progress
 }
+if ($plan.bitlocker -and $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'bitlocker') -ne 'Done') { Write-Log 'BitLocker NOT enabled: first boot gave up after too many restarts' }
 
 # Post-deploy checks. Their files move to C:\ProgramData\ImagingTool so Test-Deployment.ps1 can re-run them
 # after C:\Temp is cleared, for example once a missing driver is added.
@@ -242,8 +295,14 @@ if (Test-Path $unattend) {
         Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
     } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
 }
+# First boot is over: the startup task is no longer needed.
+& schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+$taskDeleted = $LASTEXITCODE -eq 0
+if (-not $taskDeleted) { & schtasks.exe /Query /TN $taskName 2>&1 | Out-Null; $taskDeleted = $LASTEXITCODE -ne 0 }
+Write-Log "Startup task $taskName removed: $taskDeleted"
+Complete-FirstBootStep -Progress $progress -Step 'finished'; Save-Progress
 Write-Log "First boot finished; removing what deploy staged in $deployDir"
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
 # C:\Temp can hold other files (the golden image's, or an installer's), so only what Deploy-Image.ps1 staged goes.
-# firstboot.started stays: it keeps the startup task, if it is still there, from running first boot again.
-Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & $(Get-FirstBootCleanupCommand $deployDir)" -WindowStyle Hidden
+# firstboot-progress.json stays: it says first boot finished, should the startup task still start this.
+Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & $(Get-FirstBootCleanupCommand $deployDir -KeepScript:(-not $taskDeleted))" -WindowStyle Hidden

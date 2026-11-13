@@ -332,6 +332,15 @@ try {
         }
     }
     Start-BuildStep 'configure'
+    # WinPE's own time zone is Pacific. A PC's clock holds its local time, so in Toronto WinPE was 3 hours ahead: wrong
+    # times in Deploy.log and on the Dashboard, and reimage jobs from the Computers tab looked expired. WinPE gets this
+    # PC's time zone (the deploy PCs are normally in the same place).
+    $tz = try { (Get-TimeZone).Id } catch { $null }
+    if ($tz) {
+        & dism.exe /English /Image:$mount "/Set-TimeZone:$tz" | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Host "WinPE time zone: $tz" -ForegroundColor DarkGray }
+        else { Write-Warning "Could not set the WinPE time zone to $tz (DISM exit $LASTEXITCODE): WinPE keeps Pacific time, so its log times can be off." }
+    }
     $vmdAdded = @($peReport | ForEach-Object { $_.vmd } | Where-Object { $_ }).Count -gt 0
     if ($vmdAdded) { Write-Host "WinPE has the Intel RST/VMD storage driver ($((@($peReport | ForEach-Object { $_.vmd } | Where-Object { $_ }) | Select-Object -Unique) -join ', '))." -ForegroundColor Green }
     else { Write-Warning 'WinPE has no Intel RST/VMD storage driver: PCs with VMD on (many 11th gen and later laptops) will show no internal disk.' }

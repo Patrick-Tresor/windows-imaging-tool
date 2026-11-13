@@ -113,7 +113,10 @@ function Receive-ReimageJob {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Serial,
         [string]$Uuid,
         [datetime]$Now = (Get-Date),
-        [scriptblock]$OnNote = { }
+        [scriptblock]$OnNote = { },
+        # WinPE's clock can be hours off (a stick built before WinPE got the console's time zone reads the PC's local
+        # clock as Pacific time), so expiry allows this much. The console removes a job that was not taken in time.
+        [int]$ClockSkewHours = 14
     )
     if (-not (Test-UsableSerial $Serial)) { return $null }
     $key = ConvertTo-SerialKey $Serial
@@ -122,7 +125,7 @@ function Receive-ReimageJob {
     # .NET, not Test-Path: WinPE maps the share as Z: through net use, which PowerShell may have no drive for.
     if (-not [IO.File]::Exists($path)) { return $null }
     $job = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-    if (Test-JobExpired -Job $job -Now $Now) { & $OnNote "A reimage job for this PC expired at $($job.expiresAt); not used."; return $null }
+    if (Test-JobExpired -Job $job -Now $Now.AddHours(-$ClockSkewHours)) { & $OnNote "A reimage job for this PC expired at $($job.expiresAt); not used."; return $null }
     if ($job.uuid -and $Uuid -and $job.uuid.Trim() -ne $Uuid.Trim()) {
         & $OnNote "A reimage job for serial $Serial is for another PC (UUID $($job.uuid), this PC has $Uuid); not used."
         return $null
@@ -136,14 +139,27 @@ function Receive-ReimageJob {
 }
 
 function Get-StartedJob {
-    # The most recent job WinPE took for a PC since a given time, or $null.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Serial, [datetime]$Since = [datetime]::MinValue)
+    <#
+    .SYNOPSIS
+        The job WinPE took for a PC, or $null. -RequestedAt (the requestedAt of the job the console queued) finds that
+        very job whatever WinPE's clock says; -Since takes the most recent one WinPE started after a given time.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Serial, [datetime]$Since = [datetime]::MinValue, [string]$RequestedAt)
     $key = ConvertTo-SerialKey $Serial
-    $f = Get-ChildItem -LiteralPath (Join-RootPath (Get-JobFolder $ContentRoot) 'Started') -Filter "${key}_*.json" -File -ErrorAction SilentlyContinue |
-        Sort-Object Name -Descending | Select-Object -First 1
-    if (-not $f) { return $null }
-    $job = Get-Content -Raw -LiteralPath $f.FullName | ConvertFrom-Json
-    if ((ConvertFrom-JobTime $job.startedAt) -ge $Since) { $job }
+    $files = @(Get-ChildItem -LiteralPath (Join-RootPath (Get-JobFolder $ContentRoot) 'Started') -Filter "${key}_*.json" -File -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending)
+    foreach ($f in $files) {
+        try { $job = Get-Content -Raw -LiteralPath $f.FullName | ConvertFrom-Json } catch { continue }
+        if ($RequestedAt) {
+            # ConvertFrom-Json may turn the text into a date: compare as round-trip text either way.
+            $r = if ($job.requestedAt -is [datetime]) { $job.requestedAt.ToString('o') } else { "$($job.requestedAt)" }
+            if ($r -eq $RequestedAt -or ((ConvertFrom-JobTime $r) -eq (ConvertFrom-JobTime $RequestedAt))) { return $job }
+            continue
+        }
+        if ((ConvertFrom-JobTime $job.startedAt) -ge $Since) { return $job }
+        return $null
+    }
+    $null
 }
 
 function Get-ReimageStates {
@@ -276,6 +292,37 @@ function Get-LocalBootCommands {
     )
 }
 
+function Get-LocalBootFolderAclArgs {
+    # icacls arguments that leave C:\_ImagingBoot readable by Administrators and SYSTEM only: boot.wim holds the
+    # answer file key (the network boot image has no WinPE password), so a user of the PC must not copy it.
+    param([string]$Folder = 'C:\_ImagingBoot')
+    @($Folder, '/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
+}
+
+function Get-LocalBootCleanupCommand {
+    # What the PC runs at its next Windows start (SYSTEM startup task): WinPE did not reimage it, so WinPE and its
+    # boot entry go, and the task removes itself. A reimaged PC never runs it: its disk is erased.
+    param([string]$BootEntry, [string]$Folder = 'C:\_ImagingBoot', [string]$TaskName = 'ImagingTool\RemoveImagingBoot')
+    # No quotes: schtasks /TR keeps a quoted path badly in Windows PowerShell, and these paths have no spaces.
+    $cmd = "rd /s /q $Folder"
+    if ($BootEntry) { $cmd += " & bcdedit /delete $BootEntry /f" }
+    "cmd.exe /c $cmd & schtasks /Delete /TN $TaskName /F"
+}
+
+function Remove-LocalDiskBoot {
+    # Takes WinPE off a PC that is back in Windows without being reimaged: the folder, the boot entry and the task.
+    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential)
+    $credArgs = @{}
+    if ($Credential) { $credArgs.Credential = $Credential }
+    Invoke-Command -ComputerName $ComputerName -ErrorAction Stop @credArgs -ArgumentList "$BootEntry" -ScriptBlock {
+        param($Entry)
+        if ($Entry) { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null }
+        & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
+        Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
+    }
+}
+
 function Invoke-LocalDiskBoot {
     <#
     .SYNOPSIS
@@ -298,7 +345,13 @@ function Invoke-LocalDiskBoot {
     $created = @()
     try {
         & $OnStage 'copy'
-        Invoke-Command -Session $session -ScriptBlock { New-Item -ItemType Directory -Path 'C:\_ImagingBoot' -Force | Out-Null }
+        Invoke-Command -Session $session -ArgumentList (, (Get-LocalBootFolderAclArgs)) -ScriptBlock {
+            param($AclArgs)
+            New-Item -ItemType Directory -Path 'C:\_ImagingBoot' -Force | Out-Null
+            # Admins and SYSTEM only, before boot.wim (with the answer file key) is copied in.
+            $o = & icacls.exe @AclArgs 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "Could not limit C:\_ImagingBoot to administrators: $o" }
+        }
         Copy-Item -LiteralPath $BootWim -Destination 'C:\_ImagingBoot\boot.wim' -ToSession $session -Force
         & $OnStage 'bootentry'
         $out = Invoke-Command -Session $session -ScriptBlock {
@@ -313,13 +366,17 @@ function Invoke-LocalDiskBoot {
         $created = @($ramId, $loaderId | Where-Object { $_ })
         if (-not $ramId -or -not $loaderId) { throw "bcdedit could not create the boot entries: $($out -join ' | ')" }
         $steps = Get-LocalBootCommands -RamdiskId $ramId -LoaderId $loaderId
+        $cleanup = Get-LocalBootCleanupCommand -BootEntry $loaderId
         & $OnStage 'restart'
-        Invoke-Command -Session $session -ArgumentList $steps, $DelaySeconds, $Message -ScriptBlock {
-            param($Steps, $Delay, $Message)
+        Invoke-Command -Session $session -ArgumentList $steps, $DelaySeconds, $Message, $cleanup -ScriptBlock {
+            param($Steps, $Delay, $Message, $Cleanup)
             foreach ($a in $Steps) {
                 $o = & bcdedit.exe @a 2>&1
                 if ($LASTEXITCODE -ne 0) { throw "bcdedit $($a -join ' ') failed: $o" }
             }
+            # If WinPE does not reimage the PC and Windows starts again, this removes WinPE and its boot entry.
+            $o = & schtasks.exe /Create /TN 'ImagingTool\RemoveImagingBoot' /TR $Cleanup /SC ONSTART /RU SYSTEM /RL HIGHEST /F 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "Could not create the cleanup task: $o" }
             # With BitLocker on, the changed boot would ask for the recovery key. One restart without it; the deploy
             # erases the disk anyway.
             $bl = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue
@@ -336,6 +393,7 @@ function Invoke-LocalDiskBoot {
             Invoke-Command -Session $session -ArgumentList (, $created) -ScriptBlock {
                 param($Ids)
                 foreach ($id in $Ids) { & bcdedit.exe /delete $id /f 2>&1 | Out-Null }
+                & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
                 Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
             }
         } catch { }
@@ -379,4 +437,4 @@ function Get-RemoteReimageProblems {
 
 Export-ModuleMember -Function Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Test-WinRMReachable, Get-RemoteComputerInfo,
-    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems
+    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

@@ -224,7 +224,7 @@ try {
     $orders = @($u.SelectNodes('//u:settings[@pass="specialize"]//u:RunSynchronousCommand/u:Order', $ns) | ForEach-Object InnerText) -join ','
     Assert-Equal $orders '1,2' 'specialize commands are numbered in order'
     Assert-Equal ($fbText.Contains("`$taskName = '$(Get-FirstBootTaskName)'")) $true 'FirstBoot.ps1 deletes the same task the unattend creates'
-    Assert-Equal ($fbText -match "FileMode\]::CreateNew") $true 'FirstBoot.ps1 claims the run so SetupComplete.cmd and the task never both install'
+    Assert-Equal ($fbText -match "Get-FirstBootLock") $true 'FirstBoot.ps1 takes a lock so SetupComplete.cmd and the task never both install'
     # Staging is in C:\Temp (Patrick, 2026-11-04), which can hold other files: first boot removes only what it staged.
     Assert-Equal ($fbText.Contains('rd /s /q `"$deployDir`"')) $false 'first boot does not delete the whole C:\Temp folder'
     $dpText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
