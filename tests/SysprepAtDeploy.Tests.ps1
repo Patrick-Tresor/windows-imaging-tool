@@ -32,9 +32,23 @@ Assert-Equal (Test-RegQueryHasValue -Name 'PreventDeviceEncryption' -Lines @()) 
 
 Assert-Equal ((Get-SysprepArguments -UnattendPath 'C:\ProgramData\ImagingTool\Sysprep\unattend.xml') -join ' ') '/generalize /oobe /reboot /quiet /unattend:C:\ProgramData\ImagingTool\Sysprep\unattend.xml' 'sysprep generalizes, goes to OOBE with the answer file, restarts'
 
-Assert-Equal (Test-RebootPendingFor -Pending $true -Attempt 1) $true 'a pending restart comes before sysprep'
-Assert-Equal (Test-RebootPendingFor -Pending $true -Attempt 3) $false 'restarts stop after three attempts'
-Assert-Equal (Test-RebootPendingFor -Pending $false -Attempt 1) $false 'no restart when none is pending'
+$cbs = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+$wu = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @($cbs, $wu)) -join ',') 'servicing,windowsupdate' 'both restart markers are named'
+Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @()).Count) 0 'no key, no marker'
+Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @($cbs)) -join ',') 'servicing' 'one key, one marker'
+Assert-Equal (Test-RebootPendingFor -Markers @('servicing') -Attempt 1) $true 'pending servicing restarts before sysprep'
+Assert-Equal (Test-RebootPendingFor -Markers @('servicing', 'windowsupdate') -Attempt 2) $true 'a second restart is allowed'
+Assert-Equal (Test-RebootPendingFor -Markers @('servicing') -Attempt 3) $false 'restarts stop after two, sysprep is tried'
+Assert-Equal (Test-RebootPendingFor -Markers @('windowsupdate') -Attempt 1) $false 'the Windows Update flag alone does not restart'
+Assert-Equal (Test-RebootPendingFor -Markers @() -Attempt 1) $false 'no restart when none is pending'
+
+# The Run stage handles the pending restart itself; the checks before sysprep must not stop on it again.
+$run = Get-Content -Raw (Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1')
+Assert-Equal ($run -match '-File \$prepare -CheckOnly -RemoveUserApps -SkipRebootCheck') $true 'sysprep at deploy runs the checks with -SkipRebootCheck'
+Assert-Equal ($run -match "Set-StartupHook\r?\n\s*& shutdown\.exe /r") $true 'the startup hook is set again before each restart'
+$prep = Get-Content -Raw (Join-Path $repo 'src/Prepare-Reference.ps1')
+Assert-Equal ($prep -match 'if \(\$SkipRebootCheck\) \{ \$warnings\.Add') $true 'Prepare-Reference -SkipRebootCheck only warns about a pending restart'
 
 $ok = Get-SysprepOutcome -ImageState 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE' -ExitCode 0
 Assert-Equal $ok.Ok $true 'generalized Windows is a success'

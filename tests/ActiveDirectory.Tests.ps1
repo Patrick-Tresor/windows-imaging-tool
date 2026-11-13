@@ -46,6 +46,11 @@ Assert-Equal ((Get-AdComputerFilter -Name 'LAB' -IncludeDisabled -IncludeServers
 Assert-Equal ((Get-AdComputerFilter -Name 'LAB-*' -IncludeDisabled -IncludeServers)) '(&(objectCategory=computer)(objectClass=computer)(name=LAB-*))' 'a pattern is used as it is'
 Assert-Equal ((Get-AdComputerFilter -Name 'x)(name=*' -IncludeDisabled -IncludeServers)) '(&(objectCategory=computer)(objectClass=computer)(name=x\29\28name=*))' 'a name cannot change the filter'
 
+# The domain of the Deploy Settings account
+Assert-Equal (Get-AdDomainFromAccount 'svc-deploy@Corp.Local') 'corp.local' 'a user@domain account gives its DNS domain'
+Assert-Equal (Get-AdDomainFromAccount 'CORP\svc-deploy') '' 'a DOMAIN\user account gives no DNS domain (the PC''s own is used)'
+Assert-Equal (Get-AdDomainFromAccount '') '' 'no account gives no domain'
+
 # Last logon (FILETIME)
 $when = [DateTime]::new(2026, 11, 2, 15, 30, 0, [DateTimeKind]::Utc)
 Assert-Equal (ConvertFrom-AdFileTime $when.ToFileTimeUtc()).ToUniversalTime().ToString('o') $when.ToString('o') 'lastLogonTimestamp is read as a date'

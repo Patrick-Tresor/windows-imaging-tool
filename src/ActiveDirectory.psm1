@@ -132,6 +132,14 @@ function ConvertFrom-AdComputerProperties {
     }
 }
 
+function Get-AdDomainFromAccount {
+    # The DNS domain in an account written user@corp.local. CORP\user names only the short (NetBIOS) domain, which
+    # LDAP cannot find by itself: ''.
+    param([AllowEmptyString()][AllowNull()][string]$Account)
+    if ("$Account".Trim() -match '^[^@\\\s]+@([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)$') { return $Matches[1].ToLowerInvariant() }
+    ''
+}
+
 function Get-AdDefaultDomain {
     # The domain the console PC (or else the signed-in user) belongs to, or '' when it is in a workgroup.
     try { return [DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain().Name } catch { }
@@ -204,4 +212,4 @@ function Get-AdOrganizationalUnits {
 
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
-    Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits
+    Get-AdDomainFromAccount, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits
