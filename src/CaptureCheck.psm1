@@ -274,40 +274,131 @@ function Get-DefenderExclusionPlan {
     }
 }
 
+function Get-DefenderLedgerPath {
+    # Where the build and the capture note the Defender exclusions they added, until they take them off again.
+    [IO.Path]::Combine("$env:LOCALAPPDATA", 'ImagingConsole', 'defender-exclusions.json')
+}
+
+function Read-DefenderLedger {
+    param([string]$LedgerPath = (Get-DefenderLedgerPath))
+    try {
+        if (-not [IO.File]::Exists($LedgerPath)) { return @() }
+        @(([IO.File]::ReadAllText($LedgerPath) | ConvertFrom-Json) | Where-Object { $_ -and $_.id })
+    } catch { @() }
+}
+
+function Save-DefenderLedger {
+    param([object[]]$Entries, [string]$LedgerPath = (Get-DefenderLedgerPath))
+    $Entries = @($Entries | Where-Object { $_ })
+    if (-not $Entries) { if ([IO.File]::Exists($LedgerPath)) { [IO.File]::Delete($LedgerPath) }; return }
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LedgerPath))
+    # @() keeps a one-entry ledger a JSON list in Windows PowerShell 5.1.
+    [IO.File]::WriteAllText($LedgerPath, (ConvertTo-Json -InputObject @($Entries) -Depth 4))
+}
+
+function Add-DefenderLedgerEntry {
+    # Notes what this process added; returns the entry id that Remove-DefenderLedgerEntry takes.
+    param([Parameter(Mandatory)]$Plan, [string]$LedgerPath = (Get-DefenderLedgerPath), [int]$ProcessId = $PID, [int64]$StartTicks = -1)
+    if ($StartTicks -lt 0) { $StartTicks = try { [Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().Ticks } catch { 0 } }
+    $entry = [pscustomobject]@{
+        id = [guid]::NewGuid().ToString('N'); pid = $ProcessId; started = $StartTicks
+        paths = @($Plan.Paths); processes = @($Plan.Processes)
+    }
+    Save-DefenderLedger -LedgerPath $LedgerPath -Entries (@(Read-DefenderLedger -LedgerPath $LedgerPath) + $entry)
+    $entry.id
+}
+
+function Remove-DefenderLedgerEntry {
+    param([string]$Id, [string]$LedgerPath = (Get-DefenderLedgerPath))
+    if (-not $Id) { return }
+    Save-DefenderLedger -LedgerPath $LedgerPath -Entries @(Read-DefenderLedger -LedgerPath $LedgerPath | Where-Object { $_.id -ne $Id })
+}
+
+function Test-DefenderLedgerOwnerAlive {
+    # Whether the build or capture that wrote a ledger entry still runs: same process id and same start time (an id
+    # Windows gave to a newer process does not count). A process this one may not look at counts as running.
+    param([int]$ProcessId, [int64]$StartTicks)
+    try { $p = [Diagnostics.Process]::GetProcessById($ProcessId) } catch { return $false }
+    try { $p.StartTime.ToUniversalTime().Ticks -eq $StartTicks } catch { $true }
+}
+
+function Get-StaleDefenderEntries {
+    # The ledger entries whose build or capture is gone (window closed, PC restarted): their exclusions stayed on.
+    param([object[]]$Entries, [scriptblock]$IsAlive = { param($ProcessId, $StartTicks) Test-DefenderLedgerOwnerAlive -ProcessId $ProcessId -StartTicks $StartTicks })
+    @($Entries | Where-Object { $_ -and -not (& $IsAlive ([int]$_.pid) ([int64]$_.started)) })
+}
+
+function Remove-StaleDefenderExclusions {
+    <#
+    .SYNOPSIS
+        Takes off the Defender exclusions a build or capture added and could not remove because it was stopped
+        (window closed, PC restarted). Without this, a drive letter like E:\ the stick had stayed unscanned for good.
+        Run at the start of each build, capture and console start. Returns how many exclusions were removed.
+    #>
+    param([string]$LedgerPath = (Get-DefenderLedgerPath), [scriptblock]$IsAlive, [scriptblock]$Remove)
+    $entries = @(Read-DefenderLedger -LedgerPath $LedgerPath)
+    if (-not $entries) { return 0 }
+    $staleArgs = @{ Entries = $entries }
+    if ($IsAlive) { $staleArgs.IsAlive = $IsAlive }
+    $stale = @(Get-StaleDefenderEntries @staleArgs)
+    if (-not $stale) { return 0 }
+    if (-not $Remove) {
+        $Remove = { param($Paths, $Processes)
+            if ($Paths) { Remove-MpPreference -ExclusionPath $Paths -ErrorAction Stop }
+            if ($Processes) { Remove-MpPreference -ExclusionProcess $Processes -ErrorAction Stop } }
+    }
+    $removed = 0; $done = @()
+    foreach ($e in $stale) {
+        try { & $Remove @($e.paths | Where-Object { $_ }) @($e.processes | Where-Object { $_ }); $removed += @($e.paths).Count + @($e.processes).Count; $done += $e.id }
+        catch { }   # not admin now: tried again next time
+    }
+    Save-DefenderLedger -LedgerPath $LedgerPath -Entries @($entries | Where-Object { $_.id -notin $done })
+    $removed
+}
+
 function Add-DefenderScanExclusions {
     <#
     .SYNOPSIS
         Adds temporary Microsoft Defender exclusions (only the ones not there already, see Get-DefenderExclusionPlan)
         and returns what Remove-DefenderScanExclusions takes off again. Nothing when real-time protection is off or
         another antivirus is in charge, or when it can't (not admin, policy): the work then only runs slower.
+        What it adds is noted in the ledger, so Remove-StaleDefenderExclusions takes it off if this process is
+        stopped before it can. -Log { param($Message, $Level) } replaces the console lines (the capture's log).
     #>
-    param([string[]]$Paths = @(), [string[]]$Processes = @(), [string]$Reason = 'this build')
+    param([string[]]$Paths = @(), [string[]]$Processes = @(), [string]$Reason = 'this build', [scriptblock]$Log)
+    if (-not $Log) { $Log = { param($Message, $Level) if ($Level -eq 'WARN') { Write-Warning $Message } else { Write-Host $Message -ForegroundColor DarkGray } } }
     try {
         $status = Get-MpComputerStatus -ErrorAction Stop
         if (-not $status.RealTimeProtectionEnabled) { return $null }
         $pref = Get-MpPreference -ErrorAction Stop
         $plan = Get-DefenderExclusionPlan -Paths $Paths -Processes $Processes -ExistingPaths @($pref.ExclusionPath) -ExistingProcesses @($pref.ExclusionProcess)
-        if ($plan.Paths) { Add-MpPreference -ExclusionPath $plan.Paths -ErrorAction Stop }
-        if ($plan.Processes) { Add-MpPreference -ExclusionProcess $plan.Processes -ErrorAction Stop }
-        if ($plan.Paths -or $plan.Processes) {
-            Write-Host "Microsoft Defender skips $(@($plan.Paths + $plan.Processes) -join ', ') until $Reason ends (removed after)." -ForegroundColor DarkGray
-            return $plan
-        }
-        $null
+        if (-not ($plan.Paths -or $plan.Processes)) { return $null }
+        $id = try { Add-DefenderLedgerEntry -Plan $plan } catch { $null }
+        $plan | Add-Member -NotePropertyName Id -NotePropertyValue $id -Force
+        try {
+            if ($plan.Paths) { Add-MpPreference -ExclusionPath $plan.Paths -ErrorAction Stop }
+            if ($plan.Processes) { Add-MpPreference -ExclusionProcess $plan.Processes -ErrorAction Stop }
+        } catch { Remove-DefenderScanExclusions -Plan $plan -Quiet; throw }
+        & $Log "Microsoft Defender skips $(@($plan.Paths + $plan.Processes) -join ', ') until $Reason ends (removed after)." 'INFO'
+        $plan
     } catch {
-        Write-Host "Could not pause Microsoft Defender scanning for $Reason, so it may be slower: $($_.Exception.Message)" -ForegroundColor DarkGray
+        & $Log "Could not pause Microsoft Defender scanning for $Reason, so it may be slower: $($_.Exception.Message)" 'INFO'
         $null
     }
 }
 
 function Remove-DefenderScanExclusions {
-    param($Plan)
+    param($Plan, [scriptblock]$Log, [switch]$Quiet)
     if (-not $Plan) { return }
+    if (-not $Log) { $Log = { param($Message, $Level) if ($Level -eq 'WARN') { Write-Warning $Message } else { Write-Host $Message -ForegroundColor DarkGray } } }
     try {
         if ($Plan.Paths) { Remove-MpPreference -ExclusionPath $Plan.Paths -ErrorAction Stop }
         if ($Plan.Processes) { Remove-MpPreference -ExclusionProcess $Plan.Processes -ErrorAction Stop }
+        if ($Plan.PSObject.Properties['Id']) { try { Remove-DefenderLedgerEntry -Id $Plan.Id } catch { } }
+        if (-not $Quiet) { & $Log "Microsoft Defender scans $(@($Plan.Paths + $Plan.Processes) -join ', ') again." 'INFO' }
     } catch {
-        Write-Warning "Could not remove the Microsoft Defender exclusions $(@($Plan.Paths + $Plan.Processes) -join ', '): remove them in Windows Security. $($_.Exception.Message)"
+        # Left in the ledger: Remove-StaleDefenderExclusions tries again at the next build, capture or console start.
+        if (-not $Quiet) { & $Log "Could not remove the Microsoft Defender exclusions $(@($Plan.Paths + $Plan.Processes) -join ', '): remove them in Windows Security. $($_.Exception.Message)" 'WARN' }
     }
 }
 
@@ -319,6 +410,7 @@ function Test-SlowImageTarget {
     ($DriveType -in 'Removable', 'Network') -or ($BusType -in 'USB', 'SD', 'MMC', 'iSCSI')
 }
 
-Export-ModuleMember -Function Get-DefenderExclusionPlan, Add-DefenderScanExclusions, Remove-DefenderScanExclusions, Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
+Export-ModuleMember -Function Get-DefenderExclusionPlan, Get-DefenderLedgerPath, Read-DefenderLedger, Add-DefenderLedgerEntry, Remove-DefenderLedgerEntry, Test-DefenderLedgerOwnerAlive,
+    Get-StaleDefenderEntries, Remove-StaleDefenderExclusions, Add-DefenderScanExclusions, Remove-DefenderScanExclusions, Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
     Test-ConvertedDiskReusable, Remove-ConvertedDisk, Get-CaptureDiskChecklist, ConvertFrom-RegQuery, Get-WindowsDisplayName,
     Write-CaptureCheckResult, Read-CaptureCheckResult, Get-CaptureCheckView

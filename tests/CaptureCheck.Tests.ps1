@@ -158,9 +158,47 @@ Assert-Equal (Test-SlowImageTarget -DriveType Network) $true 'slow target: netwo
 # Capture-VMImage.ps1 takes its Defender exclusions off again, also when the capture fails.
 $captureText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Capture-VMImage.ps1')
 $finally = $captureText.Substring($captureText.LastIndexOf('finally {'))
-Assert-Equal ($captureText -match '\$defender = Add-CaptureDefenderExclusions') $true 'capture adds Defender exclusions for DISM'
+Assert-Equal ($captureText -match '\$defender = Add-DefenderScanExclusions .*dism\.exe') $true 'capture adds Defender exclusions for DISM (shared code)'
+Assert-Equal ($captureText -match 'function Add-CaptureDefenderExclusions') $false 'capture has no copy of the Defender code of its own'
 Assert-Equal ($captureText -match "'/Verify'") $false 'capture does not read the whole image back with /Verify'
-Assert-Equal ($finally -match 'Remove-CaptureDefenderExclusions \$defender') $true 'capture removes them in finally'
+Assert-Equal ($finally -match 'Remove-DefenderScanExclusions -Plan \$defender') $true 'capture removes them in finally'
+
+# The ledger: what a build or capture added stays noted until it is removed, so exclusions of one that was stopped
+# (window closed, PC restarted) are taken off at the next start instead of staying for good.
+$ledgerDir = Join-Path ([IO.Path]::GetTempPath()) ("imaging-ledger-" + [guid]::NewGuid())
+$ledger = [IO.Path]::Combine($ledgerDir, 'defender-exclusions.json')
+try {
+    $one = Add-DefenderLedgerEntry -LedgerPath $ledger -Plan ([pscustomobject]@{ Paths = @('E:\', 'F:\'); Processes = @('dism.exe') }) -ProcessId 111 -StartTicks 5
+    $two = Add-DefenderLedgerEntry -LedgerPath $ledger -Plan ([pscustomobject]@{ Paths = @('C:\Work'); Processes = @() }) -ProcessId 222 -StartTicks 6
+    Assert-Equal @(Read-DefenderLedger -LedgerPath $ledger).Count 2 'ledger: each build notes its exclusions'
+    Remove-DefenderLedgerEntry -LedgerPath $ledger -Id $two
+    $left = @(Read-DefenderLedger -LedgerPath $ledger)
+    Assert-Equal "$($left.Count) $($left[0].id)" "1 $one" 'ledger: a build that removed its exclusions drops its entry'
+    Assert-Equal ($left[0].paths -join ',') 'E:\,F:\' 'ledger: one entry stays a list with its paths'
+
+    $alive = { param($ProcessId, $StartTicks) $ProcessId -eq 111 }
+    $removedArgs = New-Object System.Collections.ArrayList
+    $fake = { param($Paths, $Processes) [void]$removedArgs.Add("$($Paths -join ',')|$($Processes -join ',')") }
+    Assert-Equal (Remove-StaleDefenderExclusions -LedgerPath $ledger -IsAlive $alive -Remove $fake) 0 'stale: a build still running keeps its exclusions'
+    Assert-Equal @(Read-DefenderLedger -LedgerPath $ledger).Count 1 'stale: its entry stays'
+    $gone = { param($ProcessId, $StartTicks) $false }
+    Assert-Equal (Remove-StaleDefenderExclusions -LedgerPath $ledger -IsAlive $gone -Remove $fake) 3 'stale: a stopped build''s exclusions are removed'
+    Assert-Equal ($removedArgs -join ';') 'E:\,F:\|dism.exe' 'stale: the exact paths and processes it added'
+    Assert-Equal ([IO.File]::Exists($ledger)) $false 'stale: an empty ledger is deleted'
+
+    [void](Add-DefenderLedgerEntry -LedgerPath $ledger -Plan ([pscustomobject]@{ Paths = @('G:\'); Processes = @() }) -ProcessId 333 -StartTicks 7)
+    $fail = { param($Paths, $Processes) throw 'not admin' }
+    Assert-Equal (Remove-StaleDefenderExclusions -LedgerPath $ledger -IsAlive $gone -Remove $fail) 0 'stale: nothing counted when removing fails'
+    Assert-Equal @(Read-DefenderLedger -LedgerPath $ledger).Count 1 'stale: a failed removal is tried again next time'
+    Assert-Equal (Test-DefenderLedgerOwnerAlive -ProcessId $PID -StartTicks -1) $false 'alive: a reused process id with another start time is not the build'
+} finally {
+    Remove-Item -LiteralPath $ledgerDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# The build, the capture and the console clean up exclusions left by a stopped build or capture.
+foreach ($f in 'src/New-DeploymentMedia.ps1', 'src/Capture-VMImage.ps1', 'src/Console/ImagingConsole.ps1') {
+    Assert-Equal ((Get-Content -Raw -LiteralPath (Join-Path $repo $f)) -match 'Remove-StaleDefenderExclusions') $true "$f removes leftover Defender exclusions"
+}
 
 if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
 Write-Host 'All capture check tests passed.' -ForegroundColor Green
