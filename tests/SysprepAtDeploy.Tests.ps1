@@ -34,8 +34,9 @@ Assert-Equal ((Get-SysprepArguments -UnattendPath 'C:\ProgramData\ImagingTool\Sy
 
 $cbs = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
 $wu = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-Assert-Equal ((Get-PendingRebootMarkers -ExistingKeys @($cbs, $wu)) -join ',') 'servicing,windowsupdate' 'both restart markers are named'
+Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @($cbs, $wu)) -join ',') 'servicing,windowsupdate' 'both restart markers are named'
 Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @()).Count) 0 'no key, no marker'
+Assert-Equal (@(Get-PendingRebootMarkers -ExistingKeys @($cbs)) -join ',') 'servicing' 'one key, one marker'
 Assert-Equal (Test-RebootPendingFor -Markers @('servicing') -Attempt 1) $true 'pending servicing restarts before sysprep'
 Assert-Equal (Test-RebootPendingFor -Markers @('servicing', 'windowsupdate') -Attempt 2) $true 'a second restart is allowed'
 Assert-Equal (Test-RebootPendingFor -Markers @('servicing') -Attempt 3) $false 'restarts stop after two, sysprep is tried'

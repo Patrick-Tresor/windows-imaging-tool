@@ -86,7 +86,7 @@ function Get-PendingRebootMarkers {
     $markers = [Collections.Generic.List[string]]::new()
     if (@($ExistingKeys) -match 'Component Based Servicing\\RebootPending$') { $markers.Add('servicing') }
     if (@($ExistingKeys) -match 'Auto Update\\RebootRequired$') { $markers.Add('windowsupdate') }
-    ,$markers.ToArray()
+    $markers.ToArray()   # callers wrap it in @(): a leading comma would hand back an empty array as one item
 }
 
 function Test-RebootPendingFor {
