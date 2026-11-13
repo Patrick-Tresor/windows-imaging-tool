@@ -877,22 +877,62 @@ function Get-AdSettings {
     # The Computers tab's domain, domain controller, account and OU, kept in console.json (never a password).
     $c = Get-ConsoleConfig
     if ($c.PSObject.Properties['activeDirectory'] -and $c.activeDirectory) { return $c.activeDirectory }
-    [pscustomobject]@{ domain = ''; server = ''; user = ''; searchBase = '' }
+    [pscustomobject]@{ domain = ''; server = ''; user = ''; searchBase = ''; useShareAccount = $true }
 }
 
 function Save-AdSettings {
     $c = Get-ConsoleConfig
     $ad = [pscustomobject]@{
-        domain = $ui.TxtAdDomain.Text.Trim(); server = $ui.TxtAdServer.Text.Trim(); user = $ui.TxtAdUser.Text.Trim()
+        domain = $ui.TxtAdDomain.Text.Trim(); server = $ui.TxtAdServer.Text.Trim()
+        # The Deploy Settings account is not copied here: it is read from deploy-settings.json each time.
+        user = $(if ($ui.ChkAdUseShare.IsChecked) { "$($script:adOwnUser)" } else { $ui.TxtAdUser.Text.Trim() })
+        useShareAccount = [bool]$ui.ChkAdUseShare.IsChecked
         searchBase = $(if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' })
     }
     $c | Add-Member -NotePropertyName activeDirectory -NotePropertyValue $ad -Force
     Save-ConsoleConfig $c
 }
 
+$script:adOwnUser = ''
+
+function Get-ShareAccount {
+    # The account on the Deploy Settings tab, or $null when none is set there.
+    if (-not (Test-ContentRoot $script:root)) { return $null }
+    $v = Get-DeploySettingsView -ContentRoot $script:root
+    if (-not $v.ShareUser) { return $null }
+    $v
+}
+
+function Update-AdAccount {
+    # Shows which account the Computers tab uses: the Deploy Settings one (read only here, change it there) or its own.
+    $share = Get-ShareAccount
+    if ($ui.ChkAdUseShare.IsChecked) {
+        $ui.TxtAdUser.Text = if ($share) { $share.ShareUser } else { '' }
+        $ui.TxtAdUser.IsReadOnly = $true
+        $ui.TxtAdUser.Background = '#F3F4F6'
+    } else {
+        $ui.TxtAdUser.Text = "$($script:adOwnUser)"
+        $ui.TxtAdUser.IsReadOnly = $false
+        $ui.TxtAdUser.ClearValue([Windows.Controls.Control]::BackgroundProperty)
+    }
+    # The domain from that account (user@corp.local), else the one this PC is joined to, when none is typed.
+    if (-not $ui.TxtAdDomain.Text.Trim()) {
+        $d = Get-AdDomainFromAccount $ui.TxtAdUser.Text
+        $ui.TxtAdDomain.Text = if ($d) { $d } else { Get-AdDefaultDomain }
+    }
+}
+
 function Get-AdCredential {
-    # The account typed on the tab, for Active Directory and the PCs; its password is asked once per console session
-    # and kept in memory only. $null = the account the console runs as.
+    # With Use the Deploy Settings account: that account and the password saved there, never asked.
+    # Otherwise the account typed on the tab, its password asked once per console session and kept in memory only.
+    # $null = the account the console runs as.
+    if ($ui.ChkAdUseShare.IsChecked) {
+        $share = Get-ShareAccount
+        if (-not $share) { throw 'No account on the Deploy Settings tab yet. Set it there, or untick Use the Deploy Settings account.' }
+        $pw = Get-SharePassword -ContentRoot $script:root
+        if (-not $pw) { throw "No password saved for $($share.ShareUser) on the Deploy Settings tab. Save it there, or untick Use the Deploy Settings account." }
+        return [pscredential]::new($share.ShareUser, (ConvertTo-SecureString $pw -AsPlainText -Force))
+    }
     $user = $ui.TxtAdUser.Text.Trim()
     if (-not $user) { return $null }
     if ($script:adCredential -and $script:adCredentialUser -eq $user) { return $script:adCredential }
@@ -932,8 +972,11 @@ function Update-Computers {
     if (-not $script:adLoaded) {
         $script:adLoaded = $true
         $ad = Get-AdSettings
-        $ui.TxtAdDomain.Text = if ($ad.domain) { "$($ad.domain)" } else { Get-AdDefaultDomain }
-        $ui.TxtAdServer.Text = "$($ad.server)"; $ui.TxtAdUser.Text = "$($ad.user)"
+        $ui.TxtAdDomain.Text = "$($ad.domain)"
+        $ui.TxtAdServer.Text = "$($ad.server)"
+        $script:adOwnUser = "$($ad.user)"
+        # Older console.json files have no useShareAccount: use the Deploy Settings account unless one was typed here.
+        $ui.ChkAdUseShare.IsChecked = if ($ad.PSObject.Properties['useShareAccount']) { [bool]$ad.useShareAccount } else { -not $ad.user }
         $ou = if ($ad.searchBase) { [pscustomobject]@{ Path = (ConvertTo-AdFriendlyPath "$($ad.searchBase)"); DN = "$($ad.searchBase)" } }
               else { [pscustomobject]@{ Path = '(whole domain)'; DN = '' } }
         $ui.CmbAdOu.ItemsSource = @($ou)
@@ -943,6 +986,7 @@ function Update-Computers {
     $picked = $ui.CmbAdAnswer.SelectedItem
     $ui.CmbAdAnswer.ItemsSource = $answers
     $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif (Test-ContentRoot $script:root) { (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile } else { $null }
+    Update-AdAccount
     Update-AdBootStatus
     Show-AdRows
 }
@@ -977,6 +1021,13 @@ $ui.BtnAdConnect.Add_Click({ Invoke-Safely {
     $sel = @($items | Where-Object { $_.DN -eq $keep })
     $ui.CmbAdOu.SelectedItem = if ($sel) { $sel[0] } else { $items[0] }
     Search-AdComputers
+} })
+
+$ui.ChkAdUseShare.Add_Click({ Invoke-Safely {
+    # Turned on: keep what was typed in the box, to show it again when turned off.
+    if ($ui.ChkAdUseShare.IsChecked) { $script:adOwnUser = $ui.TxtAdUser.Text.Trim() }
+    Update-AdAccount
+    Save-AdSettings
 } })
 
 $ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
@@ -1248,7 +1299,8 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
-    Update-Answers; Update-Settings; Update-Dashboard
+    # The Computers tab uses this account and share: show the change there too.
+    Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
     if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
     Set-Status 'Deploy settings saved'
 } })
