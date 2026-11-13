@@ -78,11 +78,24 @@ function Get-SysprepArguments {
     @('/generalize', '/oobe', '/reboot', '/quiet', "/unattend:$UnattendPath")
 }
 
+function Get-PendingRebootMarkers {
+    # Which "restart needed" markers Windows has set, from the registry keys that exist: 'servicing' (Component Based
+    # Servicing\RebootPending, set while Windows has update or feature work left for the next start) and
+    # 'windowsupdate' (Windows Update's Auto Update\RebootRequired, a flag Windows Update clears itself later).
+    param([string[]]$ExistingKeys)
+    $markers = [Collections.Generic.List[string]]::new()
+    if (@($ExistingKeys) -match 'Component Based Servicing\\RebootPending$') { $markers.Add('servicing') }
+    if (@($ExistingKeys) -match 'Auto Update\\RebootRequired$') { $markers.Add('windowsupdate') }
+    ,$markers.ToArray()
+}
+
 function Test-RebootPendingFor {
-    # Whether a restart should come before sysprep: Windows servicing or Windows Update waiting for one, while
-    # the attempts so far leave room (each restart counts one, up to $MaxAttempts).
-    param([bool]$Pending, [int]$Attempt, [int]$MaxAttempts = 3)
-    $Pending -and $Attempt -lt $MaxAttempts
+    # Whether a restart should come before sysprep: only Windows servicing work left for the next start (sysprep
+    # refuses to generalize with it), and only while the attempts so far leave room (each restart counts one, up to
+    # $MaxAttempts). Windows Update's own flag alone is no reason: it often stays set on a copied Windows and a
+    # restart does not clear it, and sysprep does not check it.
+    param([string[]]$Markers, [int]$Attempt, [int]$MaxAttempts = 3)
+    (@($Markers) -contains 'servicing') -and $Attempt -lt $MaxAttempts
 }
 
 function Get-SysprepOutcome {
@@ -126,5 +139,5 @@ function Test-SysprepHookDone {
 }
 
 Export-ModuleMember -Function Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
-    Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Test-RebootPendingFor, Get-SysprepOutcome,
+    Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
     Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone

@@ -14,7 +14,8 @@
 param(
     [switch]$CheckOnly,        # report problems and stop, without running sysprep
     [switch]$RemoveUserApps,   # remove Store apps that are installed for a user but not provisioned (they break sysprep); never the Store itself
-    [string]$Unattend          # optional answer file passed to sysprep /unattend
+    [string]$Unattend,         # optional answer file passed to sysprep /unattend
+    [switch]$SkipRebootCheck   # a pending restart is only a warning (sysprep at deploy restarts by itself first)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,7 +109,10 @@ $rebootKeys = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
 )
-if ($rebootKeys | Where-Object { Test-Path $_ }) { $problems.Add('A reboot is pending (Windows Update or servicing). Reboot, then run this again.') }
+if ($rebootKeys | Where-Object { Test-Path $_ }) {
+    if ($SkipRebootCheck) { $warnings.Add('Windows says a restart is pending (Windows Update or servicing).') }
+    else { $problems.Add('A reboot is pending (Windows Update or servicing). Reboot, then run this again.') }
+}
 
 try {
     $bl = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
