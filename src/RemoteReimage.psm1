@@ -435,6 +435,51 @@ function Get-RemoteReimageProblems {
 
 #endregion
 
-Export-ModuleMember -Function Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
+function Get-RemotingProblemText {
+    <#
+    .SYNOPSIS
+        One short line for the progress window from a PowerShell remoting error, saying what to do. The whole error
+        goes to the log. WinRM's messages are long and the same in every language only by their error names.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Message, [string]$Account)
+    $who = if ($Account) { $Account } else { 'this account' }
+    if ($Message -match '(?i)TrustedHosts|cannot be authenticated|workgroup|0x8009030e|0x80090311') {
+        return "This console PC can't sign in to it over WinRM (the console PC is not in the domain?): run the console on a domain PC, or add the PCs to WinRM TrustedHosts on this one (see the log)"
+    }
+    if ($Message -match '(?i)Access is denied|Acc.s refus|0x80070005|AccessDenied') {
+        return "$who is not an administrator on it: untick Use the Deploy Settings account and use an admin account, or add $who to its Administrators"
+    }
+    if ($Message -match '(?i)user name or password is incorrect|logon failure|0x8007052e') {
+        return "Wrong password for $who"
+    }
+    if ($Message -match '(?i)WinRM cannot complete|cannot connect|ERROR_WINRM|0x80338012|network path') {
+        return 'WinRM does not answer on it: turn on PowerShell remoting there (Enable-PSRemoting -Force, or the Group Policy in the log)'
+    }
+    $line = @("$Message" -split "`r?`n" | Where-Object { $_.Trim() })
+    if ($line) { $line[0].Trim() } else { 'PowerShell remoting failed' }
+}
+
+function Read-ReimageTargets {
+    <#
+    .SYNOPSIS
+        The PCs the console's Computers tab hands to Start-RemoteReimage.ps1: a JSON list of { name, address, ou }.
+    .DESCRIPTION
+        Windows PowerShell 5.1's ConvertFrom-Json returns a JSON list as ONE object (the whole array), so
+        @(... | ConvertFrom-Json) gave a list holding a list. $t.address on that inner array then found the array's own
+        Address() method instead of the property, and the first reimage tried to reach a PC named
+        "System.Object&, mscorlib ... Address(int )". Piping through ForEach-Object unrolls the array in 5.1 and 7.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $text = [IO.File]::ReadAllText($Path)
+    @($text | ConvertFrom-Json | ForEach-Object { $_ } | ForEach-Object {
+        $name = "$($_.name)".Trim()
+        if (-not $name) { return }
+        $address = if ($_.PSObject.Properties['address'] -and "$($_.address)".Trim()) { "$($_.address)".Trim() } else { $name }
+        $ou = if ($_.PSObject.Properties['ou']) { "$($_.ou)".Trim() } else { '' }
+        [pscustomobject]@{ name = $name.ToUpperInvariant(); address = $address; ou = $ou }
+    })
+}
+
+Export-ModuleMember -Function Get-RemotingProblemText, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Test-WinRMReachable, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

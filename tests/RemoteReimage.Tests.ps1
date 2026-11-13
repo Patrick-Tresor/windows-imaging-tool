@@ -88,6 +88,31 @@ try {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# The PCs handed over by the console. PowerShell 5.1 returned the JSON list as one object, and the first real
+# reimage tried to reach a PC whose address was the array's Address() method.
+$tf = [IO.Path]::Combine([IO.Path]::GetTempPath(), "targets-$([guid]::NewGuid()).json")
+try {
+    ConvertTo-Json -InputObject @([ordered]@{ name = 'dgwhzlg3'; address = 'DGWHZLG3.corp.local'; ou = 'OU=Staff,DC=corp,DC=local' }) | Set-Content -Path $tf
+    $one = @(Read-ReimageTargets -Path $tf)
+    Assert-Equal $one.Count 1 'one PC from the console is one target'
+    Assert-Equal ($one[0].address -is [string]) $true 'its address is text'
+    Assert-Equal $one[0].address 'DGWHZLG3.corp.local' 'its address is the DNS name'
+    Assert-Equal $one[0].name 'DGWHZLG3' 'its name'
+    Assert-Equal $one[0].ou 'OU=Staff,DC=corp,DC=local' 'its OU'
+    # What 5.1 handed over: the whole list as one item.
+    $nested = @(, @([pscustomobject]@{ name = 'PC1'; address = 'pc1.corp.local' }))
+    Assert-Equal ("$($nested[0].address)" -like '*Address(int*') $true 'the 5.1 bug is reproduced: an array in an array shows its Address() method'
+    ConvertTo-Json -InputObject @([ordered]@{ name = 'PC1'; address = 'pc1.corp.local' }, [ordered]@{ name = 'PC2'; address = '' }) | Set-Content -Path $tf
+    $two = @(Read-ReimageTargets -Path $tf)
+    Assert-Equal $two.Count 2 'two PCs are two targets'
+    Assert-Equal $two[1].address 'PC2' 'a PC with no DNS name is reached by its name'
+} finally { Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue }
+
+# Remoting errors become one line saying what to do
+Assert-Equal ((Get-RemotingProblemText -Message 'Connecting to remote server PC1 failed: The WinRM client cannot process the request. ... add the destination computer to the TrustedHosts configuration setting.' -Account 'CORP\svc') -like '*not in the domain*') $true 'a TrustedHosts error says the console PC is not in the domain'
+Assert-Equal ((Get-RemotingProblemText -Message 'Connecting to remote server PC1 failed with the following error message : Access is denied.' -Account 'CORP\svc') -like 'CORP\svc is not an administrator*') $true 'access denied names the account'
+Assert-Equal ((Get-RemotingProblemText -Message "first line`nsecond line" -Account 'x')) 'first line' 'another error keeps its first line'
+
 # The PC as it answers over remoting
 $ok = [pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'UEFI'; Serial = 'ABC123'; FreeC = 50GB }
 Assert-Equal @(Test-RemoteTarget -Info $ok -ExpectedName 'PC01').Count 0 'a UEFI PC with its own name and serial can be reimaged'
