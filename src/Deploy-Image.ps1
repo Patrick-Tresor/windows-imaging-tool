@@ -704,12 +704,23 @@ try {
     if ($driverPack) {
         # 72-79 % overall, by the count of drivers DISM has installed.
         Set-DeployStatus -Step 'Injecting drivers' -Percent 72
-        Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack) -OnProgress {
-            param($pct, $info)
-            if ($info -and $info.Total) {
-                Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
-            } else { Update-NativeStepStatus }
+        $injectDrivers = {
+            Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack) -OnProgress {
+                param($pct, $info)
+                if ($info -and $info.Total) {
+                    Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
+                } else { Update-NativeStepStatus }
+            }
         }
+        if ($driverMatch -and $driverMatch.PSObject.Properties['WinPEFallback'] -and $driverMatch.WinPEFallback) {
+            # A model with no driver pack gets the WinPE packs' storage and network drivers. They are a bonus, made
+            # for WinPE: a DISM error on them must not stop a deploy whose disk is already erased.
+            try { & $injectDrivers }
+            catch {
+                Write-DeployLog "Not every WinPE driver could be added to Windows ($($_.Exception.Message)); Windows uses its own drivers for the rest. DISM's log: X:\Windows\Logs\DISM\dism.log" -Level WARN
+                Set-DeployStatus -Warning "Some WinPE drivers not added for $($hw.Maker) $($hw.Model)"
+            }
+        } else { & $injectDrivers }
     }
 
     # An image captured from a VM that was only shut down (the capture wizard's "sysprep on each PC" choice) is

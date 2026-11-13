@@ -59,14 +59,17 @@ try {
     $dellPc = New-Pc Dell 'Latitude 9999' 'FFF1' $null 'SN-D'
     $m = Resolve-DriverPack -Identity $dellPc -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
     Assert-Equal "$($m.Status) $([IO.Path]::GetFileName($m.FullPath))" 'Fallback Dell-WinPE11-A11' 'fallback folder missing: Dell WinPE pack instead'
+    Assert-Equal "$($m.WinPEFallback)" 'True' 'the WinPE pack fallback is marked, so a DISM error on it only warns'
     $m = Resolve-DriverPack -Identity (New-Pc HP 'HP ProBook 999' '9999' $null 'SN-H') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
     Assert-Equal "$($m.Status) $([IO.Path]::GetFileName($m.FullPath))" 'Fallback HP-WinPE-sp173204' 'fallback folder missing: HP WinPE pack instead'
     $m = Resolve-DriverPack -Identity (New-Pc Lenovo 'ThinkPad X1 Yoga' $null '20FQ' 'SN-L') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
     Assert-Equal "$($m.Status) $($m.FullPath -eq $pe)" 'Fallback True' 'fallback folder missing, no Lenovo pack: all WinPE drivers'
     $m = Resolve-DriverPack -Identity $dellPc -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot (Join-Path $root 'none') -Detailed 6>$null
     Assert-Equal "$($m.Status) $([bool]$m.FullPath)" 'Fallback False' 'fallback folder missing, no WinPE drivers: inbox only'
+    Assert-Equal ([bool]$m.PSObject.Properties['WinPEFallback']) $false 'inbox only is not marked as the WinPE fallback'
     $m = Resolve-DriverPack -Identity (New-Pc HP 'HP EliteBook 840 14 inch G9 Notebook PC' '8A86' $null 'x') -CatalogPath $catalog -DriverRoot $drivers -WinPEDriverRoot $pe -Detailed 6>$null
     Assert-Equal "$($m.Status) $([bool]$m.FullPath)" 'MissingFolder False' 'a listed model with no folder does not get the WinPE pack'
+    Assert-Equal ([bool]$m.PSObject.Properties['WinPEFallback']) $false 'a listed pack is not marked as the WinPE fallback'
     Remove-Item -Recurse -Force $pe
 
     $reports = Get-DriverReportDir $root
@@ -116,6 +119,13 @@ try {
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Deploy-Image: a DISM error on the WinPE pack fallback warns; on a real driver pack it still stops the deploy.
+$deployText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+$injectAt = $deployText.IndexOf("Set-DeployStatus -Step 'Injecting drivers'")
+$injectPart = $deployText.Substring($injectAt, $deployText.IndexOf('# An image captured from a VM', $injectAt) - $injectAt)
+Assert-Equal ($injectPart.Contains('$driverMatch.WinPEFallback') -and $injectPart.Contains('try { & $injectDrivers }')) $true 'deploy: the WinPE fallback injection is in a try'
+Assert-Equal ($injectPart.Contains('} else { & $injectDrivers }')) $true 'deploy: a real driver pack injection still stops on an error'
 
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green
