@@ -32,6 +32,10 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.2 | Publish to WDS, PXE boot a PC | WinPE starts with F12 (or without, when prestaged) |
 | 2.3 | Dashboard | Each PC shows live progress, then the post-deploy checks |
 | 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, an old `config\share.cred` is gone after Save, and ISO/PXE still maps the share |
+| 2.5 | Computers tab: Connect, Search | The domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
+| 2.6 | Build network boot image | `Boot\boot.wim` and `boot.json` on the content root; the tab says it is ready |
+| 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |
+| 2.8 | Reimage a PC that is off, and one with a wrong DNS record | Both rows fail with one line, nothing changed on either PC |
 
 ## 3. Features on the deployed PC
 

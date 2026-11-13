@@ -111,7 +111,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         # The main window loads, and its tabs that hold a grid under a tall form scroll as a whole.
         [xml]$mx = Get-Content -Raw -LiteralPath (Join-Path $console 'MainWindow.xaml')
         $main = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($mx))
-        foreach ($tab in 'Driver Library', 'Dashboard') {
+        foreach ($tab in 'Driver Library', 'Computers', 'Dashboard') {
             $item = @($main.FindName('Tabs').Items | Where-Object { $_.Header -eq $tab })[0]
             Assert-Equal ($item.Content -is [Windows.Controls.ScrollViewer]) $true "the $tab tab scrolls when the window is small"
         }

@@ -8,7 +8,9 @@
     domain join, tasks, extra shares and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
     answer file win over the answer file's naming, the answer file's OU and the default answer file.
-    Unless -NoPrompt or an Unattended answer file starts it, a graphical wizard
+    A reimage started from the console's Computers tab left a job for this PC's BIOS serial in Reimage\ on the
+    share (RemoteReimage.psm1): its answer file, computer name and OU are used without asking, after a countdown.
+    Unless -NoPrompt, an Unattended answer file or such a job starts it, a graphical wizard
     (DeployWizard.psm1) lets the operator pick the answer file, name, OU, disk and applications.
     Wipes the target disk and partitions it GPT for UEFI. WinPE must be booted in UEFI mode.
 .EXAMPLE
@@ -36,6 +38,7 @@ Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 
 # Passwords: from the content root's password files when they are there (network share, or a stick built with
 # -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
@@ -510,7 +513,7 @@ function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
 Unlock-DeployMedia
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
-$progressWindow = $false; $onStick = $false
+$progressWindow = $false; $onStick = $false; $job = $null
 $status = 'FAILED'; $failure = $null
 try {
     # A wide console whose lines wrap instead of running off the right edge.
@@ -548,9 +551,22 @@ try {
         throw 'WinPE started in legacy BIOS mode. Boot it in UEFI mode.'
     }
 
+    # A reimage from the console's Computers tab: a job for this PC's serial on the share. Taking it moves it to
+    # Reimage\Started, so WinPE starting again on this PC does not reimage it a second time.
+    if ($null -eq (Get-ContentDiskNumber $root)) {
+        try {
+            $uuid = "$((Get-CimInstance Win32_ComputerSystemProduct).UUID)".Trim()
+            $job = Receive-ReimageJob -ContentRoot $root -Serial "$($hw.Serial)" -Uuid $uuid -OnNote { param($m) Write-DeployLog $m -Level WARN }
+        } catch { Write-DeployLog "Could not check the share for a reimage job: $($_.Exception.Message)" -Level WARN }
+    }
+    if ($job) {
+        Write-DeployLog ("Reimage requested by {0} at {1}: answer file {2}, name '{3}', OU '{4}'" -f $job.requestedBy, $job.requestedAt, $job.answerFile, $job.computerName, $job.ou)
+        $AnswerFile = $job.answerFile
+        if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
+    }
     $givenName = $ComputerName
-    # Someone is at this PC to type a password that is not on the media, unless -NoPrompt.
-    $script:CanAskSecrets = -not $NoPrompt
+    # Someone is at this PC to type a password that is not on the media, unless -NoPrompt or a reimage job started it.
+    $script:CanAskSecrets = -not $NoPrompt -and -not $job
 
     # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
     $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
@@ -559,8 +575,12 @@ try {
         if ($problems) { throw "Naming list entry for serial $($hw.Serial) has problems: $($problems -join ' ')" }
         Write-DeployLog ("Naming list entry for serial {0}: name '{1}', OU '{2}', answer file '{3}'" -f $hw.Serial, $listed.ComputerName, $listed.OU, $listed.AnswerFile)
         if (-not $AnswerFile -and $listed.AnswerFile) { $AnswerFile = $listed.AnswerFile }
-    } else {
+    } elseif (-not $job) {
         Write-DeployLog "Serial $($hw.Serial) is not in the naming list; using the answer file's naming"
+    }
+    if ($job -and $job.ou) {
+        # The PC goes back into the OU it was in, whatever the naming list or the answer file say.
+        $listed = [pscustomobject]@{ Serial = "$($hw.Serial)"; ComputerName = $(if ($listed) { $listed.ComputerName } else { '' }); OU = $job.ou; AnswerFile = $job.answerFile }
     }
 
     $names = Get-AnswerFileNames -Root $root
@@ -581,7 +601,7 @@ try {
     # the USB stick is still first in the boot order. Ask instead of counting down, or it would be wiped again.
     # Only a safety check: if it fails, log it and carry on, so it can never stop a deploy.
     $unstarted = $null
-    if (-not $NoPrompt) {
+    if (-not $NoPrompt -and -not $job) {
         try { $unstarted = Find-UnstartedDeployment -Serial "$($hw.Serial)" -ExcludeRoots @($root) }
         catch { Write-DeployLog "Could not check this PC's disks for an earlier deployment: $($_.Exception.Message)" -Level WARN }
     }
@@ -592,14 +612,15 @@ try {
     if ($AnswerFile) {
         $answer = & $readAnswer $AnswerFile
         if ($NoPrompt) { $confirmed = $true }
-        elseif ($answer.Mode -eq 'Unattended' -and -not $unstarted) {
+        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted) -or $job) {
             $deployPlan = & $preparePlan $answer
             $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
             Write-Host ''
             Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $name -Disk (Get-Disk -Number $answer.DiskNumber) -Applications $answer.Applications |
                 ForEach-Object { Write-Host $_ }
             Set-DeployStatus -Step 'Counting down' -Percent 5
-            $confirmed = Wait-Countdown $answer.UnattendDelay
+            # Nobody may be at a PC reimaged from the console: count down, so someone who is can still stop it.
+            $confirmed = Wait-Countdown $(if ($job) { [Math]::Max([int]$answer.UnattendDelay, 15) } else { $answer.UnattendDelay })
             if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
         }
     }
@@ -622,7 +643,7 @@ try {
             if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $deployPlan.WmiValue -Serial $hw.Serial -Typed $typed }
         }
     }
-    $nameSource = if ($givenName -and $ComputerName -eq $givenName) { 'parameter' }
+    $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $job.computerName -eq $givenName) { 'kept from Active Directory' } else { 'parameter' } }
                   elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
     Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName }
@@ -807,6 +828,8 @@ finally {
         default     { Set-DeployStatus -Message $failure -State Failed -Fields $final }
     }
     if ($status -eq 'OK') {
+        # A PC reimaged from the console restarts into Windows by itself: nobody may be there to do it.
+        if ($job -and -not $answer.Shutdown -and -not $answer.Reboot) { $answer.Reboot = $true; Write-DeployLog 'Reimage job: restarting into Windows' }
         # The dashboard waits for first boot; the window on this PC is done with its part.
         $whenDone = if ($answer.Shutdown) { 'shutdown' } elseif ($answer.Reboot) { 'restart' } else { 'stay' }
         # Content on a disk of this PC is the USB stick (a network share has no disk number).
