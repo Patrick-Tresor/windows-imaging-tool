@@ -295,5 +295,16 @@ try {
     Assert-Equal ((Get-DriverCatalog -ContentRoot $root).fallbacks.Dell) 'Dell\_Generic WinPE-Storage-Net' 'old content root: fallbacks stay'
 } finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
+# Faster builds: the folders the Media tab asks the admin to exclude in Windows Security (the tool never does it).
+$folders = @(Get-ScanExclusionFolders -ContentRoot 'D:\Deploy' -WorkDir 'C:\WinPE_Build')
+Assert-Equal $folders[0] 'C:\WinPE_Build' 'scan tip: the WinPE work folder first'
+Assert-Equal ($folders[1] -like '*ImagingConsole*WinPEBuilds') $true 'scan tip: the WinPE build cache'
+Assert-Equal ($folders[2] -like 'D:\Deploy*Images') $true 'scan tip: the content root''s Images folder'
+Assert-Equal @(Get-ScanExclusionFolders -ContentRoot '\\server\Deploy').Count 2 'scan tip: a network share is not listed (its server scans it)'
+Assert-Equal (@($folders | Where-Object { $_ -match '^[A-Za-z]:\\?$' -or $_ -match '\.exe$' }).Count) 0 'scan tip: never a drive root or a program'
+$tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ contentRoot = 'D:\Deploy' })
+Assert-Equal ($tip.Text -like '*Windows Security*C:\WinPE_Build*') $true 'scan tip: says where to add them and lists them'
+Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })) $null 'scan tip: hidden once the admin clicked Done'
+
 if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All tests passed' -ForegroundColor Green

@@ -1005,6 +1005,40 @@ function Save-WdsSettings {
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
 }
 
+#region Faster builds: folders to exclude from Microsoft Defender
+
+function Get-ScanExclusionFolders {
+    <#
+    .SYNOPSIS
+        The folders the media build and the VM capture write many files to, which Microsoft Defender scans one by one
+        and so slows down: the WinPE work folder, the WinPE build cache and the content root's Images folder. The
+        console shows them on the Media tab for the admin to add once in Windows Security. The tool itself never
+        changes Defender's settings: on 2026-11-13 Defender blocked a script of this tool as malicious for doing that.
+        Folders only, never a drive root or a program, so nothing else on the PC goes unscanned.
+    #>
+    param([string]$ContentRoot, [string]$WorkDir = 'C:\WinPE_Build')
+    $local = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::Combine($HOME, '.cache') }
+    $out = @($WorkDir, [IO.Path]::Combine($local, 'ImagingConsole', 'WinPEBuilds'))
+    if ("$ContentRoot".Trim() -and "$ContentRoot".Trim() -notmatch '^\\\\') {
+        # A network share is scanned by its server, not by this PC.
+        $out += [IO.Path]::Combine("$ContentRoot".Trim(), 'Images')
+    }
+    @($out | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Get-ScanExclusionTip {
+    # The Media tab's tip: one line and the folder list, or $null once the admin said it is done.
+    param([string]$ContentRoot, $Config = (Get-ConsoleConfig))
+    if ($Config -and $Config.PSObject.Properties['scanTipDone'] -and $Config.scanTipDone) { return $null }
+    $folders = @(Get-ScanExclusionFolders -ContentRoot $ContentRoot)
+    [pscustomobject]@{
+        Text    = "Builds and captures are faster when Microsoft Defender skips these folders. Add them once in Windows Security (Virus & threat protection settings, Exclusions, Add an exclusion, Folder): $($folders -join '; ')"
+        Folders = $folders
+    }
+}
+
+#endregion
+
 #region Deploy settings page
 
 function Get-UncRoot([string]$Path) {
@@ -1249,6 +1283,7 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
+    Get-ScanExclusionFolders, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,

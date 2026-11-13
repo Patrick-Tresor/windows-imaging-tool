@@ -99,10 +99,8 @@ $title = switch ($Target) {
 }
 Start-BuildProgress -Path $ProgressFile -Title $title -Steps $steps -LogPath $LogPath
 # Any error from here on: the progress window shows the step that failed and one line, this window and the log the rest.
-$defenderPlans = @()
 trap {
     Stop-BuildProgress -Message $_.Exception.Message
-    foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }
     if ($LogPath) { Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red; try { Stop-Transcript | Out-Null } catch { } }
     break
 }
@@ -115,9 +113,6 @@ Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
-# A build or capture that was stopped (window closed, PC restarted) could not take its Defender exclusions off.
-try { $stale = Remove-StaleDefenderExclusions; if ($stale) { Write-Host "Removed $stale Microsoft Defender exclusion(s) left by a build or capture that was stopped." -ForegroundColor DarkGray } } catch { }
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -247,9 +242,6 @@ if (-not $NoWinPECache -and -not $peCached) {
     Write-Host ("No saved WinPE build matches this one (key {0}; saved: {1}). A driver pack, the ADK or the components changed, so the components and drivers go in again; this build is saved for the next one." -f $peKey, $(if ($saved) { $saved -join ', ' } else { 'none' })) -ForegroundColor DarkGray
     foreach ($peSrc in $pePlan) { Write-Host "  WinPE driver source: $($peSrc.Name) ($($peSrc.Path)), $(@($peSrc.Infs).Count) .inf" -ForegroundColor DarkGray }
 }
-# Defender scanning every file DISM writes into the mounted boot.wim (and, below, every file copied to the stick)
-# can make the build many times slower. Temporary exclusions, removed at the end or on an error.
-$defenderPlans += @(Add-DefenderScanExclusions -Paths @($WorkDir) -Processes @('dism.exe', 'dismhost.exe') -Reason 'the build' | Where-Object { $_ })
 $peReport = @()
 Start-BuildStep 'mount'
 if ($peCached) {
@@ -449,7 +441,6 @@ switch ($Target) {
             Start-BuildStep 'stick'
             $sticks = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
             $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
-            $defenderPlans += @(Add-DefenderScanExclusions -Paths @("${bootLetter}:\", "${dataLetter}:\") -Reason 'the copy to the stick' | Where-Object { $_ })
             if ($copyPlan) {
                 $update = Get-MediaUpdatePlan -Plan $copyPlan -Destination "${dataLetter}:\"
                 Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-MediaSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
@@ -479,7 +470,7 @@ switch ($Target) {
                     throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
                 }
             }
-            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }; Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
+            if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
             Write-Host "Erasing and partitioning USB disk $UsbDiskNumber..."
             Start-BuildStep 'stick' -Detail "$($disk.FriendlyName): WINPE (FAT32) and DEPLOY (NTFS)"
 
@@ -493,7 +484,6 @@ switch ($Target) {
             $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
             $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
             Complete-BuildStep 'stick' -Detail "WINPE on ${bootLetter}:, DEPLOY on ${dataLetter}:"
-            $defenderPlans += @(Add-DefenderScanExclusions -Paths @("${bootLetter}:\", "${dataLetter}:\") -Reason 'the copy to the stick' | Where-Object { $_ })
             Write-Host "Copying WinPE boot files to ${bootLetter}:..."
             Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
             robocopy "$WorkDir\media" "${bootLetter}:\" /E /NFL /NDL /NJH /NJS | Out-Null
@@ -540,7 +530,5 @@ switch ($Target) {
         Write-Host '==============================================' -ForegroundColor Green
     }
 }
-foreach ($d in $defenderPlans) { Remove-DefenderScanExclusions -Plan $d }
-$defenderPlans = @()
 Stop-BuildProgress
 if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
