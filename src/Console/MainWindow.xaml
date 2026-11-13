@@ -682,8 +682,10 @@
               <TextBox x:Name="TxtAdDomain" Width="170" Margin="0,0,12,0" ToolTip="For example corp.local. Empty = the domain this PC is joined to."/>
               <Label Content="Domain controller"/>
               <TextBox x:Name="TxtAdServer" Width="150" Margin="0,0,12,0" ToolTip="Optional. Needed only when this PC is not joined to the domain, e.g. dc01.corp.local."/>
+              <CheckBox x:Name="ChkAdUseShare" VerticalAlignment="Center" Margin="0,0,12,0" Content="Use the Deploy Settings account"
+                        ToolTip="The account and saved password from the Deploy Settings tab, so nothing is typed twice. Untick it to use another account (an administrator on the PCs)."/>
               <Label Content="Account"/>
-              <TextBox x:Name="TxtAdUser" Width="150" Margin="0,0,12,0" ToolTip="Optional: CORP\admin. Empty = the account you are signed in with. The password is asked once and not saved."/>
+              <TextBox x:Name="TxtAdUser" Width="150" Margin="0,0,12,0" ToolTip="CORP\admin, or empty for the account you are signed in with. Its password is asked once and not saved."/>
               <Button x:Name="BtnAdConnect" Content="Connect" Style="{StaticResource Primary}"/>
             </WrapPanel>
             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
