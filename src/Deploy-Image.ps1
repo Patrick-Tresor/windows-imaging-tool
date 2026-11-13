@@ -429,15 +429,14 @@ function Connect-StatusFolder([string]$Root, $Settings) {
         # A separate status share (USB deployments reporting to a server): needs the network and the share account.
         & wpeutil.exe WaitForNetwork | Out-Null
         $user = $null; $pw = $null
-        if ($Settings.share.user -and $Settings.share.passwordFile) {
-            $pwFile = @((Join-Path $Root $Settings.share.passwordFile),
-                        (Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $Settings.share.passwordFile)) |
-                Where-Object { Test-Path $_ } | Select-Object -First 1
-            # Without a password net use would stop and prompt, so only pass the account when its password is known.
+        if ($Settings.share.user) {
+            $file = if ($Settings.share.PSObject.Properties['passwordFile']) { "$($Settings.share.passwordFile)".Trim() } else { '' }
+            # A password file on the content root (older setups); otherwise Get-ShareCredential: the password the console
+            # encrypted into the settings, or the vault. Without a password net use would stop and prompt, so the account
+            # is only passed when its password is known.
+            $pwFile = if ($file) { @(Join-Path $Root $file) | Where-Object { Test-Path $_ } | Select-Object -First 1 } else { $null }
             if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
-            elseif ($script:Vault.ContainsKey((ConvertTo-SecretKey $Settings.share.passwordFile))) { $user = $Settings.share.user; $pw = $script:Vault[(ConvertTo-SecretKey $Settings.share.passwordFile)] }
             else {
-                # The copy the build encrypted into this boot image's own settings (the stick has no plain password file).
                 $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
                 if ($cred.Password) { $user = $Settings.share.user; $pw = $cred.Password }
             }

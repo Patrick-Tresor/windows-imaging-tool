@@ -130,7 +130,7 @@ try {
     Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
     $set = Join-Path $root 'config/deploy-settings.json'
     $s = if (Test-Path $set) { Get-Content -Raw $set | ConvertFrom-Json } else { [pscustomobject]@{ share = [pscustomobject]@{ path = ''; user = ''; passwordFile = '' } } }
-    $s.share.passwordFile = 'config\share.cred'
+    $s.share | Add-Member -NotePropertyName passwordFile -NotePropertyValue 'config\share.cred' -Force
     $s | ConvertTo-Json -Depth 6 | Set-Content $set
     Set-Content (Join-Path $root 'config/share.cred') 'SharePw'
     $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Default'

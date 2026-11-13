@@ -1193,10 +1193,7 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' '#B91C1C'; return }
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
-    if ($user -and -not $pw -and $script:sharePwSaved) {
-        $v = Get-DeploySettingsView -ContentRoot $script:root
-        $pw = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes((Join-ContentPath $script:root $v.PasswordFile)))).Trim()
-    }
+    if ($user -and -not $pw -and $script:sharePwSaved) { $pw = Get-SharePassword -ContentRoot $script:root }
     Set-ShareTestText "Connecting to $target..." '#5B6170'
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
