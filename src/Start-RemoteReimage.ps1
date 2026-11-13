@@ -49,7 +49,7 @@ if ($CredentialFile) {
 }
 $targets = @()
 if ($TargetsFile) {
-    try { $targets = @(Get-Content -Raw -LiteralPath $TargetsFile | ConvertFrom-Json) } finally { Remove-Item -LiteralPath $TargetsFile -Force -ErrorAction SilentlyContinue }
+    try { $targets = @(Read-ReimageTargets -Path $TargetsFile) } finally { Remove-Item -LiteralPath $TargetsFile -Force -ErrorAction SilentlyContinue }
 }
 # From the console (powershell -File) a list arrives as one comma-separated string.
 foreach ($c in @($Computers | ForEach-Object { "$_" -split ',' } | ForEach-Object Trim | Where-Object { $_ })) {
@@ -80,7 +80,10 @@ try {
     # One PC at a time up to its restart: each copy of boot.wim is a few hundred MB.
     foreach ($p in $pcs) {
         Start-BuildStep $p.Id -Detail 'Reading the PC'
-        if (-not $up[$p.Address]) { Stop-Pc $p "Not reachable over PowerShell remoting ($($p.Address)): it is off, or WinRM is not enabled on it"; continue }
+        if (-not $up[$p.Address]) {
+            Write-Host "$($p.Name): nothing answers on the WinRM port (5985) at $($p.Address). If it is on, turn on PowerShell remoting there: Enable-PSRemoting -Force as administrator, or for many PCs the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the Windows Defender Firewall rule Windows Remote Management (HTTP-In)."
+            Stop-Pc $p "Not reachable over WinRM ($($p.Address)): it is off, or PowerShell remoting is not turned on there (see the log)"; continue
+        }
         try {
             $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential
             Write-Host "$($p.Name): $($info.Model), serial $($info.Serial), $($info.Firmware), BitLocker $($info.BitLocker)"
@@ -110,7 +113,14 @@ try {
             Write-Host "$($p.Name): next boot set to WinPE from its own disk (entry $($r.BootEntry)); restarting in $RestartDelay s"
             $p.State = 'Restarting'; $p.RestartAt = (Get-Date).AddSeconds($RestartDelay)
             Set-BuildStepProgress $p.Id -Percent 70 -Detail 'Restarting into WinPE'
-        } catch { Stop-Pc $p $_.Exception.Message }
+        } catch {
+            # The whole error in the log, one line saying what to do in the window.
+            Write-Host "$($p.Name): $($_.Exception.Message)"
+            if ($_.Exception.Message -match '(?i)TrustedHosts') {
+                Write-Host "On this console PC, as administrator: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*.<your domain>' -Concatenate -Force, and sign in with DOMAIN\user."
+            }
+            Stop-Pc $p (Get-RemotingProblemText -Message $_.Exception.Message -Account $(if ($credential) { $credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
+        }
     }
 
     # Then wait for WinPE on each PC to take its job.
