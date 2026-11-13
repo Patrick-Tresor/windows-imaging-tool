@@ -55,6 +55,14 @@ Write-Log "First boot for answer file $($plan.answerFile)"
 # A PC that ran sysprep at its first start (image captured without sysprep): its scripts are done. The answer file
 # copy in there is normally gone already; the log stays in C:\Windows\Temp\SysprepAtDeploy.log.
 Remove-Item 'C:\ProgramData\ImagingTool\Sysprep' -Recurse -Force -ErrorAction SilentlyContinue
+# Setup ran, so sysprep did finish: a failure notice the first start left on the logon screen (it gave up waiting
+# while sysprep was still busy) is wrong now. Only that notice, never one the organization set.
+$noticeKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+if ((Get-ItemProperty -Path $noticeKey -Name legalnoticecaption -ErrorAction SilentlyContinue).legalnoticecaption -eq 'Deployment not finished: sysprep failed') {
+    Set-ItemProperty -Path $noticeKey -Name legalnoticecaption -Value '' -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $noticeKey -Name legalnoticetext -Value '' -ErrorAction SilentlyContinue
+    Write-Log 'Removed the sysprep failure notice from the logon screen: sysprep finished after all.'
+}
 # Windows has started, so WinPE may wipe this disk again on a later Unattended deploy (see Find-UnstartedDeployment).
 Remove-Item (Join-Path $deployDir 'deployed.json') -Force -ErrorAction SilentlyContinue
 

@@ -116,6 +116,8 @@ Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
+# A build or capture that was stopped (window closed, PC restarted) could not take its Defender exclusions off.
+try { $stale = Remove-StaleDefenderExclusions; if ($stale) { Write-Host "Removed $stale Microsoft Defender exclusion(s) left by a build or capture that was stopped." -ForegroundColor DarkGray } } catch { }
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus

@@ -178,7 +178,8 @@ try {
         Write-Log "Task $taskName started; waiting for it (no logon screen meanwhile)"
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $state = ''
-        while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes)) {
+        # The limit grows once sysprep itself runs (Get-SysprepWaitMinutes), so a slow sysprep is not called failed.
+        while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes -State $state)) {
             Start-Sleep -Seconds 5
             $state = Get-RunState
             if (Test-SysprepHookDone -State $state) { break }
@@ -189,7 +190,7 @@ try {
             Start-Sleep -Seconds 600
             exit 0
         }
-        if ($state -ne 'failed') { Stop-WithFailure "Sysprep did not finish within $(Get-SysprepWaitMinutes) minutes (last state: $(if ($state) { $state } else { 'not started' }))." }
+        if ($state -ne 'failed') { Stop-WithFailure "Sysprep did not finish within $(Get-SysprepWaitMinutes -State $state) minutes (last state: $(if ($state) { $state } else { 'not started' }))." }
         exit 1
     }
     Invoke-RunStage

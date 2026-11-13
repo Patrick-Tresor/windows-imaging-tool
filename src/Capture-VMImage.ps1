@@ -239,41 +239,8 @@ if ($CheckOnly) {
     exit 0
 }
 
-function Add-CaptureDefenderExclusions {
-    # While DISM runs, Microsoft Defender would scan every file it reads from the mounted disk and every block it
-    # writes, which can make a capture many times slower. Adds exclusions for the mounted disk, the image being
-    # written and DISM itself, and returns what Remove-CaptureDefenderExclusions takes off again. Nothing when
-    # Defender's real-time protection is off or another antivirus is in charge.
-    param([string[]]$Paths)
-    try {
-        $status = Get-MpComputerStatus -ErrorAction Stop
-        if (-not $status.RealTimeProtectionEnabled) { return $null }
-        $pref = Get-MpPreference -ErrorAction Stop
-        $plan = Get-DefenderExclusionPlan -Paths $Paths -Processes @('dism.exe', 'dismhost.exe') `
-            -ExistingPaths @($pref.ExclusionPath) -ExistingProcesses @($pref.ExclusionProcess)
-        if ($plan.Paths) { Add-MpPreference -ExclusionPath $plan.Paths -ErrorAction Stop }
-        if ($plan.Processes) { Add-MpPreference -ExclusionProcess $plan.Processes -ErrorAction Stop }
-        if ($plan.Paths -or $plan.Processes) {
-            Write-DeployLog "Microsoft Defender skips $(@($plan.Paths + $plan.Processes) -join ', ') until the capture ends (removed after)."
-        }
-        $plan
-    } catch {
-        Write-DeployLog "Could not pause Microsoft Defender scanning for the capture, so it may be slow: $($_.Exception.Message)" -Level WARN
-        $null
-    }
-}
-
-function Remove-CaptureDefenderExclusions {
-    param($Plan)
-    if (-not $Plan) { return }
-    try {
-        if ($Plan.Paths) { Remove-MpPreference -ExclusionPath $Plan.Paths -ErrorAction Stop }
-        if ($Plan.Processes) { Remove-MpPreference -ExclusionProcess $Plan.Processes -ErrorAction Stop }
-        Write-DeployLog 'Microsoft Defender scans the capture folders and DISM again.'
-    } catch {
-        Write-DeployLog "Could not remove the capture's Microsoft Defender exclusions ($(@($Plan.Paths + $Plan.Processes) -join ', ')): remove them in Windows Security. $($_.Exception.Message)" -Level WARN
-    }
-}
+# Defender exclusions for the capture go through CaptureCheck.psm1 (the same code as the media build), into this log.
+$captureLog = { param($Message, $Level) Write-DeployLog $Message -Level $(if ($Level) { $Level } else { 'INFO' }) }
 
 function Get-ImageTargetInfo {
     # The kind of drive a folder is on: DriveType (Fixed, Removable, Network...) and, for a local disk, its bus
@@ -307,6 +274,8 @@ $swapping = $false
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
 $defender = $null     # Defender exclusions added for the capture; removed in finally
+# A capture or build that was stopped (window closed, PC restarted) could not take its exclusions off: do it now.
+try { $stale = Remove-StaleDefenderExclusions; if ($stale) { Write-DeployLog "Removed $stale Microsoft Defender exclusion(s) left by a capture or build that was stopped." } } catch { }
 
 Start-BuildProgress -Path $ProgressFile -Title "Capturing $Name" -LogPath $logPath -Steps @(
     , @('convert', 'Copying the VM''s disk')
@@ -406,7 +375,7 @@ try {
     $wim = Join-Path $staging "$Name.wim"
 
     Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
-    $defender = Add-CaptureDefenderExclusions -Paths @($windowsRoot, $staging, $disk.Path)
+    $defender = Add-DefenderScanExclusions -Paths @($windowsRoot, $staging, $disk.Path) -Processes @('dism.exe', 'dismhost.exe') -Reason 'the capture' -Log $captureLog
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
@@ -421,7 +390,7 @@ try {
     $read = if ($windowsInfo) { " from $(Format-DiskSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
     # The compression is in the line so captures with Fast and Maximum can be compared from the logs.
     Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}, {3} compression." -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $read, $Compression)
-    Remove-CaptureDefenderExclusions $defender
+    Remove-DefenderScanExclusions -Plan $defender -Log $captureLog
     $defender = $null
     Complete-BuildStep 'capture' -Detail ("{0} in {1:hh\:mm}, {2} compression" -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $Compression)
 
@@ -465,7 +434,7 @@ catch {
     if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
 }
 finally {
-    Remove-CaptureDefenderExclusions $defender
+    Remove-DefenderScanExclusions -Plan $defender -Log $captureLog
     # Release the disk before the temporary copy's deletion, which needs it free.
     if ($mount) { Dismount-VMDisks $mount }
     if ($tempDisk) { Remove-ConvertedDisk $tempDisk }

@@ -673,6 +673,8 @@ function Resolve-DriverPack {
         if ($pe) {
             $full = $pe
             $m.Path = $pe
+            # The deploy only warns when DISM can't add all of these: they are made for WinPE, not for this model.
+            $m | Add-Member -NotePropertyName WinPEFallback -NotePropertyValue $true -Force
             Write-DeployLog "Using the WinPE storage and network drivers instead: $pe"
         }
     }

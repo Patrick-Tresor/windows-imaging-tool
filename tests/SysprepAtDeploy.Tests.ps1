@@ -104,7 +104,14 @@ Assert-Equal (Test-SysprepHookDone -State 'sysprep') $false 'hook keeps waiting 
 foreach ($st in 'done', 'failed', 'restart') { Assert-Equal (Test-SysprepHookDone -State $st) $true "hook stops waiting: $st" }
 $hookPart = $script.Substring($hookAt)
 Assert-Equal ($hookPart.Contains('Clear-StartupHook') -or $hookPart.Contains("-Name SetupType")) $false 'the hook does not turn the startup command off before sysprep'
-Assert-Equal ($hookPart.Contains('while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes))')) $true 'the hook waits for the task'
+Assert-Equal ($hookPart.Contains('while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes -State $state))')) $true 'the hook waits for the task'
+# A slow sysprep is not called failed: the limit grows once sysprep itself runs.
+Assert-Equal (Get-SysprepWaitMinutes -State 'running') 45 'the checks before sysprep get 45 minutes'
+Assert-Equal (Get-SysprepWaitMinutes -State '') 45 'a task that has not started gets 45 minutes'
+Assert-Equal (Get-SysprepWaitMinutes -State 'sysprep') 180 'sysprep itself gets 3 hours'
+# First boot means sysprep finished: it clears our failure notice (and only ours) if the hook gave up too early.
+$firstBoot = [IO.File]::ReadAllText((Join-Path $repo 'src/FirstBoot.ps1'))
+Assert-Equal ($firstBoot.Contains("-eq '$((Get-SysprepFailureNotice -Reason 'x').Caption)'")) $true 'first boot clears the sysprep failure notice by its exact caption'
 $failAt = $script.IndexOf('function Stop-WithFailure')
 Assert-Equal ($script.IndexOf('Clear-StartupHook', $failAt) -lt $script.IndexOf('function Invoke-RunStage')) $true 'a failure turns the startup command off'
 # The deploy screen says nothing about sysprep: only the log file does.
