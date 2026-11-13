@@ -410,6 +410,11 @@ switch ($Target) {
         $pxeWim = Join-Path $OutputPath 'boot.wim'
         Start-BuildStep 'pxe' -Detail $pxeWim
         Copy-Item $bootWim $pxeWim -Force
+        # What the console's Computers tab checks before it starts this image on PCs over the network: a WinPE
+        # password would leave each PC waiting for someone to type it.
+        [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); locked = [bool]$WinPEPasswordFile
+                    share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)" } |
+            ConvertTo-Json | Set-Content (Join-Path $OutputPath 'boot.json') -Encoding utf8
         Complete-BuildStep 'pxe'
         if ($PublishToWds) { Start-BuildStep 'wds'; & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List; Complete-BuildStep 'wds' }
         else { Write-Host "boot.wim written to $OutputPath. Publish it with Publish-WdsBootImage.ps1, or import it into WDS (Boot Images > Add Boot Image)." }

@@ -73,14 +73,16 @@ and click **Create folders** the first time. Then:
   The build stops before erasing the stick when an answer file's image is missing.
 - **Deploy Settings**: five short sections. 1) USB stick only, or a network
   share (needed for ISO and PXE). 2) The Active Directory account WinPE signs in
-  with: type its password in the console (saved to `config\secrets\share.txt`,
-  never on the stick) and click **Test connection** to check the sign-in and
+  with: type its password in the console (saved encrypted in
+  `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Where PCs report for
   the Dashboard. 4) Default answer file and how many older image versions to
   keep. 5) Post-deploy checks. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
+- **Computers**: the computers in your Active Directory, to reimage them over
+  the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
@@ -102,7 +104,54 @@ config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secre
 Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
 Status\        <serial>.json + <serial>.log per PC, for the Dashboard
+Boot\          boot.wim + boot.json: the network boot image the Computers tab starts on PCs
+Reimage\       <serial>.json per PC waiting to be reimaged, Started\ for the ones WinPE took
 ```
+
+## Reimage computers from Active Directory
+
+The **Computers** tab lists the computers in your domain and reinstalls Windows
+on the ones you pick, with nobody at the PCs.
+
+1. Type the domain (filled in when the console PC is joined to one) and click
+   **Connect**. Not joined, or another account? Also type a domain controller
+   and an account (`CORP\admin`); its password is asked once and never saved.
+2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
+   `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
+   are left out unless ticked. Each row shows the OU, Windows version, last
+   logon and whether the PC answers on PowerShell remoting now.
+3. Once: set **Network share** on the Deploy Settings tab, then click **Build
+   network boot image**. It builds WinPE with the deploy tool into `Boot\` on
+   the content root, without a WinPE password (nobody is there to type it).
+   Rebuild it after updating the tool or the share settings.
+4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
+   **Reimage...**. **Keep each PC's name** and **Join it back into its OU** are
+   on by default.
+
+For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
+checks over PowerShell remoting that it answers with its own name, starts in
+UEFI mode and has a BIOS serial of its own; writes `Reimage\<serial>.json` on
+the share; copies the network boot image to `C:\_ImagingBoot`, adds a one-time
+boot entry for it (no PXE or WDS needed), suspends BitLocker for that one
+restart and restarts the PC after a 60 second warning. WinPE maps the share,
+takes the job for its serial (and UUID), and deploys that answer file with the
+PC's name and OU after a 15 second countdown (a key there opens the wizard).
+At the end it restarts into Windows. The progress window lists each PC until
+its deploy starts; from there it is on the Dashboard.
+
+Needs:
+- PowerShell remoting (WinRM) on the PCs, with your account (or the one typed)
+  as administrator. A Group Policy can turn it on for a whole OU.
+- The answer file and its image on the network share; the console checks.
+- An answer file whose passwords are encrypted in it, or on the share: a
+  reimaged PC never waits for someone to type one.
+- Domain join of a computer account that already exists: since the October 2022
+  Windows updates the join account must be the one that created it, a Domain
+  Admin, or allowed by the *Domain controller: Allow computer account re-use
+  during domain join* policy. Otherwise the join fails at first boot (error 0xaac).
+
+**Cancel reimage** removes a waiting job. A PC that already restarted into WinPE
+then waits at the wizard for someone at its screen.
 
 ## Answer files
 

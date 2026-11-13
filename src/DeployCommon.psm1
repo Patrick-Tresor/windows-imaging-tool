@@ -822,20 +822,24 @@ function Test-JoinAccount {
 }
 
 function Get-ShareCredential {
-    # The share account from deploy-settings.json. The password file sits next to config\ on the media (X:\Deploy).
-    # Without the file, the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them),
-    # then share.encryptedPassword, which the build writes into the boot image's settings and Decrypt turns into text.
+    # The share account from deploy-settings.json. The console keeps its password encrypted in share.encryptedPassword
+    # (AES-256 with the answer file key, which is in the boot image or the vault); Decrypt turns it into text.
+    # Older setups name a password file instead (share.passwordFile): next to config\ on the media (X:\Deploy), or in
+    # the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them).
     param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
     $password = $null
-    if ($settings.share.user -and $settings.share.passwordFile) {
-        $pwFile = Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $settings.share.passwordFile
-        $key = ($settings.share.passwordFile -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
-        if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
-        elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
-        elseif ($Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
+    if ($settings.share.user) {
+        $file = if ($settings.share.PSObject.Properties['passwordFile']) { "$($settings.share.passwordFile)".Trim() } else { '' }
+        if ($file) {
+            $pwFile = Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $file
+            $key = ($file -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
+            if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
+            elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
+        }
+        if (-not $password -and $Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
             try { $password = & $Decrypt "$($settings.share.encryptedPassword)" }
-            catch { Write-DeployLog "Share account password in the boot image not usable: $($_.Exception.Message)" -Level WARN }
+            catch { Write-DeployLog "Share account password in the settings not usable: $($_.Exception.Message)" -Level WARN }
         }
     }
     [pscustomobject]@{ User = $settings.share.user; Password = $password }
