@@ -12,8 +12,9 @@
     sysprepped image. The startup command stays set until sysprep has run, so a restart Windows needs first comes
     back to the hook. When the task cannot be created, the Run stage runs in the hook itself.
 
-    -Stage Run restarts first when Windows waits for one (up to 3 times), runs Prepare-Reference.ps1 -CheckOnly
-    -RemoveUserApps (BitLocker, Store apps that break sysprep, a missing Microsoft Store), then
+    -Stage Run restarts first when Windows servicing waits for one (up to 2 restarts; Windows Update's own flag alone
+    is no reason), runs Prepare-Reference.ps1 -CheckOnly -RemoveUserApps -SkipRebootCheck (BitLocker, Store apps
+    that break sysprep, a missing Microsoft Store), then
     sysprep /generalize /oobe /reboot /unattend. After the restart Windows setup applies the answer file and
     SetupComplete.cmd starts FirstBoot.ps1, as with a sysprepped image.
 
@@ -76,6 +77,14 @@ function Clear-StartupHook {
     Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value '' -ErrorAction SilentlyContinue
 }
 
+function Set-StartupHook {
+    # Windows turns SetupType back to 0 once it has started the hook, so a restart before sysprep would come back
+    # to the logon screen (the Yoga's log: runs 2 and 3 had no hook). Setting it again before each restart keeps
+    # the boot spinner up until sysprep has run.
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value (Get-SysprepHookCommand -Folder $folder) -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name SetupType -Value 2 -Type DWord -ErrorAction SilentlyContinue
+}
+
 function Stop-WithFailure([string]$Reason) {
     # Leaves the PC as it is (a copy of the reference VM that never generalized) and says so on the logon screen.
     Write-Log $Reason 'ERROR'
@@ -98,24 +107,31 @@ function Invoke-RunStage {
     Set-RunState 'running'
     Write-Log "Run $attempt on $env:COMPUTERNAME (still the reference VM's name until sysprep)"
 
-    $pending = [bool](@(
+    $markers = @(Get-PendingRebootMarkers -ExistingKeys @(@(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-    ) | Where-Object { Test-Path $_ })
-    if (Test-RebootPendingFor -Pending $pending -Attempt $attempt) {
+    ) | Where-Object { Test-Path $_ }))
+    if ($markers.Count) { Write-Log "Windows says a restart is needed: $($markers -join ', ')" }
+    if (Test-RebootPendingFor -Markers $markers -Attempt $attempt) {
         # The hook (still set) starts this again after the restart, without a logon screen in between.
-        Write-Log 'Windows is waiting for a restart (servicing or Windows Update); restarting before sysprep.' 'WARN'
+        Write-Log 'Windows servicing is waiting for a restart; restarting before sysprep.' 'WARN'
         Set-RunState 'restart'
+        Set-StartupHook
         & shutdown.exe /r /t 0 2>&1 | Out-Null
         Wait-ForRestart
         exit 0
     }
-    if ($pending) { Write-Log 'A restart is still pending after several restarts; trying sysprep anyway.' 'WARN' }
+    if ($markers.Count) {
+        # The restarts this stage could do are done (or only Windows Update's flag is left, which a restart does not
+        # clear on a copied Windows). Sysprep checks for itself what really blocks it and says so when it fails.
+        Write-Log 'Going on with sysprep anyway; sysprep reports it if this really blocks it.' 'WARN'
+    }
 
     # The reference checks, on this PC: BitLocker, Store apps installed for one user only (removed), the Store.
     $prepare = [IO.Path]::Combine($folder, 'Prepare-Reference.ps1')
-    Write-Log 'Running Prepare-Reference.ps1 -CheckOnly -RemoveUserApps'
-    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepare -CheckOnly -RemoveUserApps 2>&1
+    # -SkipRebootCheck: this stage has already handled the pending restart above.
+    Write-Log 'Running Prepare-Reference.ps1 -CheckOnly -RemoveUserApps -SkipRebootCheck'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepare -CheckOnly -RemoveUserApps -SkipRebootCheck 2>&1
     $prepareExit = $LASTEXITCODE
     foreach ($line in @($out)) { if ("$line".Trim()) { Write-Log "  $line" } }
     if ($prepareExit -ne 0) {
