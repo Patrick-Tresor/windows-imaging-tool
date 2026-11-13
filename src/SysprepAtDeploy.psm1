@@ -111,7 +111,13 @@ function Get-SysprepFailureNotice {
     }
 }
 
-function Get-SysprepWaitMinutes { 45 }
+function Get-SysprepWaitMinutes {
+    # How long the hook waits for the Run stage before it gives up: 45 minutes for the checks before sysprep, but
+    # 3 hours once sysprep itself runs (state 'sysprep'). Giving up while sysprep still works would put the failure
+    # notice on a PC that then finishes setup fine.
+    param([string]$State)
+    if ($State -eq 'sysprep') { 180 } else { 45 }
+}
 
 function Test-SysprepHookDone {
     # Whether the hook can stop waiting for the Run stage: it finished, failed, or Windows is restarting.
