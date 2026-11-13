@@ -77,6 +77,14 @@ function Clear-StartupHook {
     Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value '' -ErrorAction SilentlyContinue
 }
 
+function Set-StartupHook {
+    # Windows turns SetupType back to 0 once it has started the hook, so a restart before sysprep would come back
+    # to the logon screen (the Yoga's log: runs 2 and 3 had no hook). Setting it again before each restart keeps
+    # the boot spinner up until sysprep has run.
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name CmdLine -Value (Get-SysprepHookCommand -Folder $folder) -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\Setup' -Name SetupType -Value 2 -Type DWord -ErrorAction SilentlyContinue
+}
+
 function Stop-WithFailure([string]$Reason) {
     # Leaves the PC as it is (a copy of the reference VM that never generalized) and says so on the logon screen.
     Write-Log $Reason 'ERROR'
@@ -108,6 +116,7 @@ function Invoke-RunStage {
         # The hook (still set) starts this again after the restart, without a logon screen in between.
         Write-Log 'Windows servicing is waiting for a restart; restarting before sysprep.' 'WARN'
         Set-RunState 'restart'
+        Set-StartupHook
         & shutdown.exe /r /t 0 2>&1 | Out-Null
         Wait-ForRestart
         exit 0

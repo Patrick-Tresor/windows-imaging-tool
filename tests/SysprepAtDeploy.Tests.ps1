@@ -45,6 +45,7 @@ Assert-Equal (Test-RebootPendingFor -Markers @() -Attempt 1) $false 'no restart 
 # The Run stage handles the pending restart itself; the checks before sysprep must not stop on it again.
 $run = Get-Content -Raw (Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1')
 Assert-Equal ($run -match '-File \$prepare -CheckOnly -RemoveUserApps -SkipRebootCheck') $true 'sysprep at deploy runs the checks with -SkipRebootCheck'
+Assert-Equal ($run -match "Set-StartupHook\r?\n\s*& shutdown\.exe /r") $true 'the startup hook is set again before each restart'
 $prep = Get-Content -Raw (Join-Path $repo 'src/Prepare-Reference.ps1')
 Assert-Equal ($prep -match 'if \(\$SkipRebootCheck\) \{ \$warnings\.Add') $true 'Prepare-Reference -SkipRebootCheck only warns about a pending restart'
 
