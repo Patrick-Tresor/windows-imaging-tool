@@ -39,6 +39,7 @@ Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
 
 # Passwords: from the content root's password files when they are there (network share, or a stick built with
 # -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
@@ -356,6 +357,13 @@ function Request-DeploySecrets([string]$Root, $Answer) {
     $typed = Show-SecretsPrompt -Secrets $missing
     if ($null -eq $typed) { throw 'The passwords were not typed.' }
     Save-TypedSecrets -Values $typed -Secrets $missing
+}
+
+function Protect-StagedItem([string]$Path, [switch]$Folder) {
+    # Administrators and SYSTEM only (Get-AdminOnlyAclArgs): C:\Temp lets every signed-in user change what is in it,
+    # and first boot keeps the BitLocker PIN there and runs the installers as SYSTEM. A failure only warns.
+    $out = & icacls.exe @(Get-AdminOnlyAclArgs -Path $Path -Folder:$Folder) 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-DeployLog "Could not limit $Path to administrators (icacls exit $LASTEXITCODE): $(@($out) -join ' ')" -Level WARN }
 }
 
 function Wait-Countdown([int]$Seconds) {
@@ -760,7 +768,12 @@ try {
 
     # 5. First boot: applications and FIRSTBOOT tasks run as SYSTEM from SetupComplete.cmd.
     Set-DeployStatus -Step 'Staging applications' -Percent 82
-    New-Item -ItemType Directory -Path 'W:\Temp\Apps' -Force | Out-Null
+    # Both folders are limited to administrators before anything goes in, so what is copied (or downloaded at first
+    # boot) in them gets the same rights.
+    foreach ($f in 'W:\Temp\Apps', 'W:\Temp\Tasks') {
+        New-Item -ItemType Directory -Path $f -Force | Out-Null
+        Protect-StagedItem -Path $f -Folder
+    }
     foreach ($app in $apps) {
         Write-DeployLog "Staging application $($app.name)"
         Copy-Item -Path (Join-Path $appRoot $app.name) -Destination 'W:\Temp\Apps\' -Recurse -Force
@@ -779,7 +792,7 @@ try {
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
-        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') 'W:\Temp\'
+        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
@@ -789,6 +802,14 @@ try {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
     $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Temp\firstboot.json' -Encoding utf8
+    # Made here so they get the same rights: first boot only writes into them (its progress, and the file it holds
+    # open so only one run goes at a time).
+    Set-Content -Path 'W:\Temp\firstboot-progress.json' -Value '{}' -Encoding ascii
+    Set-Content -Path 'W:\Temp\firstboot.lock' -Value '' -Encoding ascii
+    foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1',
+                   'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
+        Protect-StagedItem -Path "W:\Temp\$f"
+    }
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null
     "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Temp\FirstBoot.ps1`r`n" |
         Set-Content -Path 'W:\Windows\Setup\Scripts\SetupComplete.cmd' -Encoding ascii
@@ -808,6 +829,7 @@ try {
     Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
     New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
         ConvertTo-Json | Set-Content -Path 'W:\Temp\deployed.json' -Encoding utf8
+    Protect-StagedItem -Path 'W:\Temp\deployed.json'
 
     Write-DeployLog 'Deployment finished'
     $status = 'OK'
