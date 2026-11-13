@@ -170,6 +170,14 @@ function Update-Answers {
     $ui.CmbDefaultAnswer.ItemsSource = @($rows.Name)
     $ui.TxtAnswerIssues.Text = ''
     Update-MediaAnswers
+    Update-ScanTip
+}
+
+function Update-ScanTip {
+    # The Media tab's tip: which folders to add as Defender exclusions in Windows Security (the admin does it once).
+    $tip = Get-ScanExclusionTip -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root } else { '' })
+    $ui.BdrScanTip.Visibility = if ($tip) { 'Visible' } else { 'Collapsed' }
+    $ui.TxtScanTip.Text = if ($tip) { $tip.Text } else { '' }
 }
 
 function Update-MediaPacks {
@@ -1202,6 +1210,18 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     } finally { $window.Cursor = $null; $pw = $null }
     Set-ShareTestText $r.Message $(if ($r.Ok) { '#15803D' } else { '#B91C1C' })
     Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
+} })
+
+$ui.BtnScanTipOpen.Add_Click({ Invoke-Safely { Start-Process 'windowsdefender://threatsettings' } })
+$ui.BtnScanTipCopy.Add_Click({ Invoke-Safely {
+    $tip = Get-ScanExclusionTip -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root } else { '' })
+    if ($tip) { [Windows.Clipboard]::SetText(($tip.Folders -join [Environment]::NewLine)); Set-Status 'Folders copied: paste each one in Windows Security, Add an exclusion, Folder.' }
+} })
+$ui.BtnScanTipDone.Add_Click({ Invoke-Safely {
+    $c = Get-ConsoleConfig
+    $c | Add-Member -NotePropertyName scanTipDone -NotePropertyValue $true -Force
+    Save-ConsoleConfig $c
+    Update-ScanTip
 } })
 
 $ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
