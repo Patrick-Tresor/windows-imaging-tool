@@ -61,11 +61,10 @@ $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
     $t = $targets[$i]
     [pscustomobject]@{
         Id = "pc$i"; Name = "$($t.name)".ToUpperInvariant(); Address = $(if ($t.address) { "$($t.address)" } else { "$($t.name)" }); OU = "$($t.ou)"
-        State = 'Pending'; Serial = $null; RestartAt = $null
+        State = 'Pending'; Serial = $null; RequestedAt = $null; RestartAt = $null; BootEntry = $null
     }
 })
 Start-BuildProgress -Path $ProgressFile -Title "Reimaging $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' }) with $AnswerFile" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
-$started = Get-Date
 Write-Host "Reimaging $($pcs.Count) PC(s) with answer file $AnswerFile from $ContentRoot" -ForegroundColor Cyan
 
 function Stop-Pc($p, [string]$Message) {
@@ -88,8 +87,10 @@ try {
             $problems = @(Test-RemoteTarget -Info $info -ExpectedName $p.Name)
             if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
             $p.Serial = $info.Serial
-            [void](New-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial -Uuid $info.Uuid -AnswerFile $AnswerFile `
+            $queued = (New-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial -Uuid $info.Uuid -AnswerFile $AnswerFile `
                 -ComputerName $(if ($KeepNames) { $p.Name } else { '' }) -OU $(if ($KeepOU) { $p.OU } else { '' }) -ExpiresHours ([Math]::Max(2, [Math]::Ceiling($TimeoutMinutes / 60) + 1)))
+            # The console's own time stamp: the started job is matched by it, not by WinPE's clock.
+            $p.RequestedAt = "$($queued.requestedAt)"
             Write-Host "$($p.Name): job queued$(if ($KeepNames) { ", keeps its name" })$(if ($KeepOU -and $p.OU) { ", joins $($p.OU)" })"
             $onStage = {
                 param($stage)
@@ -105,6 +106,7 @@ try {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial
                 throw
             }
+            $p.BootEntry = $r.BootEntry
             Write-Host "$($p.Name): next boot set to WinPE from its own disk (entry $($r.BootEntry)); restarting in $RestartDelay s"
             $p.State = 'Restarting'; $p.RestartAt = (Get-Date).AddSeconds($RestartDelay)
             Set-BuildStepProgress $p.Id -Percent 70 -Detail 'Restarting into WinPE'
@@ -116,13 +118,16 @@ try {
         $waiting = @($pcs | Where-Object State -eq 'Restarting')
         if (-not $waiting) { break }
         foreach ($p in $waiting) {
-            if (Get-StartedJob -ContentRoot $ContentRoot -Serial $p.Serial -Since $started) {
+            if (Get-StartedJob -ContentRoot $ContentRoot -Serial $p.Serial -RequestedAt $p.RequestedAt) {
                 $p.State = 'Started'
                 Write-Host "$($p.Name): deploy started" -ForegroundColor Green
                 Complete-BuildStep $p.Id -Detail 'Deploy started: follow it on the Dashboard'
             } elseif ((Get-Date) -gt $p.RestartAt.AddMinutes($TimeoutMinutes)) {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial
-                Stop-Pc $p "WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)"
+                # Back in Windows (WinPE could not start, or nobody took the job)? Take WinPE off its disk now. If the
+                # PC does not answer, its startup task does it at the next Windows start.
+                $cleaned = try { Remove-LocalDiskBoot -ComputerName $p.Address -BootEntry $p.BootEntry -Credential $credential; $true } catch { $false }
+                Stop-Pc $p ("WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)" + $(if ($cleaned) { '. WinPE was removed from its disk.' } else { '' }))
             } elseif ((Get-Date) -gt $p.RestartAt) {
                 Set-BuildStepProgress $p.Id -Percent 85 -Detail 'Waiting for WinPE to start the deploy'
             }

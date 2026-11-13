@@ -46,17 +46,20 @@ try {
     Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'OTHER1' -Now $now)) $true 'another PC finds no job'
     Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Uuid '4C4C4544-9999' -Now $now -OnNote $note)) $true 'a PC with the same serial but another UUID does not take it'
     Assert-Equal ($notes.Count) 1 'that is logged'
-    Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Now $now.AddHours(3) -OnNote $note)) $true 'an expired job is not taken'
+    Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Now $now.AddHours(17) -OnNote $note)) $true 'an expired job is not taken'
     Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'To be filled by O.E.M.' -Now $now)) $true 'a shared serial never takes a job'
 
-    $taken = Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Uuid '4C4C4544-0001' -Now $now.AddMinutes(2)
+    # WinPE's clock hours ahead (an older stick reads the PC's Toronto clock as Pacific time): the job is still taken.
+    $taken = Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Uuid '4C4C4544-0001' -Now $now.AddHours(3)
     Assert-Equal $taken.answerFile 'Staff-W11' 'WinPE takes the job for its serial'
     Assert-Equal (Test-Path (Join-Path $root 'Reimage/ABC123.json')) $false 'taking a job removes it, so it runs once'
     Assert-Equal ($null -eq (Receive-ReimageJob -ContentRoot $root -Serial 'ABC123' -Now $now.AddMinutes(3))) $true 'a second start of WinPE finds no job'
-    Assert-Equal ($null -ne (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -Since $now)) $true 'the console sees that the deploy started'
-    Assert-Equal ($null -eq (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -Since $now.AddHours(1))) $true 'an older start does not count for a new reimage'
-    $states = Get-ReimageStates -ContentRoot $root -Now $now.AddMinutes(5)
-    Assert-Equal $states['PC01'] "Started $($now.AddMinutes(2).ToString('HH:mm'))" 'the console shows when it started'
+    Assert-Equal ($null -ne (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -RequestedAt $job.requestedAt)) $true 'the console finds the job it queued, whatever WinPE''s clock said'
+    Assert-Equal ($null -eq (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -RequestedAt $now.AddHours(-5).ToString('o'))) $true 'an older job does not count for a new reimage'
+    Assert-Equal ($null -ne (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -Since $now)) $true 'by time: a start after the request'
+    Assert-Equal ($null -eq (Get-StartedJob -ContentRoot $root -Serial 'ABC123' -Since $now.AddHours(4))) $true 'by time: an older start does not count'
+    $states = Get-ReimageStates -ContentRoot $root -Now $now.AddHours(3).AddMinutes(1)
+    Assert-Equal $states['PC01'] "Started $($now.AddHours(3).ToString('HH:mm'))" 'the console shows when it started'
 
     # A job with no UUID (the PC did not report one) is taken by serial alone.
     [void](New-ReimageJob -ContentRoot $root -Serial 'XYZ9' -AnswerFile 'Staff-W11' -Now $now)
@@ -103,6 +106,23 @@ Assert-Equal ($text -match [regex]::Escape('/set {l} osdevice ramdisk=[C:]\_Imag
 Assert-Equal ($text -match [regex]::Escape('/set {r} ramdisksdipath \_ImagingBoot\boot.sdi')) $true 'the RAM disk uses boot.sdi next to it'
 Assert-Equal ($text -match 'winload\.efi') $true 'UEFI loader'
 Assert-Equal ($cmds[-1] -join ' ') '/bootsequence {l}' 'the entry is used for the next start only, last'
+
+# The copy on the PC: admins only (boot.wim holds the answer file key), and gone if the PC starts Windows again.
+Assert-Equal ((Get-LocalBootFolderAclArgs) -join ' ') 'C:\_ImagingBoot /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F' 'C:\_ImagingBoot: no inherited access, Administrators and SYSTEM only'
+$clean = Get-LocalBootCleanupCommand -BootEntry '{l}'
+Assert-Equal $clean 'cmd.exe /c rd /s /q C:\_ImagingBoot & bcdedit /delete {l} /f & schtasks /Delete /TN ImagingTool\RemoveImagingBoot /F' 'the startup task removes WinPE, its boot entry and itself'
+Assert-Equal ($clean.Length -le 261) $true 'the task command fits schtasks /TR'
+$reimage = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
+$aclAt = $reimage.IndexOf('& icacls.exe @AclArgs'); $copyAt = $reimage.IndexOf("Copy-Item -LiteralPath `$BootWim")
+Assert-Equal ($aclAt -gt 0 -and $aclAt -lt $copyAt) $true 'the folder is locked before boot.wim is copied in'
+Assert-Equal ($reimage -match "schtasks\.exe /Create /TN 'ImagingTool\\RemoveImagingBoot'") $true 'the cleanup task is created with the boot entry'
+$start = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
+Assert-Equal ($start -match 'Remove-LocalDiskBoot -ComputerName \$p\.Address') $true 'a time-out takes WinPE off the PC when it answers'
+Assert-Equal ($start -match 'Get-StartedJob -ContentRoot \$ContentRoot -Serial \$p\.Serial -RequestedAt') $true 'the console matches the started job by its own time stamp'
+
+# The build gives WinPE this PC's time zone.
+$media = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
+Assert-Equal ($media -match '/Set-TimeZone:\$tz') $true 'the build sets the WinPE time zone'
 
 # Deploy-Image takes the job before the naming list and the wizard, and keeps the name and OU.
 $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
