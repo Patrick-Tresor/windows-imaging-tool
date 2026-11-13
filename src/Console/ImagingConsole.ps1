@@ -70,8 +70,6 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
-# Defender exclusions a media build or capture added and could not take off (its window was closed, the PC restarted).
-try { [void](Remove-StaleDefenderExclusions) } catch { }
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')

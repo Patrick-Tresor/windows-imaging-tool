@@ -146,7 +146,6 @@ Assert-Equal ($build -match 'New-WinPEDriverStaging') $true 'build: WinPE driver
 Assert-Equal ($build -match '\$peCacheThis = -not \$NoWinPECache -and -not \(\$infTotal -and \$infAdded -eq 0\)') $true 'build: a DISM run that added nothing is not cached'
 Assert-Equal ($build -match '/Add-Driver /Driver:') $true 'build: one DISM /Add-Driver over the staging folder'
 Assert-Equal ($build -match 'Add-WindowsDriver') $false 'build: no Add-WindowsDriver call per driver (about 10 s each)'
-Assert-Equal ($build -match 'Add-DefenderScanExclusions -Paths @\(\$WorkDir\)') $true 'build: Defender skips the WinPE work folder while DISM runs'
 
 if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'All WinPE build cache checks passed' -ForegroundColor Green
