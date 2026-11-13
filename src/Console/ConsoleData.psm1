@@ -1007,8 +1007,6 @@ function Save-WdsSettings {
 
 #region Deploy settings page
 
-$script:SharePasswordFile = 'config\secrets\share.txt'
-
 function Get-UncRoot([string]$Path) {
     # \\server\share\Status -> \\server\share; $null for anything that is not a UNC path.
     if ("$Path".Trim() -match '^(\\\\[^\\/]+\\[^\\/]+)') { $Matches[1] } else { $null }
@@ -1032,18 +1030,36 @@ function Get-DeploySettingsView {
     $get = { param($o, $n) if ($o.PSObject.Properties[$n]) { "$($o.$n)".Trim() } else { '' } }
     $path = & $get $share 'path'
     $file = & $get $share 'passwordFile'
-    if (-not $file) { $file = $script:SharePasswordFile }
-    $full = Join-ContentPath $ContentRoot $file
+    $fileSaved = $false
+    if ($file) { $full = Join-ContentPath $ContentRoot $file; $fileSaved = (Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -gt 0 }
     $report = if ($s.PSObject.Properties['reporting'] -and $s.reporting) { & $get $s.reporting 'path' } else { '' }
     [pscustomobject]@{
         Mode           = if ($path) { 'Share' } else { 'Usb' }
         SharePath      = $path
         ShareUser      = & $get $share 'user'
-        PasswordFile   = $file
-        PasswordSaved  = [bool]((Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -gt 0)
+        PasswordSaved  = [bool]((Test-AnswerPasswordText (& $get $share 'encryptedPassword')) -or $fileSaved)
         ReportPath     = $report
         VersionsToKeep = if ($s.PSObject.Properties['versionsToKeep']) { "$($s.versionsToKeep)" } else { '0' }
     }
+}
+
+function Get-SharePassword {
+    # The share account's password as text, for the console's connection test: decrypted from deploy-settings.json,
+    # or read from a password file an older setup still names. $null when none is saved.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $s = Get-DeploySettings -ContentRoot $ContentRoot
+    if (-not ($s.PSObject.Properties['share'] -and $s.share)) { return $null }
+    $enc = if ($s.share.PSObject.Properties['encryptedPassword']) { "$($s.share.encryptedPassword)" } else { '' }
+    if (Test-AnswerPasswordText $enc) {
+        $key = Get-AnswerKey -ContentRoot $ContentRoot
+        if ($key) { return Unprotect-AnswerPassword -Value $enc -Key $key }
+    }
+    $file = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
+    if ($file) {
+        $full = Join-ContentPath $ContentRoot $file
+        if (Test-Path -LiteralPath $full -PathType Leaf) { return (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($full))).Trim() }
+    }
+    $null
 }
 
 function Get-DeploySettingsProblems {
@@ -1090,10 +1106,11 @@ function Get-DeploySettingsProblems {
 function Save-DeploySettingsPage {
     <#
     .SYNOPSIS
-        Saves the share, account, Dashboard and versions parts of the Deploy Settings page. A typed password goes to
-        config\secrets\share.txt (never in deploy-settings.json); the media build puts it in the boot image encrypted.
-        A password file kept outside config\secrets (the old default, config\share.cred) is moved there.
-        Returns whether anything WinPE reads changed, so the page can say the stick needs updating.
+        Saves the share, account, Dashboard and versions parts of the Deploy Settings page. The share password is kept
+        encrypted in deploy-settings.json (share.encryptedPassword, AES-256 with the answer file key, like the answer
+        files' passwords): no password file. A password file an older setup named (config\share.cred) is encrypted into
+        the settings and deleted. Returns whether anything WinPE reads changed, so the page can say the stick needs
+        updating.
     #>
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -1108,36 +1125,33 @@ function Save-DeploySettingsPage {
     $before = ($s | ConvertTo-Json -Depth 5 -Compress)
     $useAccount = $Mode -eq 'Share' -or "$ReportPath".Trim()
     if (-not $s.PSObject.Properties['share'] -or -not $s.share) { $s | Add-Member -NotePropertyName share -NotePropertyValue ([pscustomobject]@{}) -Force }
-    $oldFile = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
-    $file = if ($oldFile -and (ConvertTo-SecretKey $oldFile).StartsWith('config\secrets\')) { $oldFile } else { $script:SharePasswordFile }
-    $passwordChanged = $false
-    if ($useAccount -and "$ShareUser".Trim()) {
-        $full = Join-ContentPath $ContentRoot $file
-        $oldFull = if ($oldFile -and $oldFile -ne $file) { Join-ContentPath $ContentRoot $oldFile } else { $null }
-        $text = if ($NewPassword) { $NewPassword }
-                elseif ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($oldFull))).Trim() }
-                else { $null }
-        if ($text) {
-            New-Item -ItemType Directory -Path (Split-Path $full -Parent) -Force | Out-Null
-            [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding($true)))
-            $passwordChanged = [bool]$NewPassword
-        }
-        if ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { Remove-Item -LiteralPath $oldFull -Force }
-        $user = "$ShareUser".Trim()
-    } else { $user = ''; $file = '' }
     $set = { param($o, $n, $v) if ($o.PSObject.Properties[$n]) { $o.$n = $v } else { $o | Add-Member -NotePropertyName $n -NotePropertyValue $v } }
+
+    # The password: typed now, or taken from an old password file, encrypted into the settings either way.
+    $oldFile = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
+    $oldFull = if ($oldFile) { Join-ContentPath $ContentRoot $oldFile } else { $null }
+    $text = if ($NewPassword) { $NewPassword }
+            elseif ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($oldFull))).Trim() }
+            else { $null }
+    if ($text) {
+        $key = Get-AnswerKey -ContentRoot $ContentRoot -Create
+        & $set $s.share 'encryptedPassword' (Protect-AnswerPassword -Password $text -Key $key)
+    }
+    $text = $null
+    if ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { Remove-Item -LiteralPath $oldFull -Force }
+
     & $set $s.share 'path' $(if ($Mode -eq 'Share') { "$SharePath".Trim().TrimEnd('\') } else { '' })
-    & $set $s.share 'user' $user
-    & $set $s.share 'passwordFile' $file
-    if ($s.share.PSObject.Properties['encryptedPassword']) { $s.share.PSObject.Properties.Remove('encryptedPassword') }
+    & $set $s.share 'user' $(if ($useAccount) { "$ShareUser".Trim() } else { '' })
+    if ($s.share.PSObject.Properties['passwordFile']) { $s.share.PSObject.Properties.Remove('passwordFile') }
     if (-not $s.PSObject.Properties['reporting'] -or -not $s.reporting) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) -Force }
     & $set $s.reporting 'path' "$ReportPath".Trim().TrimEnd('\')
     & $set $s 'versionsToKeep' $VersionsToKeep
-    $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$($o.share.passwordFile)|$($o.reporting.path)" }
+    $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$(if ($o.share.PSObject.Properties['encryptedPassword']) { $o.share.encryptedPassword })|$($o.reporting.path)" }
     $old = $before | ConvertFrom-Json
     $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
-    [pscustomobject]@{ MediaOutOfDate = ($passwordChanged -or (& $winpe $s) -ne $oldWinpe) }
+    # Moving an old password file into the settings is not a change for WinPE: the build already encrypted it in.
+    [pscustomobject]@{ MediaOutOfDate = [bool]$NewPassword -or ((& $winpe $s) -replace '\|aes256:[^|]*', '|') -ne ($oldWinpe -replace '\|aes256:[^|]*', '|') }
 }
 
 function Get-ShareErrorText([int]$Code) {
@@ -1235,7 +1249,7 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings, Get-WdsSettings, Save-WdsSettings,
-    Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
+    Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,

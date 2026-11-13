@@ -73,8 +73,8 @@ and click **Create folders** the first time. Then:
   The build stops before erasing the stick when an answer file's image is missing.
 - **Deploy Settings**: five short sections. 1) USB stick only, or a network
   share (needed for ISO and PXE). 2) The Active Directory account WinPE signs in
-  with: type its password in the console (saved to `config\secrets\share.txt`,
-  never on the stick) and click **Test connection** to check the sign-in and
+  with: type its password in the console (saved encrypted in
+  `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Where PCs report for
   the Dashboard. 4) Default answer file and how many older image versions to
   keep. 5) Post-deploy checks. Save refuses the example values

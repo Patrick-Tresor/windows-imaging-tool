@@ -576,7 +576,7 @@
             <!-- 2. The account -->
             <StackPanel x:Name="PnlShareAccount">
               <TextBlock Style="{StaticResource SettingsHead}" Text="2. Account WinPE signs in with"/>
-              <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="An Active Directory account that can read the share (and write to its Status folder). Leave it empty if the share allows guests. The password is saved in config\secrets on this content root, never on the stick: each build puts it in the boot image, encrypted."/>
+              <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="An Active Directory account that can read the share (and write to its Status folder). Leave it empty if the share allows guests. The password is saved encrypted (AES-256) in deploy-settings.json, like the answer files' passwords: there is no password file."/>
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>

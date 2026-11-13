@@ -4,6 +4,8 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
+Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
+$common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 
 $failures = 0
 function Assert-Equal($Actual, $Expected, $Name) {
@@ -47,33 +49,42 @@ try {
     Assert-Equal $v.Mode 'Share' 'the example settings read as a network share'
     Assert-Equal $v.PasswordSaved $false 'no password file yet'
 
-    # The old default: the password in config\share.cred, outside config\secrets. Saving moves it.
+    # The old default: the password in config\share.cred. Saving encrypts it into the settings and deletes the file.
     $s = Get-DeploySettings -ContentRoot $root
-    $s.share.passwordFile = 'config\share.cred'
+    $s.share | Add-Member -NotePropertyName passwordFile -NotePropertyValue 'config\share.cred' -Force
     Save-DeploySettings -ContentRoot $root -Settings $s
     Set-Content -LiteralPath (Join-ContentPath $root 'config\share.cred') -Value 'Old-Pass1' -NoNewline
-    Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'a password in the old place counts as saved'
+    Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'a password in the old file counts as saved'
     $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -VersionsToKeep 3
     $s = Get-DeploySettings -ContentRoot $root
     Assert-Equal $s.share.path '\\SRV01\Deploy' 'share saved without the trailing backslash'
-    Assert-Equal $s.share.passwordFile 'config\secrets\share.txt' 'the password file moves to config\secrets'
-    Assert-Equal (Test-Path -LiteralPath (Join-ContentPath $root 'config\share.cred')) $false 'the old plain file is gone'
-    $moved = ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes((Join-ContentPath $root 'config\secrets\share.txt')))
-    Assert-Equal $moved 'Old-Pass1' 'with the same password'
+    Assert-Equal ($null -eq $s.share.PSObject.Properties['passwordFile']) $true 'no passwordFile in the settings any more'
+    Assert-Equal (Test-Path -LiteralPath (Join-ContentPath $root 'config\share.cred')) $false 'the old plain file is deleted'
+    Assert-Equal (@(Get-ChildItem -LiteralPath (Join-ContentPath $root 'config\secrets') -File | Where-Object Name -ne 'answer-key.txt').Count) 0 'and no new password file is made'
+    Assert-Equal ($s.share.encryptedPassword -like 'aes256:*') $true 'the password is in the settings, encrypted'
+    Assert-Equal ((Get-Content -Raw $settingsFile) -like '*Old-Pass1*') $false 'never as plain text'
+    Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'and decrypts to the same password'
+    Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'the page shows it as saved'
     Assert-Equal $s.versionsToKeep 3 'versions to keep saved'
     Assert-Equal $r.MediaOutOfDate $true 'a new share means the stick needs updating'
-    Assert-Equal ((Get-Content -Raw $settingsFile) -like '*Old-Pass1*') $false 'the password is never in deploy-settings.json'
 
     $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -VersionsToKeep 2
     Assert-Equal $r.MediaOutOfDate $false 'only the versions changed: the stick is still up to date'
+    Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'saving again keeps the password'
     $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!' -VersionsToKeep 2
     Assert-Equal $r.MediaOutOfDate $true 'a new password means the stick needs updating'
-    Assert-Equal (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes((Join-ContentPath $root 'config\secrets\share.txt')))) 'N3w-Pass!' 'the typed password is saved'
+    Assert-Equal (Get-SharePassword -ContentRoot $root) 'N3w-Pass!' 'the typed password is saved'
 
-    # USB only: no share, no account; the password file stays so switching back finds it.
+    # WinPE reads it from the boot image's copy of the settings with the answer file key, no passwordFile needed.
+    & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+    $key = Get-AnswerKey -ContentRoot $root
+    $cred = Get-ShareCredential -SettingsPath $settingsFile -Decrypt { param($v) Unprotect-AnswerPassword -Value $v -Key $key }
+    Assert-Equal "$($cred.User)|$($cred.Password)" 'CORP\svc-deploy|N3w-Pass!' 'WinPE decrypts the share password from the settings'
+
+    # USB only: no share, no account; the encrypted password stays so switching back finds it.
     $null = Save-DeploySettingsPage -ContentRoot $root -Mode Usb -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy'
     $s = Get-DeploySettings -ContentRoot $root
-    Assert-Equal "$($s.share.path)|$($s.share.user)|$($s.share.passwordFile)" '||' 'USB only clears the share and account'
+    Assert-Equal "$($s.share.path)|$($s.share.user)" '|' 'USB only clears the share and account'
     $v = Get-DeploySettingsView -ContentRoot $root
     Assert-Equal "$($v.Mode) $($v.PasswordSaved)" 'Usb True' 'and reads back as USB only, password still there'
 
