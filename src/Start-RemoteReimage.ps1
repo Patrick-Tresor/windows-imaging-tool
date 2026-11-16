@@ -5,15 +5,16 @@
 .DESCRIPTION
     Run by the console's Computers tab (hidden, with its progress in a progress window), or by hand on an admin PC.
     For each PC (RemoteReimage.psm1):
-      1. Reads it over PowerShell remoting: the name it answers with, BIOS serial, UUID, firmware, free space.
-         A PC that is off, has no WinRM, answers with another name, starts in legacy BIOS mode or has a serial many
+      1. Reads it over PowerShell remoting, or when that is off over its admin share and a one-time SYSTEM
+         service: the name it answers with, BIOS serial, UUID, firmware, free space.
+         A PC that is off, has neither WinRM nor file sharing, answers with another name, starts in legacy BIOS mode or has a serial many
          PCs share is skipped, with nothing changed on it.
       2. Writes Reimage\<serial>.json on the share: the answer file, and the name and OU to keep.
       3. Copies the network boot image to C:\_ImagingBoot, adds a one-time boot entry for it, suspends BitLocker
          for one restart, and restarts the PC after a warning.
       4. Waits until WinPE on that PC has taken the job (Reimage\Started). From there the deploy shows on the
          Dashboard like any other.
-    Needs admin rights on the PCs over PowerShell remoting (WinRM), and a deployment share (deploy-settings.json
+    Needs admin rights on the PCs, PowerShell remoting (WinRM) or file sharing on them, and a deployment share (deploy-settings.json
     share.path) that WinPE maps.
 .EXAMPLE
     .\src\Start-RemoteReimage.ps1 -ContentRoot \\server\Deploy -BootWim D:\Deploy\Boot\boot.wim -AnswerFile Staff-W11 -Computers PC01.corp.local,PC02.corp.local
@@ -61,7 +62,7 @@ $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
     $t = $targets[$i]
     [pscustomobject]@{
         Id = "pc$i"; Name = "$($t.name)".ToUpperInvariant(); Address = $(if ($t.address) { "$($t.address)" } else { "$($t.name)" }); OU = "$($t.ou)"
-        State = 'Pending'; Serial = $null; RequestedAt = $null; RestartAt = $null; BootEntry = $null
+        State = 'Pending'; Method = 'WinRM'; Serial = $null; RequestedAt = $null; RestartAt = $null; BootEntry = $null
     }
 })
 Start-BuildProgress -Path $ProgressFile -Title "Reimaging $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' }) with $AnswerFile" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
@@ -87,14 +88,16 @@ try {
                 Write-Host 'Use a domain controller as this PC''s DNS server (or connect it to the domain network or VPN), then try again.'
                 Stop-Pc $p "Not reimaged: $($p.Address) is not found in this PC's DNS (see the log)"; continue
             }
-            Write-Host 'To turn on PowerShell remoting there: Enable-PSRemoting -Force as administrator, or for many PCs the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the Windows Defender Firewall rule Windows Remote Management (HTTP-In).'
-            Stop-Pc $p $(if ($check -and $check.State -eq 'No WinRM') { 'Not reimaged: it is on, but PowerShell remoting (WinRM) is off there (see the log)' }
+            Write-Host 'The console needs one of: PowerShell remoting (Enable-PSRemoting -Force, or the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the firewall rule Windows Remote Management (HTTP-In)), or file sharing (firewall rule File and Printer Sharing (SMB-In)).'
+            Stop-Pc $p $(if ($check -and $check.State -eq 'No access') { 'Not reimaged: it is on, but its firewall blocks PowerShell remoting and file sharing (see the log)' }
                          else { "Not reimaged: no answer from $($p.Address): it is off or asleep (see the log)" }); continue
         }
         # The short name, when only that resolves from this PC.
         $p.Address = $check.Address
+        $p.Method = $check.Method
+        if ($p.Method -eq 'Smb') { Write-Host "$($p.Name): PowerShell remoting is off, going through its admin share and a one-time service" }
         try {
-            $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential
+            $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
             Write-Host "$($p.Name): $($info.Model), serial $($info.Serial), $($info.Firmware), BitLocker $($info.BitLocker)"
             $problems = @(Test-RemoteTarget -Info $info -ExpectedName $p.Name)
             if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
@@ -113,7 +116,7 @@ try {
                 }
             }
             try {
-                $r = Invoke-LocalDiskBoot -ComputerName $p.Address -BootWim $BootWim -Credential $credential -DelaySeconds $RestartDelay -OnStage $onStage
+                $r = Invoke-LocalDiskBoot -ComputerName $p.Address -BootWim $BootWim -Credential $credential -Method $p.Method -DelaySeconds $RestartDelay -OnStage $onStage
             } catch {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial
                 throw
@@ -145,7 +148,7 @@ try {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial
                 # Back in Windows (WinPE could not start, or nobody took the job)? Take WinPE off its disk now. If the
                 # PC does not answer, its startup task does it at the next Windows start.
-                $cleaned = try { Remove-LocalDiskBoot -ComputerName $p.Address -BootEntry $p.BootEntry -Credential $credential; $true } catch { $false }
+                $cleaned = try { Remove-LocalDiskBoot -ComputerName $p.Address -BootEntry $p.BootEntry -Credential $credential -Method $p.Method; $true } catch { $false }
                 Stop-Pc $p ("WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)" + $(if ($cleaned) { '. WinPE was removed from its disk.' } else { '' }))
             } elseif ((Get-Date) -gt $p.RestartAt) {
                 Set-BuildStepProgress $p.Id -Percent 85 -Detail 'Waiting for WinPE to start the deploy'

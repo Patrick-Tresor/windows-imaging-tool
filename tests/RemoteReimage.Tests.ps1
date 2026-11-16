@@ -138,7 +138,7 @@ $clean = Get-LocalBootCleanupCommand -BootEntry '{l}'
 Assert-Equal $clean 'cmd.exe /c rd /s /q C:\_ImagingBoot & bcdedit /delete {l} /f & schtasks /Delete /TN ImagingTool\RemoveImagingBoot /F' 'the startup task removes WinPE, its boot entry and itself'
 Assert-Equal ($clean.Length -le 261) $true 'the task command fits schtasks /TR'
 $reimage = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
-$aclAt = $reimage.IndexOf('& icacls.exe @AclArgs'); $copyAt = $reimage.IndexOf("Copy-Item -LiteralPath `$BootWim")
+$aclAt = $reimage.IndexOf('& icacls.exe ([string[]]$AclArgs)'); $copyAt = $reimage.IndexOf("Copy-ToRemoteChannel -Channel `$ch -Path `$BootWim")
 Assert-Equal ($aclAt -gt 0 -and $aclAt -lt $copyAt) $true 'the folder is locked before boot.wim is copied in'
 Assert-Equal ($reimage -match "schtasks\.exe /Create /TN 'ImagingTool\\RemoveImagingBoot'") $true 'the cleanup task is created with the boot entry'
 $start = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
@@ -165,24 +165,70 @@ $smb = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $smb.Start(
 $closed = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $closed.Start(); $closedPort = $closed.LocalEndpoint.Port; $closed.Stop()
 try {
     $wp = $winrm.LocalEndpoint.Port; $sp = $smb.LocalEndpoint.Port
-    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1', 'pc-that-does-not-exist.invalid' -Port $wp -OtherPorts $sp -TimeoutMs 2000
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1', 'pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['127.0.0.1'].State 'Yes' 'a PC that answers on the WinRM port is online'
-    Assert-Equal $s['127.0.0.1'].Online $true 'online means WinRM answers'
+    Assert-Equal $s['127.0.0.1'].Method 'WinRM' 'WinRM first when it answers'
     Assert-Equal $s['pc-that-does-not-exist.invalid'].State 'Not found' 'a name that does not resolve says Not found'
-    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -OtherPorts $sp -TimeoutMs 2000
-    Assert-Equal $s['127.0.0.1'].State 'No WinRM' 'a PC that answers on another port but not WinRM is on with remoting off'
-    Assert-Equal $s['127.0.0.1'].Online $false 'remoting off is not online'
-    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -OtherPorts $closedPort -TimeoutMs 2000
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'Yes (SMB)' 'remoting off but file sharing on: reimaged through the admin share'
+    Assert-Equal $s['127.0.0.1'].Method 'Smb' 'the admin share is the fallback'
+    Assert-Equal $s['127.0.0.1'].Online $true 'the admin share counts as online'
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $closedPort -OtherPorts $sp -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'No access' 'a PC that answers on another port only is on, with both ways blocked'
+    Assert-Equal $s['127.0.0.1'].Online $false 'no way in is not online'
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $closedPort -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['127.0.0.1'].State 'No answer' 'a PC that answers on no port says No answer'
-    $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -OtherPorts $sp -TimeoutMs 2000
+    $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['localhost.pc-that-does-not-exist.invalid'].Address 'localhost' 'a full name that does not resolve is tried by its short name'
     Assert-Equal (Test-WinRMReachable -ComputerName '127.0.0.1' -Port $wp)['127.0.0.1'] $true 'Test-WinRMReachable still answers true/false'
 } finally { $winrm.Stop(); $smb.Stop() }
-$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'No WinRM' })
-Assert-Equal ($t -like '1 of 2 answer*2J14HL3: on, but remoting is off*Enable-PSRemoting*') $true 'the status line says which PC has remoting off and how to turn it on'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
+Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Not found' }, [pscustomobject]@{ Name = 'PC2'; State = 'Not found' })
 Assert-Equal ($t -like '*PC1 and 1 more: name not found*DNS*') $true 'the status line says names were not found in DNS'
-Assert-Equal (Get-OnlineSummaryText -Rows @()) '0 of 0 answer on PowerShell remoting (WinRM).' 'no rows, no hint'
+Assert-Equal (Get-OnlineSummaryText -Rows @()) '0 of 0 can be reimaged now.' 'no rows, no hint'
+
+# Without WinRM: the admin share and a one-time service.
+Assert-Equal (ConvertTo-AdminSharePath -ComputerName 'PC01' -Path 'C:\_ImagingBoot\boot.wim') '\\PC01\C$\_ImagingBoot\boot.wim' 'a local path maps to the admin share'
+Assert-Throws { ConvertTo-AdminSharePath -ComputerName 'PC01' -Path '\\server\x' } 'only local paths map to the admin share'
+$sc = Get-RemoteServiceArgs -ComputerName 'PC01' -Name 'ImagingToolRunab12' -Script 'C:\Windows\Temp\ImagingTool-ab12\run.ps1'
+Assert-Equal ($sc.Create[0..2] -join ' ') '\\PC01 create ImagingToolRunab12' 'the service is created on the PC'
+Assert-Equal ($sc.Create -contains 'LocalSystem') $true 'the service runs as SYSTEM'
+Assert-Equal ($sc.Create[4] -like 'C:\Windows\System32\cmd.exe /c start /b *powershell.exe* -File C:\Windows\Temp\ImagingTool-ab12\run.ps1') $true 'cmd start lets PowerShell outlive the service start'
+Assert-Equal ($sc.Create[4] -notmatch '"') $true 'the service command has no quotes (sc.exe and Windows PowerShell mangle them)'
+Assert-Equal ($sc.Delete -join ' ') '\\PC01 delete ImagingToolRunab12' 'the service is deleted after'
+# The runner script, run here as the service would run it on the PC.
+$run = Join-Path ([IO.Path]::GetTempPath()) ("runner-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $run | Out-Null
+try {
+    $pwshExe = (Get-Process -Id $PID).Path
+    Export-Clixml -LiteralPath (Join-Path $run 'args.xml') -InputObject @('a b', 3, @('x', 'y')) -Depth 4
+    Set-Content -LiteralPath (Join-Path $run 'run.ps1') -Value (Get-RemoteRunnerScript -Folder $run -ScriptBlock { param($Text, $N, $List) "$Text|$($N * 2)|$($List -join '+')"; 'second' })
+    & $pwshExe -NoProfile -File (Join-Path $run 'run.ps1')
+    Assert-Equal (Test-Path (Join-Path $run 'done.txt')) $true 'the runner says when it is done'
+    $raw = Import-Clixml (Join-Path $run 'out.xml'); $out = @($raw)   # as Invoke-RemoteChannel reads it
+    Assert-Equal ($out -join ',') 'a b|6|x+y,second' 'the runner passes the arguments and returns every output'
+    Remove-Item (Join-Path $run '*') -Force
+    Export-Clixml -LiteralPath (Join-Path $run 'args.xml') -InputObject @() -Depth 4
+    Set-Content -LiteralPath (Join-Path $run 'run.ps1') -Value (Get-RemoteRunnerScript -Folder $run -ScriptBlock { throw "bcdedit failed: it's broken" })
+    & $pwshExe -NoProfile -File (Join-Path $run 'run.ps1')
+    Assert-Equal ((Get-Content -Raw (Join-Path $run 'error.txt')).Trim()) "bcdedit failed: it's broken" 'the runner writes the error for the console to throw'
+    Assert-Equal (Test-Path (Join-Path $run 'out.xml')) $false 'no output after an error'
+    Remove-Item (Join-Path $run '*') -Force
+    $steps = Get-LocalBootCommands -RamdiskId '{r}' -LoaderId '{l}'
+    Export-Clixml -LiteralPath (Join-Path $run 'args.xml') -InputObject @($steps, 60) -Depth 4
+    Set-Content -LiteralPath (Join-Path $run 'run.ps1') -Value (Get-RemoteRunnerScript -Folder $run -ScriptBlock { param($Steps, $Delay) foreach ($a in $Steps) { "$(([string[]]$a).Count):$(([string[]]$a) -join ' ')" }; $Delay })
+    & $pwshExe -NoProfile -File (Join-Path $run 'run.ps1')
+    $raw = Import-Clixml (Join-Path $run 'out.xml'); $out = @($raw)
+    Assert-Equal $out[0] '4:/set {r} ramdisksdidevice partition=C:' 'each bcdedit step keeps its own arguments over the admin share'
+    Assert-Equal $out[-1] '60' 'the arguments after the steps arrive too'
+} finally { Remove-Item $run -Recurse -Force -ErrorAction SilentlyContinue }
+$mod = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
+Assert-Equal ($mod -match 'GetNetworkCredential\(\)\.Password, \$Credential\.UserName') $true 'the share password goes to WNetAddConnection2, never on a command line'
+foreach ($f in 'Get-RemoteComputerInfo', 'Invoke-LocalDiskBoot', 'Remove-LocalDiskBoot') {
+    Assert-Equal ($mod -match "(?s)function $f \{.*?Open-RemoteChannel.*?Close-RemoteChannel") $true "$f works over WinRM or the admin share"
+}
+Assert-Equal ($start -match '-Method \$p\.Method') $true 'Start-RemoteReimage uses the way in the check found'
 
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
