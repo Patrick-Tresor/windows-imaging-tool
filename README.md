@@ -2,7 +2,7 @@
 
 Capture one hardware-independent Windows 10/11 image, then deploy it to any
 Dell, HP or Lenovo PC with the right drivers injected automatically. Works from
-an offline USB stick, a LAN share, or PXE, on UEFI PCs. Built on the Windows ADK, WinPE and
+an offline USB stick or a LAN share, on UEFI PCs. Built on the Windows ADK, WinPE and
 DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Layout
@@ -10,7 +10,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
-                     Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1, Publish-WdsBootImage.ps1,
+                     Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, NamingList.psm1, Win11Readiness.psm1, DeployWizard.psm1,
                      DeployProgress.psm1, DeployProgressWindow.ps1
@@ -62,16 +62,15 @@ and click **Create folders** the first time. Then:
   PCs and which ones, and finds each model's pack in the vendor catalog. Models
   with a pack are pre-ticked, so **Download** fetches them all in one click.
   **Use inbox drivers** marks a model (a VM, say) as needing no pack.
-- **Media**: build a USB stick, ISO or PXE `boot.wim` in one click. The tab shows
+- **Media**: build a USB stick or ISO in one click. The tab shows
   whether the Windows ADK and its WinPE add-on are installed (and their version),
   with a **Download ADK** button when they aren't. Media builds and the capture
-  wizard refuse to start until both are there. For PXE it also publishes
-  `boot.wim` to a WDS server (see [PXE with WDS](#pxe-with-wds)).
+  wizard refuse to start until both are there.
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
 - **Deploy Settings**: five short sections. 1) USB stick only, or a network
-  share (needed for ISO and PXE). 2) The Active Directory account WinPE signs in
+  share (needed for ISO boot and the Computers tab). 2) The Active Directory account WinPE signs in
   with: type its password in the console (saved encrypted in
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Where PCs report for
@@ -283,8 +282,7 @@ only as safe as the stick. Set a **WinPE password** on the Media tab (8
 characters or more) to close that gap: the key and any password files then go
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
-tries or **Shut down**. A PXE image with a WinPE password waits for someone to
-type it.
+tries or **Shut down**.
 
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
@@ -503,36 +501,6 @@ environment (`winre.wim`); refresh those with a new capture from time to time.
 [docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md) lists what still needs a real PC,
 in order, with what a pass looks like.
 
-## PXE with WDS
-
-On the Media tab, pick **PXE boot.wim**, fill in the **Windows Deployment
-Services** box and click **Build media**. After the build, `boot.wim` is
-published to the WDS server and set as the default UEFI network boot entry.
-Building again replaces it. **Check server** shows whether WDS is installed and
-configured and which boot images it serves. The settings are saved in the
-`wds` section of `config\deploy-settings.json`.
-
-- **WDS server**: empty for this PC, or a server name. A remote server must allow
-  PowerShell remoting (on by default on Windows Server) and you must be an
-  administrator on it; `boot.wim` is copied through its `ADMIN$` share.
-- **Set up WDS if needed** installs the WDS role and configures it in standalone
-  mode (no Active Directory needed) in the **RemoteInstall folder**, then answers
-  all PXE clients. Use a data volume, not `C:`. Without it, a server that isn't set
-  up stops with an error.
-- **DHCP runs on the WDS server too**: WDS then leaves port 67 to DHCP and sets
-  option 60. When DHCP runs elsewhere (another server or a router), add an IP
-  helper for the WDS server on the client VLAN's router. That is the reliable
-  way for UEFI. DHCP options 66 (WDS server) and 67 (`boot\x64\wdsmgfm.efi`) also
-  work on a single subnet.
-- **Boot without pressing F12 or Enter** sets the PXE prompt policy to no prompt.
-  Then any PC set to network boot first starts the deploy tool, so pair it with
-  interactive answer files or a separate VLAN. Unticked, the policy is left as it is.
-
-PXE-booted PCs find the content root through the network share in Deploy Settings,
-the same as an ISO boot. From the command line:
-`.\src\Publish-WdsBootImage.ps1 -BootWim C:\WinPE\boot.wim -Server wds01 -Setup -RemoteInstallPath D:\RemoteInstall`
-publishes an existing `boot.wim`, and `-Status` only reports the server's state.
-
 ## Deployment dashboard
 
 Each PC writes `Status\<serial>.json` (and a live copy of its log) at every step:
@@ -622,7 +590,7 @@ are both read. The deploy log says which entry was used.
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
-   (or `-Target Iso`, or `-Target Pxe -PublishToWds` to publish it to WDS).
+   (or `-Target Iso`).
    Add `-AnswerFiles Staff-W11,Lab` to put only those answer files and their images on the stick.
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
@@ -692,7 +660,7 @@ are both read. The deploy log says which entry was used.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, add the new cumulative update with **Update image...** instead of
    capturing again.
-5. **Deploy**: boot the target PC from USB or PXE. The deploy wizard opens
+5. **Deploy**: boot the target PC from USB or ISO. The deploy wizard opens
    and shows the detected maker, model and serial. Pick the answer file, check
    or change the computer name, OU and target disk, tick the applications, then
    review the summary, tick the erase confirmation and click **Deploy**. A PC in

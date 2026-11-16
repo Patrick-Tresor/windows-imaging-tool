@@ -14,9 +14,8 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Reimage from Active Directory** (`src/ActiveDirectory.psm1`, `src/RemoteReimage.psm1`, `src/Start-RemoteReimage.ps1`) | Admin workstation, then WinPE | The console's Computers tab lists computer accounts over LDAP (ADSI, no RSAT). A reimage reads each PC over WinRM (name, serial, UUID, UEFI), writes `Reimage\<serial>.json` on the share, copies `Boot\boot.wim` to `C:\_ImagingBoot` with a one-time RAM disk boot entry (`bcdedit /bootsequence`), suspends BitLocker for one restart and restarts. `Deploy-Image.ps1` takes the job by serial (UUID checked) right after mapping the share, moves it to `Reimage\Started`, and deploys its answer file with the kept name and OU, no wizard and no password prompts. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
-| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for WDS/PXE. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
+| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for the Computers tab's network boot. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
-| **WDS publisher** (`src/Publish-WdsBootImage.ps1`) | Admin workstation or the WDS server | Sets up WDS if asked and publishes `boot.wim` as the default UEFI PXE boot image. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
@@ -185,16 +184,6 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    still need UEFI.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
-3. **PXE**: the same `boot.wim` is published to WDS by `Publish-WdsBootImage.ps1`
-   (or served by iPXE/wimboot); it then behaves like the LAN share mode.
-   WDS serves BIOS (`pxeboot.n12`) and UEFI (`wdsmgfw.efi`) clients from the
-   same boot image.
-   The script runs its WDS steps on the server (locally, or with `Invoke-Command`
-   after copying the WIM through `ADMIN$`): optionally install the role and
-   `wdsutil /Initialize-Server /Standalone`, then remove any boot image with the
-   same name, `Import-WdsBootImage`, and make it the default `x64uefi` boot image.
-   It reads server state from the WDSServer service, the `REMINST` share and the
-   WDS cmdlets, never from `wdsutil` text, which is localized.
 
 Every medium boots both UEFI and legacy BIOS, so capture media start on BIOS VMs;
 the deploy itself stops on a PC that started WinPE in legacy BIOS mode. The ISO carries both

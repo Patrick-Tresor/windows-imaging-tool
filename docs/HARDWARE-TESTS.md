@@ -1,6 +1,6 @@
 # Hardware test checklist
 
-Everything below passes the Windows CI tests, but CI has no real WinPE, USB stick, PXE server or laptop.
+Everything below passes the Windows CI tests, but CI has no real WinPE, USB stick, network or laptop.
 Work through it in this order: each step needs the ones before it. Note the date and result next to each
 line, and when one fails, use **Copy logs** in WinPE and keep the `Logs\<serial>-<date>` folder.
 
@@ -24,16 +24,15 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |
 | 1.13 | Stick built with **Online apps on USB** ticked, deployed with the network cable out | The build's Downloading online applications step lists the apps; `FirstBoot.log` says the installer "is already in the folder; not downloaded" and the apps install |
 
-## 2. Network (LAN share, PXE)
+## 2. Network (LAN share)
 
 | # | Test | Pass when |
 |---|------|-----------|
-| 2.1 | ISO or PXE boot.wim reaching the share | WinPE maps the share (password from the WinPE password vault or the share's password file) |
-| 2.2 | Publish to WDS, PXE boot a PC | WinPE starts with F12 (or without, when prestaged) |
+| 2.1 | ISO boot reaching the share | WinPE maps the share (password from the WinPE password vault or the share's password file) |
 | 2.3 | Dashboard | Each PC shows live progress, then the post-deploy checks |
 | 2.3a | Dashboard with USB deploys, Deploy Settings section 3 on "Same place" | Deploy a PC from the stick with no network, then plug the stick into the console PC with the Dashboard open: the PC appears within 10 s (state Succeeded, "applications install at first boot"), its final log is on Deployment Logs, and the stick's `Status` folder is empty |
 | 2.3b | Dashboard with USB deploys, section 3 set to a network folder (Domain Computers can write to it) | The PC shows live from WinPE, then first boot (apps, checks) until "Deployment complete"; unplug the network cable in WinPE before the deploy and the status goes to the stick instead (2.3a) |
-| 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, an old `config\share.cred` is gone after Save, and ISO/PXE still maps the share |
+| 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, an old `config\share.cred` is gone after Save, and ISO boot still maps the share |
 | 2.5 | Computers tab: Connect, Search | The domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
 | 2.6 | Build network boot image | `Boot\boot.wim` and `boot.json` on the content root; the tab says it is ready |
 | 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |

@@ -241,7 +241,6 @@
 
           <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus answer files, their images and drivers)" IsChecked="True" Margin="0,4"/>
           <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
-          <RadioButton x:Name="RbPxe" GroupName="Media" Content="PXE boot.wim (publish to a WDS server; content comes from the network share)" Margin="0,4"/>
 
           <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -288,7 +287,7 @@
               </ListBox>
             </DockPanel>
 
-            <Label Grid.Row="6" Content="Output folder (ISO/PXE)"/>
+            <Label Grid.Row="6" Content="Output folder (ISO)"/>
             <TextBox x:Name="TxtOutput" Grid.Row="6" Grid.Column="1"/>
             <Button x:Name="BtnOutput" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
@@ -314,7 +313,7 @@
                 <PasswordBox x:Name="PwdWinPE2" Width="200"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
-                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm. A locked PXE image waits for the WinPE password at every network boot."/>
+                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm."/>
             </StackPanel>
 
             <Label Grid.Row="14" Content="Passwords on USB"/>
@@ -326,41 +325,6 @@
                       Content="Download the applications that install from the internet (Find an app online, Download tick box) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
-          <GroupBox Header="PXE: Windows Deployment Services" Margin="0,16,0,0" Padding="8" IsEnabled="{Binding IsChecked, ElementName=RbPxe}">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Hint}" Text="After the build, boot.wim is published to the WDS server and becomes the default UEFI network boot entry. Publishing again replaces it. Leave the server empty to use this PC. A remote server must allow PowerShell remoting and you must be an administrator on it."/>
-              <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-
-                <Label Content="Publish to WDS"/>
-                <CheckBox x:Name="ChkWdsPublish" Grid.Column="1" IsChecked="True" VerticalAlignment="Center" Content="Publish boot.wim to the WDS server after building"/>
-
-                <Label Grid.Row="2" Content="WDS server"/>
-                <TextBox x:Name="TxtWdsServer" Grid.Row="2" Grid.Column="1" ToolTip="Server name, for example wds01. Empty: this PC."/>
-                <Button x:Name="BtnWdsCheck" Grid.Row="2" Grid.Column="2" Content="Check server" Margin="8,0,0,0"/>
-
-                <Label Grid.Row="4" Content="Boot menu name"/>
-                <TextBox x:Name="TxtWdsImageName" Grid.Row="4" Grid.Column="1" ToolTip="Shown in the PXE boot menu. An image with this name is replaced."/>
-
-                <Label Grid.Row="6" Content="Set up WDS"/>
-                <CheckBox x:Name="ChkWdsSetup" Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
-                          Content="Install and configure WDS if needed (standalone, answers all PXE clients)"/>
-
-                <Label Grid.Row="8" Content="RemoteInstall folder"/>
-                <TextBox x:Name="TxtWdsRemInst" Grid.Row="8" Grid.Column="1" IsEnabled="{Binding IsChecked, ElementName=ChkWdsSetup}"
-                         ToolTip="On the WDS server. Used only when WDS is configured for the first time. Not the system drive."/>
-
-                <Label Grid.Row="10" Content="Options"/>
-                <StackPanel Grid.Row="10" Grid.Column="1">
-                  <CheckBox x:Name="ChkWdsDhcp" Content="DHCP runs on the WDS server too" Margin="0,2"/>
-                  <CheckBox x:Name="ChkWdsNoPrompt" Content="Boot without pressing F12 or Enter (any PC set to network boot starts the deploy)" Margin="0,2"/>
-                </StackPanel>
-              </Grid>
-              <TextBox x:Name="TxtWdsStatus" Height="80" Margin="0,10,0,0" IsReadOnly="True" TextWrapping="Wrap"
-                       VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-            </StackPanel>
-          </GroupBox>
 
           <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
@@ -549,7 +513,7 @@
             <RadioButton x:Name="RbSettingsUsb" GroupName="SettingsMode" Margin="0,4"
                          Content="USB stick only. Everything is on the stick; no network needed."/>
             <RadioButton x:Name="RbSettingsShare" GroupName="SettingsMode" Margin="0,4"
-                         Content="Network share. Needed for ISO and PXE boot. A USB stick still deploys from the stick first."/>
+                         Content="Network share. Needed for ISO boot and the Computers tab. A USB stick still deploys from the stick first."/>
             <Grid x:Name="PnlSharePath" Margin="22,6,0,0">
               <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Share"/>
@@ -634,7 +598,7 @@
             <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="#FFFBEB" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4">
               <DockPanel>
                 <Button x:Name="BtnSettingsMedia" DockPanel.Dock="Right" Content="Open the Media tab" Margin="12,0,0,0"/>
-                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and republish PXE) before the next deploy."/>
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>
               </DockPanel>
             </Border>
           </StackPanel>

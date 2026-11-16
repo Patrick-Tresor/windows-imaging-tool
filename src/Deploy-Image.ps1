@@ -3,7 +3,7 @@
     Deploys a Windows image to this PC from WinPE, driven by an answer file, and injects the matching OEM drivers.
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
-    deploy-settings.json (LAN or PXE boot). Reads an answer file
+    deploy-settings.json (ISO or network boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
     domain join, tasks, extra shares and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
