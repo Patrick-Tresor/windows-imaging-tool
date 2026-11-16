@@ -307,7 +307,7 @@ if (Test-Path $clearScript) {
     if ($setupNow -and -not $setupNow.SystemSetupInProgress -and -not $setupNow.OOBEInProgress) {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $clearScript -LogPath $log
     }
-} else { Write-Log "No $clearScript: the passwords in unattend.xml are left to Windows Setup" }
+} else { Write-Log "No ${clearScript}: the passwords in unattend.xml are left to Windows Setup" }
 $unattend = "$env:WINDIR\Panther\unattend.xml"
 if (Test-Path $unattend) {
     try {
