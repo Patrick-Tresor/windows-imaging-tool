@@ -23,6 +23,7 @@ function Read-ConsoleXaml {
     foreach ($child in @($res.ChildNodes)) {
         if ($child.LocalName -eq 'ResourceDictionary' -and $child.GetAttribute('Source')) {
             [xml]$part = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot $child.GetAttribute('Source'))
+            [void]$res.RemoveChild($child)
             foreach ($style in @($part.DocumentElement.ChildNodes | Where-Object NodeType -eq 'Element')) { [void]$dict.AppendChild($xaml.ImportNode($style, $true)) }
         } else { [void]$dict.AppendChild($child) }
     }

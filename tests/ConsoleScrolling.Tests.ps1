@@ -23,6 +23,15 @@ foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.xaml' | Where-Obje
     Assert-Equal ($loader.Count -ge 1) $true "$($f.Name) is opened with New-ConsoleWindow"
 }
 
+# A window's <ResourceDictionary Source="FormStyles.xaml"/> is replaced by those styles: WPF can't load a relative
+# Source from a string.
+Import-Module (Join-Path $console 'XamlWindow.psm1') -Force
+foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*Editor.xaml') {
+    $text = (Read-ConsoleXaml -Path $f.FullName).OuterXml
+    Assert-Equal ($text -match '<ResourceDictionary Source=') $false "$($f.Name): no Source left for WPF to load"
+    Assert-Equal ($text -match 'Property="CanUserAddRows"|Value="0,4,8,4"') $true "$($f.Name): gets the form styles"
+}
+
 # Pages and sections that the editors and the capture wizard switch between are ScrollViewers, or DockPanels that
 # give a grid or list the rest of the room. A bare StackPanel page is cut off at the bottom of the window.
 foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.xaml') {
