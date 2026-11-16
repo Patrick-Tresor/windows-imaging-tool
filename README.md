@@ -122,7 +122,17 @@ on the ones you pick, with nobody at the PCs.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
    are left out unless ticked. Each row shows the OU, Windows version, last
-   logon and whether the PC answers on PowerShell remoting now.
+   logon and whether the PC answers on PowerShell remoting now. **Online**
+   says why when it does not (point at it for details):
+   - **No WinRM**: the PC is on (it answers on file sharing or RPC) but
+     PowerShell remoting is off. Turn it on there (`Enable-PSRemoting -Force`
+     as administrator) or for a whole OU by Group Policy: *Computer
+     Configuration > Administrative Templates > Windows Components > Windows
+     Remote Management > WinRM Service > Allow remote server management
+     through WinRM*, plus the firewall rule *Windows Remote Management (HTTP-In)*.
+   - **Not found**: its name does not resolve from the console PC. Use a domain
+     controller as the console PC's DNS server.
+   - **No answer**: it is off or asleep, or a firewall drops everything.
 3. Once: set **Network share** on the Deploy Settings tab, then click **Build
    network boot image**. It builds WinPE with the deploy tool into `Boot\` on
    the content root, without a WinPE password (nobody is there to type it).

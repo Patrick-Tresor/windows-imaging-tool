@@ -197,25 +197,95 @@ function Find-ReimageJobByName {
 
 #region Reaching the PCs
 
-function Test-WinRMReachable {
-    # Which of these hosts answer on the WinRM port, checked in parallel, 200 at a time. Ping is often blocked by
-    # Windows Firewall; WinRM is what the reimage needs anyway.
-    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 1500, [int]$Port = 5985)
+function Get-RemoteOnlineState {
+    <#
+    .SYNOPSIS
+        For each host, whether it can be reimaged over the network now, and if not why: checked in parallel, 200 at
+        a time. Ping is often blocked by Windows Firewall, so a PC that is on is told apart by its other ports.
+    .OUTPUTS
+        Hashtable: name as given -> { Online (WinRM answers), State, Address (the name that resolved), Detail }
+        State is 'Yes', 'No WinRM' (the PC is on but PowerShell remoting is off or blocked), 'Not found' (the name
+        does not resolve from this PC) or 'No answer' (off, asleep, or a firewall drops everything).
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
+        [int[]]$OtherPorts = @(445, 135, 3389))
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
     for ($i = 0; $i -lt $names.Count; $i += 200) {
-        $batch = $names[$i..([Math]::Min($i + 199, $names.Count - 1))]
-        $checks = foreach ($c in $batch) {
-            $tcp = [Net.Sockets.TcpClient]::new()
-            [pscustomobject]@{ Name = $c; Client = $tcp; Task = $(try { $tcp.ConnectAsync($c, $Port) } catch { $null }) }
+        $batch = @($names[$i..([Math]::Min($i + 199, $names.Count - 1))])
+
+        # 1. Names to addresses. A full name that does not resolve (this PC uses another DNS server) is tried short.
+        $lookups = foreach ($c in $batch) {
+            $alt = if ($c -match '^[^.]+\.' -and $c -notmatch '^\d+(\.\d+){3}$') { ($c -split '\.')[0] } else { '' }
+            [pscustomobject]@{ Name = $c; Alt = $alt; Task = $(try { [Net.Dns]::GetHostAddressesAsync($c) } catch { $null })
+                AltTask = $(if ($alt) { try { [Net.Dns]::GetHostAddressesAsync($alt) } catch { $null } }) }
         }
-        $tasks = @($checks | Where-Object Task | ForEach-Object Task)
+        $tasks = @($lookups | ForEach-Object { $_.Task; $_.AltTask } | Where-Object { $_ })
         if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
-        foreach ($c in $checks) {
-            $result[$c.Name] = [bool]($c.Task -and $c.Task.Status -eq 'RanToCompletion' -and $c.Client.Connected)
-            $c.Client.Close()
+        $resolved = foreach ($l in $lookups) {
+            $ip = $null; $used = $l.Name
+            foreach ($pair in @(@($l.Task, $l.Name), @($l.AltTask, $l.Alt))) {
+                $t = $pair[0]
+                if ($ip -or -not $t -or $t.Status -ne 'RanToCompletion') { continue }
+                # IPv4 first: a .NET Framework TcpClient connects over the address's own family.
+                $a = @($t.Result | Sort-Object { if ($_.AddressFamily -eq 'InterNetwork') { 0 } else { 1 } } | Where-Object { -not [Net.IPAddress]::IsLoopback($_) -or $pair[1] -match '(?i)^localhost$|^127\.' })
+                if ($a) { $ip = $a[0]; $used = $pair[1] }
+            }
+            [pscustomobject]@{ Name = $l.Name; Ip = $ip; Used = $used }
+        }
+
+        # 2. The WinRM port, and the ports any Windows PC that is on answers on.
+        $probes = foreach ($r in @($resolved | Where-Object Ip)) {
+            foreach ($p in @($Port) + $OtherPorts) {
+                $tcp = [Net.Sockets.TcpClient]::new($r.Ip.AddressFamily)
+                [pscustomobject]@{ Name = $r.Name; Port = $p; Client = $tcp; Task = $(try { $tcp.ConnectAsync($r.Ip, $p) } catch { $null }) }
+            }
+        }
+        $tasks = @($probes | Where-Object Task | ForEach-Object Task)
+        if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
+        $open = @{}
+        foreach ($p in @($probes)) {
+            if ($p.Task -and $p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected) { $open["$($p.Name)|$($p.Port)"] = $true }
+            try { $p.Client.Close() } catch { }
+        }
+
+        foreach ($r in $resolved) {
+            $winrm = [bool]$open["$($r.Name)|$Port"]
+            $other = @($OtherPorts | Where-Object { $open["$($r.Name)|$_"] })
+            $state = if (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($other) { 'No WinRM' } else { 'No answer' }
+            $detail = switch ($state) {
+                'Not found' { "$($r.Name) does not resolve from this PC: it is not in the DNS this PC uses (this PC on another network, or the PC's DNS record is old)" }
+                'Yes'       { "answers on the WinRM port $Port at $($r.Ip)" }
+                'No WinRM'  { "is on at $($r.Ip) (port $($other -join ', ') answers) but nothing answers on the WinRM port ${Port}: PowerShell remoting is off there, or its firewall blocks it" }
+                default     { "resolves to $($r.Ip) but answers on none of ports $((@($Port) + $OtherPorts) -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
+            }
+            $result[$r.Name] = [pscustomobject]@{ Online = $winrm; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
         }
     }
+    $result
+}
+
+function Get-OnlineSummaryText {
+    # One line for the console's status bar: how many answer on WinRM, and what to do about the first ones that do not.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)   # { Name, State }
+    $rows = @($Rows)
+    $on = @($rows | Where-Object State -eq 'Yes').Count
+    $text = "$on of $($rows.Count) answer on PowerShell remoting (WinRM)."
+    $names = { param($list) "$($list[0].Name)$(if ($list.Count -gt 1) { " and $($list.Count - 1) more" })" }
+    $winrm = @($rows | Where-Object State -eq 'No WinRM')
+    $lost = @($rows | Where-Object State -eq 'Not found')
+    if ($winrm) { $text += " $(& $names $winrm): on, but remoting is off. Run Enable-PSRemoting -Force there as administrator, or turn it on by Group Policy (README)." }
+    elseif ($lost) { $text += " $(& $names $lost): name not found in this PC's DNS. Use a domain controller as this PC's DNS server." }
+    elseif ($rows.Count -gt $on) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Online for details.' }
+    $text
+}
+
+function Test-WinRMReachable {
+    # Which of these hosts answer on the WinRM port: name -> $true/$false.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985)
+    $result = @{}
+    $states = Get-RemoteOnlineState -ComputerName $ComputerName -TimeoutMs $TimeoutMs -Port $Port
+    foreach ($k in $states.Keys) { $result[$k] = [bool]$states[$k].Online }
     $result
 }
 
@@ -481,5 +551,5 @@ function Read-ReimageTargets {
 }
 
 Export-ModuleMember -Function Get-RemotingProblemText, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
-    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Test-WinRMReachable, Get-RemoteComputerInfo,
+    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, Test-WinRMReachable, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

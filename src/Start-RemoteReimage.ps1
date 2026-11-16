@@ -75,15 +75,24 @@ function Stop-Pc($p, [string]$Message) {
 
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $ContentRoot "AnswerFiles\$AnswerFile.xml"))) { throw "Answer file $AnswerFile is not on $ContentRoot." }
-    $up = Test-WinRMReachable -ComputerName @($pcs | ForEach-Object Address)
+    $up = Get-RemoteOnlineState -ComputerName @($pcs | ForEach-Object Address)
 
     # One PC at a time up to its restart: each copy of boot.wim is a few hundred MB.
     foreach ($p in $pcs) {
         Start-BuildStep $p.Id -Detail 'Reading the PC'
-        if (-not $up[$p.Address]) {
-            Write-Host "$($p.Name): nothing answers on the WinRM port (5985) at $($p.Address). If it is on, turn on PowerShell remoting there: Enable-PSRemoting -Force as administrator, or for many PCs the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the Windows Defender Firewall rule Windows Remote Management (HTTP-In)."
-            Stop-Pc $p "Not reachable over WinRM ($($p.Address)): it is off, or PowerShell remoting is not turned on there (see the log)"; continue
+        $check = $up[$p.Address]
+        if (-not $check -or -not $check.Online) {
+            Write-Host "$($p.Name): $(if ($check) { $check.Detail } else { 'not checked' })"
+            if ($check -and $check.State -eq 'Not found') {
+                Write-Host 'Use a domain controller as this PC''s DNS server (or connect it to the domain network or VPN), then try again.'
+                Stop-Pc $p "Not reimaged: $($p.Address) is not found in this PC's DNS (see the log)"; continue
+            }
+            Write-Host 'To turn on PowerShell remoting there: Enable-PSRemoting -Force as administrator, or for many PCs the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the Windows Defender Firewall rule Windows Remote Management (HTTP-In).'
+            Stop-Pc $p $(if ($check -and $check.State -eq 'No WinRM') { 'Not reimaged: it is on, but PowerShell remoting (WinRM) is off there (see the log)' }
+                         else { "Not reimaged: no answer from $($p.Address): it is off or asleep (see the log)" }); continue
         }
+        # The short name, when only that resolves from this PC.
+        $p.Address = $check.Address
         try {
             $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential
             Write-Host "$($p.Name): $($info.Model), serial $($info.Serial), $($info.Firmware), BitLocker $($info.BitLocker)"

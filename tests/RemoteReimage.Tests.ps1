@@ -159,6 +159,31 @@ Assert-Equal ($deploy -match "-or \`$job\) \{") $true 'a job starts without the 
 Assert-Equal ($deploy -match 'OU = \$job\.ou') $true 'the job OU replaces the answer file OU'
 Assert-Equal ($deploy -match '\$job -and -not \$answer\.Shutdown -and -not \$answer\.Reboot\) \{ \$answer\.Reboot = \$true') $true 'a reimaged PC restarts into Windows by itself'
 
+# Check online: says why a PC can't be reached, with local listeners standing in for the PC's ports.
+$winrm = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $winrm.Start()
+$smb = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $smb.Start()
+$closed = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $closed.Start(); $closedPort = $closed.LocalEndpoint.Port; $closed.Stop()
+try {
+    $wp = $winrm.LocalEndpoint.Port; $sp = $smb.LocalEndpoint.Port
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1', 'pc-that-does-not-exist.invalid' -Port $wp -OtherPorts $sp -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'Yes' 'a PC that answers on the WinRM port is online'
+    Assert-Equal $s['127.0.0.1'].Online $true 'online means WinRM answers'
+    Assert-Equal $s['pc-that-does-not-exist.invalid'].State 'Not found' 'a name that does not resolve says Not found'
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -OtherPorts $sp -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'No WinRM' 'a PC that answers on another port but not WinRM is on with remoting off'
+    Assert-Equal $s['127.0.0.1'].Online $false 'remoting off is not online'
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -OtherPorts $closedPort -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'No answer' 'a PC that answers on no port says No answer'
+    $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -OtherPorts $sp -TimeoutMs 2000
+    Assert-Equal $s['localhost.pc-that-does-not-exist.invalid'].Address 'localhost' 'a full name that does not resolve is tried by its short name'
+    Assert-Equal (Test-WinRMReachable -ComputerName '127.0.0.1' -Port $wp)['127.0.0.1'] $true 'Test-WinRMReachable still answers true/false'
+} finally { $winrm.Stop(); $smb.Stop() }
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'No WinRM' })
+Assert-Equal ($t -like '1 of 2 answer*2J14HL3: on, but remoting is off*Enable-PSRemoting*') $true 'the status line says which PC has remoting off and how to turn it on'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Not found' }, [pscustomobject]@{ Name = 'PC2'; State = 'Not found' })
+Assert-Equal ($t -like '*PC1 and 1 more: name not found*DNS*') $true 'the status line says names were not found in DNS'
+Assert-Equal (Get-OnlineSummaryText -Rows @()) '0 of 0 answer on PowerShell remoting (WinRM).' 'no rows, no hint'
+
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repo $f))
