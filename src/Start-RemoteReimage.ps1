@@ -97,7 +97,15 @@ try {
         $p.Method = $check.Method
         if ($p.Method -eq 'Smb') { Write-Host "$($p.Name): PowerShell remoting is off, going through its admin share and a one-time service" }
         try {
-            $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
+            try {
+                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
+            } catch {
+                # This console PC is outside the domain and WinRM won't sign in: file sharing takes domain accounts.
+                if ($p.Method -ne 'WinRM' -or -not $check.Smb -or -not (Test-WinRMSignInError $_.Exception.Message)) { throw }
+                Write-Host "$($p.Name): WinRM would not sign in from this PC ($($_.Exception.Message -replace '\s+', ' ')); going through its admin share and a one-time service instead"
+                $p.Method = 'Smb'
+                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
+            }
             Write-Host "$($p.Name): $($info.Model), serial $($info.Serial), $($info.Firmware), BitLocker $($info.BitLocker)"
             $problems = @(Test-RemoteTarget -Info $info -ExpectedName $p.Name)
             if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
