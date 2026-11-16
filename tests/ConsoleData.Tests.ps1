@@ -99,14 +99,13 @@ try {
     Assert-Equal $threw $true 'capture refuses a name that already exists'
 
     $s = Get-DeploySettings -ContentRoot $root
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 0 'share from defaults is accepted'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 0 'share from defaults is accepted'
     $s.share.path = ''
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'network capture without a share is flagged'
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Usb).Count) 0 'USB capture does not need a share'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 1 'network capture without a share is flagged'
     $s.share.path = 'server\Deploy'
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'non-UNC share is flagged'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 1 'non-UNC share is flagged'
 
     Set-Content (Join-Path $root 'Logs/CAPTURE-Win11_Ref_20261022-1700_FAILED.log') 'x'
     $cap = Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'CAPTURE-*'

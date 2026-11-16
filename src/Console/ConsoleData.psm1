@@ -261,15 +261,11 @@ function New-CaptureConfig {
 
 function Get-CaptureReadiness {
     # Problems that would make a capture fail in WinPE, for the wizard's summary page.
-    # Network captures (capture ISO) need the share; USB captures write to the stick's DEPLOY volume.
-    param([Parameter(Mandatory)][string]$ContentRoot, [ValidateSet('Network', 'Usb')][string]$Destination)
-    $issues = @()
-    if ($Destination -eq 'Network') {
-        $share = (Get-DeploySettings -ContentRoot $ContentRoot).share.path
-        if (-not $share) { $issues += 'No network share is set in Deploy Settings, so WinPE has nowhere to save the image.' }
-        elseif ($share -notmatch '^\\\\[^\\]+\\.+') { $issues += "The share '$share' is not a \\server\share path." }
-    }
-    $issues
+    # The capture ISO saves the image to the network share.
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $share = (Get-DeploySettings -ContentRoot $ContentRoot).share.path
+    if (-not $share) { 'No network share is set in Deploy Settings, so WinPE has nowhere to save the image.' }
+    elseif ($share -notmatch '^\\\\[^\\]+\\.+') { "The share '$share' is not a \\server\share path." }
 }
 
 #endregion

@@ -615,8 +615,7 @@ are both read. The deploy log says which entry was used.
    in the image: [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md).
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
-      below), an **ISO** for a VM or PC that boots from one, or a **USB stick** for a
-      physical PC.
+      below) or a **capture ISO** for a VM that boots from it.
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
       Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
@@ -632,8 +631,8 @@ are both read. The deploy log says which entry was used.
    4. Name the image and choose compression.
    5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
       window with each step (copy, read, capture, save), its bar and the time left.
-   The image is saved to the content root's `Images` folder (disk file), the share's
-   `Images` folder, or the USB stick, and a
+   The image is saved to the content root's `Images` folder (disk file) or the share's
+   `Images` folder (ISO), and a
    `CAPTURE-<name>` log appears on the Deployment Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.

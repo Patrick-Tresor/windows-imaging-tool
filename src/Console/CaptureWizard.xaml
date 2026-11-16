@@ -57,20 +57,12 @@
             <TextBox x:Name="TxtDiskFile" ToolTip="The VM's disk file: .vmdk, .vhdx, .vhd, .vdi or .qcow2"/>
           </DockPanel>
 
-          <RadioButton x:Name="RbIso" GroupName="Ref" Content="A VM or a PC that boots from an ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
+          <RadioButton x:Name="RbIso" GroupName="Ref" Content="A VM that boots from the capture ISO" FontWeight="SemiBold" Margin="0,6,0,4"/>
           <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
                      Text="You run sysprep yourself, then attach the capture ISO. The machine saves the image to the network share."/>
-          <DockPanel Margin="22,0,0,12">
+          <DockPanel Margin="22,0,0,0">
             <Button x:Name="BtnIsoFolder" DockPanel.Dock="Right" Content="Browse..."/>
             <TextBox x:Name="TxtIsoFolder" ToolTip="Folder for Capture-WinPE.iso"/>
-          </DockPanel>
-
-          <RadioButton x:Name="RbUsb" GroupName="Ref" Content="A physical PC, with a USB stick" FontWeight="SemiBold" Margin="0,6,0,4"/>
-          <TextBlock Style="{StaticResource Body}" Margin="22,0,0,6"
-                     Text="You run sysprep yourself. Erases the stick and makes it capture media; the image is saved on the stick's DEPLOY partition, copy it to the content root afterwards."/>
-          <DockPanel Margin="22,0,0,0">
-            <Button x:Name="BtnUsbRefresh" DockPanel.Dock="Right" Content="Refresh"/>
-            <ComboBox x:Name="CmbUsb" DisplayMemberPath="Label"/>
           </DockPanel>
         </StackPanel>
       </ScrollViewer>

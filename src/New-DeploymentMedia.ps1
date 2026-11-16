@@ -62,7 +62,7 @@ if ($LogPath) {
 }
 # The steps the progress window lists, in the order they run. Only the parameters decide them, so the list is
 # there before anything can fail.
-$appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig -and -not $NoAppDownloads
+$appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $NoAppDownloads
 $steps = @(, @('check', 'Checking the ADK and the content'))
 if ($appDownloads) { $steps += , @('apps', 'Downloading online applications') }
 $steps += , @('copype', 'Copying WinPE files')
@@ -138,13 +138,14 @@ if ($WinPEPasswordFile) {
     if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
 }
 if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
+if ($CaptureConfig -and $Target -ne 'Iso') { throw '-CaptureConfig needs -Target Iso: capture runs on a VM booted from the capture ISO.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
 if ($SecretsOnMedia -and -not $ContentSource) { throw '-SecretsOnMedia needs -ContentSource.' }
 $packArgs = @{}
 if ($SecretsOnMedia) { $packArgs.IncludeSecrets = $true }
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
-if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
+if ($Target -eq 'Usb' -and $ContentSource) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
     $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
@@ -158,10 +159,9 @@ if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
     foreach ($n in $content.Notes) { Write-Warning $n }
 }
 $copyPlan = $null
-if ($Target -eq 'Usb' -and $ContentSource) {
+if ($content) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
-    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude }
-                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { Get-MediaSecretExcludes -ContentRoot $ContentSource }) }
+    $copyPlan = Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude
     Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
 }
 if ($UpdateOnly) {
@@ -495,11 +495,10 @@ switch ($Target) {
             & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
             Complete-BuildStep 'bootfiles'
-            # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
+            # Find-ContentRoot recognizes the stick by its Images folder.
             New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
             if ($copyPlan) {
-                # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
-                # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
+                # The answer files, the image each one names, and what they use, copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
                 Start-BuildStep 'content'
                 $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\" -OnProgress $onCopy
                 Write-Host ('Copied {0} files, {1}, in {2} ({3}/s on average)' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), (Format-MediaSize ([int64]($copied.Bytes / [Math]::Max(0.001, $copied.Seconds)))))
