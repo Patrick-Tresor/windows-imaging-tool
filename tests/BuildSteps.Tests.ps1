@@ -131,7 +131,9 @@ Assert-Equal ($buildText -match '(?m)^Stop-BuildProgress\s*$') $true 'the end ma
 
 # The console: the build gets a progress file and a log, and the window is loaded the console's way.
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
-Assert-Equal ($consoleText -match "'-ProgressFile'") $true 'the console passes -ProgressFile'
+$progressText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/BuildProgress.ps1')
+Assert-Equal ($consoleText -match "Start-ConsoleJob -Name 'media-build'") $true 'the console starts the build with Start-ConsoleJob'
+Assert-Equal ($progressText -match "'-ProgressFile'") $true 'Start-ConsoleJob passes -ProgressFile'
 Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console opens the Build progress window'
 
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'
@@ -141,7 +143,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     Write-Host 'SKIP Build progress window: WPF needs an STA thread' -ForegroundColor Yellow
 } else {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
-    Import-Module (Join-Path $repo 'src/Console/WheelScroll.psm1') -Force
+    Import-Module (Join-Path $repo 'src/Console/XamlWindow.psm1') -Force
     . (Join-Path $repo 'src/Console/BuildProgress.ps1')
     $dir = Join-Path ([IO.Path]::GetTempPath()) ("imaging-steps-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $dir | Out-Null

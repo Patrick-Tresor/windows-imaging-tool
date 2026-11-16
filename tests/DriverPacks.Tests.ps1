@@ -264,7 +264,7 @@ Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'HP'; Model = 'H
 $dl = Get-Content -Raw (Join-Path $repo 'src/Console/DriverDownloader.ps1')
 $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
-Assert-Equal ($start -match "-WindowStyle Hidden -PassThru") $true 'download: the worker runs hidden'
+Assert-Equal ($start -match "Start-ConsoleJob [^\n]*-Hidden") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
 Assert-Equal ($start -match 'Add-DriverDownloadJob -Panel \$script:ui.GrpDriverDownloads -List \$script:ui.LstDriverDownloads') $true 'download: progress shown on the Driver Library page'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')

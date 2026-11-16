@@ -23,7 +23,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
 } else {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
     Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force
-    Import-Module (Join-Path $repo 'src/Console/WheelScroll.psm1') -Force
+    Import-Module (Join-Path $repo 'src/Console/XamlWindow.psm1') -Force
     . (Join-Path $repo 'src/Console/BuildProgress.ps1')
     . (Join-Path $repo 'src/Console/DriverDownloader.ps1')
 

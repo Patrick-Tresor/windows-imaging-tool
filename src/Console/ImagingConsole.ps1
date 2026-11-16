@@ -1055,12 +1055,8 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
     $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
     if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
-    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-    $progressFile = Join-Path $env:TEMP "network-boot-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
-    $logPath = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'Logs', "network-boot-$stamp.log")
-    $buildArgs += @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
-    $proc = Start-Process powershell.exe -ArgumentList $buildArgs -WindowStyle Minimized -PassThru
-    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
+    $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
     Set-Status 'Network boot image build started.'
 } })
 
@@ -1089,12 +1085,9 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
     ConvertTo-Json -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } }) | Set-Content -Path $targetsFile -Encoding utf8
-    $progressFile = Join-Path $env:TEMP "reimage-$stamp-$tag.json"
-    $logPath = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'Logs', "reimage-$stamp.log")
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
-        '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile),
-        '-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
+        '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
     if ($ui.ChkAdKeepName.IsChecked) { $runArgs += '-KeepNames' }
     if ($ui.ChkAdKeepOu.IsChecked) { $runArgs += '-KeepOU' }
     if ($cred) {
@@ -1103,8 +1096,8 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
         $cred | Export-Clixml -Path $credFile
         $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
     }
-    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle Hidden -PassThru
-    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Reimaging $($rows.Count) PC(s) with $answer" `
+    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $runArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Reimaging $($rows.Count) PC(s) with $answer" `
         -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
     Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard."
 } })
@@ -1207,15 +1200,9 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
-    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-    $progressFile = Join-Path $env:TEMP "media-build-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
-    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
-    $logPath = [IO.Path]::Combine($logDir, "media-build-$stamp.log")
-    $buildArgs += @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
-    $buildArgs = @('-NoExit') + $buildArgs
-    $proc = Start-Process powershell.exe -ArgumentList $buildArgs -WindowStyle Minimized -PassThru
+    $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
     $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } elseif ($ui.RbIso.IsChecked) { 'ISO' } else { 'PXE boot image' }
-    Show-BuildProgress -Owner $window -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Building $what"
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building $what"
     Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 

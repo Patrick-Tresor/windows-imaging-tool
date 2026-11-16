@@ -51,6 +51,26 @@ function Update-BuildStepRows {
     while ($Target.Count -gt $Rows.Count) { $Target.RemoveAt($Target.Count - 1) }
 }
 
+function Start-ConsoleJob {
+    # Runs a script in its own powershell.exe so the console stays usable, with a progress file in TEMP and a log
+    # in %LOCALAPPDATA%\ImagingConsole\Logs\<Name>-<time>.log for Show-BuildProgress. -ArgumentList is the command
+    # line, to which -ProgressFile and -LogPath are added, or a script block that gets both paths and returns it.
+    # Returns Process, ProgressFile and LogPath.
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$ArgumentList,
+        [switch]$Hidden
+    )
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $temp = [IO.Path]::GetTempPath()
+    $progressFile = [IO.Path]::Combine($temp, "$Name-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json")
+    $logPath = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $temp }), 'ImagingConsole', 'Logs', "$Name-$stamp.log")
+    $runArgs = if ($ArgumentList -is [scriptblock]) { & $ArgumentList $progressFile $logPath }
+               else { @($ArgumentList) + @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath)) }
+    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle $(if ($Hidden) { 'Hidden' } else { 'Minimized' }) -PassThru
+    [pscustomobject]@{ Process = $proc; ProgressFile = $progressFile; LogPath = $logPath }
+}
+
 function Show-BuildProgress {
     param(
         [Parameter(Mandatory)]$Owner,
