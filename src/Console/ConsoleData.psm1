@@ -489,6 +489,70 @@ function Save-AnswerFromEditor {
     $dest
 }
 
+#region Library folders (Applications\<name>, Tasks\<name>)
+
+# What differs between an application pack and a task: its folder, its json file and how it is read and checked.
+$script:LibraryKinds = @{
+    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application'; Suffix = '.apppack'
+        Check = { param($Name, $Dir)
+            $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'app.json') | ConvertFrom-Json)
+            @(Test-AppPack -Definition $def -Folder $Dir | Where-Object { $_ -notlike 'Warning:*' }) } }
+    Task = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task'; Suffix = ''
+        Check = { param($Name, $Dir)
+            $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'task.json') | ConvertFrom-Json)
+            @(Test-TaskPack -Definition $def -Folder $Dir) } }
+}
+
+function Export-LibraryItem {
+    # Zips <Root>\<name> (installer or script, its json, other files) into one file to copy to another content root.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
+    $k = $script:LibraryKinds[$Kind]
+    $src = Join-Path $Root $Name
+    if (-not (Test-Path (Join-Path $src $k.Json))) { throw "$Name has no $($k.Json) in $src." }
+    if (Test-Path $Path) { Remove-Item $Path -Force }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
+    $Path
+}
+
+function Import-LibraryItem {
+    # Unzips an exported pack into <Root>\<name>; the name comes from the file unless -Name is given.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
+    $k = $script:LibraryKinds[$Kind]
+    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path); if ($k.Suffix) { $Name = $Name -replace "$([regex]::Escape($k.Suffix))$", '' } }
+    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "The $($k.What) name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $dest = Join-Path $Root $Name
+    if ((Test-Path $dest) -and -not $Overwrite) { throw "The $($k.What) $Name already exists." }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("libraryitem-" + [guid]::NewGuid())
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try {
+        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
+        if (-not (Test-Path (Join-Path $tmp $k.Json))) { throw "$Path is not an exported $($k.What) (no $($k.Json) at the top)." }
+        $problems = @(& $k.Check $Name $tmp)
+        if ($problems) { throw ($problems -join "`n") }
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        New-Item -ItemType Directory -Path $Root -Force | Out-Null
+        Move-Item $tmp $dest
+    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
+    $dest
+}
+
+function Remove-LibraryItem {
+    # Deletes <content root>\Applications\<name> or Tasks\<name>. Refuses while an answer file still uses it.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$Name)
+    $k = $script:LibraryKinds[$Kind]
+    $usage = if ($Kind -eq 'Application') { Get-ApplicationUsage -ContentRoot $ContentRoot } else { Get-TaskUsage -ContentRoot $ContentRoot }
+    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
+    $dir = Join-Path (Join-Path $ContentRoot $k.Folder) $Name
+    if (-not (Test-Path (Join-Path $dir $k.Json))) { throw "$Name is not a $($k.What) folder." }
+    Remove-Item $dir -Recurse -Force
+}
+
+#endregion
+
 function Get-ApplicationUsage {
     # Application name -> names of the answer files that install it.
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -579,16 +643,6 @@ function Save-Application {
     Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source -Overwrite
 }
 
-function Remove-Application {
-    # Deletes Applications\<name>. Refuses while an answer file still installs it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
-    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
-    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
-    $dir = Join-Path (Join-Path $ContentRoot 'Applications') $Name
-    if (-not (Test-Path (Join-Path $dir 'app.json'))) { throw "$Name is not an application folder." }
-    Remove-Item $dir -Recurse -Force
-}
-
 function Get-TaskUsage {
     # Task library name -> names of the answer files that run it.
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -631,16 +685,6 @@ function Save-Task {
     $save = @{ TaskRoot = (Join-Path $ContentRoot 'Tasks'); Definition = $Definition; Source = $Source; Overwrite = -not $New }
     if ($PSBoundParameters.ContainsKey('ScriptText')) { $save.ScriptText = $ScriptText }
     Save-TaskPack @save
-}
-
-function Remove-Task {
-    # Deletes Tasks\<name>. Refuses while an answer file still runs it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
-    $usage = Get-TaskUsage -ContentRoot $ContentRoot
-    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
-    $dir = Join-Path (Join-Path $ContentRoot 'Tasks') $Name
-    if (-not (Test-Path (Join-Path $dir 'task.json'))) { throw "$Name is not a task folder." }
-    Remove-Item $dir -Recurse -Force
 }
 
 function Get-ImageUsage {
@@ -1268,10 +1312,10 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
-    Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
+    Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
-    Get-ApplicationUsage, Save-Application, Remove-Application,
+    Get-ApplicationUsage, Save-Application,
     Get-NamingListPath, Get-AnswerFileNames, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
     Get-VMCaptureArguments

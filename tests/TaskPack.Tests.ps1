@@ -90,7 +90,7 @@ try {
     Assert-Equal (($rows | ForEach-Object Name) -join ',') 'Cleanup,Rename,Wallpaper' 'the Tasks tab lists every task'
     $cleanup = $rows | Where-Object Name -eq 'Cleanup'
     Assert-Equal "$($cleanup.Phase)|$($cleanup.For)|$($cleanup.UsedBy)|$($cleanup.Status)" 'POSTIMAGE|Dell|Default|Ready' 'a row shows when it runs, which PCs and who uses it'
-    Assert-Throws { Remove-Task -ContentRoot $root -Name 'Cleanup' } '*still in these answer files: Default*' 'a task in use cannot be deleted'
+    Assert-Throws { Remove-LibraryItem -Kind Task -ContentRoot $root -Name 'Cleanup' } '*still in these answer files: Default*' 'a task in use cannot be deleted'
     Assert-Equal @(Get-AnswerFileIssues -ContentRoot $root -Answer $b | Where-Object { $_ -like 'Task *' }).Count 0 'existing tasks raise no answer file issue'
 
     # What the deploy runs: library tasks read, other makers' tasks left out, missing ones stop before the erase.
@@ -170,11 +170,11 @@ try {
 
     # Export and import.
     $zip = Join-Path $root 'Cleanup.zip'
-    Export-TaskPack -TaskRoot $taskRoot -Name 'Cleanup' -Path $zip | Out-Null
+    Export-LibraryItem -Kind Task -Root $taskRoot -Name 'Cleanup' -Path $zip | Out-Null
     $other = Join-Path $root 'OtherTasks'
-    Import-TaskPack -TaskRoot $other -Path $zip | Out-Null
+    Import-LibraryItem -Kind Task -Root $other -Path $zip | Out-Null
     Assert-Equal "$((Read-TaskPack -TaskRoot $other -Name 'Cleanup').phase)|$(Test-Path (Join-Path $other 'Cleanup/clean.cmd'))" 'POSTIMAGE|True' 'an exported task imports with its script'
-    Assert-Throws { Import-TaskPack -TaskRoot $other -Path $zip } '*already exists*' 'import does not overwrite a task by accident'
+    Assert-Throws { Import-LibraryItem -Kind Task -Root $other -Path $zip } '*already exists*' 'import does not overwrite a task by accident'
 
     # Task logs go straight in C:\Windows\Temp, next to Deploy.log and FirstBoot.log, not in a subfolder.
     # (C:\Temp\Tasks, without Windows, is where FIRSTBOOT tasks are staged.)
