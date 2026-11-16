@@ -133,7 +133,6 @@ try {
     Assert-Equal ($c.Exclude -join ';') 'config\secrets;config\share.cred' 'share password file outside config\secrets is left off the stick'
     $plan = Get-MediaCopyPlan -ContentRoot $root -Folders $c.Folders -Files $c.Files -Exclude $c.Exclude
     Assert-Equal (@($plan.Items | Where-Object { $_.Relative -like '*share.cred' }).Count) 0 'the copy plan has no share.cred'
-    Assert-Equal (@(Get-MediaContent -ContentRoot $root -AnswerFiles 'Default' -IncludeSecrets).Exclude.Count) 0 '-IncludeSecrets copies it'
     $s.share.passwordFile = 'config\secrets\share.txt'
     $s | ConvertTo-Json -Depth 6 | Set-Content $set
     Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Default').Exclude -join ';') 'config\secrets' 'share password file in config\secrets: one exclude'

@@ -73,7 +73,7 @@ try {
     $cred = Get-ShareCredential -SettingsPath (Join-Path $peDir 'deploy-settings.json')
     Assert-Equal ($null -eq $cred.Password) $true 'without the key nothing is decrypted (net use then asks)'
 
-    # The stick: config is copied, config\secrets is not, unless asked for.
+    # The stick: config is copied, config\secrets never is.
     $c = Get-MediaContent -ContentRoot $root
     Assert-Equal ($c.Exclude -join ';') 'config\secrets;config\share.txt' 'secrets and the share password file left out by default'
     Assert-Equal (($c.Notes -join ' ') -like '*Password files (config\secrets) are not copied*') $true 'and the build says so'
@@ -81,10 +81,6 @@ try {
     Assert-Equal (@($plan.Items | Where-Object { $_.Relative -like 'config\secrets*' }).Count) 0 'no password file in the copy'
     Assert-Equal (@($plan.Directories | Where-Object { $_ -like 'config\secrets*' }).Count) 0 'not even the empty folder'
     Assert-Equal (@($plan.Items | Where-Object Relative -eq 'config\deploy-settings.json').Count) 1 'the rest of config is copied'
-    $with = Get-MediaContent -ContentRoot $root -IncludeSecrets
-    Assert-Equal $with.Exclude.Count 0 '-IncludeSecrets: nothing left out'
-    $plan = Get-MediaCopyPlan -ContentRoot $root -Folders $with.Folders -Files $with.Files -Exclude $with.Exclude
-    Assert-Equal (@($plan.Items | Where-Object { $_.Relative -eq 'config\secrets\Default-join.txt' }).Count) 1 '-IncludeSecrets: password files copied'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 

@@ -1156,10 +1156,9 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkSecretsOnMedia.IsChecked) {
+    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked) {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
-    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
     if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkAppDownloads.IsChecked) { $buildArgs += '-NoAppDownloads' }
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress

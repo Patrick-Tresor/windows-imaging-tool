@@ -42,8 +42,7 @@ Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
 
-# Passwords: from the content root's password files when they are there (network share, or a stick built with
-# -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
+# Passwords: from the content root's password files when they are there (network share), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
 # else from the vault the WinPE password unlocked, else typed by the operator (kept in memory only).
 $script:Vault = @{}
 $script:AnswerKey = $null

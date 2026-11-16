@@ -17,8 +17,7 @@
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
     WinPE asks for the password in that file before it does anything. The content root's password files and the
-    answer file key go into boot.wim encrypted with it; they are never copied to the stick as plain text (unless
-    -SecretsOnMedia). Without a WinPE password the answer files still carry their passwords encrypted, and the key
+    answer file key go into boot.wim encrypted with it; they are never copied to the stick as plain text. Without a WinPE password the answer files still carry their passwords encrypted, and the key
     that decrypts them is in boot.wim, so the deploy needs no typing either way.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
@@ -45,7 +44,6 @@ param(
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
-    [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
     [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
     [string]$LogPath,                # transcript of the build (the progress window's Open log button)
@@ -140,9 +138,7 @@ if ($WinPEPasswordFile) {
 if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
 if ($CaptureConfig -and $Target -ne 'Iso') { throw '-CaptureConfig needs -Target Iso: capture runs on a VM booted from the capture ISO.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
-if ($SecretsOnMedia -and -not $ContentSource) { throw '-SecretsOnMedia needs -ContentSource.' }
 $packArgs = @{}
-if ($SecretsOnMedia) { $packArgs.IncludeSecrets = $true }
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
 if ($Target -eq 'Usb' -and $ContentSource) {
@@ -380,10 +376,10 @@ try {
         # the whole stick can take the key out of boot.wim.
         [IO.File]::WriteAllText("$deployDir\config\answer-key.txt", $answerKey, [Text.Encoding]::ASCII)
         Write-Host "Answer file key $(Get-AnswerKeyId $answerKey) is in boot.wim: the passwords encrypted in the answer files are used without typing." -ForegroundColor Green
-        if ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+        if ($Target -eq 'Usb' -and $ContentSource) {
             Write-Warning 'No WinPE password: anyone with the stick can boot it, and could take the answer file key out of boot.wim to decrypt the passwords. Set a WinPE password to lock it.'
         }
-    } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+    } elseif ($Target -eq 'Usb' -and $ContentSource) {
         Write-Warning 'No answer file key in config\secrets: no answer file has an encrypted password, so the deploy wizard asks for the passwords on its Passwords page.'
     }
     $answerKey = $null

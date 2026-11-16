@@ -69,10 +69,7 @@ function Get-MediaContent {
         [string[]]$AnswerFiles,
         [string]$DefaultAnswerFile,
         # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
-        [AllowEmptyCollection()][string[]]$DriverPacks,
-        # Also copy config\secrets (join, share and Administrator passwords, the answer file key) as plain text. Off by
-        # default: a lost stick would give them away. WinPE uses the passwords encrypted in the answer files instead.
-        [switch]$IncludeSecrets
+        [AllowEmptyCollection()][string[]]$DriverPacks
     )
     $pickPacks = $PSBoundParameters.ContainsKey('DriverPacks')
     $packsCopied = @()
@@ -85,7 +82,7 @@ function Get-MediaContent {
     if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
-    # Always: settings, driver catalog, naming list and the tools (password files only with -IncludeSecrets).
+    # Always: settings, driver catalog, naming list and the tools (never the password files).
     # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
     foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-ContentPath $ContentRoot $dir)) { $folders += $dir } }
 
@@ -159,12 +156,11 @@ function Get-MediaContent {
     if ($DefaultAnswerFile -and $names -and $DefaultAnswerFile -notin $names) {
         $notes += "The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use."
     }
-    $exclude = @()
-    if (-not $IncludeSecrets) {
-        $exclude += @(Get-MediaSecretExcludes -ContentRoot $ContentRoot)
-        if ($names -and (Test-Path (Join-ContentPath $ContentRoot 'config\secrets'))) {
-            $notes += 'Password files (config\secrets) are not copied to the stick. The answer files carry their passwords encrypted, and WinPE decrypts them with the key the build puts in boot.wim.'
-        }
+    # Password files (config\secrets: join, share and Administrator passwords, the answer file key) never go on the
+    # stick: a lost stick would give them away. WinPE uses the passwords encrypted in the answer files instead.
+    $exclude = @(Get-MediaSecretExcludes -ContentRoot $ContentRoot)
+    if ($names -and (Test-Path (Join-ContentPath $ContentRoot 'config\secrets'))) {
+        $notes += 'Password files (config\secrets) are not copied to the stick. The answer files carry their passwords encrypted, and WinPE decrypts them with the key the build puts in boot.wim.'
     }
     [pscustomobject]@{
         AnswerFiles = $rows

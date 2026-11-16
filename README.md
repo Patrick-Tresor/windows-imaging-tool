@@ -287,9 +287,8 @@ tries or **Shut down**.
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
 right after the answer file, with one box for each missing password; an
-unattended answer file asks in one window before its countdown. Tick
-**Passwords on USB** only if you also want the plain password files on the
-stick; it is not needed.
+unattended answer file asks in one window before its countdown. Password files
+are never copied to the stick.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach
 the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).
