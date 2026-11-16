@@ -18,7 +18,7 @@ foreach ($f in Get-ChildItem -LiteralPath $console -Include '*.ps1', '*.psm1' -R
         Assert-Equal $f.Name 'XamlWindow.psm1' "$($f.Name): windows are loaded with New-ConsoleWindow"
     }
 }
-foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.xaml' | Where-Object Name -ne 'Styles.xaml') {
+foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.xaml' | Where-Object Name -notin 'Styles.xaml', 'FormStyles.xaml') {
     $loader = @(Get-ChildItem -LiteralPath $console -Filter '*.ps1' | Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match "New-ConsoleWindow '$([regex]::Escape($f.Name))'" })
     Assert-Equal ($loader.Count -ge 1) $true "$($f.Name) is opened with New-ConsoleWindow"
 }

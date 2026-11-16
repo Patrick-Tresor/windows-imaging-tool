@@ -8,6 +8,7 @@ $script:XamlNs = 'http://schemas.microsoft.com/winfx/2006/xaml'
 function Read-ConsoleXaml {
     # A window's XAML with Styles.xaml merged into its resources. The window's own styles come after the shared
     # ones, so they win, and BasedOn="{StaticResource {x:Type Button}}" in a window builds on the shared style.
+    # <ResourceDictionary Source="FormStyles.xaml"/> in the window's resources is replaced by that file's styles.
     param([Parameter(Mandatory)][string]$Path)
     [xml]$xaml = Get-Content -Raw -LiteralPath $Path
     [xml]$shared = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'Styles.xaml')
@@ -19,7 +20,12 @@ function Read-ConsoleXaml {
     $dict = $xaml.CreateElement('ResourceDictionary', $ns)
     $merged = $dict.AppendChild($xaml.CreateElement('ResourceDictionary.MergedDictionaries', $ns))
     [void]$merged.AppendChild($xaml.ImportNode($shared.DocumentElement, $true))
-    foreach ($child in @($res.ChildNodes)) { [void]$dict.AppendChild($child) }
+    foreach ($child in @($res.ChildNodes)) {
+        if ($child.LocalName -eq 'ResourceDictionary' -and $child.GetAttribute('Source')) {
+            [xml]$part = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot $child.GetAttribute('Source'))
+            foreach ($style in @($part.DocumentElement.ChildNodes | Where-Object NodeType -eq 'Element')) { [void]$dict.AppendChild($xaml.ImportNode($style, $true)) }
+        } else { [void]$dict.AppendChild($child) }
+    }
     [void]$res.AppendChild($dict)
     $xaml
 }

@@ -3,19 +3,7 @@
         Title="Task" Width="860" Height="720" MinWidth="680" MinHeight="520"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="ComboBox">
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="CheckBox">
-      <Setter Property="Margin" Value="0,4,0,8"/>
-    </Style>
-    <Style TargetType="Label" BasedOn="{StaticResource {x:Type Label}}">
-      <Setter Property="Padding" Value="0,4,8,4"/>
-      <Setter Property="VerticalAlignment" Value="Top"/>
-    </Style>
+    <ResourceDictionary Source="FormStyles.xaml"/>
     <Style x:Key="Heading" TargetType="TextBlock">
       <Setter Property="FontSize" Value="14"/>
       <Setter Property="FontWeight" Value="SemiBold"/>

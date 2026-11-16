@@ -3,30 +3,7 @@
         Title="Answer File" Width="920" Height="660" MinWidth="820" MinHeight="560"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="PasswordBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="ComboBox">
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="CheckBox">
-      <Setter Property="Margin" Value="0,4,0,8"/>
-    </Style>
-    <Style TargetType="RadioButton">
-      <Setter Property="Margin" Value="0,4,16,8"/>
-    </Style>
-    <Style TargetType="Label" BasedOn="{StaticResource {x:Type Label}}">
-      <Setter Property="Padding" Value="0,4,8,4"/>
-      <Setter Property="VerticalAlignment" Value="Top"/>
-    </Style>
-    <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
-      <Setter Property="CanUserAddRows" Value="False"/>
-      <Setter Property="SelectionMode" Value="Single"/>
-    </Style>
+    <ResourceDictionary Source="FormStyles.xaml"/>
   </Window.Resources>
 
   <DockPanel>
