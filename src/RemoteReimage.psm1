@@ -266,7 +266,7 @@ function Get-RemoteOnlineState {
                 'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port) nor file sharing (port $SmbPort) answers: turn one on, or allow it in its firewall" }
                 default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
             }
-            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
+            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
         }
     }
     $result
@@ -388,7 +388,16 @@ function Open-RemoteChannel {
     if ($Method -eq 'WinRM') {
         $credArgs = @{}
         if ($Credential) { $credArgs.Credential = $Credential }
-        $ch.Session = New-PSSession -ComputerName $ComputerName -ErrorAction Stop @credArgs
+        try {
+            $ch.Session = New-PSSession -ComputerName $ComputerName -ErrorAction Stop @credArgs
+        } catch {
+            # A console PC outside the domain can't use Negotiate without TrustedHosts, but it can ask the domain for
+            # a Kerberos ticket with the account given (the PC's full DNS name, the domain's DNS reachable).
+            if (-not $Credential -or -not (Test-WinRMSignInError $_.Exception.Message)) { throw }
+            $first = $_
+            try { $ch.Session = New-PSSession -ComputerName $ComputerName -Authentication Kerberos -ErrorAction Stop @credArgs }
+            catch { throw $first }
+        }
     } else {
         foreach ($share in 'IPC$', 'ADMIN$', 'C$') {
             $unc = "\\$ComputerName\$share"
@@ -674,6 +683,12 @@ function Get-RemoteReimageProblems {
 
 #endregion
 
+function Test-WinRMSignInError {
+    # WinRM answered but would not sign in from this PC: it is outside the domain (no TrustedHosts, no Kerberos).
+    param([AllowEmptyString()][string]$Message)
+    $Message -match '(?i)TrustedHosts|cannot be authenticated|workgroup|0x8009030e|0x80090311|0x80090322|Kerberos'
+}
+
 function Get-RemotingProblemText {
     <#
     .SYNOPSIS
@@ -719,6 +734,6 @@ function Read-ReimageTargets {
     })
 }
 
-Export-ModuleMember -Function Get-RemotingProblemText, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
+Export-ModuleMember -Function Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Test-WinRMReachable, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

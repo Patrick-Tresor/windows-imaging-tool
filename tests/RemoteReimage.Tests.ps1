@@ -229,6 +229,13 @@ foreach ($f in 'Get-RemoteComputerInfo', 'Invoke-LocalDiskBoot', 'Remove-LocalDi
     Assert-Equal ($mod -match "(?s)function $f \{.*?Open-RemoteChannel.*?Close-RemoteChannel") $true "$f works over WinRM or the admin share"
 }
 Assert-Equal ($start -match '-Method \$p\.Method') $true 'Start-RemoteReimage uses the way in the check found'
+# A console PC outside the domain (2026-11-16, 2J14HL3): WinRM answers but asks for TrustedHosts.
+$trusted = 'Connecting to remote server 2J14HL3.borealc.on.ca failed with the following error message : The WinRM client cannot process the request. If the authentication scheme is different from Kerberos, or if the client computer is not joined to a domain, then HTTPS transport must be used or the destination machine must be added to the TrustedHosts configuration setting.'
+Assert-Equal (Test-WinRMSignInError $trusted) $true 'the TrustedHosts error is a sign-in error'
+Assert-Equal (Test-WinRMSignInError 'Access is denied.') $false 'access denied is not (the account is wrong, not the console PC)'
+Assert-Equal ($mod -match '(?s)Test-WinRMSignInError.*?-Authentication Kerberos') $true 'WinRM tries Kerberos with the account given before giving up'
+Assert-Equal ($start -match "(?s)Test-WinRMSignInError.*?\`$p\.Method = 'Smb'") $true 'when WinRM still will not sign in, the reimage goes through the admin share'
+Assert-Equal ($start -match '\$check\.Smb') $true 'only when file sharing answered'
 
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
