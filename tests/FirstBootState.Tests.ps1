@@ -101,4 +101,32 @@ Assert-Equal "$($clean.Contains('"C:\Temp\FirstBoot.ps1"'))|$($clean.Contains('f
 $keep = Get-FirstBootCleanupCommand 'C:\Temp' -KeepScript
 Assert-Equal "$($keep.Contains('"C:\Temp\FirstBoot.ps1"'))|$($keep.Contains('firstboot.json'))" 'False|True' 'when the task could not be deleted, its script stays (admins only) but the PIN goes'
 
+# unattend.xml on the deployed PC: Clear-UnattendPasswords.ps1 blanks every password once OOBE is over.
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('unattend-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+try {
+    $ua = Join-Path $tmp 'unattend.xml'
+    [IO.File]::WriteAllText($ua, @'
+<unattend><settings pass="specialize"><component name="Microsoft-Windows-UnattendedJoin"><Identification><Credentials>
+<Domain>CORP</Domain><Password>J0in-Secret</Password><Username>svc-join</Username></Credentials></Identification></component></settings>
+<settings pass="oobeSystem"><component name="Microsoft-Windows-Shell-Setup"><UserAccounts><AdministratorPassword>
+<Value>Adm1n-Secret</Value><PlainText>true</PlainText></AdministratorPassword></UserAccounts>
+<AutoLogon><Password><Value>Auto-Secret</Value><PlainText>true</PlainText></Password><Username>Administrator</Username></AutoLogon>
+<ComputerName>PC-01</ComputerName></component></settings></unattend>
+'@)
+    $logFile = Join-Path $tmp 'FirstBoot.log'
+    $clear = Join-Path $repo 'src/Clear-UnattendPasswords.ps1'
+    & $clear -Path $ua, (Join-Path $tmp 'missing.xml') -LogPath $logFile -NoWait -KeepTask
+    $after = [IO.File]::ReadAllText($ua)
+    Assert-Equal ($after -match 'Secret') $false 'unattend: every password is removed'
+    Assert-Equal (([xml]$after).unattend.settings[1].component.ComputerName) 'PC-01' 'unattend: still valid XML, other settings kept'
+    Assert-Equal ((Get-Content -Raw $logFile) -match 'removed 3 from') $true 'unattend: the log says how many'
+    & $clear -Path $ua -LogPath $logFile -NoWait -KeepTask
+    Assert-Equal ((Get-Content -Raw $logFile) -match 'none left in') $true 'unattend: a second run finds nothing to remove'
+} finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+$fb = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
+Assert-Equal ($fb -match '/SC ONLOGON /RU SYSTEM') $true 'unattend: first boot creates the SYSTEM logon task'
+$dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+Assert-Equal ($dp -match "Protect-StagedItem -Path 'W:\\ProgramData\\ImagingTool\\Clear-UnattendPasswords\.ps1'") $true 'unattend: the script is staged for admins only'
+
 Complete-Tests 'All first boot state tests passed.'

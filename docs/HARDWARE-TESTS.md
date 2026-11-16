@@ -46,6 +46,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 3.1 | BitLocker (TPM, and TPM+PIN) | Encrypted at first boot; the recovery key is backed up where the answer file says |
 | 3.2 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
 | 3.2b | Same PC, tick **Install Windows 11 anyway on this PC** and press Next | The wizard goes on; the Ready to deploy summary shows the failed requirement; `Deploy.log` has "Deploying Windows 11 anyway"; Windows 11 starts and joins the domain |
+| 3.3 | Passwords removed from unattend.xml | After the first logon (OOBE over), `C:\Windows\Panther\unattend.xml` shows `*removed*` for every password, `C:\Windows\Temp\FirstBoot.log` says "unattend.xml passwords: removed N from ...", and the `ImagingTool\ClearUnattend` task and `C:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1` are gone; OOBE still skipped the account page and the domain join worked |
 
 ## 4. Capture and image upkeep
 

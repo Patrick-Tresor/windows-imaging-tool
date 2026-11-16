@@ -790,6 +790,11 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
         (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
+    # Removes the passwords from unattend.xml once OOBE is over (FirstBoot.ps1 sets up the logon task that runs it).
+    # It runs as SYSTEM, so only Administrators and SYSTEM may change it.
+    New-Item -ItemType Directory -Path 'W:\ProgramData\ImagingTool' -Force | Out-Null
+    Copy-Item (Join-Path $PSScriptRoot 'Clear-UnattendPasswords.ps1') 'W:\ProgramData\ImagingTool\' -Force
+    Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
