@@ -6,11 +6,7 @@
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $launcher = @(Get-Content -LiteralPath (Join-Path $repo 'ImagingConsole.cmd') | Where-Object { $_ -match '(?i)powershell' -and $_ -notmatch '(?i)^\s*rem\b' })
 Assert-Equal $launcher.Count 1 'ImagingConsole.cmd starts PowerShell once'
@@ -27,5 +23,4 @@ Assert-Equal ($text -match "(?s)trap \{.*?console-error\.log.*?MessageBox\]::Sho
 $trapAt = $text.IndexOf('trap {'); $windowAt = $text.IndexOf("MainWindow.xaml")
 Assert-Equal ($trapAt -gt 0 -and $trapAt -lt $windowAt) $true 'the error trap is set before the main window loads'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

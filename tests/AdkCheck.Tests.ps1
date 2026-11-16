@@ -5,11 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/AdkCheck.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 function New-FakeFile([string]$Root, [string]$Relative) {
     $path = Join-Path $Root ($Relative -replace '\\', [IO.Path]::DirectorySeparatorChar)
@@ -77,5 +73,4 @@ finally {
     Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All ADK check tests passed' -ForegroundColor Green
+Complete-Tests 'All ADK check tests passed'

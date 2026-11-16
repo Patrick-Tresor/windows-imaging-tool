@@ -7,11 +7,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # The startup command: SYSTEM\Setup SetupType 2 + CmdLine, and device encryption held off for that boot.
 $cmd = Get-SysprepHookCommand
@@ -133,5 +129,4 @@ $setPart = $deploy.Substring($deploy.IndexOf('function Set-SysprepAtDeploy'), $d
 Assert-Equal ($setPart.Contains('Write-DeployLog ''Sysprep') -or $setPart.Contains("Invoke-Native -FilePath 'reg.exe'")) $false 'setting up sysprep prints nothing on the deploy screen'
 Assert-Equal ($deploy.Contains("Set-DeployStatus -Step 'Setting up sysprep")) $false 'no sysprep step in the deploy progress'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All sysprep at deploy tests passed.' -ForegroundColor Green
+Complete-Tests 'All sysprep at deploy tests passed.'

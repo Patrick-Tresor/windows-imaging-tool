@@ -5,11 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $script = Join-Path $repo 'src/Prepare-Reference.ps1'
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # The script needs admin rights and runs sysprep, so load only the function.
 $ast = [Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$null)
@@ -58,5 +54,4 @@ Assert-Equal ($msg -like '*installed for a user*not provisioned*') $true 'a Stor
 $msg = "$(Get-StoreProblem -Installed @() -Provisioned $noStore)"
 Assert-Equal ($msg -like '*not installed or provisioned*') $true 'a Store that is gone is a problem'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

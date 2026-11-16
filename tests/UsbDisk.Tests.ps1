@@ -5,11 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/UsbDisk.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Fakes: functions win over cmdlets, also when the module calls them. Clear-Disk keeps the partition style,
 # as it does on most sticks; Initialize-Disk fails on a disk that is not RAW, as the real one does.
@@ -73,5 +69,4 @@ Assert-Equal (Get-UsbTargetDisk -DiskNumber 2).FriendlyName 'SanDisk Ultra' 'a p
 $script = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($script -match 'Initialize-Disk') $false 'New-DeploymentMedia leaves initializing to Reset-UsbDisk'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All USB disk tests passed.' -ForegroundColor Green
+Complete-Tests 'All USB disk tests passed.'

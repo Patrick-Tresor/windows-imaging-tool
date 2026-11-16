@@ -8,11 +8,7 @@ Import-Module (Join-Path $repo 'src/Console/DriverPacks.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 $fixtures = Join-Path $PSScriptRoot 'fixtures/driverpacks'
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Dell names newer models with the brand already in the model's Display ("Latitude 5531" under brand Latitude):
 # the console showed "Dell Latitude Latitude 5531" and the folder and model matched no PC.
@@ -310,5 +306,4 @@ try {
     Assert-Equal ((Format-VendorDriverPack @($r.Packs)[0]) -like 'Lenovo ThinkPad T570 - Windows 10 20H2*') $true 'find online: an older model gets its Windows 10 pack, and says so'
 } finally { Remove-Item $anyXml -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

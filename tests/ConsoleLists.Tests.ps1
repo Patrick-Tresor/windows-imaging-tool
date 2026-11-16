@@ -9,11 +9,7 @@ Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Stands in for a WPF list control: the property has the same type as ItemsSource, so PowerShell converts the same way.
 Add-Type -TypeDefinition @'
@@ -72,5 +68,4 @@ foreach ($f in Get-ChildItem (Join-Path $repo 'src/Console') -Include *.ps1, *.p
 foreach ($line in $bad) { Write-Host "  $line" }
 Assert-Equal $bad.Count 0 'console scripts wrap @() around if/switch statements, not inside their branches'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

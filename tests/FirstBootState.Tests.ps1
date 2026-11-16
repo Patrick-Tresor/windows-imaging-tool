@@ -6,11 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/FirstBootState.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ('fbstate-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -105,5 +101,4 @@ Assert-Equal "$($clean.Contains('"C:\Temp\FirstBoot.ps1"'))|$($clean.Contains('f
 $keep = Get-FirstBootCleanupCommand 'C:\Temp' -KeepScript
 Assert-Equal "$($keep.Contains('"C:\Temp\FirstBoot.ps1"'))|$($keep.Contains('firstboot.json'))" 'False|True' 'when the task could not be deleted, its script stays (admins only) but the PIN goes'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All first boot state tests passed.' -ForegroundColor Green
+Complete-Tests 'All first boot state tests passed.'

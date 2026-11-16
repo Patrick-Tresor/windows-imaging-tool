@@ -9,18 +9,7 @@ Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/TaskPack.psm1') -Force
 Import-Module (Join-Path $repo 'src/MediaContent.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Block, [string]$Like, $Name) {
-    try { & $Block; Write-Host "FAIL $Name (no error)" -ForegroundColor Red; $script:failures++ }
-    catch {
-        if ($_.Exception.Message -like $Like) { Write-Host "PASS $Name" -ForegroundColor Green }
-        else { Write-Host "FAIL $Name`n  error: $($_.Exception.Message)" -ForegroundColor Red; $script:failures++ }
-    }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("tasks-test-" + [guid]::NewGuid())
 try {
@@ -212,5 +201,4 @@ try {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All task library checks passed.' -ForegroundColor Green
+Complete-Tests 'All task library checks passed.'

@@ -6,11 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/CaptureCheck.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function Get-Row($List, $Id) { @($List.Rows | Where-Object Id -eq $Id)[0] }
 $tick = [string][char]0x2713; $cross = [string][char]0x2717; $wait = [string][char]0x25CB
 
@@ -157,5 +153,4 @@ $touching = @(Get-ChildItem -LiteralPath $src -Recurse -File -Include *.ps1, *.p
     Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match '(?i)\b(Add|Set|Remove)-MpPreference\b|-Exclusion(Path|Process|Extension)\b' } | ForEach-Object Name)
 Assert-Equal ($touching -join ', ') '' 'no script adds or removes Defender exclusions'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All capture check tests passed.' -ForegroundColor Green
+Complete-Tests 'All capture check tests passed.'

@@ -5,18 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Block, [string]$Like, $Name) {
-    try { & $Block; Write-Host "FAIL $Name (no error)" -ForegroundColor Red; $script:failures++ }
-    catch {
-        if ($_.Exception.Message -like $Like) { Write-Host "PASS $Name" -ForegroundColor Green }
-        else { Write-Host "FAIL $Name`n  error: $($_.Exception.Message)" -ForegroundColor Red; $script:failures++ }
-    }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("answer-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -299,5 +288,4 @@ finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

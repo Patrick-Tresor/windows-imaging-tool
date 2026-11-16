@@ -8,11 +8,7 @@ Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-test-" + [guid]::NewGuid())
 & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
@@ -306,5 +302,4 @@ $tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{
 Assert-Equal ($tip.Text -like '*Windows Security*C:\WinPE_Build*') $true 'scan tip: says where to add them and lists them'
 Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })) $null 'scan tip: hidden once the admin clicked Done'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

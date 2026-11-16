@@ -6,11 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/NamingList.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("naming-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -101,5 +97,4 @@ finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

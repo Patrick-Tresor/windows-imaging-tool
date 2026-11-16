@@ -5,11 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("capture-state-test-" + [guid]::NewGuid())
 $stateDir = Join-Path $root 'Windows/Setup/State'
@@ -44,5 +40,4 @@ try {
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All capture state tests passed.' -ForegroundColor Green
+Complete-Tests 'All capture state tests passed.'

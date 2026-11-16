@@ -10,11 +10,7 @@ Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Paths agree between the build (Windows paths) and WinPE whatever the case or slashes.
 Assert-Equal (ConvertTo-SecretKey 'config/secrets/Staff-Join.txt') 'config\secrets\staff-join.txt' 'key: slashes and case'
@@ -215,5 +211,4 @@ $readAt = $deploy.IndexOf('function Read-DeployAnswer(')
 Assert-Equal ($deploy.IndexOf('Add-AnswerPasswords -Root $Root -Answer $a', $readAt) -gt $readAt) $true 'deploy: answer file passwords decrypted when it is read'
 Assert-Equal ([regex]::Matches($deploy, 'Get-DeploySecret -Root \$\w+ -RelativePath \S+ -Label').Count) 0 'deploy: every Get-DeploySecret is given the answer'
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All secret vault checks passed' -ForegroundColor Green
+Complete-Tests 'All secret vault checks passed'

@@ -7,11 +7,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployProgress.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Wrapping.
 $short = @(Format-ConsoleText -Text '12:00:01 Partitioning disk 0' -Width 80)
@@ -72,5 +68,4 @@ Assert-Equal ($deploy -match 'Set-DeployConsole') $true 'deploy sets up the cons
 $common = Get-Content -Raw (Join-Path $repo 'src/DeployCommon.psm1')
 Assert-Equal ($common -match 'ReadAllText\(\$out\)') $false 'DISM output is read with FileShare.ReadWrite'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All deploy console tests passed.' -ForegroundColor Green
+Complete-Tests 'All deploy console tests passed.'

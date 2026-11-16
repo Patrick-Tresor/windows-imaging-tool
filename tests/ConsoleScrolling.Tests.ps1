@@ -7,11 +7,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $console = Join-Path $repo 'src/Console'
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Every window the console loads turns on wheel routing.
 foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.ps1') {
@@ -151,5 +147,4 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     }
 }
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All scrolling tests passed.' -ForegroundColor Green
+Complete-Tests 'All scrolling tests passed.'

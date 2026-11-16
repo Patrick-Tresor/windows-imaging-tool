@@ -7,11 +7,7 @@ Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/SecretVault.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 $onWindows = $env:OS -eq 'Windows_NT'
 
 Assert-Equal (Get-UncRoot '\\srv01\Deploy\Status') '\\srv01\Deploy' 'UNC root of a sub folder'
@@ -125,5 +121,4 @@ foreach ($n in 'RbSettingsUsb', 'RbSettingsShare', 'PwdShare', 'BtnShareTest', '
 }
 Assert-Equal ($names -contains 'TxtSharePwFile') $false 'no password file box any more'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

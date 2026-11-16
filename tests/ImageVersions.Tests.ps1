@@ -7,16 +7,7 @@ Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/ImageVersions.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Action, $Name) {
-    $threw = $false
-    try { & $Action } catch { $threw = $true }
-    Assert-Equal $threw $true $Name
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-versions-" + [guid]::NewGuid())
 try {
@@ -153,5 +144,4 @@ finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All image version tests passed' -ForegroundColor Green
+Complete-Tests 'All image version tests passed'

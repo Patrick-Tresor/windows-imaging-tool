@@ -6,11 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/PostDeployChecks.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployStatus.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function Get-Result($Results, $Name) { ($Results | Where-Object name -eq $Name).result }
 
 $answer = [pscustomobject]@{ Name = 'Lab'; Membership = 'Domain'; Domain = 'corp.example.com'; Workgroup = 'WORKGROUP' }
@@ -139,5 +135,4 @@ finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

@@ -6,11 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 function ConvertTo-Ms([DateTime]$Time) { [int64]($Time.ToUniversalTime() - $epoch).TotalMilliseconds }
 
@@ -184,5 +180,4 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     }
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All build step checks passed.' -ForegroundColor Green
+Complete-Tests 'All build step checks passed.'
