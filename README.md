@@ -98,7 +98,7 @@ Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad 
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 Tasks\         Set-Wallpaper\task.json + script.ps1, ... (scripts answer files run)
-config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (password files)
+config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (answer-key.txt)
 Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
 Status\        <serial>.json + <serial>.log per PC, for the Dashboard
@@ -264,13 +264,12 @@ they never block.
 **Passwords are kept in the answer file, encrypted.** The join account, share,
 local Administrator and BitLocker PIN passwords typed in the answer file editor
 are saved in the XML as `aes256:<key id>:<base64>` (AES-256-CBC with an
-HMAC-SHA256, next to each `passwordFile`, which still names the password). The
+HMAC-SHA256, next to each `passwordFile`, which now only names the password). The
 key is random, made once in `config\secrets\answer-key.txt` on the content root,
 and never copied to the stick. Each media build puts it inside the boot image,
 so WinPE decrypts the passwords itself and **the deploy asks for nothing**.
-Older answer files that only name password files are filled in by the next
-media build (the build reads each password file and writes it, encrypted, into
-the answer file). Use a join account that can only join computers to one OU, and
+Plain password files are not used: a password that only sits in a text file
+under `config\secrets` is not read, so type it once in the editor. Use a join account that can only join computers to one OU, and
 restrict who can read `config\secrets`.
 
 How far that protects them, honestly: the answer files on the stick, or a copy
@@ -279,7 +278,7 @@ WinPE password the key sits in `boot.wim` on the same stick, so someone who has
 the whole stick and knows where to look can decrypt them. This is still real
 encryption, not the base64 that unattend.xml calls `PlainText=false`, but it is
 only as safe as the stick. Set a **WinPE password** on the Media tab (8
-characters or more) to close that gap: the key and any password files then go
+characters or more) to close that gap: the key then goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
 tries or **Shut down**.
@@ -287,17 +286,15 @@ tries or **Shut down**.
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
 right after the answer file, with one box for each missing password; an
-unattended answer file asks in one window before its countdown. Password files
-are never copied to the stick.
+unattended answer file asks in one window before its countdown. Nothing under
+`config\secrets` is ever copied to the stick.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach
 the domain, it signs in once with the join account (`net use \\<domain>\IPC$`).
 A wrong password, or a locked, disabled or expired account, stops the deploy
 with the reason; otherwise Windows would retry it for 15 minutes after the
 restart and the PC would stay out of the domain. If WinPE can't reach the
-domain, the check is skipped and noted in `Deploy.log`. Password files can be
-UTF-8 (with or without a BOM), UTF-16 or ANSI, so accented passwords survive
-Notepad.
+domain, the check is skipped and noted in `Deploy.log`.
 
 **Applications** are packs: a folder under `Applications\` with the installer
 (and any files it needs) and an `app.json`. Build them on the **Applications**
@@ -428,7 +425,7 @@ another content root; **Import...** adds it back.
 **Importing a deploy wizard answer file** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
 options. The source file encrypts its passwords, so they are never carried over; the
-import lists the password files to create, the `.spk` application packs to
+import lists the passwords to type in the editor, the `.spk` application packs to
 rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
 platform packs, unsupported system properties).
 

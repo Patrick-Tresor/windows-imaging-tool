@@ -199,7 +199,7 @@ no longer create `fwfiles`).
    A naming list entry's computer name and OU replace the answer file's naming
    and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
 2. Check everything before touching the disk: image, driver pack, applications,
-   password files, computer name, and for a Windows 11 image the hardware
+   passwords, computer name, and for a Windows 11 image the hardware
    requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
    memory, disk), which stop the deploy in Block mode. The unattend is built here too and checked
    by `Test-UnattendXml` (each setting in a pass and component that takes it; computer name,
@@ -328,10 +328,9 @@ The console's answer file editor (`src/Console/AnswerEditor.ps1` + `.xaml`)
 loads an answer object, shows each section as a form, and saves through
 `Save-AnswerFromEditor`, which validates it, encrypts typed passwords into the
 answer object with the content root's key (`Protect-AnswerPassword`,
-`config\secrets\answer-key.txt`) and exports the XML. The media build runs
-`Sync-AnswerFilePasswords` first (password files into the answer files,
-encrypted) and puts the key in `boot.wim` (in the WinPE password vault when
-there is one). In WinPE, `Read-DeployAnswer` decrypts them (`Find-AnswerKey`,
+`config\secrets\answer-key.txt`) and exports the XML. Plain password files are
+not read anywhere. The media build puts the key in `boot.wim` (in the WinPE
+password vault when there is one). In WinPE, `Read-DeployAnswer` decrypts them (`Find-AnswerKey`,
 `Unprotect-AnswerPassword`) and `Get-DeploySecret` uses them before the vault
 or the Passwords page.
 

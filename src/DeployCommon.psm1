@@ -727,9 +727,8 @@ function Write-DriverReport {
 
 function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
-    # Vault: the password files the WinPE password unlocked (SecretVault.psm1), for the share account.
-    # Decrypt: turns the share password the build encrypted in the settings into text (Get-ShareCredential).
-    param([string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
+    # Decrypt: turns the share password the console encrypted in the settings into text (Get-ShareCredential).
+    param([string]$SettingsPath, [scriptblock]$Decrypt)
     foreach ($vol in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' }) {
         $root = "$($vol.DriveLetter):\"
         # .NET, not Test-Path/Join-Path: a volume PowerShell has no drive for makes those fail in WinPE.
@@ -743,7 +742,7 @@ function Find-ContentRoot {
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
 
-    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $Vault -Decrypt $Decrypt
+    $cred = Get-ShareCredential -SettingsPath $SettingsPath -Decrypt $Decrypt
     Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $cred.User -Password $cred.Password
     Write-DeployLog "Using network content at Z:\"
     'Z:\'
@@ -836,20 +835,11 @@ function Test-JoinAccount {
 function Get-ShareCredential {
     # The share account from deploy-settings.json. The console keeps its password encrypted in share.encryptedPassword
     # (AES-256 with the answer file key, which is in the boot image or the vault); Decrypt turns it into text.
-    # Older setups name a password file instead (share.passwordFile): next to config\ on the media (X:\Deploy), or in
-    # the vault the WinPE password unlocked (keys as SecretVault's ConvertTo-SecretKey writes them).
-    param([Parameter(Mandatory)][string]$SettingsPath, [hashtable]$Vault = @{}, [scriptblock]$Decrypt)
+    param([Parameter(Mandatory)][string]$SettingsPath, [scriptblock]$Decrypt)
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
     $password = $null
     if ($settings.share.user) {
-        $file = if ($settings.share.PSObject.Properties['passwordFile']) { "$($settings.share.passwordFile)".Trim() } else { '' }
-        if ($file) {
-            $pwFile = Join-Path (Split-Path $SettingsPath -Parent | Split-Path -Parent) $file
-            $key = ($file -replace '/', '\').Trim().TrimStart('.', '\').ToLowerInvariant()
-            if (Test-Path $pwFile) { $password = (Get-Content -Raw $pwFile).Trim() }
-            elseif ($Vault -and $Vault.ContainsKey($key)) { $password = $Vault[$key] }
-        }
-        if (-not $password -and $Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
+        if ($Decrypt -and $settings.share.PSObject.Properties['encryptedPassword'] -and $settings.share.encryptedPassword) {
             try { $password = & $Decrypt "$($settings.share.encryptedPassword)" }
             catch { Write-DeployLog "Share account password in the settings not usable: $($_.Exception.Message)" -Level WARN }
         }

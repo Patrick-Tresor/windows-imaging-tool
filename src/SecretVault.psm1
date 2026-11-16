@@ -1,8 +1,8 @@
-# Keeps passwords off the USB stick in plain text: encrypted in the answer files (below), and with a WinPE
-# password also in a vault. The build puts the content root's password files (join account,
-# share accounts, local Administrator, BitLocker PIN) into one encrypted file baked into
-# boot.wim (X:\Deploy\config\vault.json), locked with the WinPE password the admin sets on the Media tab. WinPE asks
+# Keeps passwords off the USB stick in plain text: encrypted in the answer files (below), with the key that decrypts
+# them in boot.wim. With a WinPE password that key goes into a vault baked into boot.wim
+# (X:\Deploy\config\vault.json), locked with the WinPE password the admin sets on the Media tab. WinPE asks
 # for that password before anything else, so a lost stick or a copied boot.wim gives away nothing.
+# Plain password files are not used: the editor and Deploy Settings type each password once and save it encrypted.
 #
 # PBKDF2-SHA256 turns the password into two keys: AES-256-CBC encrypts the secrets, HMAC-SHA256 over the IV and the
 # encrypted bytes tells a wrong password (or a changed file) apart from a right one. PowerShell 5.1 compatible.
@@ -99,32 +99,6 @@ function Unlock-SecretVault {
     $out = @{}
     $obj = [Text.Encoding]::UTF8.GetString($plain) | ConvertFrom-Json
     foreach ($p in @($obj.PSObject.Properties)) { $out[$p.Name] = "$($p.Value)" }
-    $out
-}
-
-function Get-ContentSecrets {
-    <#
-    .SYNOPSIS
-        Every password file under the content root's config\secrets, plus the share account's password file named
-        in deploy-settings.json, read as text (Read-SecretFile). Path -> password, for New-SecretVault.
-    #>
-    param([Parameter(Mandatory)][string]$ContentRoot, [string]$SettingsPath)
-    $out = @{}
-    $dir = Join-Path $ContentRoot ('config\secrets' -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-    $rootFull = (Get-Item -LiteralPath $ContentRoot).FullName.TrimEnd([IO.Path]::DirectorySeparatorChar)
-    foreach ($f in @(Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue)) {
-        if ($f.Length -gt 64KB) { continue }   # a password file, not a stray document
-        $rel = $f.FullName.Substring($rootFull.Length + 1)
-        $out[(ConvertTo-SecretKey $rel)] = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($f.FullName))).Trim()
-    }
-    if ($SettingsPath -and (Test-Path -LiteralPath $SettingsPath)) {
-        $s = try { Get-Content -Raw -LiteralPath $SettingsPath | ConvertFrom-Json } catch { $null }
-        $pf = if ($s -and $s.share) { "$($s.share.passwordFile)" } else { '' }
-        if ($pf -and -not $out.ContainsKey((ConvertTo-SecretKey $pf))) {
-            $full = Join-Path $ContentRoot ($pf -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-            if (Test-Path -LiteralPath $full) { $out[(ConvertTo-SecretKey $pf)] = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($full))).Trim() }
-        }
-    }
     $out
 }
 
@@ -271,71 +245,6 @@ function Find-AnswerKey {
     }
 }
 
-function Get-AnswerPasswordFields {
-    <#
-    .SYNOPSIS
-        Each password an answer file can hold, as XPath of its passwordFile and of its encrypted value. Used to
-        fill the encrypted values in place, keeping the file's comments.
-    #>
-    param([Parameter(Mandatory)][xml]$Xml)
-    $d = $Xml.SelectSingleNode('/deployment')
-    if (-not $d) { return @() }
-    $out = @(
-        [pscustomobject]@{ Parent = $d.SelectSingleNode('network/joinCredentials'); File = 'passwordFile'; Value = 'encryptedPassword' }
-        [pscustomobject]@{ Parent = $d.SelectSingleNode('options'); File = 'administratorPasswordFile'; Value = 'administratorEncryptedPassword' }
-        [pscustomobject]@{ Parent = $d.SelectSingleNode('bitlocker'); File = 'pinFile'; Value = 'encryptedPin' }
-    )
-    foreach ($s in @($d.SelectNodes('shares/share'))) { $out += [pscustomobject]@{ Parent = $s; File = 'passwordFile'; Value = 'encryptedPassword' } }
-    @($out | Where-Object { $_.Parent })
-}
-
-function Sync-AnswerFilePasswords {
-    <#
-    .SYNOPSIS
-        Puts the password of each password file an answer file names (when that file exists under the content root)
-        into the answer file, encrypted with the content root's key, so the answer file deploys without the password
-        files. Rewrites only the files whose passwords changed. Returns one line per answer file it updated.
-    #>
-    param([Parameter(Mandatory)][string]$ContentRoot, [string[]]$Names)
-    $dir = [IO.Path]::Combine($ContentRoot, 'AnswerFiles')
-    if (-not [IO.Directory]::Exists($dir)) { return }
-    $key = $null
-    foreach ($file in @([IO.Directory]::GetFiles($dir, '*.xml') | Sort-Object)) {
-        $name = [IO.Path]::GetFileNameWithoutExtension($file)
-        if ($Names -and $name -notin $Names) { continue }
-        $xml = New-Object Xml.XmlDocument
-        $xml.PreserveWhitespace = $true
-        try { $xml.Load($file) } catch { continue }
-        $changed = @()
-        foreach ($f in Get-AnswerPasswordFields -Xml $xml) {
-            $rel = "$($f.Parent.SelectSingleNode($f.File).InnerText)".Trim()
-            if (-not $rel -or [IO.Path]::IsPathRooted($rel)) { continue }
-            $pwPath = [IO.Path]::Combine($ContentRoot, ($rel -replace '[\\/]', [IO.Path]::DirectorySeparatorChar))
-            if (-not [IO.File]::Exists($pwPath)) { continue }
-            $pw = (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($pwPath))).Trim()
-            if (-not $key) { $key = Get-AnswerKey -ContentRoot $ContentRoot -Create }
-            $node = $f.Parent.SelectSingleNode($f.Value)
-            $current = if ($node) { "$($node.InnerText)".Trim() } else { '' }
-            $same = $false
-            if ($current) { try { $same = (Unprotect-AnswerPassword -Value $current -Key $key) -ceq $pw } catch { } }
-            if ($same) { continue }
-            if (-not $node) {
-                $node = $xml.CreateElement($f.Value)
-                $fileNode = $f.Parent.SelectSingleNode($f.File)
-                $indent = if ($fileNode.PreviousSibling -is [Xml.XmlWhitespace]) { $fileNode.PreviousSibling.Value } else { '' }
-                [void]$f.Parent.InsertAfter($node, $fileNode)
-                if ($indent) { [void]$f.Parent.InsertAfter($xml.CreateWhitespace($indent), $fileNode) }
-            }
-            $node.InnerText = Protect-AnswerPassword -Password $pw -Key $key
-            $changed += $rel
-        }
-        if ($changed) {
-            $xml.Save($file)
-            "Answer file ${name}: $($changed -join ', ') now encrypted in the answer file"
-        }
-    }
-}
-
-Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-ContentSecrets, Get-AnswerSecrets,
+Export-ModuleMember -Function ConvertTo-SecretKey, New-SecretVault, Unlock-SecretVault, Get-AnswerSecrets,
     New-AnswerKey, Get-AnswerKeyId, Test-AnswerPasswordText, Protect-AnswerPassword,
-    Unprotect-AnswerPassword, Get-AnswerKey, Find-AnswerKey, Get-AnswerPasswordFields, Sync-AnswerFilePasswords
+    Unprotect-AnswerPassword, Get-AnswerKey, Find-AnswerKey

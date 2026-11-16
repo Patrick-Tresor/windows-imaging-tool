@@ -16,8 +16,8 @@
     Puts only those two driver packs on the stick instead of the whole Drivers folder.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
-    WinPE asks for the password in that file before it does anything. The content root's password files and the
-    answer file key go into boot.wim encrypted with it; they are never copied to the stick as plain text. Without a WinPE password the answer files still carry their passwords encrypted, and the key
+    WinPE asks for the password in that file before it does anything. The answer file key goes into boot.wim
+    encrypted with it. Without a WinPE password the answer files still carry their passwords encrypted, and the key
     that decrypts them is in boot.wim, so the deploy needs no typing either way.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
@@ -145,10 +145,6 @@ if ($Target -eq 'Usb' -and $ContentSource) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
     $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
-    # Each password file the answer files name goes into the answer file itself, encrypted (SecretVault.psm1),
-    # so the stick deploys hands-free without the password files.
-    try { foreach ($line in @(Sync-AnswerFilePasswords -ContentRoot $ContentSource -Names $AnswerFiles)) { Write-Host $line } }
-    catch { Write-Warning "Passwords not put into the answer files ($($_.Exception.Message)): WinPE asks for those not in them." }
     $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default @packArgs
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
@@ -344,27 +340,13 @@ try {
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
     $answerKey = Get-AnswerKey -ContentRoot $secretRoot
-    if (-not $winPEPassword) {
-        # The share account's password (deploy-settings share.passwordFile) never goes on the stick as plain text:
-        # with a WinPE password it is in the vault below, otherwise it goes into this boot image's settings,
-        # encrypted with the answer file key that goes in next to it.
-        $shareFile = try { "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.passwordFile)" } catch { '' }
-        $sharePw = if ($shareFile) { (Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath)[(ConvertTo-SecretKey $shareFile)] } else { $null }
-        if ($sharePw) {
-            if (-not $answerKey) { $answerKey = Get-AnswerKey -ContentRoot $secretRoot -Create }
-            $baked = Get-Content -Raw "$deployDir\config\deploy-settings.json" | ConvertFrom-Json
-            $baked.share | Add-Member -NotePropertyName encryptedPassword -NotePropertyValue (Protect-AnswerPassword -Password $sharePw -Key $answerKey) -Force
-            Save-JsonFile -Path "$deployDir\config\deploy-settings.json" -InputObject $baked -Depth 8
-            Write-Host "Share account password ($shareFile) is in boot.wim, encrypted with the answer file key." -ForegroundColor Green
-        }
-        $sharePw = $null
-    }
     if ($winPEPassword) {
-        # The password files (the answer file key among them), encrypted with the WinPE password, inside boot.wim.
-        # WinPE asks for it at start.
-        $secrets = Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath
+        # The answer file key, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start; the key
+        # then decrypts the passwords in the answer files and the share password in the settings.
+        $secrets = @{}
+        if ($answerKey) { $secrets['config\secrets\answer-key.txt'] = $answerKey }
         New-SecretVault -Password $winPEPassword -Secrets $secrets | ConvertTo-Json | Set-Content "$deployDir\config\vault.json" -Encoding ascii
-        Write-Host "WinPE password set: WinPE asks for it at start. $($secrets.Count) password file(s) from $secretRoot\config\secrets are inside boot.wim, encrypted with it." -ForegroundColor Green
+        Write-Host "WinPE password set: WinPE asks for it at start. $(if ($answerKey) { 'The answer file key is' } else { 'Nothing is' }) inside boot.wim, encrypted with it." -ForegroundColor Green
         $winPEPassword = $null
         # cmd /c instead of WinPE's default cmd /k: Ctrl+C at the password prompt ends the shell, and WinPE restarts
         # instead of leaving a command prompt behind the lock.

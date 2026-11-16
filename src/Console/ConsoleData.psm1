@@ -309,14 +309,14 @@ function Get-AnswerFileIssues {
             } catch { "Task ${name}: $($_.Exception.Message)" }
         }
     }
-    # Each password the deploy needs: encrypted in the answer file (with this content root's key) or in its file.
+    # Each password the deploy needs, encrypted in the answer file with this content root's key.
     $key = Get-AnswerKey -ContentRoot $ContentRoot
     foreach ($s in @(Get-AnswerSecrets -Answer $a)) {
         if ($s.Encrypted) {
             if (-not $key) { "$($s.Label) is encrypted, but config\secrets\answer-key.txt is missing: type it again in the editor."; continue }
             try { $null = Unprotect-AnswerPassword -Value $s.Encrypted -Key $key } catch { "$($s.Label) can't be decrypted ($($_.Exception.Message)): type it again in the editor." }
         }
-        elseif (-not (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $s.RelativePath)) { "$($s.Label) is not saved: type it in the editor." }
+        else { "$($s.Label) is not saved: type it in the editor." }
     }
 }
 
@@ -366,15 +366,11 @@ function Get-NewAnswer {
     $a
 }
 
-function Test-SecretFile {
-    param([Parameter(Mandatory)][string]$ContentRoot, [string]$RelativePath)
-    [bool]($RelativePath -and (Test-Path (Join-ContentPath $ContentRoot $RelativePath)))
-}
-
 function Test-SavedPassword {
-    # True when a password is saved for this field: encrypted in the answer file, or in its password file.
+    # True when a password is saved for this field, encrypted in the answer file. ContentRoot and RelativePath are
+    # kept for the callers; plain password files are not read.
     param([Parameter(Mandatory)][string]$ContentRoot, [string]$RelativePath, [string]$Encrypted)
-    [bool]((Test-AnswerPasswordText $Encrypted) -or (Test-SecretFile -ContentRoot $ContentRoot -RelativePath $RelativePath))
+    [bool](Test-AnswerPasswordText $Encrypted)
 }
 
 function Split-JoinAccount {
@@ -427,9 +423,8 @@ function Save-AnswerFromEditor {
     .SYNOPSIS
         Saves an answer object edited in the console. Passwords typed in the editor are saved in the answer file,
         encrypted with the content root's answer file key (SecretVault.psm1; made the first time). Each one keeps a
-        passwordFile name (named after the answer file when it has none), which names the password for the vault and
-        the deploy wizard; an old password file there is removed so it can't override the new password. Throws with
-        the problems if it can't be deployed.
+        passwordFile name (named after the answer file when it has none), which only names the password for the deploy
+        wizard; no file is written. Throws with the problems if it can't be deployed.
     #>
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -458,24 +453,15 @@ function Save-AnswerFromEditor {
 
     $typed = @($JoinPassword, $AdminPassword, $BitLockerPin) + @($SharePasswords.Values) | Where-Object { $_ }
     $key = if ($typed) { Get-AnswerKey -ContentRoot $ContentRoot -Create } else { $null }
-    $replaced = New-Object Collections.Generic.List[string]
     $protect = {
-        param($Object, [string]$Property, [string]$Password, [string]$RelativePath)
+        param($Object, [string]$Property, [string]$Password)
         if (-not $Password) { return }
         $Object | Add-Member -NotePropertyName $Property -NotePropertyValue (Protect-AnswerPassword -Password $Password -Key $key) -Force
-        if ($RelativePath) { $replaced.Add($RelativePath) }
     }
-    & $protect $a 'JoinPasswordEncrypted' $JoinPassword $a.JoinPasswordFile
-    & $protect $a 'AdminPasswordEncrypted' $AdminPassword $a.AdminPasswordFile
-    & $protect $a.BitLocker 'PinEncrypted' $BitLockerPin $a.BitLocker.PinFile
-    foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] $sh.PasswordFile }
-    # A password file left from before would win over the new password at deploy time, and the next build would put
-    # it back in the answer file: drop it, once the other answer files that name it carry its password encrypted.
-    $old = @($replaced | Where-Object { Test-SecretFile -ContentRoot $ContentRoot -RelativePath $_ })
-    if ($old) {
-        $null = Sync-AnswerFilePasswords -ContentRoot $ContentRoot
-        foreach ($f in $old) { Remove-Item -LiteralPath (Join-ContentPath $ContentRoot $f) -Force }
-    }
+    & $protect $a 'JoinPasswordEncrypted' $JoinPassword
+    & $protect $a 'AdminPasswordEncrypted' $AdminPassword
+    & $protect $a.BitLocker 'PinEncrypted' $BitLockerPin
+    foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] }
     Export-AnswerFile -Answer $a -Path $dest
     $dest
 }
@@ -1053,23 +1039,20 @@ function Get-DeploySettingsView {
     $share = if ($s.PSObject.Properties['share'] -and $s.share) { $s.share } else { [pscustomobject]@{} }
     $get = { param($o, $n) if ($o.PSObject.Properties[$n]) { "$($o.$n)".Trim() } else { '' } }
     $path = & $get $share 'path'
-    $file = & $get $share 'passwordFile'
-    $fileSaved = $false
-    if ($file) { $full = Join-ContentPath $ContentRoot $file; $fileSaved = (Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -gt 0 }
     $report = if ($s.PSObject.Properties['reporting'] -and $s.reporting) { & $get $s.reporting 'path' } else { '' }
     [pscustomobject]@{
         Mode           = if ($path) { 'Share' } else { 'Usb' }
         SharePath      = $path
         ShareUser      = & $get $share 'user'
-        PasswordSaved  = [bool]((Test-AnswerPasswordText (& $get $share 'encryptedPassword')) -or $fileSaved)
+        PasswordSaved  = [bool](Test-AnswerPasswordText (& $get $share 'encryptedPassword'))
         ReportPath     = $report
         VersionsToKeep = if ($s.PSObject.Properties['versionsToKeep']) { "$($s.versionsToKeep)" } else { '0' }
     }
 }
 
 function Get-SharePassword {
-    # The share account's password as text, for the console's connection test: decrypted from deploy-settings.json,
-    # or read from a password file an older setup still names. $null when none is saved.
+    # The share account's password as text, for the console's connection test: decrypted from deploy-settings.json.
+    # $null when none is saved.
     param([Parameter(Mandatory)][string]$ContentRoot)
     $s = Get-DeploySettings -ContentRoot $ContentRoot
     if (-not ($s.PSObject.Properties['share'] -and $s.share)) { return $null }
@@ -1077,11 +1060,6 @@ function Get-SharePassword {
     if (Test-AnswerPasswordText $enc) {
         $key = Get-AnswerKey -ContentRoot $ContentRoot
         if ($key) { return Unprotect-AnswerPassword -Value $enc -Key $key }
-    }
-    $file = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
-    if ($file) {
-        $full = Join-ContentPath $ContentRoot $file
-        if (Test-Path -LiteralPath $full -PathType Leaf) { return (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($full))).Trim() }
     }
     $null
 }
@@ -1132,8 +1110,8 @@ function Save-DeploySettingsPage {
     .SYNOPSIS
         Saves the share, account, Dashboard and versions parts of the Deploy Settings page. The share password is kept
         encrypted in deploy-settings.json (share.encryptedPassword, AES-256 with the answer file key, like the answer
-        files' passwords): no password file. A password file an older setup named (config\share.cred) is encrypted into
-        the settings and deleted. Returns whether anything WinPE reads changed, so the page can say the stick needs
+        files' passwords): no password file. An older setup's passwordFile entry is dropped (its file is not read).
+        Returns whether anything WinPE reads changed, so the page can say the stick needs
         updating.
     #>
     param(
@@ -1151,18 +1129,12 @@ function Save-DeploySettingsPage {
     if (-not $s.PSObject.Properties['share'] -or -not $s.share) { $s | Add-Member -NotePropertyName share -NotePropertyValue ([pscustomobject]@{}) -Force }
     $set = { param($o, $n, $v) if ($o.PSObject.Properties[$n]) { $o.$n = $v } else { $o | Add-Member -NotePropertyName $n -NotePropertyValue $v } }
 
-    # The password: typed now, or taken from an old password file, encrypted into the settings either way.
-    $oldFile = if ($s.share.PSObject.Properties['passwordFile']) { "$($s.share.passwordFile)".Trim() } else { '' }
-    $oldFull = if ($oldFile) { Join-ContentPath $ContentRoot $oldFile } else { $null }
-    $text = if ($NewPassword) { $NewPassword }
-            elseif ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($oldFull))).Trim() }
-            else { $null }
-    if ($text) {
+    # The password typed now, encrypted into the settings. An old passwordFile entry is dropped below: password
+    # files are not read any more, so its password has to be typed once.
+    if ($NewPassword) {
         $key = Get-AnswerKey -ContentRoot $ContentRoot -Create
-        & $set $s.share 'encryptedPassword' (Protect-AnswerPassword -Password $text -Key $key)
+        & $set $s.share 'encryptedPassword' (Protect-AnswerPassword -Password $NewPassword -Key $key)
     }
-    $text = $null
-    if ($oldFull -and (Test-Path -LiteralPath $oldFull -PathType Leaf)) { Remove-Item -LiteralPath $oldFull -Force }
 
     & $set $s.share 'path' $(if ($Mode -eq 'Share') { "$SharePath".Trim().TrimEnd('\') } else { '' })
     & $set $s.share 'user' $(if ($useAccount) { "$ShareUser".Trim() } else { '' })
@@ -1174,7 +1146,6 @@ function Save-DeploySettingsPage {
     $old = $before | ConvertFrom-Json
     $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
-    # Moving an old password file into the settings is not a change for WinPE: the build already encrypted it in.
     [pscustomobject]@{ MediaOutOfDate = [bool]$NewPassword -or ((& $winpe $s) -replace '\|aes256:[^|]*', '|') -ne ($oldWinpe -replace '\|aes256:[^|]*', '|') }
 }
 
@@ -1278,7 +1249,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
+    Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
     Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,

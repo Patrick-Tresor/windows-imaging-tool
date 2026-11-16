@@ -52,12 +52,5 @@ Assert-Equal (ConvertFrom-SecretBytes ([byte[]](@(0xEF, 0xBB, 0xBF) + @([Text.En
 Assert-Equal (ConvertFrom-SecretBytes ([Text.Encoding]::UTF8.GetBytes($want))) $want 'password file: UTF-8 without a BOM (Notepad on Windows 11)'
 Assert-Equal (ConvertFrom-SecretBytes ([byte[]](@(0xFF, 0xFE) + @([Text.Encoding]::Unicode.GetBytes($want))))) $want 'password file: UTF-16 (Unicode in older Notepad)'
 Assert-Equal (ConvertFrom-SecretBytes ([byte[]](0x43, 0x61, 0x66, 0xE9, 0x2D, 0x32, 0x30, 0x32, 0x36))) $want 'password file: ANSI (older Notepad)'
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("secret-test-" + [guid]::NewGuid())
-New-Item -ItemType Directory -Path (Join-Path $tmp 'config/secrets') -Force | Out-Null
-try {
-    [IO.File]::WriteAllText((Join-Path $tmp 'config/secrets/join.txt'), "$want`r`n", [Text.UTF8Encoding]::new($false))
-    Assert-Equal (Read-SecretFile -ContentRoot $tmp -RelativePath 'config\secrets\join.txt') $want 'Read-SecretFile: BOM-less UTF-8 with a line break reads back the password'
-}
-finally { Remove-Item -Recurse -Force $tmp }
 
 Complete-Tests 'All join check tests passed.'
