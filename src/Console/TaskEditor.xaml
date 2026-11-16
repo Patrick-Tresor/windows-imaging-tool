@@ -3,19 +3,7 @@
         Title="Task" Width="860" Height="720" MinWidth="680" MinHeight="520"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="12,5"/>
-      <Setter Property="Margin" Value="0,0,8,0"/>
-      <Setter Property="MinWidth" Value="80"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
       <Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
     <Style TargetType="ComboBox">
@@ -24,19 +12,9 @@
     <Style TargetType="CheckBox">
       <Setter Property="Margin" Value="0,4,0,8"/>
     </Style>
-    <Style TargetType="Label">
+    <Style TargetType="Label" BasedOn="{StaticResource {x:Type Label}}">
       <Setter Property="Padding" Value="0,4,8,4"/>
       <Setter Property="VerticalAlignment" Value="Top"/>
-    </Style>
-    <Style x:Key="Title" TargetType="TextBlock">
-      <Setter Property="FontSize" Value="18"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Margin" Value="0,0,0,4"/>
-    </Style>
-    <Style x:Key="Hint" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#5B6170"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
-      <Setter Property="Margin" Value="0,0,0,14"/>
     </Style>
     <Style x:Key="Heading" TargetType="TextBlock">
       <Setter Property="FontSize" Value="14"/>
@@ -53,7 +31,7 @@
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
         </StackPanel>
-        <TextBlock x:Name="TxtProblems" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+        <TextBlock x:Name="TxtProblems" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
       </DockPanel>
     </Border>
 

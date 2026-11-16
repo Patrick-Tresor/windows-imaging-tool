@@ -8,15 +8,9 @@ function Show-CaptureWizard {
         [Parameter(Mandatory)][string]$SrcDir
     )
 
-    [xml]$wxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'CaptureWizard.xaml')
-    $wiz = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($wxaml))
-    $wiz.Owner = $Owner
-    Enable-WheelScrolling $wiz
-    $w = @{}
-    foreach ($node in $wxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $w[$name] = $wiz.FindName($name)
-    }
+    $form = New-ConsoleWindow 'CaptureWizard.xaml' -Owner $Owner
+    $wiz = $form.Window
+    $w = $form.Controls
 
     # Check: the Check the disk page's run (checklist, result file, background process) for the disk in CheckedDisk.
     $state = @{ Page = 0; Last = 4; Checklist = $null; CheckedDisk = $null; CheckProc = $null; ResultPath = $null

@@ -9,15 +9,9 @@ function Show-UpdateImageDialog {
         [Parameter(Mandatory)]$Image      # a row from Get-ImageList
     )
 
-    [xml]$dxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'UpdateImage.xaml')
-    $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($dxaml))
-    $dlg.Owner = $Owner
-    Enable-WheelScrolling $dlg
-    $d = @{}
-    foreach ($node in $dxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $d[$name] = $dlg.FindName($name)
-    }
+    $form = New-ConsoleWindow 'UpdateImage.xaml' -Owner $Owner
+    $dlg = $form.Window
+    $d = $form.Controls
 
     function Show-DialogError([string]$Text) {
         [Windows.MessageBox]::Show($dlg, $Text, 'Update Image', 'OK', 'Warning') | Out-Null

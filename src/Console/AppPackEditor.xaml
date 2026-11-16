@@ -3,19 +3,7 @@
         Title="Application" Width="900" Height="680" MinWidth="800" MinHeight="560"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="12,5"/>
-      <Setter Property="Margin" Value="0,0,8,0"/>
-      <Setter Property="MinWidth" Value="80"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
       <Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
     <Style TargetType="ComboBox">
@@ -27,26 +15,11 @@
     <Style TargetType="RadioButton">
       <Setter Property="Margin" Value="0,4,16,8"/>
     </Style>
-    <Style TargetType="Label">
+    <Style TargetType="Label" BasedOn="{StaticResource {x:Type Label}}">
       <Setter Property="Padding" Value="0,4,8,4"/>
       <Setter Property="VerticalAlignment" Value="Top"/>
     </Style>
-    <Style x:Key="Title" TargetType="TextBlock">
-      <Setter Property="FontSize" Value="18"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Margin" Value="0,0,0,4"/>
-    </Style>
-    <Style x:Key="Hint" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#5B6170"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
-      <Setter Property="Margin" Value="0,0,0,14"/>
-    </Style>
-    <Style TargetType="DataGrid">
-      <Setter Property="AutoGenerateColumns" Value="False"/>
-      <Setter Property="HeadersVisibility" Value="Column"/>
-      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
-      <Setter Property="RowHeight" Value="26"/>
+    <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
       <Setter Property="CanUserAddRows" Value="False"/>
       <Setter Property="SelectionMode" Value="Single"/>
     </Style>
@@ -75,7 +48,7 @@
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
         </StackPanel>
-        <TextBlock x:Name="TxtProblems" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+        <TextBlock x:Name="TxtProblems" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
       </DockPanel>
     </Border>
 
@@ -163,7 +136,7 @@
             <Button x:Name="BtnRuleRemove" Content="Remove rule"/>
             <Button x:Name="BtnRuleTest" Content="Test on this PC"/>
           </StackPanel>
-          <TextBlock x:Name="TxtRuleTest" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#5B6170"/>
+          <TextBlock x:Name="TxtRuleTest" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}"/>
         </StackPanel>
         <DataGrid x:Name="GridRules">
           <DataGrid.Columns>

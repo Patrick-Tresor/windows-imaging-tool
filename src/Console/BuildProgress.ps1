@@ -67,15 +67,9 @@ function Show-BuildProgress {
         [scriptblock]$OnFinished
     )
 
-    [xml]$bxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'BuildProgress.xaml')
-    $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($bxaml))
-    $dlg.Owner = $Owner
-    Enable-WheelScrolling $dlg
-    $b = @{}
-    foreach ($node in $bxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $b[$name] = $dlg.FindName($name)
-    }
+    $form = New-ConsoleWindow 'BuildProgress.xaml' -Owner $Owner
+    $dlg = $form.Window
+    $b = $form.Controls
     $b.TxtTitle.Text = $Title
     $dlg.Title = if ($Noun -eq 'build') { 'Build progress' } else { "$((Get-Culture).TextInfo.ToTitleCase($Noun)) progress" }
     $b.TxtNote.Text = "Closing this window does not stop the $Noun."

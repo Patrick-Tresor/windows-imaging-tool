@@ -3,27 +3,7 @@
         Title="Image versions" Width="900" Height="560" MinWidth="760" MinHeight="420"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="14,6"/>
-      <Setter Property="Margin" Value="0,0,8,0"/>
-      <Setter Property="MinWidth" Value="90"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
-    </Style>
-    <Style TargetType="DataGrid">
-      <Setter Property="AutoGenerateColumns" Value="False"/>
-      <Setter Property="HeadersVisibility" Value="Column"/>
-      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-      <Setter Property="HorizontalGridLinesBrush" Value="#E5E7EB"/>
-      <Setter Property="BorderBrush" Value="#D1D5DB"/>
-      <Setter Property="RowHeight" Value="28"/>
+    <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
       <Setter Property="SelectionMode" Value="Extended"/>
       <Setter Property="IsReadOnly" Value="True"/>
     </Style>
@@ -32,7 +12,7 @@
   <DockPanel Margin="20">
     <StackPanel DockPanel.Dock="Top">
       <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
-      <TextBlock TextWrapping="Wrap" Foreground="#5B6170" Margin="0,0,0,12"
+      <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"
                  Text="Earlier versions are kept in Images\Previous when you capture over an image, update it offline, keep a copy or roll back. Roll back makes the selected version current again for every answer file without a version; the image you roll away from is kept as a version too. To keep one answer file on a version, pick it in the answer file's Image page."/>
     </StackPanel>
 

@@ -209,15 +209,9 @@ function Show-DriverDownloader {
         [Parameter(Mandatory)][string]$SrcDir
     )
 
-    [xml]$dxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'DriverDownloader.xaml')
-    $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($dxaml))
-    $dlg.Owner = $Owner
-    Enable-WheelScrolling $dlg
-    $d = @{}
-    foreach ($node in $dxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $d[$name] = $dlg.FindName($name)
-    }
+    $form = New-ConsoleWindow 'DriverDownloader.xaml' -Owner $Owner
+    $dlg = $form.Window
+    $d = $form.Controls
     $state = @{ Rows = @(); Started = $false }
 
     function Show-DownloaderError([string]$Text) {

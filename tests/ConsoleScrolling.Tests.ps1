@@ -9,13 +9,18 @@ $console = Join-Path $repo 'src/Console'
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
-# Every window the console loads turns on wheel routing.
-foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.ps1') {
+# Every window the console loads turns on wheel routing: New-ConsoleWindow does it, and nothing else loads a window.
+foreach ($f in Get-ChildItem -LiteralPath $console -Include '*.ps1', '*.psm1' -Recurse) {
     $text = Get-Content -Raw -LiteralPath $f.FullName
     foreach ($m in [regex]::Matches($text, '(\$\w+) = \[Windows\.Markup\.XamlReader\]::Load')) {
         $var = [regex]::Escape($m.Groups[1].Value)
         Assert-Equal ($text -match "Enable-WheelScrolling $var\b") $true "$($f.Name): $($m.Groups[1].Value) gets wheel scrolling"
+        Assert-Equal $f.Name 'XamlWindow.psm1' "$($f.Name): windows are loaded with New-ConsoleWindow"
     }
+}
+foreach ($f in Get-ChildItem -LiteralPath $console -Filter '*.xaml' | Where-Object Name -ne 'Styles.xaml') {
+    $loader = @(Get-ChildItem -LiteralPath $console -Filter '*.ps1' | Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match "New-ConsoleWindow '$([regex]::Escape($f.Name))'" })
+    Assert-Equal ($loader.Count -ge 1) $true "$($f.Name) is opened with New-ConsoleWindow"
 }
 
 # Pages and sections that the editors and the capture wizard switch between are ScrollViewers, or DockPanels that
@@ -37,6 +42,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
 } else {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
     Import-Module (Join-Path $console 'WheelScroll.psm1') -Force
+    Import-Module (Join-Path $console 'XamlWindow.psm1') -Force
 
     function Find-Visual($Root, [type]$Type) {
         for ($i = 0; $i -lt [Windows.Media.VisualTreeHelper]::GetChildrenCount($Root); $i++) {
@@ -105,7 +111,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal ($gridScroll.VerticalOffset -gt 0) $true 'that wheel turn scrolls the grid'
 
         # The main window loads, and its tabs that hold a grid under a tall form scroll as a whole.
-        [xml]$mx = Get-Content -Raw -LiteralPath (Join-Path $console 'MainWindow.xaml')
+        $mx = Read-ConsoleXaml -Path (Join-Path $console 'MainWindow.xaml')
         $main = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($mx))
         foreach ($tab in 'Driver Library', 'Computers', 'Dashboard') {
             $item = @($main.FindName('Tabs').Items | Where-Object { $_.Header -eq $tab })[0]
@@ -117,7 +123,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
 
     # Capture wizard labels wrap: no check box or option text runs past the right edge of its page, even at the
     # smallest window size.
-    [xml]$cx = Get-Content -Raw -LiteralPath (Join-Path $console 'CaptureWizard.xaml')
+    $cx = Read-ConsoleXaml -Path (Join-Path $console 'CaptureWizard.xaml')
     $wiz = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($cx))
     $wiz.Left = -3000; $wiz.Top = -3000; $wiz.ShowInTaskbar = $false; $wiz.ShowActivated = $false
     $wiz.Width = $wiz.MinWidth
