@@ -269,7 +269,52 @@ function Get-ImageVersionsToPrune {
     @(Get-ImageVersions -ImagePath $ImagePath | Select-Object -Skip $Keep | Where-Object { $_.Version -notin $Pinned })
 }
 
-Export-ModuleMember -Function Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+function Publish-CapturedImage {
+    <#
+    .SYNOPSIS
+        After a capture into -Staging: keeps the image it replaces (-Existing) as a version, moves the new files into
+        -ImagesDir and applies the image's keep limit. Returns the new file name (Name.wim or Name.swm).
+    .DESCRIPTION
+        Used by Capture-GoldenImage.ps1 and Capture-VMImage.ps1, which import DeployCommon.psm1 for Write-DeployLog.
+        $State.Swapping turns true once the old image starts moving: from then on the staging folder may hold the
+        only copy of the new capture, so the caller must not delete it.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Staging,
+        [Parameter(Mandatory)][string]$ImagesDir,
+        [Parameter(Mandatory)][string]$Name,
+        [int]$SplitSizeMB,
+        [string[]]$Existing,
+        [string]$ContentRoot,
+        [Parameter(Mandatory)][hashtable]$State
+    )
+    if ($Existing) {
+        $State.Swapping = $true
+        foreach ($old in $Existing) {
+            $v = Save-ImageVersion -ImagePath $old -Move -Reason 'Replaced by a new capture'
+            Write-DeployLog "Kept the previous $(Split-Path $old -Leaf) as version $($v.Version)"
+        }
+    }
+    if ($Staging -ne $ImagesDir) {
+        Get-ChildItem -LiteralPath $Staging -File | Move-Item -Destination $ImagesDir
+        Remove-Item -LiteralPath $Staging -Recurse -Force
+    }
+    $newLeaf = if ($SplitSizeMB -gt 0) { "$Name.swm" } else { "$Name.wim" }
+    if ($Existing) {
+        if ($Existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
+            Write-DeployLog "The new version is $newLeaf but the old one was $(($Existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
+        }
+        if ($ContentRoot) {
+            try {
+                $pruned = @(Invoke-ImageVersionRetention -ContentRoot $ContentRoot -ImagePath (Join-Path $ImagesDir $newLeaf))
+                if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
+            } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
+        }
+    }
+    $newLeaf
+}
+
+Export-ModuleMember -Function Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

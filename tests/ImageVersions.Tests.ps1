@@ -139,6 +139,19 @@ try {
     Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Win11' } 'capturing over an existing image needs -NewVersion'
     $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Win11' -NewVersion) | ConvertFrom-Json
     Assert-Equal $cfg.newVersion $true 'capture config asks for a new version'
+
+    # A new capture replaces the image: the old one becomes a version and the new one moves in from staging.
+    function global:Write-DeployLog { param($Message, $Level) }
+    $pubDir = Join-Path $root 'PubImages'
+    $pubStage = Join-Path $pubDir '.capture-Pub'
+    New-Item -ItemType Directory -Path $pubStage -Force | Out-Null
+    Set-Content (Join-Path $pubDir 'Pub.wim') 'old'
+    Set-Content (Join-Path $pubStage 'Pub.wim') 'new'
+    $swap = @{ Swapping = $false }
+    $leaf = Publish-CapturedImage -Staging $pubStage -ImagesDir $pubDir -Name 'Pub' -Existing @(Join-Path $pubDir 'Pub.wim') -State $swap
+    Assert-Equal "$leaf|$($swap.Swapping)|$((Get-Content (Join-Path $pubDir 'Pub.wim')).Trim())|$(Test-Path $pubStage)" 'Pub.wim|True|new|False' 'a new capture moves in and the staging folder goes'
+    Assert-Equal @(Get-ImageVersions -ImagePath (Join-Path $pubDir 'Pub.wim')).Count 1 'the replaced image is kept as a version'
+    Remove-Item function:global:Write-DeployLog
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
