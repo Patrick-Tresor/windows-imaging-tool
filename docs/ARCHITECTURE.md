@@ -342,8 +342,7 @@ Naming List tab edits it through `Get-NamingListRows`, `Merge-NamingList` and
 duplicate serials or names, OUs that are not distinguished names, and answer
 files that do not exist.
 
-`AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
-deploy wizard answer file import. It has no WinPE dependencies, so it is unit tested and shared
+`AnswerFile.psm1` holds the parsing, validation, naming and unattend generation. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
 
 ## Driver packs

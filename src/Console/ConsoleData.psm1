@@ -343,17 +343,6 @@ function Get-AnswerFileRows {
     }
 }
 
-function Import-DeployWizardAnswerFile {
-    # Converts a deploy wizard answer file XML into AnswerFiles\<name>.xml. Returns the notes to show the user.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Path, [string]$Name)
-    $result = ConvertFrom-DeployWizardAnswerFile -Path $Path
-    if (-not $Name) { $Name = $result.Answer.Name -replace '[^A-Za-z0-9._-]', '_' }
-    $dest = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
-    if (Test-Path $dest) { throw "An answer file named $Name already exists. Rename or delete it first." }
-    Export-AnswerFile -Answer $result.Answer -Path $dest
-    [pscustomobject]@{ Name = $Name; Path = $dest; Notes = $result.Notes }
-}
-
 function Get-NewAnswer {
     # A fresh answer object for the editor: the repo sample's defaults, with password files named after it.
     param([Parameter(Mandatory)][string]$Name)
@@ -1248,7 +1237,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
-    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
+    Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
     Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
