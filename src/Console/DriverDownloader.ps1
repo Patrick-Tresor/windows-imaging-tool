@@ -30,7 +30,7 @@ function Start-DriverPackDownload {
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $job = Join-Path ([IO.Path]::GetTempPath()) "driverpacks-$stamp-$tag.json"
-    ConvertTo-Json -InputObject @($Packs) -Depth 4 | Set-Content -Path $job -Encoding utf8
+    Save-JsonFile -Path $job -InputObject @($Packs) -Depth 4
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
         '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Get-DriverPacks.ps1')),
         '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job))

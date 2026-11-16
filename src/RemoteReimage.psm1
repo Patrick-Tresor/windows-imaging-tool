@@ -16,6 +16,8 @@
 #   Reimage\Started\<serial>_<time>.json      jobs WinPE took
 # PowerShell 5.1 compatible. The job and boot entry functions work off Windows, for the tests.
 
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
+
 function Join-RootPath {
     # Paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
     param([string]$Root, [string]$Child)
@@ -81,7 +83,7 @@ function New-ReimageJob {
         requestedAt  = $Now.ToString('o')
         expiresAt    = $Now.AddHours($ExpiresHours).ToString('o')
     }
-    $job | ConvertTo-Json | Set-Content -Path (Join-RootPath $dir "$key.json") -Encoding utf8
+    Save-JsonFile -Path (Join-RootPath $dir "$key.json") -InputObject $job
     $job
 }
 
@@ -134,7 +136,7 @@ function Receive-ReimageJob {
     $job | Add-Member -NotePropertyName startedAt -NotePropertyValue $Now.ToString('o') -Force
     $started = Join-RootPath $dir 'Started'
     [void][IO.Directory]::CreateDirectory($started)
-    [IO.File]::WriteAllText((Join-RootPath $started ("{0}_{1:yyyyMMdd-HHmmss}.json" -f $key, $Now)), ($job | ConvertTo-Json))
+    Save-JsonFile -Path (Join-RootPath $started ("{0}_{1:yyyyMMdd-HHmmss}.json" -f $key, $Now)) -InputObject $job
     [IO.File]::Delete($path)
     $job
 }

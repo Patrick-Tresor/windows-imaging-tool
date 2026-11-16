@@ -1,5 +1,7 @@
 # Shared helpers for capture and deploy. Runs in WinPE (PowerShell 5.1, WinPE-PowerShell component).
 
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
+
 $script:LogPath = 'X:\Windows\Temp\Deploy.log'
 
 function Format-ConsoleText {
@@ -422,7 +424,7 @@ function Save-WinPEBuildCache {
     [void][IO.Directory]::CreateDirectory($staging)
     [IO.File]::Copy($WimPath, [IO.Path]::Combine($staging, 'boot.wim'))
     $info = [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($Sources) }
-    [IO.File]::WriteAllText([IO.Path]::Combine($staging, 'build.json'), (ConvertTo-Json -InputObject $info -Depth 4))
+    Save-JsonFile -Path ([IO.Path]::Combine($staging, 'build.json')) -InputObject $info -Depth 4
     if ([IO.Directory]::Exists($dir)) { [IO.Directory]::Delete($dir, $true) }
     [IO.Directory]::Move($staging, $dir)
     # The JSON marks a finished build; a folder without one (a build stopped halfway) is removed too.

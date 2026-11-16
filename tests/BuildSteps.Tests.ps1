@@ -7,6 +7,23 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+
+# Save-JsonFile (JsonFile.psm1): every JSON file the console, the build and WinPE write goes through it.
+Import-Module (Join-Path $repo 'src/JsonFile.psm1') -Force
+$jsonDir = Join-Path ([IO.Path]::GetTempPath()) ("jsonfile-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $jsonDir | Out-Null
+try {
+    $jf = Join-Path $jsonDir 'a.json'
+    Save-JsonFile -Path $jf -InputObject ([ordered]@{ name = "Andr$([char]0xE9)"; list = @(1) })
+    Save-JsonFile -Path $jf -InputObject ([ordered]@{ name = "Andr$([char]0xE9)"; list = @(1, 2) })
+    $bytes = [IO.File]::ReadAllBytes($jf)
+    Assert-Equal "$($bytes[0]),$($bytes[1]),$($bytes[2])" '239,187,191' 'JSON files are UTF-8 with a BOM, as 5.1 reads them'
+    $back = Get-Content -Raw -LiteralPath $jf -Encoding UTF8 | ConvertFrom-Json
+    Assert-Equal "$($back.name)|$($back.list -join ',')" "Andr$([char]0xE9)|1,2" 'a second save replaces the file'
+    Assert-Equal (Test-Path "$jf.tmp") $false 'no .tmp file is left behind'
+    Save-JsonFile -Path $jf -InputObject @(@{ x = 1 })
+    Assert-Equal ((Get-Content -Raw -LiteralPath $jf).Trim().StartsWith('[')) $true 'a one-item list stays a list'
+} finally { Remove-Item $jsonDir -Recurse -Force -ErrorAction SilentlyContinue }
 $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 function ConvertTo-Ms([DateTime]$Time) { [int64]($Time.ToUniversalTime() - $epoch).TotalMilliseconds }
 

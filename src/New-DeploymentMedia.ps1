@@ -111,6 +111,7 @@ Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 
@@ -363,7 +364,7 @@ try {
             if (-not $answerKey) { $answerKey = Get-AnswerKey -ContentRoot $secretRoot -Create }
             $baked = Get-Content -Raw "$deployDir\config\deploy-settings.json" | ConvertFrom-Json
             $baked.share | Add-Member -NotePropertyName encryptedPassword -NotePropertyValue (Protect-AnswerPassword -Password $sharePw -Key $answerKey) -Force
-            $baked | ConvertTo-Json -Depth 8 | Set-Content "$deployDir\config\deploy-settings.json" -Encoding utf8
+            Save-JsonFile -Path "$deployDir\config\deploy-settings.json" -InputObject $baked -Depth 8
             Write-Host "Share account password ($shareFile) is in boot.wim, encrypted with the answer file key." -ForegroundColor Green
         }
         $sharePw = $null
@@ -393,8 +394,8 @@ try {
     }
     $answerKey = $null
     # What WinPE drivers went in, so Deploy-Image can log it: "no internal disk" is then easy to explain.
-    [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem } |
-        ConvertTo-Json -Depth 4 | Set-Content "$deployDir\config\winpe-drivers.json" -Encoding utf8
+    Save-JsonFile -Path "$deployDir\config\winpe-drivers.json" -Depth 4 -InputObject ([ordered]@{
+        built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); sources = @($peReport); vmd = $vmdAdded; problem = $peProblem })
     Copy-Item "$repo\winpe\startnet.cmd" "$mount\Windows\System32\startnet.cmd" -Force
     Complete-BuildStep 'configure' -Detail $(if ($vmdAdded) { 'Intel RST/VMD storage driver in' } else { 'No Intel RST/VMD storage driver, see the log' })
 }
@@ -413,9 +414,8 @@ switch ($Target) {
         Copy-Item $bootWim $pxeWim -Force
         # What the console's Computers tab checks before it starts this image on PCs over the network: a WinPE
         # password would leave each PC waiting for someone to type it.
-        [ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm'); locked = [bool]$WinPEPasswordFile
-                    share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)" } |
-            ConvertTo-Json | Set-Content (Join-Path $OutputPath 'boot.json') -Encoding utf8
+        Save-JsonFile -Path (Join-Path $OutputPath 'boot.json') -InputObject ([ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+            locked = [bool]$WinPEPasswordFile; share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)" })
         Complete-BuildStep 'pxe'
         if ($PublishToWds) { Start-BuildStep 'wds'; & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List; Complete-BuildStep 'wds' }
         else { Write-Host "boot.wim written to $OutputPath. Publish it with Publish-WdsBootImage.ps1, or import it into WDS (Boot Images > Add Boot Image)." }

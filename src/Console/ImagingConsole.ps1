@@ -57,6 +57,7 @@ Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'WheelScroll.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'XamlWindow.psm1') -Force
 Import-Module (Join-Path $srcDir 'AnswerFile.psm1') -Force
+Import-Module (Join-Path $srcDir 'JsonFile.psm1') -Force
 Import-Module (Join-Path $srcDir 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $srcDir 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1') -Force
@@ -1084,7 +1085,7 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
-    ConvertTo-Json -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } }) | Set-Content -Path $targetsFile -Encoding utf8
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))

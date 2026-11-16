@@ -7,6 +7,7 @@
 # old image to the same place, so its backups show up as versions too, just without version.json.
 
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 
 $script:StampFormat = 'yyyyMMdd-HHmm'
 $script:VersionPattern = '^\d{8}-\d{4}(-\d+)?$'
@@ -108,7 +109,7 @@ function Set-ImageVersionLimit {
     $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
     if ($null -eq $Keep) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return }
     if ([int]$Keep -lt 0) { throw 'Keep must be 0 or more.' }
-    [pscustomobject]@{ keep = [int]$Keep } | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject ([pscustomobject]@{ keep = [int]$Keep })
 }
 
 function Get-VersionsToKeep {
@@ -196,8 +197,8 @@ function Save-ImageVersion {
         Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
         throw
     }
-    [pscustomobject]@{ image = (Split-Path $ImagePath -Leaf); archived = $Date.ToString('yyyy-MM-dd HH:mm'); reason = $Reason; note = "$Note" } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $folder 'version.json') -Encoding utf8
+    Save-JsonFile -Path (Join-Path $folder 'version.json') -InputObject ([pscustomobject]@{ image = (Split-Path $ImagePath -Leaf)
+        archived = $Date.ToString('yyyy-MM-dd HH:mm'); reason = $Reason; note = "$Note" })
     Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $version
 }
 
@@ -205,8 +206,8 @@ function Set-ImageVersionNote {
     param([Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Version, [AllowEmptyString()][string]$Note)
     $v = Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $Version
     if (-not $v) { throw "Version $Version of $(Split-Path $ImagePath -Leaf) was not found." }
-    [pscustomobject]@{ image = (Split-Path $ImagePath -Leaf); archived = $v.Archived.ToString('yyyy-MM-dd HH:mm'); reason = $v.Reason; note = "$Note" } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $v.Folder 'version.json') -Encoding utf8
+    Save-JsonFile -Path (Join-Path $v.Folder 'version.json') -InputObject ([pscustomobject]@{ image = (Split-Path $ImagePath -Leaf)
+        archived = $v.Archived.ToString('yyyy-MM-dd HH:mm'); reason = $v.Reason; note = "$Note" })
 }
 
 function Set-ImageFileLink {

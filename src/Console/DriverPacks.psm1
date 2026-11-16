@@ -3,6 +3,7 @@
 # The catalog parsers have no Windows dependencies, so they are tested off Windows with sample XML.
 
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1')
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'JsonFile.psm1')
 $ErrorActionPreference = 'Stop'   # a failed download or extraction must stop that pack, not carry on
 
 $script:VendorCatalogs = @{
@@ -153,8 +154,8 @@ function Install-WinPEPackToCache {
     if (Test-Path $Destination) { Remove-Item $Destination -Recurse -Force }
     Move-Item $staging $Destination
     Remove-Item $file -Force
-    [ordered]@{ maker = $Maker; version = $Pack.Version; url = $Pack.Url; downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') } |
-        ConvertTo-Json | Set-Content -Path (Join-Path $Destination 'pack.json') -Encoding utf8
+    Save-JsonFile -Path (Join-Path $Destination 'pack.json') -InputObject ([ordered]@{ maker = $Maker; version = $Pack.Version; url = $Pack.Url
+        downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
 }
 
 # HP lists its WinPE 10/11 driver packs (one pack for all HP business models) on this page, newest first.
@@ -656,11 +657,11 @@ function Install-VendorDriverPack {
     if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
     Move-Item $staging $dest
 
-    [ordered]@{
+    Save-JsonFile -Path (Join-Path $dest 'pack.json') -InputObject ([ordered]@{
         maker = $Pack.Maker; model = $Pack.Model; os = $Pack.Os; release = $Pack.Release; version = $Pack.Version
         released = $Pack.Released; url = $Pack.Url
         downloaded = (Get-Date).ToString('yyyy-MM-dd HH:mm')
-    } | ConvertTo-Json | Set-Content -Path (Join-Path $dest 'pack.json') -Encoding utf8
+    })
 
     & $stage 'register'
     $entries = Register-DriverPack -ContentRoot $ContentRoot -Pack $Pack -Path $relative

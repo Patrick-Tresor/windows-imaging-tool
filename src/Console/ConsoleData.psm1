@@ -8,6 +8,7 @@ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -For
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'TaskPack.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'SecretVault.psm1') -Force
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'JsonFile.psm1') -Force
 
 function Get-ConsoleConfigPath {
     $base = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $HOME '.config' }
@@ -24,7 +25,7 @@ function Save-ConsoleConfig {
     param([Parameter(Mandatory)]$Config)
     $path = Get-ConsoleConfigPath
     New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
-    $Config | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject $Config
 }
 
 function Initialize-ContentRoot {
@@ -132,7 +133,7 @@ function Remove-SampleDriverEntries {
     }
     if ($removed) {
         $catalog.entries = @($keep)
-        $catalog | ConvertTo-Json -Depth 5 | Set-Content -Path $path -Encoding utf8
+        Save-JsonFile -Path $path -InputObject $catalog -Depth 5
     }
     $removed
 }
@@ -179,7 +180,7 @@ function Save-DriverCatalog {
         [pscustomobject]$e
     }
     $catalog.entries = @($entries)
-    $catalog | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -Encoding utf8
+    Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -InputObject $catalog -Depth 5
 }
 
 function Import-DriverPack {
@@ -254,7 +255,7 @@ function New-CaptureConfig {
         newVersion       = [bool]$NewVersion
     }
     $path = Join-ContentPath $ContentRoot 'config\capture.json'
-    [pscustomobject]$cfg | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject ([pscustomobject]$cfg)
     $path
 }
 
@@ -840,8 +841,7 @@ function Add-ImageServicingRecord {
         resetBase = [bool]$ResetBase
         packages  = @($Results | ForEach-Object { [pscustomobject]@{ index = $_.index; package = $_.package; result = $_.result } })
     }
-    [pscustomobject]@{ history = $history } | ConvertTo-Json -Depth 5 |
-        Set-Content -LiteralPath (Get-ImageServicingHistoryPath -ImagePath $ImagePath) -Encoding utf8
+    Save-JsonFile -Path (Get-ImageServicingHistoryPath -ImagePath $ImagePath) -InputObject ([pscustomobject]@{ history = $history }) -Depth 5
 }
 
 function Get-ImageUpdateArguments {
@@ -996,7 +996,7 @@ function Get-DeploySettings {
 
 function Save-DeploySettings {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Settings)
-    $Settings | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -Encoding utf8
+    Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -InputObject $Settings -Depth 5
 }
 
 function Get-WdsSettings {
