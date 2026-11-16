@@ -2,7 +2,8 @@
 # PC's own disk. Used by Start-RemoteReimage.ps1 on the console PC and, in WinPE, by Deploy-Image.ps1 (to take a job).
 #
 # How a reimage goes:
-#   1. The console reads the PC over PowerShell remoting (WinRM): its name, BIOS serial, UUID and firmware.
+#   1. The console reads the PC over PowerShell remoting (WinRM), or when that is off over its admin share and a
+#      one-time SYSTEM service: its name, BIOS serial, UUID and firmware.
 #   2. It writes Reimage\<serial>.json on the share: answer file, computer name and OU to keep, expiry.
 #   3. It copies the network boot image (Boot\boot.wim on the content root) to C:\_ImagingBoot on the PC, adds a
 #      one-time RAM disk boot entry for it (as WDS does over the network, but from the PC's disk, so no PXE),
@@ -197,26 +198,263 @@ function Find-ReimageJobByName {
 
 #region Reaching the PCs
 
-function Test-WinRMReachable {
-    # Which of these hosts answer on the WinRM port, checked in parallel, 200 at a time. Ping is often blocked by
-    # Windows Firewall; WinRM is what the reimage needs anyway.
-    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 1500, [int]$Port = 5985)
+function Get-RemoteOnlineState {
+    <#
+    .SYNOPSIS
+        For each host, whether the console can reimage it now and how, and if not why: checked in parallel, 200 at
+        a time. Ping is often blocked by Windows Firewall, so a PC that is on is told apart by its other ports.
+    .OUTPUTS
+        Hashtable: name as given -> { Online, Method, State, Address (the name that resolved), Ip, Detail }
+        Method: 'WinRM' (PowerShell remoting answers), 'Smb' (remoting is off but the admin share answers: the
+        console copies its files there and runs them with a one-time service), or '' when neither answers.
+        State: 'Yes', 'Yes (SMB)', 'No access' (on, but neither WinRM nor file sharing answers), 'Not found' (the
+        name does not resolve from this PC) or 'No answer' (off, asleep, or a firewall drops everything).
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
+        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389))
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
+    $allPorts = @(@($Port, $SmbPort) + $OtherPorts | Where-Object { $_ -gt 0 } | Select-Object -Unique)
     for ($i = 0; $i -lt $names.Count; $i += 200) {
-        $batch = $names[$i..([Math]::Min($i + 199, $names.Count - 1))]
-        $checks = foreach ($c in $batch) {
-            $tcp = [Net.Sockets.TcpClient]::new()
-            [pscustomobject]@{ Name = $c; Client = $tcp; Task = $(try { $tcp.ConnectAsync($c, $Port) } catch { $null }) }
+        $batch = @($names[$i..([Math]::Min($i + 199, $names.Count - 1))])
+
+        # 1. Names to addresses. A full name that does not resolve (this PC uses another DNS server) is tried short.
+        $lookups = foreach ($c in $batch) {
+            $alt = if ($c -match '^[^.]+\.' -and $c -notmatch '^\d+(\.\d+){3}$') { ($c -split '\.')[0] } else { '' }
+            [pscustomobject]@{ Name = $c; Alt = $alt; Task = $(try { [Net.Dns]::GetHostAddressesAsync($c) } catch { $null })
+                AltTask = $(if ($alt) { try { [Net.Dns]::GetHostAddressesAsync($alt) } catch { $null } }) }
         }
-        $tasks = @($checks | Where-Object Task | ForEach-Object Task)
+        $tasks = @($lookups | ForEach-Object { $_.Task; $_.AltTask } | Where-Object { $_ })
         if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
-        foreach ($c in $checks) {
-            $result[$c.Name] = [bool]($c.Task -and $c.Task.Status -eq 'RanToCompletion' -and $c.Client.Connected)
-            $c.Client.Close()
+        $resolved = foreach ($l in $lookups) {
+            $ip = $null; $used = $l.Name
+            foreach ($pair in @(@($l.Task, $l.Name), @($l.AltTask, $l.Alt))) {
+                $t = $pair[0]
+                if ($ip -or -not $t -or $t.Status -ne 'RanToCompletion') { continue }
+                # IPv4 first: a .NET Framework TcpClient connects over the address's own family.
+                $a = @($t.Result | Sort-Object { if ($_.AddressFamily -eq 'InterNetwork') { 0 } else { 1 } } | Where-Object { -not [Net.IPAddress]::IsLoopback($_) -or $pair[1] -match '(?i)^localhost$|^127\.' })
+                if ($a) { $ip = $a[0]; $used = $pair[1] }
+            }
+            [pscustomobject]@{ Name = $l.Name; Ip = $ip; Used = $used }
+        }
+
+        # 2. WinRM, file sharing, and the ports any Windows PC that is on answers on.
+        $probes = foreach ($r in @($resolved | Where-Object Ip)) {
+            foreach ($p in $allPorts) {
+                $tcp = [Net.Sockets.TcpClient]::new($r.Ip.AddressFamily)
+                [pscustomobject]@{ Name = $r.Name; Port = $p; Client = $tcp; Task = $(try { $tcp.ConnectAsync($r.Ip, $p) } catch { $null }) }
+            }
+        }
+        $tasks = @($probes | Where-Object Task | ForEach-Object Task)
+        if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
+        $open = @{}
+        foreach ($p in @($probes)) {
+            if ($p.Task -and $p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected) { $open["$($p.Name)|$($p.Port)"] = $true }
+            try { $p.Client.Close() } catch { }
+        }
+
+        foreach ($r in $resolved) {
+            $winrm = [bool]$open["$($r.Name)|$Port"]
+            $smb = [bool]$open["$($r.Name)|$SmbPort"]
+            $other = @($OtherPorts | Where-Object { $open["$($r.Name)|$_"] })
+            $method = if ($winrm) { 'WinRM' } elseif ($smb) { 'Smb' } else { '' }
+            $state = if (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($other) { 'No access' } else { 'No answer' }
+            $detail = switch ($state) {
+                'Not found' { "$($r.Name) does not resolve from this PC: it is not in the DNS this PC uses (this PC on another network, or the PC's DNS record is old)" }
+                'Yes'       { "answers on PowerShell remoting (WinRM, port $Port) at $($r.Ip)" }
+                'Yes (SMB)' { "is on at $($r.Ip): PowerShell remoting is off, so the reimage goes through its admin share (C$, port $SmbPort) and a one-time service" }
+                'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port) nor file sharing (port $SmbPort) answers: turn one on, or allow it in its firewall" }
+                default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
+            }
+            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
         }
     }
     $result
+}
+
+function Get-OnlineSummaryText {
+    # One line for the console's status bar: how many can be reimaged now, and what to do about the first ones that can't.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)   # { Name, State }
+    $rows = @($Rows)
+    $on = @($rows | Where-Object { "$($_.State)" -like 'Yes*' }).Count
+    $text = "$on of $($rows.Count) can be reimaged now."
+    $names = { param($list) "$($list[0].Name)$(if ($list.Count -gt 1) { " and $($list.Count - 1) more" })" }
+    $blocked = @($rows | Where-Object State -eq 'No access')
+    $lost = @($rows | Where-Object State -eq 'Not found')
+    if ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing. Allow one of them (README)." }
+    elseif ($lost) { $text += " $(& $names $lost): name not found in this PC's DNS. Use a domain controller as this PC's DNS server." }
+    elseif ($rows.Count -gt $on) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Online for details.' }
+    $text
+}
+
+function Test-WinRMReachable {
+    # Which of these hosts answer on PowerShell remoting (WinRM): name -> $true/$false.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985)
+    $result = @{}
+    $states = Get-RemoteOnlineState -ComputerName $ComputerName -TimeoutMs $TimeoutMs -Port $Port
+    foreach ($k in $states.Keys) { $result[$k] = $states[$k].Method -eq 'WinRM' }
+    $result
+}
+
+#endregion
+
+#region Running commands on a PC: PowerShell remoting, or the admin share and a one-time service
+
+# Without WinRM: the console connects to \\PC\IPC$ and \\PC\ADMIN$ (as the account given), writes a script and its
+# arguments to \\PC\ADMIN$\Temp\ImagingTool-<id>, creates a one-time SYSTEM service that starts it (sc.exe over
+# the service manager's named pipe, port 445 only, as Windows admin tools do), reads the result file it writes,
+# and deletes the service and the folder.
+
+$script:WNetSource = @'
+using System;
+using System.Runtime.InteropServices;
+public static class ImagingToolWNet {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public class NetResource { public int Scope; public int Type; public int DisplayType; public int Usage;
+        public string LocalName; public string RemoteName; public string Comment; public string Provider; }
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+    public static extern int WNetAddConnection2(NetResource res, string password, string user, int flags);
+    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
+    public static extern int WNetCancelConnection2(string name, int flags, bool force);
+}
+'@
+
+function Connect-AdminShare {
+    # Signs in to \\PC\<share> as the account, without the password on a command line. 1219 = this PC already has
+    # a connection to it as another account: that one is used.
+    param([Parameter(Mandatory)][string]$Unc, [pscredential]$Credential)
+    if (-not $Credential) { return $false }
+    if (-not ('ImagingToolWNet' -as [type])) { Add-Type -TypeDefinition $script:WNetSource }
+    $res = New-Object ImagingToolWNet+NetResource
+    $res.Type = 0; $res.RemoteName = $Unc
+    $code = [ImagingToolWNet]::WNetAddConnection2($res, $Credential.GetNetworkCredential().Password, $Credential.UserName, 0)
+    if ($code -eq 1219) { return $false }
+    if ($code -ne 0) { throw "Could not connect to ${Unc} as $($Credential.UserName): $((New-Object ComponentModel.Win32Exception $code).Message) (error $code)" }
+    $true
+}
+
+function Disconnect-AdminShare {
+    param([string]$Unc)
+    if ('ImagingToolWNet' -as [type]) { try { [void][ImagingToolWNet]::WNetCancelConnection2($Unc, 0, $true) } catch { } }
+}
+
+function ConvertTo-AdminSharePath {
+    # C:\_ImagingBoot\boot.wim on PC01 -> \\PC01\C$\_ImagingBoot\boot.wim
+    param([Parameter(Mandatory)][string]$ComputerName, [Parameter(Mandatory)][string]$Path)
+    if ($Path -notmatch '^([A-Za-z]):\\(.*)$') { throw "Not a local path: $Path" }
+    "\\$ComputerName\$($Matches[1].ToUpperInvariant())`$\$($Matches[2])"
+}
+
+function Get-RemoteRunnerScript {
+    # The script the one-time service runs (as SYSTEM): the command, with its arguments from args.xml, writes its
+    # output to out.xml or its error to error.txt, then done.txt. Folder: where the files are, on the PC.
+    param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [Parameter(Mandatory)][string]$Folder)
+    $code = $ScriptBlock.ToString()
+    @"
+`$ErrorActionPreference = 'Stop'
+`$dir = '$($Folder -replace "'", "''")'
+try {
+    # The list comes back as one ArrayList: @() of the variable makes it the argument list, nested lists kept.
+    `$raw = Import-Clixml -LiteralPath (Join-Path `$dir 'args.xml')
+    `$a = @(`$raw)
+    `$out = @(& {
+$code
+    } @a)
+    Export-Clixml -LiteralPath (Join-Path `$dir 'out.xml') -InputObject `$out -Depth 4
+} catch {
+    Set-Content -LiteralPath (Join-Path `$dir 'error.txt') -Value "`$(`$_.Exception.Message)" -Encoding UTF8
+} finally {
+    Set-Content -LiteralPath (Join-Path `$dir 'done.txt') -Value 'done'
+}
+"@
+}
+
+function Get-RemoteServiceArgs {
+    # sc.exe argument lists that create, start and delete the one-time service. cmd's start lets PowerShell run on
+    # after the service manager gives up on it (it is not a real service: error 1053 is expected).
+    param([Parameter(Mandatory)][string]$ComputerName, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Script)
+    $ps = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    [pscustomobject]@{
+        Create = @("\\$ComputerName", 'create', $Name, 'binPath=', "C:\Windows\System32\cmd.exe /c start /b $ps -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $Script", 'type=', 'own', 'start=', 'demand', 'obj=', 'LocalSystem')
+        Start  = @("\\$ComputerName", 'start', $Name)
+        Delete = @("\\$ComputerName", 'delete', $Name)
+    }
+}
+
+function Open-RemoteChannel {
+    # A way to run commands and copy files on a PC: Method 'WinRM' (a PowerShell session) or 'Smb'.
+    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
+    $ch = [pscustomobject]@{ ComputerName = $ComputerName; Method = $Method; Credential = $Credential; Session = $null; Connected = @() }
+    if ($Method -eq 'WinRM') {
+        $credArgs = @{}
+        if ($Credential) { $credArgs.Credential = $Credential }
+        $ch.Session = New-PSSession -ComputerName $ComputerName -ErrorAction Stop @credArgs
+    } else {
+        foreach ($share in 'IPC$', 'ADMIN$', 'C$') {
+            $unc = "\\$ComputerName\$share"
+            if (Connect-AdminShare -Unc $unc -Credential $Credential) { $ch.Connected += $unc }
+        }
+        if (-not [IO.Directory]::Exists("\\$ComputerName\ADMIN`$\Temp")) {
+            Close-RemoteChannel $ch
+            throw "Access is denied to \\$ComputerName\ADMIN`$: the account is not an administrator there, or file sharing is off"
+        }
+    }
+    $ch
+}
+
+function Close-RemoteChannel {
+    param($Channel)
+    if (-not $Channel) { return }
+    if ($Channel.Session) { Remove-PSSession $Channel.Session -ErrorAction SilentlyContinue }
+    foreach ($unc in @($Channel.Connected)) { Disconnect-AdminShare $unc }
+    $Channel.Connected = @()
+}
+
+function Invoke-RemoteChannel {
+    # Runs the script block on the PC with these arguments and returns its output. Over Smb it runs as SYSTEM.
+    param([Parameter(Mandatory)]$Channel, [Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @(), [int]$TimeoutSeconds = 180)
+    if ($Channel.Method -eq 'WinRM') {
+        return Invoke-Command -Session $Channel.Session -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ErrorAction Stop
+    }
+    $pc = $Channel.ComputerName
+    $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $local = "C:\Windows\Temp\ImagingTool-$id"
+    $unc = "\\$pc\ADMIN`$\Temp\ImagingTool-$id"
+    $name = "ImagingToolRun$id"
+    [void][IO.Directory]::CreateDirectory($unc)
+    try {
+        Export-Clixml -LiteralPath "$unc\args.xml" -InputObject $ArgumentList -Depth 4
+        [IO.File]::WriteAllText("$unc\run.ps1", (Get-RemoteRunnerScript -ScriptBlock $ScriptBlock -Folder $local), [Text.Encoding]::UTF8)
+        $sc = Get-RemoteServiceArgs -ComputerName $pc -Name $name -Script "$local\run.ps1"
+        $o = & sc.exe @($sc.Create) 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Could not create a service on ${pc}: $(($o | Out-String).Trim())" }
+        try {
+            & sc.exe @($sc.Start) 2>&1 | Out-Null    # 1053 is expected: PowerShell is not a real service
+            $until = (Get-Date).AddSeconds($TimeoutSeconds)
+            while (-not [IO.File]::Exists("$unc\done.txt")) {
+                if ((Get-Date) -gt $until) { throw "$pc did not run the command within $TimeoutSeconds s (its antivirus may block services that start PowerShell)" }
+                Start-Sleep -Milliseconds 500
+            }
+        } finally { & sc.exe @($sc.Delete) 2>&1 | Out-Null }
+        if ([IO.File]::Exists("$unc\error.txt")) { throw ([IO.File]::ReadAllText("$unc\error.txt").Trim()) }
+        if ([IO.File]::Exists("$unc\out.xml")) {
+            # One ArrayList: written out, its items go down the pipeline one by one, as Invoke-Command's would.
+            $result = Import-Clixml -LiteralPath "$unc\out.xml"
+            $result
+        }
+    } finally {
+        try { [IO.Directory]::Delete($unc, $true) } catch { }
+    }
+}
+
+function Copy-ToRemoteChannel {
+    # Copies a file from this PC to a path on the PC (C:\...).
+    param([Parameter(Mandatory)]$Channel, [Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Destination)
+    if ($Channel.Method -eq 'WinRM') {
+        Copy-Item -LiteralPath $Path -Destination $Destination -ToSession $Channel.Session -Force
+    } else {
+        [IO.File]::Copy($Path, (ConvertTo-AdminSharePath -ComputerName $Channel.ComputerName -Path $Destination), $true)
+    }
 }
 
 $script:RemoteInfoScript = {
@@ -225,7 +463,8 @@ $script:RemoteInfoScript = {
     try { $bl = (Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop).ProtectionStatus.ToString() } catch { }
     [pscustomobject]@{
         ComputerName = $env:COMPUTERNAME
-        Firmware     = $env:firmware_type
+        # Services may not get firmware_type: PEFirmwareType 2 = UEFI.
+        Firmware     = $(if ($env:firmware_type) { $env:firmware_type } elseif ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control' -ErrorAction SilentlyContinue).PEFirmwareType -eq 2) { 'UEFI' } else { 'Legacy' })
         Serial       = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
         Uuid         = "$((Get-CimInstance Win32_ComputerSystemProduct).UUID)".Trim()
         Model        = "$((Get-CimInstance Win32_ComputerSystem).Model)".Trim()
@@ -235,11 +474,10 @@ $script:RemoteInfoScript = {
 }
 
 function Get-RemoteComputerInfo {
-    # Reads a running PC over PowerShell remoting. Needs admin rights on it.
-    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential)
-    $credArgs = @{}
-    if ($Credential) { $credArgs.Credential = $Credential }
-    Invoke-Command -ComputerName $ComputerName -ScriptBlock $script:RemoteInfoScript -ErrorAction Stop @credArgs
+    # Reads a running PC (WinRM, or the admin share and a one-time service). Needs admin rights on it.
+    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
+    $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
+    try { @(Invoke-RemoteChannel -Channel $ch -ScriptBlock $script:RemoteInfoScript -TimeoutSeconds 120)[0] } finally { Close-RemoteChannel $ch }
 }
 
 function Test-RemoteTarget {
@@ -311,67 +549,68 @@ function Get-LocalBootCleanupCommand {
 
 function Remove-LocalDiskBoot {
     # Takes WinPE off a PC that is back in Windows without being reimaged: the folder, the boot entry and the task.
-    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential)
-    $credArgs = @{}
-    if ($Credential) { $credArgs.Credential = $Credential }
-    Invoke-Command -ComputerName $ComputerName -ErrorAction Stop @credArgs -ArgumentList "$BootEntry" -ScriptBlock {
-        param($Entry)
-        if ($Entry) { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null }
-        & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
-        Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
-    }
+    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
+    $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
+    try {
+        Invoke-RemoteChannel -Channel $ch -ArgumentList "$BootEntry" -ScriptBlock {
+            param($Entry)
+            if ($Entry) { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null }
+            & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
+            Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
+        } | Out-Null
+    } finally { Close-RemoteChannel $ch }
 }
 
 function Invoke-LocalDiskBoot {
     <#
     .SYNOPSIS
-        Copies boot.wim to C:\_ImagingBoot on a running PC over PowerShell remoting, adds a one-time RAM disk boot
-        entry for it, suspends BitLocker for one restart (the boot manager must read C:), and restarts it.
-        On a failure before the restart, the boot entries are removed again and the PC is left as it was.
+        Copies boot.wim to C:\_ImagingBoot on a running PC (PowerShell remoting, or the admin share), adds a one-time
+        RAM disk boot entry for it, suspends BitLocker for one restart (the boot manager must read C:), and restarts
+        it. On a failure before the restart, the boot entries are removed again and the PC is left as it was.
     #>
     param(
         [Parameter(Mandatory)][string]$ComputerName,
         [Parameter(Mandatory)][string]$BootWim,
         [pscredential]$Credential,
+        [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM',
         [int]$DelaySeconds = 60,
         [string]$Message = 'IT is reinstalling Windows on this PC. Save your work: it restarts shortly.',
         [scriptblock]$OnStage = { }
     )
     if (-not (Test-Path -LiteralPath $BootWim)) { throw "No network boot image at $BootWim." }
-    $credArgs = @{}
-    if ($Credential) { $credArgs.Credential = $Credential }
-    $session = New-PSSession -ComputerName $ComputerName -ErrorAction Stop @credArgs
+    $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
     $created = @()
     try {
         & $OnStage 'copy'
-        Invoke-Command -Session $session -ArgumentList (, (Get-LocalBootFolderAclArgs)) -ScriptBlock {
+        Invoke-RemoteChannel -Channel $ch -ArgumentList (, (Get-LocalBootFolderAclArgs)) -ScriptBlock {
             param($AclArgs)
             New-Item -ItemType Directory -Path 'C:\_ImagingBoot' -Force | Out-Null
             # Admins and SYSTEM only, before boot.wim (with the answer file key) is copied in.
-            $o = & icacls.exe @AclArgs 2>&1
+            # [string[]]: over the admin share a list arrives as an ArrayList.
+            $o = & icacls.exe ([string[]]$AclArgs) 2>&1
             if ($LASTEXITCODE -ne 0) { throw "Could not limit C:\_ImagingBoot to administrators: $o" }
-        }
-        Copy-Item -LiteralPath $BootWim -Destination 'C:\_ImagingBoot\boot.wim' -ToSession $session -Force
+        } | Out-Null
+        Copy-ToRemoteChannel -Channel $ch -Path $BootWim -Destination 'C:\_ImagingBoot\boot.wim'
         & $OnStage 'bootentry'
-        $out = Invoke-Command -Session $session -ScriptBlock {
+        $out = @(Invoke-RemoteChannel -Channel $ch -ScriptBlock {
             $sdi = 'C:\Windows\Boot\DVD\EFI\boot.sdi'
             if (-not (Test-Path $sdi)) { throw "$sdi is missing on this PC." }
             Copy-Item $sdi 'C:\_ImagingBoot\boot.sdi' -Force
             $ram = (& bcdedit.exe /create /d 'Imaging RAM disk' /device) -join ' '
             $ldr = (& bcdedit.exe /create /d 'Reinstall Windows (WinPE)' /application osloader) -join ' '
             @($ram, $ldr)
-        }
+        })
         $ramId = Get-BcdGuid $out[0]; $loaderId = Get-BcdGuid $out[1]
         $created = @($ramId, $loaderId | Where-Object { $_ })
         if (-not $ramId -or -not $loaderId) { throw "bcdedit could not create the boot entries: $($out -join ' | ')" }
         $steps = Get-LocalBootCommands -RamdiskId $ramId -LoaderId $loaderId
         $cleanup = Get-LocalBootCleanupCommand -BootEntry $loaderId
         & $OnStage 'restart'
-        Invoke-Command -Session $session -ArgumentList $steps, $DelaySeconds, $Message, $cleanup -ScriptBlock {
+        Invoke-RemoteChannel -Channel $ch -ArgumentList $steps, $DelaySeconds, $Message, $cleanup -ScriptBlock {
             param($Steps, $Delay, $Message, $Cleanup)
             foreach ($a in $Steps) {
-                $o = & bcdedit.exe @a 2>&1
+                $o = & bcdedit.exe ([string[]]$a) 2>&1
                 if ($LASTEXITCODE -ne 0) { throw "bcdedit $($a -join ' ') failed: $o" }
             }
             # If WinPE does not reimage the PC and Windows starts again, this removes WinPE and its boot entry.
@@ -384,21 +623,21 @@ function Invoke-LocalDiskBoot {
             # /d p:4:1 = planned, application installation. A delay over 0 also closes the apps that are open.
             & shutdown.exe /r /t $Delay /c $Message /d p:4:1
             if ($LASTEXITCODE -ne 0) { throw "shutdown.exe failed (exit $LASTEXITCODE)." }
-        }
+        } | Out-Null
         $created = @()
-        [pscustomobject]@{ ComputerName = $ComputerName; BootEntry = $loaderId }
+        [pscustomobject]@{ ComputerName = $ComputerName; BootEntry = $loaderId; Method = $Method }
     } catch {
         $err = $_
         try {
-            Invoke-Command -Session $session -ArgumentList (, $created) -ScriptBlock {
+            Invoke-RemoteChannel -Channel $ch -ArgumentList (, $created) -ScriptBlock {
                 param($Ids)
                 foreach ($id in $Ids) { & bcdedit.exe /delete $id /f 2>&1 | Out-Null }
                 & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
                 Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
-            }
+            } | Out-Null
         } catch { }
         throw $err
-    } finally { Remove-PSSession $session -ErrorAction SilentlyContinue }
+    } finally { Close-RemoteChannel $ch }
 }
 
 #region Console checks
@@ -481,5 +720,5 @@ function Read-ReimageTargets {
 }
 
 Export-ModuleMember -Function Get-RemotingProblemText, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
-    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Test-WinRMReachable, Get-RemoteComputerInfo,
+    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Test-WinRMReachable, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

@@ -977,8 +977,9 @@ function Show-AdRows {
         if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
     }
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
-        $on = if ($script:adOnline.ContainsKey($_.Address)) { if ($script:adOnline[$_.Address]) { 'Yes' } else { 'No' } } else { '' }
-        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $on -Force
+        $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
+        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $(if ($check) { $check.State } else { '' }) -Force
+        $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $(if ($check) { "$($_.Name) $($check.Detail)" } else { $null }) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
 }
@@ -1015,12 +1016,21 @@ function Search-AdComputers {
         $script:adRows = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $ui.TxtAdName.Text `
             -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
         Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
-        $script:adOnline = if ($script:adRows) { Test-WinRMReachable -ComputerName @($script:adRows | ForEach-Object Address) } else { @{} }
+        Update-AdOnline
     } finally { $window.Cursor = $null }
     Save-AdSettings
     Show-AdRows
-    $on = @($script:adRows | Where-Object { $script:adOnline[$_.Address] }).Count
-    Set-Status "$($script:adRows.Count) computer(s) found, $on online"
+    Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)"
+}
+
+function Update-AdOnline {
+    $script:adOnline = if ($script:adRows) { Get-RemoteOnlineState -ComputerName @($script:adRows | ForEach-Object Address) } else { @{} }
+}
+
+function Get-AdOnlineSummary {
+    # One line: how many answer on PowerShell remoting, and what to do about the first one that does not.
+    Get-OnlineSummaryText -Rows @($script:adRows | Where-Object { $script:adOnline[$_.Address] } | ForEach-Object {
+        [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
 }
 
 $ui.BtnAdConnect.Add_Click({ Invoke-Safely {
@@ -1051,9 +1061,9 @@ $ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke
 $ui.BtnAdOnline.Add_Click({ Invoke-Safely {
     if (-not $script:adRows) { Show-Error 'Click Connect or Search first.'; return }
     $window.Cursor = 'Wait'
-    try { $script:adOnline = Test-WinRMReachable -ComputerName @($script:adRows | ForEach-Object Address) } finally { $window.Cursor = $null }
+    try { Update-AdOnline } finally { $window.Cursor = $null }
     Show-AdRows
-    Set-Status "$(@($script:adRows | Where-Object { $script:adOnline[$_.Address] }).Count) of $($script:adRows.Count) PCs answer on PowerShell remoting"
+    Set-Status (Get-AdOnlineSummary)
 } })
 
 $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
@@ -1092,7 +1102,7 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
     }
-    $off = @($rows | Where-Object { $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address] })
+    $off = @($rows | Where-Object { $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address].Online })
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
     if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }

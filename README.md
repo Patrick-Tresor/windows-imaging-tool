@@ -122,7 +122,23 @@ on the ones you pick, with nobody at the PCs.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
    are left out unless ticked. Each row shows the OU, Windows version, last
-   logon and whether the PC answers on PowerShell remoting now.
+   logon and whether the console can reach it now. **Online** (point at it for
+   details):
+   - **Yes**: PowerShell remoting (WinRM) answers.
+   - **Yes (SMB)**: remoting is off, but file sharing answers. The console
+     goes through the PC's admin share (`\\PC\ADMIN$`, `\\PC\C$`) and a
+     one-time SYSTEM service that it deletes right after, the way Windows admin
+     tools do. Some antivirus products block services that start PowerShell;
+     the progress window then says the PC did not run the command.
+   - **No access**: the PC is on, but its firewall blocks both. Allow
+     *File and Printer Sharing (SMB-In)*, or turn on remoting
+     (`Enable-PSRemoting -Force`, or for a whole OU the Group Policy *Computer
+     Configuration > Administrative Templates > Windows Components > Windows
+     Remote Management > WinRM Service > Allow remote server management
+     through WinRM* plus the firewall rule *Windows Remote Management (HTTP-In)*).
+   - **Not found**: its name does not resolve from the console PC. Use a domain
+     controller as the console PC's DNS server.
+   - **No answer**: it is off or asleep, or a firewall drops everything.
 3. Once: set **Network share** on the Deploy Settings tab, then click **Build
    network boot image**. It builds WinPE with the deploy tool into `Boot\` on
    the content root, without a WinPE password (nobody is there to type it).
@@ -132,7 +148,7 @@ on the ones you pick, with nobody at the PCs.
    on by default.
 
 For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
-checks over PowerShell remoting that it answers with its own name, starts in
+checks (over PowerShell remoting, or its admin share) that it answers with its own name, starts in
 UEFI mode and has a BIOS serial of its own; writes `Reimage\<serial>.json` on
 the share; copies the network boot image to `C:\_ImagingBoot`, adds a one-time
 boot entry for it (no PXE or WDS needed), suspends BitLocker for that one
@@ -143,8 +159,8 @@ At the end it restarts into Windows. The progress window lists each PC until
 its deploy starts; from there it is on the Dashboard.
 
 Needs:
-- PowerShell remoting (WinRM) on the PCs, with your account (or the one typed)
-  as administrator. A Group Policy can turn it on for a whole OU.
+- PowerShell remoting (WinRM) or file sharing on the PCs, with your account
+  (or the one typed) as administrator.
 - The answer file and its image on the network share; the console checks.
 - An answer file whose passwords are encrypted in it, or on the share: a
   reimaged PC never waits for someone to type one.

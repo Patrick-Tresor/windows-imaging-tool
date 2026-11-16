@@ -725,7 +725,11 @@
                 <DataGridTextColumn Header="OU" Binding="{Binding OUPath}" Width="*"/>
                 <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystem}" Width="*"/>
                 <DataGridTextColumn Header="Last logon" Binding="{Binding LastLogonText}" Width="85"/>
-                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="55"/>
+                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="80">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding OnlineDetail}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Reimage" Binding="{Binding Reimage}" Width="*"/>
                 <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
               </DataGrid.Columns>
