@@ -9,12 +9,6 @@ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'TaskPack.psm1') -Fo
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'SecretVault.psm1') -Force
 
-function Join-ContentPath {
-    # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
-    param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
-
 function Get-ConsoleConfigPath {
     $base = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $HOME '.config' }
     Join-ContentPath $base 'ImagingConsole\console.json'
@@ -72,7 +66,7 @@ function Get-ImageList {
     $files = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.wim' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
     foreach ($f in $files) {
-        $parts = @(if ($f.Extension -eq '.swm') { Get-ChildItem -Path $dir -Filter "$($f.BaseName)*.swm" } else { $f })
+        $parts = @(Get-ImagePartFiles -ImagePath $f.FullName)
         $indexes = ''
         if (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue) {
             try {

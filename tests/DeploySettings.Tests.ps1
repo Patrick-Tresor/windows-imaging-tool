@@ -72,7 +72,7 @@ try {
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'N3w-Pass!' 'the typed password is saved'
 
     # WinPE reads it from the boot image's copy of the settings with the answer file key, no passwordFile needed.
-    & $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+    Set-DeployLogPath -Path (Join-Path $root 'test.log')
     $key = Get-AnswerKey -ContentRoot $root
     $cred = Get-ShareCredential -SettingsPath $settingsFile -Decrypt { param($v) Unprotect-AnswerPassword -Value $v -Key $key }
     Assert-Equal "$($cred.User)|$($cred.Password)" 'CORP\svc-deploy|N3w-Pass!' 'WinPE decrypts the share password from the settings'

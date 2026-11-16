@@ -20,7 +20,7 @@ function Test-ItemsSource($Value) {
 }
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-test-" + [guid]::NewGuid())
-& $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+Set-DeployLogPath -Path (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
 

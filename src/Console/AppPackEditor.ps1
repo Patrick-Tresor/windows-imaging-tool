@@ -1,5 +1,5 @@
 # Application pack builder window: installer, silent command, detection rules and which PCs get the app.
-# Dot-sourced by ImagingConsole.ps1 after AnswerEditor.ps1 (for Get-XamlControls); uses AppPack.psm1 and ConsoleData.psm1.
+# Dot-sourced by ImagingConsole.ps1; loads its window with New-ConsoleWindow (XamlWindow.psm1) and uses AppPack.psm1 and ConsoleData.psm1.
 
 class DetectionRow {
     [string]$Type

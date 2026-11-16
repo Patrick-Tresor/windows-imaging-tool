@@ -51,6 +51,14 @@ function Set-DeployConsole {
     } catch { }   # a host without a resizable console (ISE, CI): keep what it has
 }
 
+function Set-DeployLogPath {
+    # Write-DeployLog writes to X:\Windows\Temp\Deploy.log (WinPE) unless a script points it somewhere else.
+    # -New starts the file empty.
+    param([Parameter(Mandatory)][string]$Path, [switch]$New)
+    if ($New) { Set-Content -Path $Path -Value $null }
+    $script:LogPath = $Path
+}
+
 function Write-DeployLog {
     # The log keeps the full line with date and level; the console gets the time and the message, wrapped to fit.
     param([Parameter(Mandatory)][string]$Message, [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO')
@@ -65,10 +73,12 @@ function Write-DeployLog {
 }
 
 function Invoke-Native {
-    # Runs an external tool, logs it, and throws on a non-zero exit code.
-    param([Parameter(Mandatory)][string]$FilePath, [string[]]$ArgumentList = @())
+    # Runs an external tool, logs it, and throws on a non-zero exit code. -NoThrow returns the exit code instead,
+    # for callers that accept some codes (DISM's "not applicable").
+    param([Parameter(Mandatory)][string]$FilePath, [string[]]$ArgumentList = @(), [switch]$NoThrow)
     Write-DeployLog "> $FilePath $($ArgumentList -join ' ')"
     & $FilePath @ArgumentList 2>&1 | ForEach-Object { Add-Content -Path $script:LogPath -Value "  $_" }
+    if ($NoThrow) { return $LASTEXITCODE }
     if ($LASTEXITCODE -ne 0) { throw "$FilePath exited with code $LASTEXITCODE" }
 }
 
@@ -889,6 +899,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

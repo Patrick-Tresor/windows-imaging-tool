@@ -52,9 +52,7 @@ Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 $logPath = if ($LogPath) { $LogPath } elseif ($CheckOnly) { Join-Path $env:TEMP 'Capture-VMImage-check.log' } else { Join-Path $env:TEMP 'Capture-VMImage.log' }
 $logParent = Split-Path -Parent $logPath
 if ($logParent -and -not (Test-Path -LiteralPath $logParent)) { New-Item -ItemType Directory -Path $logParent -Force | Out-Null }
-Set-Content -Path $logPath -Value $null
-# DeployCommon logs to X:\ (WinPE) by default; point it at a local file.
-& (Get-Module DeployCommon) { param($p) $script:LogPath = $p } $logPath
+Set-DeployLogPath -Path $logPath -New
 
 function Mount-VMDisks {
     # Mounts the virtual disks and gives their partitions drive letters until the Windows one is found.

@@ -109,7 +109,7 @@ Assert-Equal ($packs.Model -join ',') 'Latitude 5440,Latitude 5540' 'get-vendord
 
 # Registration in a content root.
 $root = Join-Path ([IO.Path]::GetTempPath()) ("driverpacks-test-" + [guid]::NewGuid())
-& $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+Set-DeployLogPath -Path (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
     Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows

@@ -11,7 +11,7 @@ $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassTh
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-test-" + [guid]::NewGuid())
-& $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+Set-DeployLogPath -Path (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
     Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows

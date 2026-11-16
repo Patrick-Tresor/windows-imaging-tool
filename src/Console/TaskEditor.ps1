@@ -1,6 +1,6 @@
 # Task editor window: a script for the task library (Tasks tab), typed here or imported, with when it runs,
 # its arguments, timeout, success codes and which PCs get it.
-# Dot-sourced by ImagingConsole.ps1 after AnswerEditor.ps1 (for Get-XamlControls); uses TaskPack.psm1 and ConsoleData.psm1.
+# Dot-sourced by ImagingConsole.ps1; loads its window with New-ConsoleWindow (XamlWindow.psm1) and uses TaskPack.psm1 and ConsoleData.psm1.
 
 function Get-TaskPhaseNote([string]$Phase) {
     switch ($Phase) {

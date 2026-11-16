@@ -874,6 +874,12 @@ function ConvertFrom-DeployWizardAnswerFile {
     @{ Answer = $answer; Notes = @($notes) }
 }
 
+function Join-ContentPath {
+    # Content root paths use backslashes (they are read in WinPE); normalize so the modules also run in tests off Windows.
+    param([string]$Root, [string]$Child)
+    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+}
+
 function Get-AnswerFileUsage {
     # Key -> names of the answer files in <content root>\AnswerFiles that use it. -Keys gets each answer file
     # (Read-AnswerFile) and returns what it uses; -Label says how the file is named in the list (default: its name).
@@ -894,7 +900,7 @@ function Get-AnswerFileUsage {
     $usage
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
     Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

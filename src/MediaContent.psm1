@@ -5,12 +5,6 @@
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1')
 
-function Join-MediaPath {
-    # Content paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
-    param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
-
 function ConvertTo-MediaRelative([string]$Path) {
     ($Path -replace '/', '\') -replace '^\\+|\\+$', ''
 }
@@ -50,7 +44,7 @@ function Get-MediaSecretExcludes {
     #>
     param([Parameter(Mandatory)][string]$ContentRoot)
     $out = @('config\secrets')
-    $settings = Join-MediaPath $ContentRoot 'config\deploy-settings.json'
+    $settings = Join-ContentPath $ContentRoot 'config\deploy-settings.json'
     $s = if (Test-Path -LiteralPath $settings) { try { Get-Content -Raw -LiteralPath $settings | ConvertFrom-Json } catch { $null } } else { $null }
     $pf = if ($s -and $s.share -and $s.share.PSObject.Properties['passwordFile']) { ConvertTo-MediaRelative "$($s.share.passwordFile)".Trim() } else { '' }
     if ($pf -and -not (Test-MediaRooted $pf) -and -not (Test-MediaWithin $pf @('config\secrets'))) { $out += $pf }
@@ -59,7 +53,7 @@ function Get-MediaSecretExcludes {
 
 function Get-MediaAnswerFileNames {
     param([Parameter(Mandatory)][string]$ContentRoot)
-    @(Get-ChildItem -Path (Join-MediaPath $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue |
+    @(Get-ChildItem -Path (Join-ContentPath $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue |
         Sort-Object Name | ForEach-Object BaseName)
 }
 
@@ -93,10 +87,10 @@ function Get-MediaContent {
 
     # Always: settings, driver catalog, naming list and the tools (password files only with -IncludeSecrets).
     # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
-    foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir } }
+    foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-ContentPath $ContentRoot $dir)) { $folders += $dir } }
 
     foreach ($name in $names) {
-        $path = Join-MediaPath $ContentRoot "AnswerFiles\$name.xml"
+        $path = Join-ContentPath $ContentRoot "AnswerFiles\$name.xml"
         if (-not (Test-Path $path)) { $problems += "Answer file $name is not in $ContentRoot\AnswerFiles."; continue }
         $files += "AnswerFiles\$name.xml"
         $a = $null
@@ -109,7 +103,7 @@ function Get-MediaContent {
         elseif (Test-MediaRooted $image) {
             $notes += "Answer file $name reads its image from $image, which is not copied: the PC needs that path at deploy time."
         } else {
-            $current = Join-MediaPath $ContentRoot $image
+            $current = Join-ContentPath $ContentRoot $image
             $sp = Split-MediaPath $image
             if ($a.ImageVersion) {
                 # A pinned answer file deploys the copy in Images\Previous\<name>_<version>; copy that whole folder.
@@ -142,11 +136,11 @@ function Get-MediaContent {
                 # Only the chosen packs; PCs whose pack is left off get the maker fallback if it is on, else inbox drivers.
                 foreach ($p in $packs) {
                     $packDir = Join-MediaRelative $dir, $p
-                    if (Test-Path (Join-MediaPath $ContentRoot $packDir)) { $folders += $packDir; $packsCopied += $p }
+                    if (Test-Path (Join-ContentPath $ContentRoot $packDir)) { $folders += $packDir; $packsCopied += $p }
                 }
                 continue
             }
-            if (Test-Path (Join-MediaPath $ContentRoot $dir)) { $folders += $dir }
+            if (Test-Path (Join-ContentPath $ContentRoot $dir)) { $folders += $dir }
         }
     }
 
@@ -168,7 +162,7 @@ function Get-MediaContent {
     $exclude = @()
     if (-not $IncludeSecrets) {
         $exclude += @(Get-MediaSecretExcludes -ContentRoot $ContentRoot)
-        if ($names -and (Test-Path (Join-MediaPath $ContentRoot 'config\secrets'))) {
+        if ($names -and (Test-Path (Join-ContentPath $ContentRoot 'config\secrets'))) {
             $notes += 'Password files (config\secrets) are not copied to the stick. The answer files carry their passwords encrypted, and WinPE decrypts them with the key the build puts in boot.wim.'
         }
     }
@@ -206,7 +200,7 @@ function Get-MediaDriverPacks {
         [Parameter(Mandatory)][string]$ContentRoot,
         [string]$DriverRoot = 'Drivers'
     )
-    $catalogPath = Join-MediaPath $ContentRoot 'config\driver-catalog.json'
+    $catalogPath = Join-ContentPath $ContentRoot 'config\driver-catalog.json'
     if (-not (Test-Path $catalogPath)) { return }
     $catalog = Get-Content -Raw -Path $catalogPath | ConvertFrom-Json
     $byPath = [ordered]@{}
@@ -236,7 +230,7 @@ function Get-MediaDriverPacks {
         }
     }
     foreach ($row in $byPath.Values) {
-        $full = Join-MediaPath $ContentRoot (Join-MediaRelative $DriverRoot, $row.Path)
+        $full = Join-ContentPath $ContentRoot (Join-MediaRelative $DriverRoot, $row.Path)
         $exists = Test-Path $full
         $size = [int64]0
         if ($exists) { $size = [int64](Get-ChildItem -Path $full -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum }
