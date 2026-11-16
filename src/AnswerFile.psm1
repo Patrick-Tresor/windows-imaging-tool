@@ -260,14 +260,6 @@ function Get-WmiNamingValue {
     if ($prop) { "$($prop.Value)".Trim() }
 }
 
-function Read-SecretFile {
-    # A password file under the content root. Answer files also carry each password encrypted (SecretVault.psm1).
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$RelativePath)
-    $p = Join-Path $ContentRoot ($RelativePath -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-    if (-not (Test-Path $p)) { throw "Password file not found: $p" }
-    (ConvertFrom-SecretBytes ([IO.File]::ReadAllBytes($p))).Trim()
-}
-
 function ConvertFrom-SecretBytes {
     # A password file's text, whatever saved it: the console writes UTF-8 with a BOM, Notepad on Windows 11 UTF-8
     # without one, older Notepad ANSI. Windows PowerShell 5.1 (WinPE) reads a file without a BOM as ANSI, so an
@@ -820,8 +812,8 @@ function ConvertFrom-DeployWizardAnswerFile {
             PasswordFile = "config\secrets\share-$($local.TrimEnd(':').ToLowerInvariant()).txt"
         }
     })
-    if ($shares) { $notes.Add("Shares: put each share's password in its passwordFile ($(($shares.PasswordFile) -join ', ')).") }
-    if ($membership -eq 'Domain') { $notes.Add('Domain join: put the join account''s password in config\secrets\join.txt.') }
+    if ($shares) { $notes.Add("Shares: type each share's password in the answer file editor ($(($shares.RemoteName) -join ', ')).") }
+    if ($membership -eq 'Domain') { $notes.Add('Domain join: type the join account''s password in the answer file editor.') }
     if (Get-XmlText $w 'advanced_options/general/platform_pack') { $notes.Add('Drivers: platform packs (.ppk) aren''t used; import the OEM driver packs in the Driver Library tab.') }
     if ((Get-XmlText $w 'network_tcpip_settings/ipv4/static') -eq '1') { $notes.Add('Static IP settings aren''t supported; the PC will use DHCP.') }
     if ((Get-XmlText $w 'client/install_during_deployment') -eq 'true') { $notes.Add('The old client agent isn''t installed; add your management agent as an application if needed.') }
@@ -870,7 +862,7 @@ function ConvertFrom-DeployWizardAnswerFile {
         Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
         BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
     }
-    if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: put its password in config\secrets\admin.txt.') }
+    if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: type its password in the answer file editor.') }
     @{ Answer = $answer; Notes = @($notes) }
 }
 
@@ -901,6 +893,6 @@ function Get-AnswerFileUsage {
 }
 
 Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
-    Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
+    ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
     Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

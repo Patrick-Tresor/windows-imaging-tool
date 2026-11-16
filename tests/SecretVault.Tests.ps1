@@ -53,13 +53,8 @@ try {
     $s.share | Add-Member -NotePropertyName passwordFile -NotePropertyValue 'config\share.txt' -Force
     $s | ConvertTo-Json -Depth 6 | Set-Content $settings
 
-    # What goes into the vault: config\secrets and the share account's password file.
-    $found = Get-ContentSecrets -ContentRoot $root -SettingsPath $settings
-    Assert-Equal $found['config\secrets\default-join.txt'] 'JoinPw1' 'vault gets config\secrets'
-    Assert-Equal $found['config\share.txt'] 'SharePw' 'vault gets the share password file from the settings'
-
-    # Without a WinPE password the build writes the share password into the boot image's settings, encrypted with
-    # the answer file key; WinPE decrypts it (Get-ShareCredential -Decrypt) since the stick has no plain file.
+    # The share password is in the boot image's settings, encrypted with the answer file key; WinPE decrypts it
+    # (Get-ShareCredential -Decrypt). A plain password file is never read, even when it is there.
     Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
     $key = New-AnswerKey
     $peDir = Join-Path $root 'pe/Deploy/config'
@@ -72,8 +67,10 @@ try {
     Assert-Equal "$($cred.User)|$($cred.Password)" 'CORP\svc|SharePw' 'WinPE decrypts the share password from the boot image settings'
     $cred = Get-ShareCredential -SettingsPath (Join-Path $peDir 'deploy-settings.json')
     Assert-Equal ($null -eq $cred.Password) $true 'without the key nothing is decrypted (net use then asks)'
+    $cred = Get-ShareCredential -SettingsPath $settings
+    Assert-Equal ($null -eq $cred.Password) $true 'a plain share password file is not read'
 
-    # The stick: config is copied, config\secrets is not, unless asked for.
+    # The stick: config is copied, config\secrets never is.
     $c = Get-MediaContent -ContentRoot $root
     Assert-Equal ($c.Exclude -join ';') 'config\secrets;config\share.txt' 'secrets and the share password file left out by default'
     Assert-Equal (($c.Notes -join ' ') -like '*Password files (config\secrets) are not copied*') $true 'and the build says so'
@@ -81,10 +78,6 @@ try {
     Assert-Equal (@($plan.Items | Where-Object { $_.Relative -like 'config\secrets*' }).Count) 0 'no password file in the copy'
     Assert-Equal (@($plan.Directories | Where-Object { $_ -like 'config\secrets*' }).Count) 0 'not even the empty folder'
     Assert-Equal (@($plan.Items | Where-Object Relative -eq 'config\deploy-settings.json').Count) 1 'the rest of config is copied'
-    $with = Get-MediaContent -ContentRoot $root -IncludeSecrets
-    Assert-Equal $with.Exclude.Count 0 '-IncludeSecrets: nothing left out'
-    $plan = Get-MediaCopyPlan -ContentRoot $root -Folders $with.Folders -Files $with.Files -Exclude $with.Exclude
-    Assert-Equal (@($plan.Items | Where-Object { $_.Relative -eq 'config\secrets\Default-join.txt' }).Count) 1 '-IncludeSecrets: password files copied'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
@@ -93,7 +86,9 @@ finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 $unlockAt = [regex]::Match($deploy, '(?m)^Unlock-DeployMedia\s*$').Index
 Assert-Equal ($unlockAt -gt 0 -and $unlockAt -lt $deploy.IndexOf('Find-ContentRoot -SettingsPath')) $true 'WinPE password asked before the content is looked for'
-Assert-Equal ([regex]::Matches($deploy, 'Read-SecretFile -ContentRoot \$root').Count) 0 'no password read straight from the media in the deploy'
+Assert-Equal ($deploy -match 'Read-SecretFile') $false 'no password read straight from the media in the deploy'
+$common = Get-Content -Raw (Join-Path $repo 'src/DeployCommon.psm1')
+Assert-Equal ($common -match "share\.PSObject\.Properties\['passwordFile'\]") $false 'WinPE never reads a share password file'
 Assert-Equal ($deploy -match 'exit 3') $true 'refused WinPE password exits 3'
 $startnet = Get-Content -Raw (Join-Path $repo 'winpe/startnet.cmd')
 Assert-Equal ($startnet.IndexOf('if errorlevel 3') -lt $startnet.IndexOf('Deployment failed')) $true 'startnet: exit 3 checked before the command prompt'
@@ -165,25 +160,13 @@ try {
     Assert-Equal (Find-AnswerKey -Vault @{ 'config\secrets\answer-key.txt' = $other } -ScriptRoot $pe -ContentRoot $root) $other 'find key: the WinPE password vault first'
     Assert-Equal ($null -eq (Find-AnswerKey -ScriptRoot (Join-Path $root 'nowhere') -ContentRoot 'Q:\')) $true 'find key: nothing, no error, for a missing drive'
 
-    # Sync: the password files an answer file names go into it, encrypted, keeping its comments.
+    # The answer file's encrypted password is what the deploy wizard gets.
     $af = Join-Path $root 'AnswerFiles/Default.xml'
-    $xml = [IO.File]::ReadAllText($af) -replace '<membership>Workgroup</membership>', '<membership>Domain</membership>'
-    [IO.File]::WriteAllText($af, $xml)
-    Set-Content (Join-Path $root 'config/secrets/join.txt') 'J0in pw' -NoNewline
-    $lines = @(Sync-AnswerFilePasswords -ContentRoot $root)
-    Assert-Equal $lines.Count 1 'sync: one answer file updated'
-    $raw = [IO.File]::ReadAllText($af)
-    Assert-Equal ($raw -match 'J0in pw') $false 'sync: no plain password in the answer file'
-    Assert-Equal ($raw -match 'Passwords|everything one deployment needs') $true 'sync: comments kept'
     $a = Read-AnswerFile -Path $af -SkipValidation
-    Assert-Equal (Unprotect-AnswerPassword -Value $a.JoinPasswordEncrypted -Key $k1) 'J0in pw' 'sync: the join password is in the answer file'
-    Assert-Equal "$($a.AdminPasswordEncrypted)" '' 'sync: no password file, nothing added'
-    Assert-Equal @(Sync-AnswerFilePasswords -ContentRoot $root).Count 0 'sync: nothing to do the second time'
-    Set-Content (Join-Path $root 'config/secrets/join.txt') 'N3w pw' -NoNewline
-    $null = Sync-AnswerFilePasswords -ContentRoot $root
-    Assert-Equal (Unprotect-AnswerPassword -Value (Read-AnswerFile -Path $af -SkipValidation).JoinPasswordEncrypted -Key $k1) 'N3w pw' 'sync: a changed password file updates the answer file'
-    $null = Sync-AnswerFilePasswords -ContentRoot $root -Names 'Other'
+    $a.Membership = 'Domain'; $a.JoinUser = 'CORP\svc-join'; $a.Domain = 'corp.example.com'
+    $a | Add-Member -NotePropertyName JoinPasswordEncrypted -NotePropertyValue (Protect-AnswerPassword -Password 'N3w pw' -Key $k1) -Force
     Assert-Equal @(Get-AnswerSecrets -Answer $a)[0].Encrypted $a.JoinPasswordEncrypted 'answer secrets: carry the encrypted password'
+    Export-AnswerFile -Answer $a -Path $af
 
     # Export-AnswerFile (the editor's save) keeps the encrypted values; the stick needs no password file.
     $a = Read-AnswerFile -Path $af -SkipValidation
@@ -202,11 +185,11 @@ try {
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
-# Wiring: the build puts the passwords into the answer files before the stick is planned, and the key into boot.wim;
-# the deploy decrypts them when it reads the answer file.
-Assert-Equal ($build.IndexOf('Sync-AnswerFilePasswords') -lt $build.IndexOf('$content = Get-MediaContent')) $true 'build: passwords into the answer files before the stick content is planned'
+# Wiring: the build puts the key into boot.wim (or into the vault); the deploy decrypts the passwords when it reads
+# the answer file. Nothing reads plain password files.
+Assert-Equal ($build -match 'Sync-AnswerFilePasswords|Get-ContentSecrets') $false 'build: no plain password files read'
 Assert-Equal ($build -match 'deployDir\\config\\answer-key\.txt') $true 'build: answer file key into boot.wim without a WinPE password'
-Assert-Equal ($build.IndexOf('$answerKey = Get-AnswerKey') -lt $build.IndexOf('Get-ContentSecrets -ContentRoot $secretRoot')) $true 'build: key known before the vault (which then holds it)'
+Assert-Equal ($build.IndexOf('$answerKey = Get-AnswerKey') -lt $build.IndexOf('New-SecretVault -Password $winPEPassword')) $true 'build: key known before the vault (which then holds it)'
 $readAt = $deploy.IndexOf('function Read-DeployAnswer(')
 Assert-Equal ($deploy.IndexOf('Add-AnswerPasswords -Root $Root -Answer $a', $readAt) -gt $readAt) $true 'deploy: answer file passwords decrypted when it is read'
 Assert-Equal ([regex]::Matches($deploy, 'Get-DeploySecret -Root \$\w+ -RelativePath \S+ -Label').Count) 0 'deploy: every Get-DeploySecret is given the answer'

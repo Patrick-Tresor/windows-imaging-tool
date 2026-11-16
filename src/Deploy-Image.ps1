@@ -3,7 +3,7 @@
     Deploys a Windows image to this PC from WinPE, driven by an answer file, and injects the matching OEM drivers.
 .DESCRIPTION
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
-    deploy-settings.json (LAN or PXE boot). Reads an answer file
+    deploy-settings.json (ISO or network boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
     domain join, tasks, extra shares and BitLocker.
     If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
@@ -42,9 +42,9 @@ Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
 
-# Passwords: from the content root's password files when they are there (network share, or a stick built with
-# -SecretsOnMedia), else encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault),
-# else from the vault the WinPE password unlocked, else typed by the operator (kept in memory only).
+# Passwords: encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault), else typed
+# by the operator (kept in memory only). Plain password files are never read.
+# The answer files still name each password by its old password file path (passwordFile): only a name now.
 $script:Vault = @{}
 $script:AnswerKey = $null
 $script:TypedSecrets = @{}
@@ -290,7 +290,7 @@ function Unlock-DeployMedia {
         $secrets = Unlock-SecretVault -Vault $vault -Password $pw
         if ($null -ne $secrets) {
             $script:Vault = $secrets
-            Write-DeployLog "WinPE unlocked; $($secrets.Count) password file(s) in the vault"
+            Write-DeployLog "WinPE unlocked; $($secrets.Count) item(s) in the vault"
             return
         }
         Write-DeployLog "Wrong WinPE password (try $try of 5)" -Level WARN
@@ -302,11 +302,10 @@ function Unlock-DeployMedia {
 }
 
 function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string]$Label) {
-    # The password in a password file of the answer file, wherever it is (see $script:Vault above). Throws when it
-    # is nowhere and nobody is there to type it, before anything is erased.
+    # A password the answer file needs (named by its passwordFile path): decrypted from the answer file, or typed.
+    # Throws when it is nowhere and nobody is there to type it, before anything is erased.
     if (-not $RelativePath) { throw "No password file is set for $Label in the answer file." }
     $key = ConvertTo-SecretKey $RelativePath
-    if ($Root -and [IO.File]::Exists([IO.Path]::Combine($Root, $RelativePath))) { return Read-SecretFile -ContentRoot $Root -RelativePath $RelativePath }
     if ($Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)) { return $Answer.Passwords[$key] }
     if ($script:Vault.ContainsKey($key)) { return $script:Vault[$key] }
     if ($script:TypedSecrets.ContainsKey($key)) { return $script:TypedSecrets[$key] }
@@ -325,10 +324,8 @@ function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string
 function Test-DeploySecretKnown([string]$Root, [string]$RelativePath, $Answer) {
     # True when Get-DeploySecret can return this password without asking anyone.
     $key = ConvertTo-SecretKey $RelativePath
-    # .NET, not Join-Path: Join-Path throws for a drive letter PowerShell has no drive for (WinPE).
-    $onMedia = $Root -and [IO.File]::Exists([IO.Path]::Combine($Root, $RelativePath))
     $inAnswer = $Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)
-    $onMedia -or $inAnswer -or $script:Vault.ContainsKey($key) -or $script:TypedSecrets.ContainsKey($key)
+    $inAnswer -or $script:Vault.ContainsKey($key) -or $script:TypedSecrets.ContainsKey($key)
 }
 
 function Get-MissingDeploySecrets([string]$Root, $Answer) {
@@ -439,16 +436,10 @@ function Connect-StatusFolder([string]$Root, $Settings) {
         & wpeutil.exe WaitForNetwork | Out-Null
         $user = $null; $pw = $null
         if ($Settings.share.user) {
-            $file = if ($Settings.share.PSObject.Properties['passwordFile']) { "$($Settings.share.passwordFile)".Trim() } else { '' }
-            # A password file on the content root (older setups); otherwise Get-ShareCredential: the password the console
-            # encrypted into the settings, or the vault. Without a password net use would stop and prompt, so the account
-            # is only passed when its password is known.
-            $pwFile = if ($file) { @(Join-Path $Root $file) | Where-Object { Test-Path $_ } | Select-Object -First 1 } else { $null }
-            if ($pwFile) { $user = $Settings.share.user; $pw = (Get-Content -Raw $pwFile).Trim() }
-            else {
-                $cred = Get-ShareCredential -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
-                if ($cred.Password) { $user = $Settings.share.user; $pw = $cred.Password }
-            }
+            # The password the console encrypted into the settings. Without a password net use would stop and prompt,
+            # so the account is only passed when its password is known.
+            $cred = Get-ShareCredential -SettingsPath $SettingsPath -Decrypt $script:DecryptShare
+            if ($cred.Password) { $user = $Settings.share.user; $pw = $cred.Password }
         }
         Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
         $target
@@ -542,7 +533,7 @@ try {
     $progressWindow = Start-ProgressWindow -ProgressPath $progressPath
 
     Set-DeployStatus -LocalOnly -Step 'Looking for the deployment content (USB DEPLOY volume or network share)' -Percent 1
-    $root = Find-ContentRoot -SettingsPath $SettingsPath -Vault $script:Vault -Decrypt $script:DecryptShare
+    $root = Find-ContentRoot -SettingsPath $SettingsPath -Decrypt $script:DecryptShare
     # Which WinPE drivers this boot image was built with, so "no internal disk" can be explained from the log.
     Write-WinPEDriverReport -Path (Join-Path $PSScriptRoot 'config\winpe-drivers.json')
     Set-DeployStatus -LocalOnly -Step 'Reading the answer files' -Percent 3
@@ -799,6 +790,11 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
         (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
+    # Removes the passwords from unattend.xml once OOBE is over (FirstBoot.ps1 sets up the logon task that runs it).
+    # It runs as SYSTEM, so only Administrators and SYSTEM may change it.
+    New-Item -ItemType Directory -Path 'W:\ProgramData\ImagingTool' -Force | Out-Null
+    Copy-Item (Join-Path $PSScriptRoot 'Clear-UnattendPasswords.ps1') 'W:\ProgramData\ImagingTool\' -Force
+    Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings

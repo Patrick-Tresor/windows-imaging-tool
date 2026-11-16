@@ -294,8 +294,20 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
 
 # C:\Windows\Panther\unattend.xml stays where it is: SetupComplete.cmd runs before the OOBE screens, and OOBE still
 # reads the oobeSystem settings (account page, Administrator password) from it after this script ends. Deleting it
-# here made OOBE ask for a local account on the Dell 5521. Setup blanks the passwords in it after use.
+# here made OOBE ask for a local account on the Dell 5521. Windows Setup is not relied on to blank the passwords:
+# a SYSTEM logon task runs Clear-UnattendPasswords.ps1 (staged by Deploy-Image.ps1), which waits until OOBE is over,
+# removes every password value, then deletes itself and the task.
 # A copy with every password value removed is also kept in C:\Windows\Temp\unattend-deployed.xml.
+$clearScript = "$env:ProgramData\ImagingTool\Clear-UnattendPasswords.ps1"
+if (Test-Path $clearScript) {
+    & schtasks.exe /Create /F /TN 'ImagingTool\ClearUnattend' /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$clearScript`"" 2>&1 | Out-Null
+    Write-Log "Logon task ImagingTool\ClearUnattend (removes the passwords from unattend.xml after OOBE) created: exit $LASTEXITCODE"
+    # Started by the startup task after OOBE: nobody may log on for a while, so clean now (the task stays if this fails).
+    $setupNow = Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue
+    if ($setupNow -and -not $setupNow.SystemSetupInProgress -and -not $setupNow.OOBEInProgress) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $clearScript -LogPath $log
+    }
+} else { Write-Log "No ${clearScript}: the passwords in unattend.xml are left to Windows Setup" }
 $unattend = "$env:WINDIR\Panther\unattend.xml"
 if (Test-Path $unattend) {
     try {

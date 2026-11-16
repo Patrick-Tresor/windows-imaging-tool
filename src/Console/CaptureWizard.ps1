@@ -1,4 +1,4 @@
-# Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg, Get-UsbDiskChoices,
+# Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg,
 # Show-BuildProgress and the ConsoleData, VMwareVM and CaptureCheck modules.
 
 function Show-CaptureWizard {
@@ -58,11 +58,6 @@ function Show-CaptureWizard {
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
 
     # Page 1: reference machine choices.
-    $loadUsb = {
-        $disks = @(Get-UsbDiskChoices)
-        $w.CmbUsb.ItemsSource = $disks
-        if ($disks) { $w.CmbUsb.SelectedIndex = 0 }
-    }
     # The disk file choice starts at the current disk of the first VMware Workstation VM, when there is one.
     $prefillDiskFile = {
         $vmx = @(try { Get-VMwareInventory } catch { })
@@ -82,9 +77,8 @@ function Show-CaptureWizard {
         if ($w.TxtDiskFile.Text -and (Test-Path -LiteralPath (Split-Path -Parent $w.TxtDiskFile.Text))) { $dlg.InitialDirectory = Split-Path -Parent $w.TxtDiskFile.Text }
         if ($dlg.ShowDialog() -eq 'OK') { $w.TxtDiskFile.Text = $dlg.FileName }
     })
-    & $loadUsb; & $prefillDiskFile
+    & $prefillDiskFile
     $w.RbDiskFile.IsChecked = $true
-    $w.BtnUsbRefresh.Add_Click($loadUsb)
     $w.TxtIsoFolder.Text = [Environment]::GetFolderPath('Desktop')
     $w.BtnIsoFolder.Add_Click({
         $dlg = [Windows.Forms.FolderBrowserDialog]::new()
@@ -100,10 +94,9 @@ function Show-CaptureWizard {
             Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
             SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked -and $w.RbDiskFile.IsChecked
-            Mode        = if ($w.RbDiskFile.IsChecked) { 'DiskFile' } elseif ($w.RbIso.IsChecked) { 'Iso' } else { 'Usb' }
+            Mode        = if ($w.RbDiskFile.IsChecked) { 'DiskFile' } else { 'Iso' }
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
-            Usb         = $w.CmbUsb.SelectedItem
         }
     }
 
@@ -203,7 +196,6 @@ function Show-CaptureWizard {
                 if ($c.Mode -eq 'DiskFile' -and -not ($c.DiskFile -and (Test-Path -LiteralPath $c.DiskFile -PathType Leaf))) { 'Choose the VM''s disk file.' }
                 elseif ($c.Mode -eq 'DiskFile' -and [IO.Path]::GetExtension($c.DiskFile) -notin '.vhd', '.vhdx' -and -not (Find-QemuImg)) { 'Reading this disk file needs qemu-img.exe: install QEMU for Windows and add its folder to PATH.' }
                 elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
-                elseif ($c.Mode -eq 'Usb' -and -not $c.Usb) { 'No USB stick found. Plug one in and click Refresh.' }
             }
             1 {
                 if (-not $w.ChkPrepared.IsChecked) { $(if ($c.SysprepAtDeploy) { 'Shut the VM down first, then tick the box.' } else { 'Run the prepare command on the reference machine first, then tick the box.' }) }
@@ -233,10 +225,8 @@ function Show-CaptureWizard {
                 $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
             }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
-            'Usb' { "USB stick $($c.Usb.Label) (will be ERASED)" }
         }
         $saveTo = switch ($c.Mode) {
-            'Usb'    { 'The USB stick''s DEPLOY partition' }
             { $_ -in $onThisPC } { "$ContentRoot\Images" }
             default  { "$($settings.share.path)\Images" }
         }
@@ -253,7 +243,7 @@ function Show-CaptureWizard {
         ) -join "`r`n"
         $issues = @()
         if ($c.Mode -notin $onThisPC) {
-            $issues += @(Get-CaptureReadiness -ContentRoot $ContentRoot -Destination $(if ($c.Mode -eq 'Usb') { 'Usb' } else { 'Network' }))
+            $issues += @(Get-CaptureReadiness -ContentRoot $ContentRoot)
             # Capture media is built with the ADK on this PC, so check it before Build and start.
             $issues += @((Get-AdkStatus).Problems)
         }
@@ -286,9 +276,6 @@ function Show-CaptureWizard {
 
     $finish = {
         $c = & $getChoice
-        if ($c.Mode -eq 'Usb' -and
-            [Windows.MessageBox]::Show($wiz, "Everything on $($c.Usb.Label) will be erased. Continue?", 'Capture Wizard', 'YesNo', 'Warning') -ne 'Yes') { return $false }
-
         if ($c.Mode -eq 'DiskFile') {
             # Its own minimized window, followed in the progress window (steps, bars, time left), like a media build.
             $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
@@ -308,15 +295,12 @@ function Show-CaptureWizard {
             '-File', (ConvertTo-Arg (Join-Path $SrcDir 'New-DeploymentMedia.ps1')),
             '-SettingsPath', (ConvertTo-Arg (Join-Path $ContentRoot 'config\deploy-settings.json')),
             '-CaptureConfig', (ConvertTo-Arg $cfg))
-        switch ($c.Mode) {
-            'Iso' { $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $c.IsoFolder)) }
-            'Usb' { $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $c.Usb.Number, '-Force') }
-        }
+        $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $c.IsoFolder))
         Start-Process powershell.exe -ArgumentList $buildArgs
         $true
     }
 
-    # The disk check page is only for a VM's disk file; the ISO and USB captures check the disk in WinPE.
+    # The disk check page is only for a VM's disk file; the ISO capture checks the disk in WinPE.
     $skipCheck = { $state.Page -eq $checkPage -and (& $getChoice).Mode -ne 'DiskFile' }
     $w.BtnBack.Add_Click({
         try {

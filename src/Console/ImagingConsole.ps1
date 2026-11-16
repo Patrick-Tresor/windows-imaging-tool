@@ -296,28 +296,6 @@ function Select-ComboText($Combo, [string]$Text) {
     if (-not $Combo.SelectedItem) { $Combo.SelectedIndex = 0 }
 }
 
-function Update-Wds {
-    if (-not (Test-ContentRoot $script:root)) { return }
-    $w = Get-WdsSettings -ContentRoot $script:root
-    $ui.TxtWdsServer.Text       = $w.server
-    $ui.TxtWdsImageName.Text    = $w.imageName
-    $ui.ChkWdsSetup.IsChecked   = $w.setup
-    $ui.TxtWdsRemInst.Text      = $w.remoteInstallPath
-    $ui.ChkWdsDhcp.IsChecked    = $w.dhcpOnServer
-    $ui.ChkWdsNoPrompt.IsChecked = $w.noPrompt
-}
-
-function Save-WdsFromUi {
-    Save-WdsSettings -ContentRoot $script:root -Wds ([pscustomobject]@{
-        server            = $ui.TxtWdsServer.Text
-        imageName         = $ui.TxtWdsImageName.Text
-        setup             = $ui.ChkWdsSetup.IsChecked
-        remoteInstallPath = $ui.TxtWdsRemInst.Text
-        dhcpOnServer      = $ui.ChkWdsDhcp.IsChecked
-        noPrompt          = $ui.ChkWdsNoPrompt.IsChecked
-    })
-}
-
 function Get-DashboardFolder {
     if (-not (Test-ContentRoot $script:root)) { return $null }
     Get-StatusFolder -ContentRoot $script:root -Settings (Get-DeploySettings -ContentRoot $script:root)
@@ -425,7 +403,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Wds; Update-Computers; Update-Dashboard; Update-Logs
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard; Update-Logs
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -767,14 +745,7 @@ $ui.BtnNamingExport.Add_Click({ Invoke-Safely {
 
 $ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
 $ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
-$ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    if (Show-DriverDownloader -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Set-Status 'Driver pack download started. The library refreshes when it is done.'
-    }
-} })
-
-# Find a model online: type the PC model, pick the pack, download it (in its own window, like Download from vendor...).
+# Find a model online: type the PC model, pick the pack, download it (the progress shows on the Driver Library page).
 $script:driverFound = @()
 function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
@@ -1052,7 +1023,7 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     New-Item -ItemType Directory -Path $out -Force | Out-Null
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
     $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
-        '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Pxe', '-OutputPath', (ConvertTo-Arg $out))
+        '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
     $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
     if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
@@ -1128,7 +1099,7 @@ $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll(
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
-$ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO or boot.wim'; if ($p) { $ui.TxtOutput.Text = $p } })
+$ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO'; if ($p) { $ui.TxtOutput.Text = $p } })
 $ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
@@ -1171,15 +1142,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         }
     } else {
         if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
-        $buildArgs += @('-Target', $(if ($ui.RbIso.IsChecked) { 'Iso' } else { 'Pxe' }), '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
-        if ($ui.RbPxe.IsChecked) {
-            # The build reads the WDS settings from the same deploy-settings.json it bakes in.
-            Save-WdsFromUi
-            if ($ui.ChkWdsPublish.IsChecked) {
-                if ($ui.ChkWdsNoPrompt.IsChecked -and -not (Confirm-Action 'Without the F12/Enter prompt, any PC that network boots from this WDS server starts the deploy tool. Continue?')) { return }
-                $buildArgs += '-PublishToWds'
-            }
-        }
+        $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
     }
     if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
     $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
@@ -1193,34 +1156,17 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkSecretsOnMedia.IsChecked) {
+    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked) {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
-    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and $ui.ChkSecretsOnMedia.IsChecked) { $buildArgs += '-SecretsOnMedia' }
     if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkAppDownloads.IsChecked) { $buildArgs += '-NoAppDownloads' }
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
     $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
-    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } elseif ($ui.RbIso.IsChecked) { 'ISO' } else { 'PXE boot image' }
+    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } else { 'ISO' }
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building $what"
     Set-Status 'Media build started. The Build progress window shows each step.'
-} })
-
-$ui.BtnWdsCheck.Add_Click({ Invoke-Safely {
-    $server = $ui.TxtWdsServer.Text.Trim()
-    $window.Cursor = 'Wait'
-    Set-Status "Checking WDS on $(if ($server) { $server } else { 'this PC' })..."
-    try { $st = & "$srcDir\Publish-WdsBootImage.ps1" -Server $server -Status } finally { $window.Cursor = $null }
-    $ui.TxtWdsStatus.Text = @(
-        "Server: $($st.Server)"
-        $(if (-not $st.IsServerOS) { 'Not Windows Server: WDS cannot run here.' }
-          elseif (-not $st.RoleInstalled) { 'WDS role: not installed (tick Set up WDS to install it).' }
-          elseif (-not $st.Configured) { 'WDS role: installed but not configured (tick Set up WDS).' }
-          else { "WDS: configured in $($st.RemoteInstall), service $(if ($st.Running) { 'running' } else { 'stopped' })." })
-        "Boot images: $(if ($st.BootImages) { $st.BootImages -join ', ' } else { 'none' })"
-    ) -join "`r`n"
-    Set-Status 'WDS check done'
 } })
 
 #endregion

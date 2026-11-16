@@ -1,18 +1,10 @@
 {
-  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml. The wds section is read only by the console and Publish-WdsBootImage.ps1.",
+  "_comment": "Read by Deploy-Image.ps1 inside WinPE. Leave share.path empty for USB-only use. Everything else about a deployment is in AnswerFiles\\*.xml.",
   "share": {
     "path": "\\\\deploy-server\\Deploy",
     "user": "DOMAIN\\svc-deploy"
   },
   "defaultAnswerFile": "Default",
-  "wds": {
-    "server": "",
-    "imageName": "Imaging Tool (x64)",
-    "setup": false,
-    "remoteInstallPath": "D:\\RemoteInstall",
-    "dhcpOnServer": false,
-    "noPrompt": false
-  },
   "reporting": {
     "_comment": "Optional. Where PCs report progress for the console's Dashboard. Empty = <content root>\\Status. Set a UNC path (e.g. \\\\deploy-server\\Deploy\\Status) so USB deployments report to a server too.",
     "path": ""

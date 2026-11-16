@@ -72,16 +72,6 @@ try {
     $s.defaultAnswerFile = 'Default'
     Save-DeploySettings -ContentRoot $root -Settings $s
 
-    # WDS settings: defaults for older settings files, round-trip, and the share settings are kept.
-    $s.PSObject.Properties.Remove('wds')
-    Save-DeploySettings -ContentRoot $root -Settings $s
-    $w = Get-WdsSettings -ContentRoot $root
-    Assert-Equal "$($w.server)|$($w.imageName)|$($w.setup)" '|Imaging Tool (x64)|False' 'WDS settings default when the section is missing'
-    Save-WdsSettings -ContentRoot $root -Wds ([pscustomobject]@{ server = ' wds01 '; imageName = ''; setup = $true; remoteInstallPath = 'E:\RemoteInstall'; dhcpOnServer = $true; noPrompt = $false })
-    $w = Get-WdsSettings -ContentRoot $root
-    Assert-Equal "$($w.server)|$($w.imageName)|$($w.setup)|$($w.remoteInstallPath)|$($w.dhcpOnServer)|$($w.noPrompt)" 'wds01|Imaging Tool (x64)|True|E:\RemoteInstall|True|False' 'WDS settings round-trip'
-    Assert-Equal (Get-DeploySettings -ContentRoot $root).share.path $s.share.path 'saving WDS settings keeps the share'
-
 
     # Answer files.
     $rows = @(Get-AnswerFileRows -ContentRoot $root)
@@ -109,14 +99,13 @@ try {
     Assert-Equal $threw $true 'capture refuses a name that already exists'
 
     $s = Get-DeploySettings -ContentRoot $root
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 0 'share from defaults is accepted'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 0 'share from defaults is accepted'
     $s.share.path = ''
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'network capture without a share is flagged'
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Usb).Count) 0 'USB capture does not need a share'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 1 'network capture without a share is flagged'
     $s.share.path = 'server\Deploy'
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root -Destination Network).Count) 1 'non-UNC share is flagged'
+    Assert-Equal (@(Get-CaptureReadiness -ContentRoot $root).Count) 1 'non-UNC share is flagged'
 
     Set-Content (Join-Path $root 'Logs/CAPTURE-Win11_Ref_20261022-1700_FAILED.log') 'x'
     $cap = Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'CAPTURE-*'

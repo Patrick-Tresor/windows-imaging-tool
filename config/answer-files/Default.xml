@@ -4,9 +4,8 @@
   Paths are relative to the content root unless absolute (Y:\..., \\server\share\...).
   Passwords: type them in the console's answer file editor. They are saved here encrypted
   (encryptedPassword, administratorEncryptedPassword, encryptedPin) with the key in
-  config\secrets\answer-key.txt, which the media build puts in boot.wim. Each *PasswordFile names the
-  password; a text file there (for example config\secrets\join.txt) is put in here, encrypted, by the
-  next media build. Use a join account that can only join computers to one OU.
+  config\secrets\answer-key.txt, which the media build puts in boot.wim. Each *PasswordFile only names the
+  password (no file is read or written there). Use a join account that can only join computers to one OU.
 -->
 <deployment version="1.0">
   <!-- Interactive: pick the answer file and type YES. Unattended: start after unattendDelay seconds unless a key is pressed. -->

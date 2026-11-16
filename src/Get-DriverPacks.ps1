@@ -5,7 +5,7 @@
     Reads each vendor's driver pack catalog (Dell DriverPackCatalog.cab, HP HPClientDriverPackCatalog.cab,
     Lenovo catalogv2.xml), picks the newest x64 pack for each model, downloads it, checks its hash and
     signature, extracts it to <ContentRoot>\Drivers\<Maker>\<Model> and adds catalog entries for its SKUs
-    or machine types and model name. The admin console's Download from vendor... button runs this with -JobFile.
+    or machine types and model name. The admin console (Find a model online, Unknown models...) runs this with -JobFile.
 .EXAMPLE
     .\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -List -Model 'Latitude 54*'
 .EXAMPLE

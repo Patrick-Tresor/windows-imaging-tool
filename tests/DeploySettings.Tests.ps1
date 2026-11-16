@@ -45,17 +45,18 @@ try {
     Assert-Equal $v.Mode 'Share' 'the example settings read as a network share'
     Assert-Equal $v.PasswordSaved $false 'no password file yet'
 
-    # The old default: the password in config\share.cred. Saving encrypts it into the settings and deletes the file.
+    # The old default named a plain password file (config\share.cred). It is not read any more: the password is
+    # typed once on the page and saved encrypted; the passwordFile entry is dropped.
     $s = Get-DeploySettings -ContentRoot $root
     $s.share | Add-Member -NotePropertyName passwordFile -NotePropertyValue 'config\share.cred' -Force
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Set-Content -LiteralPath (Join-ContentPath $root 'config\share.cred') -Value 'Old-Pass1' -NoNewline
-    Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'a password in the old file counts as saved'
-    $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -VersionsToKeep 3
+    Set-Content -LiteralPath (Join-ContentPath $root 'config\share.cred') -Value 'Plain-Pass' -NoNewline
+    Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $false 'a password in an old plain file does not count as saved'
+    Assert-Equal ($null -eq (Get-SharePassword -ContentRoot $root)) $true 'and is not read'
+    $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -NewPassword 'Old-Pass1' -VersionsToKeep 3
     $s = Get-DeploySettings -ContentRoot $root
     Assert-Equal $s.share.path '\\SRV01\Deploy' 'share saved without the trailing backslash'
     Assert-Equal ($null -eq $s.share.PSObject.Properties['passwordFile']) $true 'no passwordFile in the settings any more'
-    Assert-Equal (Test-Path -LiteralPath (Join-ContentPath $root 'config\share.cred')) $false 'the old plain file is deleted'
     Assert-Equal (@(Get-ChildItem -LiteralPath (Join-ContentPath $root 'config\secrets') -File | Where-Object Name -ne 'answer-key.txt').Count) 0 'and no new password file is made'
     Assert-Equal ($s.share.encryptedPassword -like 'aes256:*') $true 'the password is in the settings, encrypted'
     Assert-Equal ((Get-Content -Raw $settingsFile) -like '*Old-Pass1*') $false 'never as plain text'

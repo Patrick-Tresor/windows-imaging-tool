@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Builds the WinPE boot image with the deploy tool inside, then a USB stick, an ISO, or a boot.wim for PXE.
+    Builds the WinPE boot image with the deploy tool inside, then a USB stick, an ISO, or a boot.wim in a folder
+    (the Computers tab's network boot image).
 .DESCRIPTION
     Run as admin on a workstation with the Windows ADK and the WinPE add-on installed.
     All three targets boot both UEFI and legacy BIOS PCs.
@@ -15,22 +16,19 @@
     Puts only those two driver packs on the stick instead of the whole Drivers folder.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -WinPEPasswordFile C:\Temp\pe.txt
-    WinPE asks for the password in that file before it does anything. The content root's password files and the
-    answer file key go into boot.wim encrypted with it; they are never copied to the stick as plain text (unless
-    -SecretsOnMedia). Without a WinPE password the answer files still carry their passwords encrypted, and the key
+    WinPE asks for the password in that file before it does anything. The answer file key goes into boot.wim
+    encrypted with it. Without a WinPE password the answer files still carry their passwords encrypted, and the key
     that decrypts them is in boot.wim, so the deploy needs no typing either way.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
     Updates a stick built earlier without erasing it: new WinPE, and only the content files that changed.
 .EXAMPLE
-    .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot
-.EXAMPLE
-    .\New-DeploymentMedia.ps1 -Target Pxe -OutputPath C:\WDS\Boot -PublishToWds -SettingsPath D:\DeployShare\config\deploy-settings.json
-    Builds boot.wim and publishes it to the WDS server named in the settings' "wds" section.
+    .\New-DeploymentMedia.ps1 -Target Wim -OutputPath D:\DeployShare\Boot -SettingsPath D:\DeployShare\config\deploy-settings.json
+    Writes boot.wim and boot.json to the folder (what the console's Computers tab starts on PCs over the network).
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Usb', 'Iso', 'Pxe')][string]$Target,
+    [Parameter(Mandatory)][ValidateSet('Usb', 'Iso', 'Wim')][string]$Target,
     [string]$WorkDir = 'C:\WinPE_Build',
     [int]$UsbDiskNumber = -1,
     [string]$ContentSource,          # content root to copy to the USB's DEPLOY partition (answer files, their images, drivers, apps, config)
@@ -44,10 +42,8 @@ param(
     [string[]]$WinPEDriverVendors = @('Dell', 'HP'),   # whose WinPE driver packs go into boot.wim: Dell, HP (comma list from the console)
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
-    [switch]$PublishToWds,           # with -Target Pxe: publish boot.wim to WDS (Publish-WdsBootImage.ps1, settings' "wds" section)
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
-    [switch]$SecretsOnMedia,         # with -ContentSource: also copy config\secrets to the stick as plain text (not recommended)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
     [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
     [string]$LogPath,                # transcript of the build (the progress window's Open log button)
@@ -64,7 +60,7 @@ if ($LogPath) {
 }
 # The steps the progress window lists, in the order they run. Only the parameters decide them, so the list is
 # there before anything can fail.
-$appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig -and -not $NoAppDownloads
+$appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $NoAppDownloads
 $steps = @(, @('check', 'Checking the ADK and the content'))
 if ($appDownloads) { $steps += , @('apps', 'Downloading online applications') }
 $steps += , @('copype', 'Copying WinPE files')
@@ -87,15 +83,12 @@ switch ($Target) {
         if (-not $NoVendorWinPEDrivers) { $steps += , @('packs', 'Copying WinPE driver packs to the stick') }
     }
     'Iso' { $steps += , @('iso', 'Making the ISO') }
-    'Pxe' {
-        $steps += , @('pxe', 'Writing boot.wim')
-        if ($PublishToWds) { $steps += , @('wds', 'Publishing boot.wim to WDS') }
-    }
+    'Wim' { $steps += , @('wim', 'Writing boot.wim') }
 }
 $title = switch ($Target) {
     'Usb' { if ($UpdateOnly) { "Updating USB stick (disk $UsbDiskNumber)" } else { "Creating USB stick (disk $UsbDiskNumber)" } }
     'Iso' { 'Creating ISO' }
-    'Pxe' { 'Creating PXE boot image' }
+    'Wim' { 'Creating the network boot image' }
 }
 Start-BuildProgress -Path $ProgressFile -Title $title -Steps $steps -LogPath $LogPath
 # Any error from here on: the progress window shows the step that failed and one line, this window and the log the rest.
@@ -124,7 +117,6 @@ $adk = $adkStatus.Root
 $peRoot = "$adk\Windows Preinstallation Environment"
 
 if (-not $SettingsPath) { $SettingsPath = "$repo\config\deploy-settings.json" }
-if ($PublishToWds -and $Target -ne 'Pxe') { throw '-PublishToWds needs -Target Pxe.' }
 if ($AnswerFiles -and -not $ContentSource) { throw '-AnswerFiles needs -ContentSource.' }
 # The console passes the names as one comma-separated argument (powershell.exe -File doesn't take arrays).
 $AnswerFiles = @($AnswerFiles | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -144,30 +136,24 @@ if ($WinPEPasswordFile) {
     if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
 }
 if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
+if ($CaptureConfig -and $Target -ne 'Iso') { throw '-CaptureConfig needs -Target Iso: capture runs on a VM booted from the capture ISO.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
-if ($SecretsOnMedia -and -not $ContentSource) { throw '-SecretsOnMedia needs -ContentSource.' }
 $packArgs = @{}
-if ($SecretsOnMedia) { $packArgs.IncludeSecrets = $true }
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
-if ($Target -eq 'Usb' -and $ContentSource -and -not $CaptureConfig) {
+if ($Target -eq 'Usb' -and $ContentSource) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
     $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
-    # Each password file the answer files name goes into the answer file itself, encrypted (SecretVault.psm1),
-    # so the stick deploys hands-free without the password files.
-    try { foreach ($line in @(Sync-AnswerFilePasswords -ContentRoot $ContentSource -Names $AnswerFiles)) { Write-Host $line } }
-    catch { Write-Warning "Passwords not put into the answer files ($($_.Exception.Message)): WinPE asks for those not in them." }
     $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default @packArgs
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
     foreach ($n in $content.Notes) { Write-Warning $n }
 }
 $copyPlan = $null
-if ($Target -eq 'Usb' -and $ContentSource) {
+if ($content) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
-    $copyPlan = if ($content) { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude }
-                else { Get-MediaCopyPlan -ContentRoot $ContentSource -Folders @('Images', 'Drivers', 'config' | Where-Object { Test-Path (Join-Path $ContentSource $_) }) -Exclude @(if (-not $SecretsOnMedia) { Get-MediaSecretExcludes -ContentRoot $ContentSource }) }
+    $copyPlan = Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude
     Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
 }
 if ($UpdateOnly) {
@@ -354,27 +340,13 @@ try {
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
     $answerKey = Get-AnswerKey -ContentRoot $secretRoot
-    if (-not $winPEPassword) {
-        # The share account's password (deploy-settings share.passwordFile) never goes on the stick as plain text:
-        # with a WinPE password it is in the vault below, otherwise it goes into this boot image's settings,
-        # encrypted with the answer file key that goes in next to it.
-        $shareFile = try { "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.passwordFile)" } catch { '' }
-        $sharePw = if ($shareFile) { (Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath)[(ConvertTo-SecretKey $shareFile)] } else { $null }
-        if ($sharePw) {
-            if (-not $answerKey) { $answerKey = Get-AnswerKey -ContentRoot $secretRoot -Create }
-            $baked = Get-Content -Raw "$deployDir\config\deploy-settings.json" | ConvertFrom-Json
-            $baked.share | Add-Member -NotePropertyName encryptedPassword -NotePropertyValue (Protect-AnswerPassword -Password $sharePw -Key $answerKey) -Force
-            Save-JsonFile -Path "$deployDir\config\deploy-settings.json" -InputObject $baked -Depth 8
-            Write-Host "Share account password ($shareFile) is in boot.wim, encrypted with the answer file key." -ForegroundColor Green
-        }
-        $sharePw = $null
-    }
     if ($winPEPassword) {
-        # The password files (the answer file key among them), encrypted with the WinPE password, inside boot.wim.
-        # WinPE asks for it at start.
-        $secrets = Get-ContentSecrets -ContentRoot $secretRoot -SettingsPath $SettingsPath
+        # The answer file key, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start; the key
+        # then decrypts the passwords in the answer files and the share password in the settings.
+        $secrets = @{}
+        if ($answerKey) { $secrets['config\secrets\answer-key.txt'] = $answerKey }
         New-SecretVault -Password $winPEPassword -Secrets $secrets | ConvertTo-Json | Set-Content "$deployDir\config\vault.json" -Encoding ascii
-        Write-Host "WinPE password set: WinPE asks for it at start. $($secrets.Count) password file(s) from $secretRoot\config\secrets are inside boot.wim, encrypted with it." -ForegroundColor Green
+        Write-Host "WinPE password set: WinPE asks for it at start. $(if ($answerKey) { 'The answer file key is' } else { 'Nothing is' }) inside boot.wim, encrypted with it." -ForegroundColor Green
         $winPEPassword = $null
         # cmd /c instead of WinPE's default cmd /k: Ctrl+C at the password prompt ends the shell, and WinPE restarts
         # instead of leaving a command prompt behind the lock.
@@ -386,10 +358,10 @@ try {
         # the whole stick can take the key out of boot.wim.
         [IO.File]::WriteAllText("$deployDir\config\answer-key.txt", $answerKey, [Text.Encoding]::ASCII)
         Write-Host "Answer file key $(Get-AnswerKeyId $answerKey) is in boot.wim: the passwords encrypted in the answer files are used without typing." -ForegroundColor Green
-        if ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+        if ($Target -eq 'Usb' -and $ContentSource) {
             Write-Warning 'No WinPE password: anyone with the stick can boot it, and could take the answer file key out of boot.wim to decrypt the passwords. Set a WinPE password to lock it.'
         }
-    } elseif ($Target -eq 'Usb' -and $ContentSource -and -not $SecretsOnMedia) {
+    } elseif ($Target -eq 'Usb' -and $ContentSource) {
         Write-Warning 'No answer file key in config\secrets: no answer file has an encrypted password, so the deploy wizard asks for the passwords on its Passwords page.'
     }
     $answerKey = $null
@@ -408,17 +380,16 @@ Dismount-WindowsImage -Path $mount -Save | Out-Null
 Complete-BuildStep 'unmount'
 
 switch ($Target) {
-    'Pxe' {
-        $pxeWim = Join-Path $OutputPath 'boot.wim'
-        Start-BuildStep 'pxe' -Detail $pxeWim
-        Copy-Item $bootWim $pxeWim -Force
+    'Wim' {
+        $outWim = Join-Path $OutputPath 'boot.wim'
+        Start-BuildStep 'wim' -Detail $outWim
+        Copy-Item $bootWim $outWim -Force
         # What the console's Computers tab checks before it starts this image on PCs over the network: a WinPE
         # password would leave each PC waiting for someone to type it.
         Save-JsonFile -Path (Join-Path $OutputPath 'boot.json') -InputObject ([ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm')
             locked = [bool]$WinPEPasswordFile; share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)" })
-        Complete-BuildStep 'pxe'
-        if ($PublishToWds) { Start-BuildStep 'wds'; & "$PSScriptRoot\Publish-WdsBootImage.ps1" -BootWim $pxeWim -SettingsPath $SettingsPath | Format-List; Complete-BuildStep 'wds' }
-        else { Write-Host "boot.wim written to $OutputPath. Publish it with Publish-WdsBootImage.ps1, or import it into WDS (Boot Images > Add Boot Image)." }
+        Complete-BuildStep 'wim'
+        Write-Host "boot.wim written to $OutputPath."
     }
     'Iso' {
         $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
@@ -502,11 +473,10 @@ switch ($Target) {
             & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
             Complete-BuildStep 'bootfiles'
-            # Find-ContentRoot recognizes the stick by its Images folder; capture media saves there too.
+            # Find-ContentRoot recognizes the stick by its Images folder.
             New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
             if ($copyPlan) {
-                # The answer files, the image each one names, and what they use (or, for capture media, Images, Drivers
-                # and config), copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
+                # The answer files, the image each one names, and what they use, copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
                 Start-BuildStep 'content'
                 $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\" -OnProgress $onCopy
                 Write-Host ('Copied {0} files, {1}, in {2} ({3}/s on average)' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), (Format-MediaSize ([int64]($copied.Bytes / [Math]::Max(0.001, $copied.Seconds)))))
