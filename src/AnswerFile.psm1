@@ -722,6 +722,150 @@ function Join-InputLocale([string]$Main, [string]$Second) {
     $parts -join '; '
 }
 
+function ConvertTo-LocaleTag([string]$Value) {
+    # Deploy wizard files store display names ("French (Canada)"); unattend wants tags (fr-CA).
+    if (-not $Value) { return $null }
+    if ($Value -match '^[a-z]{2,3}(-[A-Za-z0-9]+)+$') { return $Value }
+    $c = [Globalization.CultureInfo]::GetCultures('SpecificCultures') | Where-Object { $_.EnglishName -eq $Value } | Select-Object -First 1
+    if ($c) { $c.Name } else { $null }
+}
+
+function ConvertFrom-DeployWizardAnswerFile {
+    <#
+    .SYNOPSIS
+        Converts an existing deploy wizard answer file (.xml) to this tool's answer object.
+        Returns @{ Answer; Notes }: Notes lists what needs a manual step. Passwords are never carried over
+        (the source file encrypts them); each one becomes a passwordFile to fill in.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    [xml]$xml = Get-Content -Raw -Path $Path
+    $w = $xml.DocumentElement.SelectSingleNode('deploy_wizard')
+    if (-not $w) { throw "$Path is not a deploy wizard answer file (no deploy_wizard element)." }
+    $notes = [Collections.Generic.List[string]]::new()
+
+    $imageFile = Get-XmlText $w 'select_image/image_file'
+    $imageLeaf = if ($imageFile) { Split-Path $imageFile -Leaf } else { 'Image.wim' }
+    $notes.Add("Image: copy $imageFile to the content root's Images folder (the answer file points to Images\$imageLeaf).")
+
+    $apps = @($w.SelectNodes('application_packs/application_pack') |
+        Sort-Object { [int]$_.GetAttribute('installation_order') } |
+        ForEach-Object { [IO.Path]::GetFileNameWithoutExtension("$($_.InnerText)".Trim()) })
+    if ($apps) {
+        $known = @($apps | Where-Object { Find-AppTemplate -Name $_ })
+        $tip = if ($known) { " The builder has templates for $($known -join ', ')." } else { '' }
+        $notes.Add("Applications: .spk application packs can't be read. Rebuild each one on the Applications tab (New..., keeping the same name): $($apps -join ', ').$tip")
+    }
+
+    $diskOption = Get-XmlText $w 'disk_options/disk_option' '0'
+    if ($diskOption -ne '0') { $notes.Add("Disk option $diskOption (wipe and load / keep user data) isn't converted; the disk will be recreated.") }
+
+    $membership = switch (Get-XmlText $w 'network_identification/membership' '1') { '0' { 'Domain' } '2' { 'Workgroup' } default { 'Workgroup' } }
+    if ((Get-XmlText $w 'network_identification/membership') -eq '2') { $notes.Add('Azure AD join isn''t supported; set to Workgroup.') }
+
+    $inputName = Get-XmlText $w 'regional_settings/input_locale'
+    $locale = ConvertTo-LocaleTag $inputName
+    if ($inputName -and -not $locale) { $notes.Add("Input locale '$inputName' wasn't recognized; set it by hand (for example fr-CA).") }
+
+    $wmiQuery = Get-XmlText $w 'advanced_options/identification/wmi_query'
+    $scheme = Get-XmlText $w 'advanced_options/identification/custom_naming_scheme'
+    # The deploy wizard tries its naming methods in order (WMI, existing name, custom scheme); a fresh disk has no
+    # existing name, so the WMI query wins when there is one.
+    $mode = if ($wmiQuery) { 'WMI' } elseif ($scheme) { 'Custom' } else { 'WMI' }
+
+    $props = @{}
+    foreach ($p in $w.SelectNodes('advanced_options/general/system_properties/system_property')) { $props["$($p.InnerText)".Trim()] = $p.GetAttribute('enabled') -eq '1' }
+    $unsupportedProps = @($props.Keys | Where-Object { $props[$_] -and $_ -notin 'DISABLE_SYSTEM_RESTORE', 'ENABLE_ADMINISTRATOR_ACCOUNT' })
+    if ($unsupportedProps) { $notes.Add("System properties not supported (ignored): $($unsupportedProps -join ', ').") }
+
+    $tasks = @($w.SelectNodes('advanced_options/tasks/task') | ForEach-Object {
+        $phase = (Get-XmlText $_ 'phase' '').ToUpperInvariant()
+        $cmd = Get-XmlText $_ 'command' ''
+        if ($phase -eq 'POSTIMAGE' -and $cmd -match '(?i)\bT:\\') {
+            $cmd = $cmd -replace '(?i)\bT:\\', '%OSDRIVE%\'
+            $notes.Add("POSTIMAGE task: the old T: drive was changed to %OSDRIVE%: $cmd")
+        }
+        if ($phase -in 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON') { [pscustomobject]@{ Phase = $phase; Script = ''; Command = $cmd } }
+        else { $notes.Add("Task phase '$phase' isn't supported; skipped: $cmd") }
+    })
+    foreach ($t in $tasks | Where-Object { $_.Phase -ne 'POSTIMAGE' -and $_.Command -match '(?i)\bT:\\' }) {
+        $notes.Add("$($t.Phase) task uses T:, which only exists in WinPE; check it: $($t.Command)")
+    }
+
+    # Letters W:, X: and Z: are taken by the deploy; keep every other letter the file already uses.
+    $shareNodes = @($w.SelectNodes('settings/network_shares/network_share'))
+    $reserved = @('R:', 'S:', 'W:', 'X:', 'Z:')
+    $used = $reserved + @($shareNodes | ForEach-Object { (Get-XmlText $_ 'local_name' '').ToUpperInvariant() } |
+        Where-Object { $_ -match '^[D-Y]:$' -and $_ -notin $reserved })
+    $shares = @($shareNodes | ForEach-Object {
+        $local = (Get-XmlText $_ 'local_name' '').ToUpperInvariant()
+        if ($local -in $reserved -or $local -notmatch '^[D-Y]:$') {
+            $free = [char[]](89..68) | ForEach-Object { "$($_):" } | Where-Object { $_ -notin $used } | Select-Object -First 1
+            $notes.Add("Share $(Get-XmlText $_ 'remote_name') moved from $local to $free ($local is used by the deploy).")
+            $local = $free
+        }
+        $used += $local
+        [pscustomobject]@{
+            LocalName    = $local
+            RemoteName   = Get-XmlText $_ 'remote_name'
+            Username     = Get-XmlText $_ 'username'
+            Domain       = Get-XmlText $_ 'domain'
+            PasswordFile = "config\secrets\share-$($local.TrimEnd(':').ToLowerInvariant()).txt"
+        }
+    })
+    if ($shares) { $notes.Add("Shares: type each share's password in the answer file editor ($(($shares.RemoteName) -join ', ')).") }
+    if ($membership -eq 'Domain') { $notes.Add('Domain join: type the join account''s password in the answer file editor.') }
+    if (Get-XmlText $w 'advanced_options/general/platform_pack') { $notes.Add('Drivers: platform packs (.ppk) aren''t used; import the OEM driver packs in the Driver Library tab.') }
+    if ((Get-XmlText $w 'network_tcpip_settings/ipv4/static') -eq '1') { $notes.Add('Static IP settings aren''t supported; the PC will use DHCP.') }
+    if ((Get-XmlText $w 'client/install_during_deployment') -eq 'true') { $notes.Add('The old client agent isn''t installed; add your management agent as an application if needed.') }
+
+    $answer = [pscustomobject]@{
+        Name                 = [IO.Path]::GetFileNameWithoutExtension($Path)
+        Path                 = $null
+        Mode                 = if ((Get-XmlText $w '@mode') -eq 'Unattended') { 'Unattended' } else { 'Interactive' }
+        UnattendDelay        = [int](Get-XmlText $w 'settings/unattend_delay' '10')
+        ImageFile            = "Images\$imageLeaf"
+        ImageIndex           = 1
+        Windows11Check       = 'Block'
+        ImageVersion         = $null
+        DiskNumber           = 0
+        DiskOption           = 'Recreate'
+        DriverRoot           = 'Drivers'
+        AppLocation          = 'Applications'
+        Applications         = $apps
+        ProductKey           = Get-XmlText $w 'product_key/product_key'
+        FullName             = Get-XmlText $w 'user_information/full_name'
+        Organization         = Get-XmlText $w 'user_information/organization_name'
+        TimeZone             = Get-XmlText $w 'regional_settings/time_zone'
+        InputLocale          = $locale
+        SystemLocale         = $null
+        UILanguage           = $null
+        UILanguageFallback   = $null
+        UserLocale           = $locale
+        NamingMode           = $mode
+        WmiQuery             = if ($wmiQuery) { $wmiQuery } else { 'SELECT SerialNumber FROM Win32_BIOS' }
+        CustomScheme         = $scheme
+        Prefix               = Get-XmlText $w 'advanced_options/identification/prefix' ''
+        Membership           = $membership
+        Domain               = Get-XmlText $w 'network_identification/domain'
+        OrganizationalUnit   = Get-XmlText $w 'network_identification/organizational_unit'
+        Workgroup            = Get-XmlText $w 'network_identification/workgroup' 'WORKGROUP'
+        JoinUser             = Get-XmlText $w 'join_domain_credentials/username'
+        JoinDomain           = Get-XmlText $w 'join_domain_credentials/domain'
+        JoinPasswordFile     = 'config\secrets\join.txt'
+        EnableAdministrator  = [bool]$props['ENABLE_ADMINISTRATOR_ACCOUNT']
+        AdminPasswordFile    = 'config\secrets\admin.txt'
+        DisableSystemRestore = [bool]$props['DISABLE_SYSTEM_RESTORE']
+        TaskLocation         = 'Tasks'
+        Tasks                = $tasks
+        Shares               = $shares
+        Reboot               = (Get-XmlText $w 'advanced_options/general/reboot_after_deployment' 'true') -eq 'true'
+        Shutdown             = (Get-XmlText $w 'advanced_options/general/shutdown_after_deployment' 'false') -eq 'true'
+        BitLocker            = Read-BitLockerNode ([xml]'<deployment/>').DocumentElement
+    }
+    if ($answer.EnableAdministrator) { $notes.Add('Built-in Administrator: type its password in the answer file editor.') }
+    @{ Answer = $answer; Notes = @($notes) }
+}
+
 function Join-ContentPath {
     # Content root paths use backslashes (they are read in WinPE); normalize so the modules also run in tests off Windows.
     param([string]$Root, [string]$Child)
@@ -750,5 +894,5 @@ function Get-AnswerFileUsage {
 
 Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
-    Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile,
+    Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
     Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

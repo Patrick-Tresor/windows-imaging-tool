@@ -79,6 +79,12 @@ try {
     Assert-Equal ($rows[0].Issues -join '') 'Image Images\Win11-Enterprise.wim is not in the content root.' 'missing image is reported'
     Copy-Item (Get-AnswerFilePath -ContentRoot $root -Name 'Default') (Get-AnswerFilePath -ContentRoot $root -Name 'Lab')
 
+    $imp = Import-DeployWizardAnswerFile -ContentRoot $root -Path (Join-Path $PSScriptRoot 'fixtures/deploy-wizard-sample.xml')
+    Assert-Equal $imp.Name 'deploy-wizard-sample' 'deploy wizard file is imported under its own name'
+    Assert-Equal ($imp.Notes.Count -gt 3) $true 'import returns the manual steps'
+    $impRow = Get-AnswerFileRows -ContentRoot $root | Where-Object Name -eq 'deploy-wizard-sample'
+    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like '*is not saved: type it in the editor.' }).Count) 3 'missing join and share passwords are reported'
+    Assert-Equal (@($impRow.Issues | Where-Object { $_ -like 'Application*' }).Count) 2 'missing application folders are reported'
     Assert-Equal ((Get-ImageUsage -ContentRoot $root)['Win11-Enterprise.wim'] -join ',') 'Default,Lab' 'image usage lists the answer files using it'
 
     # Capture wizard data.
