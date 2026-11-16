@@ -17,15 +17,6 @@ class ShareRow {
     [string]$PasswordEncrypted
 }
 
-function Get-XamlControls($Xaml, $Window) {
-    $map = @{}
-    foreach ($node in $Xaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $map[$name] = $Window.FindName($name)
-    }
-    $map
-}
-
 function Show-AnswerEditor {
     <#
     .SYNOPSIS
@@ -40,11 +31,9 @@ function Show-AnswerEditor {
     $isNew = -not $Path
     $a = if ($isNew) { Get-NewAnswer -Name $NewName } else { Read-AnswerFile -Path $Path -SkipValidation }
 
-    [xml]$ex = Get-Content -Raw (Join-Path $PSScriptRoot 'AnswerEditor.xaml')
-    $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($ex))
-    $win.Owner = $Owner
-    Enable-WheelScrolling $win
-    $e = Get-XamlControls $ex $win
+    $form = New-ConsoleWindow 'AnswerEditor.xaml' -Owner $Owner
+    $win = $form.Window
+    $e = $form.Controls
     $win.Title = if ($isNew) { 'New answer file' } else { "Answer file: $($a.Name)" }
     $state = @{ Saved = $false; SharePasswords = @{} }
 

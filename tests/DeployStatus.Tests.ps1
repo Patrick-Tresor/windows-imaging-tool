@@ -5,11 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployStatus.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("status-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -111,5 +107,4 @@ finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

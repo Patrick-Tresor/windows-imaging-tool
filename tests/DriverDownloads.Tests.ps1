@@ -4,11 +4,7 @@
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 [xml]$main = Get-Content -Raw (Join-Path $repo 'src/Console/MainWindow.xaml')
 $xns = 'http://schemas.microsoft.com/winfx/2006/xaml'
@@ -27,7 +23,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
 } else {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
     Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force
-    Import-Module (Join-Path $repo 'src/Console/WheelScroll.psm1') -Force
+    Import-Module (Join-Path $repo 'src/Console/XamlWindow.psm1') -Force
     . (Join-Path $repo 'src/Console/BuildProgress.ps1')
     . (Join-Path $repo 'src/Console/DriverDownloader.ps1')
 
@@ -104,5 +100,4 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     }
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All driver download list checks passed.' -ForegroundColor Green
+Complete-Tests 'All driver download list checks passed.'

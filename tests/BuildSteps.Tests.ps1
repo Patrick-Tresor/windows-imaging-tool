@@ -6,11 +6,24 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/BuildSteps.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+
+# Save-JsonFile (JsonFile.psm1): every JSON file the console, the build and WinPE write goes through it.
+Import-Module (Join-Path $repo 'src/JsonFile.psm1') -Force
+$jsonDir = Join-Path ([IO.Path]::GetTempPath()) ("jsonfile-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $jsonDir | Out-Null
+try {
+    $jf = Join-Path $jsonDir 'a.json'
+    Save-JsonFile -Path $jf -InputObject ([ordered]@{ name = "Andr$([char]0xE9)"; list = @(1) })
+    Save-JsonFile -Path $jf -InputObject ([ordered]@{ name = "Andr$([char]0xE9)"; list = @(1, 2) })
+    $bytes = [IO.File]::ReadAllBytes($jf)
+    Assert-Equal "$($bytes[0]),$($bytes[1]),$($bytes[2])" '239,187,191' 'JSON files are UTF-8 with a BOM, as 5.1 reads them'
+    $back = Get-Content -Raw -LiteralPath $jf -Encoding UTF8 | ConvertFrom-Json
+    Assert-Equal "$($back.name)|$($back.list -join ',')" "Andr$([char]0xE9)|1,2" 'a second save replaces the file'
+    Assert-Equal (Test-Path "$jf.tmp") $false 'no .tmp file is left behind'
+    Save-JsonFile -Path $jf -InputObject @(@{ x = 1 })
+    Assert-Equal ((Get-Content -Raw -LiteralPath $jf).Trim().StartsWith('[')) $true 'a one-item list stays a list'
+} finally { Remove-Item $jsonDir -Recurse -Force -ErrorAction SilentlyContinue }
 $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 function ConvertTo-Ms([DateTime]$Time) { [int64]($Time.ToUniversalTime() - $epoch).TotalMilliseconds }
 
@@ -135,7 +148,9 @@ Assert-Equal ($buildText -match '(?m)^Stop-BuildProgress\s*$') $true 'the end ma
 
 # The console: the build gets a progress file and a log, and the window is loaded the console's way.
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
-Assert-Equal ($consoleText -match "'-ProgressFile'") $true 'the console passes -ProgressFile'
+$progressText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/BuildProgress.ps1')
+Assert-Equal ($consoleText -match "Start-ConsoleJob -Name 'media-build'") $true 'the console starts the build with Start-ConsoleJob'
+Assert-Equal ($progressText -match "'-ProgressFile'") $true 'Start-ConsoleJob passes -ProgressFile'
 Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console opens the Build progress window'
 
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'
@@ -145,7 +160,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     Write-Host 'SKIP Build progress window: WPF needs an STA thread' -ForegroundColor Yellow
 } else {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
-    Import-Module (Join-Path $repo 'src/Console/WheelScroll.psm1') -Force
+    Import-Module (Join-Path $repo 'src/Console/XamlWindow.psm1') -Force
     . (Join-Path $repo 'src/Console/BuildProgress.ps1')
     $dir = Join-Path ([IO.Path]::GetTempPath()) ("imaging-steps-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $dir | Out-Null
@@ -184,5 +199,4 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     }
 }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All build step checks passed.' -ForegroundColor Green
+Complete-Tests 'All build step checks passed.'

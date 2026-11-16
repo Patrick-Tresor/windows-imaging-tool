@@ -3,6 +3,8 @@
 # times. The console reads it twice a second and draws one row per step: name, elapsed time, bar, Complete.
 # Progress is best effort: a failed write never stops the build. PowerShell 5.1 compatible, no Windows-only calls.
 
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
+
 $script:Build = $null
 
 function Start-BuildProgress {
@@ -41,19 +43,8 @@ function Save-BuildProgress {
     if (-not $script:Build) { return }
     if (-not $Force -and $script:Build.LastWrite.ElapsedMilliseconds -lt 300) { return }
     $script:Build.LastWrite.Restart()
-    $path = $script:Build.Path
-    $tmp = "$path.tmp"
-    try {
-        $json = ConvertTo-Json -InputObject $script:Build.Data -Depth 4
-        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
-        for ($try = 0; $try -lt 3; $try++) {
-            try {
-                if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
-                [IO.File]::Move($tmp, $path)
-                break
-            } catch { Start-Sleep -Milliseconds 50 }   # the console was reading it
-        }
-    } catch { Write-Verbose "Build progress not saved: $($_.Exception.Message)" }
+    try { Save-JsonFile -Path $script:Build.Path -InputObject $script:Build.Data -Depth 4 }
+    catch { Write-Verbose "Build progress not saved: $($_.Exception.Message)" }
 }
 
 function Start-BuildStep {

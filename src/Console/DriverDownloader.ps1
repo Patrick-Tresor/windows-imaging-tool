@@ -30,16 +30,13 @@ function Start-DriverPackDownload {
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $job = Join-Path ([IO.Path]::GetTempPath()) "driverpacks-$stamp-$tag.json"
-    ConvertTo-Json -InputObject @($Packs) -Depth 4 | Set-Content -Path $job -Encoding utf8
-    $progressFile = Join-Path ([IO.Path]::GetTempPath()) "driverpacks-$stamp-$tag-progress.json"
-    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }), 'ImagingConsole', 'Logs')
-    $logPath = [IO.Path]::Combine($logDir, "driverpacks-$stamp.log")
+    Save-JsonFile -Path $job -InputObject @($Packs) -Depth 4
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
         '-File', (ConvertTo-Arg (Join-Path $SrcDir 'Get-DriverPacks.ps1')),
-        '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job),
-        '-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath))
+        '-ContentRoot', (ConvertTo-Arg $ContentRoot), '-JobFile', (ConvertTo-Arg $job))
     if ($KeepDownload) { $runArgs += '-KeepDownload' }
-    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle Hidden -PassThru
+    $run = Start-ConsoleJob -Name 'driverpacks' -ArgumentList $runArgs -Hidden
+    $progressFile = $run.ProgressFile; $logPath = $run.LogPath; $proc = $run.Process
     $title = if (@($Packs).Count -eq 1) { "$(Format-DriverPackName @($Packs)[0]) driver pack" } else { "$(@($Packs).Count) driver packs" }
     # The progress goes in the Driver Library page, under the library, where it stays until it is removed
     # (Patrick, 2026-11-11: no separate window, and a closed window could not be opened again).
@@ -209,15 +206,9 @@ function Show-DriverDownloader {
         [Parameter(Mandatory)][string]$SrcDir
     )
 
-    [xml]$dxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'DriverDownloader.xaml')
-    $dlg = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($dxaml))
-    $dlg.Owner = $Owner
-    Enable-WheelScrolling $dlg
-    $d = @{}
-    foreach ($node in $dxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $d[$name] = $dlg.FindName($name)
-    }
+    $form = New-ConsoleWindow 'DriverDownloader.xaml' -Owner $Owner
+    $dlg = $form.Window
+    $d = $form.Controls
     $state = @{ Rows = @(); Started = $false }
 
     function Show-DownloaderError([string]$Text) {

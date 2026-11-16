@@ -5,6 +5,7 @@
 # PowerShell 5.1 compatible. Only Get-CaptureDiskChecklist touches the disk files; the rest is plain data.
 
 Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1')
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 
 function Find-VBoxManage {
     # VirtualBox's VBoxManage converts VMDK and VDI disks when qemu-img is not installed.
@@ -185,17 +186,7 @@ function Write-CaptureCheckResult {
     # Saves what Capture-VMImage.ps1 -CheckOnly found so far; a temporary file swapped in, so the wizard never
     # reads half of it.
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Result)
-    try {
-        $tmp = "$Path.tmp"
-        [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $Result -Depth 3), (New-Object Text.UTF8Encoding($false)))
-        for ($try = 0; $try -lt 5; $try++) {
-            try {
-                if ([IO.File]::Exists($Path)) { [IO.File]::Delete($Path) }
-                [IO.File]::Move($tmp, $Path)
-                break
-            } catch { Start-Sleep -Milliseconds 50 }
-        }
-    } catch { }
+    try { Save-JsonFile -Path $Path -InputObject $Result -Depth 3 } catch { }
 }
 
 function Read-CaptureCheckResult {

@@ -8,11 +8,7 @@ Import-Module (Join-Path $repo 'src/Console/DriverPacks.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 $fixtures = Join-Path $PSScriptRoot 'fixtures/driverpacks'
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Dell names newer models with the brand already in the model's Display ("Latitude 5531" under brand Latitude):
 # the console showed "Dell Latitude Latitude 5531" and the folder and model matched no PC.
@@ -113,7 +109,7 @@ Assert-Equal ($packs.Model -join ',') 'Latitude 5440,Latitude 5540' 'get-vendord
 
 # Registration in a content root.
 $root = Join-Path ([IO.Path]::GetTempPath()) ("driverpacks-test-" + [guid]::NewGuid())
-& $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+Set-DeployLogPath -Path (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
     Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows
@@ -268,7 +264,7 @@ Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'HP'; Model = 'H
 $dl = Get-Content -Raw (Join-Path $repo 'src/Console/DriverDownloader.ps1')
 $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
-Assert-Equal ($start -match "-WindowStyle Hidden -PassThru") $true 'download: the worker runs hidden'
+Assert-Equal ($start -match "Start-ConsoleJob [^\n]*-Hidden") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
 Assert-Equal ($start -match 'Add-DriverDownloadJob -Panel \$script:ui.GrpDriverDownloads -List \$script:ui.LstDriverDownloads') $true 'download: progress shown on the Driver Library page'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
@@ -310,5 +306,4 @@ try {
     Assert-Equal ((Format-VendorDriverPack @($r.Packs)[0]) -like 'Lenovo ThinkPad T570 - Windows 10 20H2*') $true 'find online: an older model gets its Windows 10 pack, and says so'
 } finally { Remove-Item $anyXml -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

@@ -7,11 +7,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployWizard.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function New-File([string]$Path, [string]$Text) {
     New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
     Set-Content -LiteralPath $Path -Value $Text -NoNewline
@@ -75,5 +71,4 @@ finally { Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue }
 $build = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($build -match '(?s)if \(-not \$UpdateOnly\) \{.*Reset-UsbDisk') $true 'Reset-UsbDisk only when not updating'
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All media update checks passed' -ForegroundColor Green
+Complete-Tests 'All media update checks passed'

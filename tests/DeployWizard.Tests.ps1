@@ -7,11 +7,7 @@ Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployWizard.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Computer names.
 Assert-Equal (Test-ComputerNameValue 'LAB-PC-042') '' 'valid name passes'
@@ -143,5 +139,4 @@ $deploySrc = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploySrc -match "Data\['Windows11Block'\]") $true 'Deploy-Image marks the Windows 11 block for the wizard'
 Assert-Equal ($deploySrc -match '-IgnoreWin11 \(\$IgnoreWindows11Check\.IsPresent -or \$IgnoreWin11\)') $true 'Install anyway from the wizard skips the block'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

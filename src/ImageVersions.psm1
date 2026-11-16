@@ -7,6 +7,7 @@
 # old image to the same place, so its backups show up as versions too, just without version.json.
 
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 
 $script:StampFormat = 'yyyyMMdd-HHmm'
 $script:VersionPattern = '^\d{8}-\d{4}(-\d+)?$'
@@ -81,15 +82,9 @@ function Get-ImageVersions {
 function Get-ImageVersionUsage {
     # Version -> names of the answer files deploying it, for one image. '' is the current image.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -ne $ImageName) { continue }
-        $key = "$($a.ImageVersion)"
-        if (-not $usage.ContainsKey($key)) { $usage[$key] = @() }
-        $usage[$key] += $f.BaseName
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys {
+        param($a) if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -eq $ImageName) { "$($a.ImageVersion)" }
+    }.GetNewClosure()
 }
 
 function Get-ImageVersionLimitPath {
@@ -114,7 +109,7 @@ function Set-ImageVersionLimit {
     $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
     if ($null -eq $Keep) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return }
     if ([int]$Keep -lt 0) { throw 'Keep must be 0 or more.' }
-    [pscustomobject]@{ keep = [int]$Keep } | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject ([pscustomobject]@{ keep = [int]$Keep })
 }
 
 function Get-VersionsToKeep {
@@ -202,8 +197,8 @@ function Save-ImageVersion {
         Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
         throw
     }
-    [pscustomobject]@{ image = (Split-Path $ImagePath -Leaf); archived = $Date.ToString('yyyy-MM-dd HH:mm'); reason = $Reason; note = "$Note" } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $folder 'version.json') -Encoding utf8
+    Save-JsonFile -Path (Join-Path $folder 'version.json') -InputObject ([pscustomobject]@{ image = (Split-Path $ImagePath -Leaf)
+        archived = $Date.ToString('yyyy-MM-dd HH:mm'); reason = $Reason; note = "$Note" })
     Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $version
 }
 
@@ -211,8 +206,8 @@ function Set-ImageVersionNote {
     param([Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Version, [AllowEmptyString()][string]$Note)
     $v = Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $Version
     if (-not $v) { throw "Version $Version of $(Split-Path $ImagePath -Leaf) was not found." }
-    [pscustomobject]@{ image = (Split-Path $ImagePath -Leaf); archived = $v.Archived.ToString('yyyy-MM-dd HH:mm'); reason = $v.Reason; note = "$Note" } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $v.Folder 'version.json') -Encoding utf8
+    Save-JsonFile -Path (Join-Path $v.Folder 'version.json') -InputObject ([pscustomobject]@{ image = (Split-Path $ImagePath -Leaf)
+        archived = $v.Archived.ToString('yyyy-MM-dd HH:mm'); reason = $v.Reason; note = "$Note" })
 }
 
 function Set-ImageFileLink {
@@ -275,7 +270,52 @@ function Get-ImageVersionsToPrune {
     @(Get-ImageVersions -ImagePath $ImagePath | Select-Object -Skip $Keep | Where-Object { $_.Version -notin $Pinned })
 }
 
-Export-ModuleMember -Function Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+function Publish-CapturedImage {
+    <#
+    .SYNOPSIS
+        After a capture into -Staging: keeps the image it replaces (-Existing) as a version, moves the new files into
+        -ImagesDir and applies the image's keep limit. Returns the new file name (Name.wim or Name.swm).
+    .DESCRIPTION
+        Used by Capture-GoldenImage.ps1 and Capture-VMImage.ps1, which import DeployCommon.psm1 for Write-DeployLog.
+        $State.Swapping turns true once the old image starts moving: from then on the staging folder may hold the
+        only copy of the new capture, so the caller must not delete it.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Staging,
+        [Parameter(Mandatory)][string]$ImagesDir,
+        [Parameter(Mandatory)][string]$Name,
+        [int]$SplitSizeMB,
+        [string[]]$Existing,
+        [string]$ContentRoot,
+        [Parameter(Mandatory)][hashtable]$State
+    )
+    if ($Existing) {
+        $State.Swapping = $true
+        foreach ($old in $Existing) {
+            $v = Save-ImageVersion -ImagePath $old -Move -Reason 'Replaced by a new capture'
+            Write-DeployLog "Kept the previous $(Split-Path $old -Leaf) as version $($v.Version)"
+        }
+    }
+    if ($Staging -ne $ImagesDir) {
+        Get-ChildItem -LiteralPath $Staging -File | Move-Item -Destination $ImagesDir
+        Remove-Item -LiteralPath $Staging -Recurse -Force
+    }
+    $newLeaf = if ($SplitSizeMB -gt 0) { "$Name.swm" } else { "$Name.wim" }
+    if ($Existing) {
+        if ($Existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
+            Write-DeployLog "The new version is $newLeaf but the old one was $(($Existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
+        }
+        if ($ContentRoot) {
+            try {
+                $pruned = @(Invoke-ImageVersionRetention -ContentRoot $ContentRoot -ImagePath (Join-Path $ImagesDir $newLeaf))
+                if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
+            } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
+        }
+    }
+    $newLeaf
+}
+
+Export-ModuleMember -Function Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

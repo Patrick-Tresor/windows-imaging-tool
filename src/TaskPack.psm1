@@ -295,39 +295,6 @@ function Invoke-TaskPack {
 
 #region Library
 
-function Export-TaskPack {
-    # Zips Tasks\<name> (script, task.json, other files) into one file to copy to another content root.
-    param([Parameter(Mandatory)][string]$TaskRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
-    $src = Join-Path $TaskRoot $Name
-    [void](Read-TaskPack -TaskRoot $TaskRoot -Name $Name)
-    if (Test-Path $Path) { Remove-Item $Path -Force }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
-    $Path
-}
-
-function Import-TaskPack {
-    # Unzips an exported task into Tasks\<name>; the name comes from the file unless -Name is given.
-    param([Parameter(Mandatory)][string]$TaskRoot, [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
-    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path) }
-    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Task name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $dest = Join-Path $TaskRoot $Name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "A task named $Name already exists." }
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("taskpack-" + [guid]::NewGuid())
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    try {
-        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
-        if (-not (Test-Path (Join-Path $tmp 'task.json'))) { throw "$Path is not an exported task (no task.json at the top)." }
-        $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $tmp 'task.json') | ConvertFrom-Json)
-        $problems = @(Test-TaskPack -Definition $def -Folder $tmp)
-        if ($problems) { throw ($problems -join "`n") }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        New-Item -ItemType Directory -Path $TaskRoot -Force | Out-Null
-        Move-Item $tmp $dest
-    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
-    $dest
-}
-
 function Get-TaskTemplates {
     # config\task-templates.json: ready-made scripts for common jobs, to start a new task from.
     param([string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/task-templates.json'))
@@ -352,4 +319,4 @@ function New-TaskFromTemplate {
 Export-ModuleMember -Function Get-TaskTypeFromFile, ConvertTo-TaskDefinition, ConvertTo-TaskJson, Read-TaskPack, Test-TaskPack,
     Write-TaskScriptText, Save-TaskPack, Get-TaskScriptText, Get-TaskLaunch, Get-TaskCommandLine, Test-TaskRequirement,
     Resolve-DeployTasks, Get-LogonTaskFolder, Get-LogonTaskCommand, New-LogonTaskPlan, Invoke-TaskPack,
-    Export-TaskPack, Import-TaskPack, Get-TaskTemplates, New-TaskFromTemplate
+    Get-TaskTemplates, New-TaskFromTemplate

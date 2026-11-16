@@ -6,11 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function New-TestFile([string]$Path, [int]$Bytes) {
     New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
     $data = New-Object byte[] $Bytes
@@ -123,5 +119,4 @@ try {
 }
 finally { Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All media copy checks passed' -ForegroundColor Green
+Complete-Tests 'All media copy checks passed'

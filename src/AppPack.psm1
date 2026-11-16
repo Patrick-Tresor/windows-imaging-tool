@@ -540,39 +540,6 @@ function Save-AppPack {
     $dest
 }
 
-function Export-AppPack {
-    # Zips Applications\<name> (installer, app.json, scripts) into one file to copy to another content root.
-    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
-    $src = Join-Path $AppRoot $Name
-    [void](Read-AppPack -AppRoot $AppRoot -Name $Name)
-    if (Test-Path $Path) { Remove-Item $Path -Force }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
-    $Path
-}
-
-function Import-AppPack {
-    # Unzips an exported pack into Applications\<name>; the name comes from the file unless -Name is given.
-    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
-    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path) -replace '\.apppack$', '' }
-    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Application name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $dest = Join-Path $AppRoot $Name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "An application named $Name already exists." }
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("apppack-" + [guid]::NewGuid())
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    try {
-        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
-        if (-not (Test-Path (Join-Path $tmp 'app.json'))) { throw "$Path is not an application pack (no app.json at the top)." }
-        $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $tmp 'app.json') | ConvertFrom-Json)
-        $problems = @(Test-AppPack -Definition $def -Folder $tmp | Where-Object { $_ -notlike 'Warning:*' })
-        if ($problems) { throw ($problems -join "`n") }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        New-Item -ItemType Directory -Path $AppRoot -Force | Out-Null
-        Move-Item $tmp $dest
-    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
-    $dest
-}
-
 #endregion
 
 #region On the target PC
@@ -845,5 +812,5 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     ConvertFrom-WingetSearch, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Get-MediaAppDownloads, Add-MediaCopyItems,
-    Save-AppPack, Export-AppPack, Import-AppPack,
+    Save-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall

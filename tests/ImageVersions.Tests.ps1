@@ -7,16 +7,7 @@ Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/ImageVersions.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Action, $Name) {
-    $threw = $false
-    try { & $Action } catch { $threw = $true }
-    Assert-Equal $threw $true $Name
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-versions-" + [guid]::NewGuid())
 try {
@@ -148,10 +139,22 @@ try {
     Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Win11' } 'capturing over an existing image needs -NewVersion'
     $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Win11' -NewVersion) | ConvertFrom-Json
     Assert-Equal $cfg.newVersion $true 'capture config asks for a new version'
+
+    # A new capture replaces the image: the old one becomes a version and the new one moves in from staging.
+    function global:Write-DeployLog { param($Message, $Level) }
+    $pubDir = Join-Path $root 'PubImages'
+    $pubStage = Join-Path $pubDir '.capture-Pub'
+    New-Item -ItemType Directory -Path $pubStage -Force | Out-Null
+    Set-Content (Join-Path $pubDir 'Pub.wim') 'old'
+    Set-Content (Join-Path $pubStage 'Pub.wim') 'new'
+    $swap = @{ Swapping = $false }
+    $leaf = Publish-CapturedImage -Staging $pubStage -ImagesDir $pubDir -Name 'Pub' -Existing @(Join-Path $pubDir 'Pub.wim') -State $swap
+    Assert-Equal "$leaf|$($swap.Swapping)|$((Get-Content (Join-Path $pubDir 'Pub.wim')).Trim())|$(Test-Path $pubStage)" 'Pub.wim|True|new|False' 'a new capture moves in and the staging folder goes'
+    Assert-Equal @(Get-ImageVersions -ImagePath (Join-Path $pubDir 'Pub.wim')).Count 1 'the replaced image is kept as a version'
+    Remove-Item function:global:Write-DeployLog
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All image version tests passed' -ForegroundColor Green
+Complete-Tests 'All image version tests passed'

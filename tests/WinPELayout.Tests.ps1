@@ -9,11 +9,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployWizard.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployProgress.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # The log box shows short entries: time and message, no tool output or command lines.
 Assert-Equal (Format-LogTailLine '2026-11-02 12:01:05 [INFO] Partitioning disk 0') '12:01:05 Partitioning disk 0' 'log entry: time and message'
@@ -157,5 +153,4 @@ finally { $form.Close(); $form.Dispose() }
 $src = Get-Content -Raw (Join-Path $repo 'src/DeployWizard.psm1')
 Assert-Equal ($src -match '\$w\.Layout = \{ Update-DeployWizardLayout') $true 'Show-DeployWizard uses Update-DeployWizardLayout'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All WinPE layout tests passed.' -ForegroundColor Green
+Complete-Tests 'All WinPE layout tests passed.'

@@ -29,8 +29,14 @@ jobs:
               foreach ($e in $errors) { $bad++; Write-Host "$($f.Name):$($e.Extent.StartLineNumber): $($e.Message)" }
           }
           Add-Type -AssemblyName PresentationFramework
-          foreach ($f in Get-ChildItem src -Recurse -Include *.xaml) {
-              try { [void][Windows.Markup.XamlReader]::Parse((Get-Content -Raw $f.FullName)) }
+          # Console windows load with the shared Styles.xaml merged in, as the console loads them. FormStyles.xaml is
+          # loaded with the editor windows that use it.
+          Import-Module .\src\Console\XamlWindow.psm1
+          foreach ($f in Get-ChildItem src -Recurse -Include *.xaml | Where-Object Name -ne 'FormStyles.xaml') {
+              try {
+                  if ($f.Name -eq 'Styles.xaml') { [void][Windows.Markup.XamlReader]::Parse((Get-Content -Raw $f.FullName)) }
+                  else { [void][Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new((Read-ConsoleXaml -Path $f.FullName))) }
+              }
               catch { $bad++; Write-Host "$($f.Name): $($_.Exception.InnerException.Message) $($_.Exception.Message)" }
           }
           if ($bad) { Write-Host "$bad problem(s)"; exit 1 }

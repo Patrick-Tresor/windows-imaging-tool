@@ -8,18 +8,7 @@ Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/AppPack.psm1') -Force
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Block, [string]$Like, $Name) {
-    try { & $Block; Write-Host "FAIL $Name (no error)" -ForegroundColor Red; $script:failures++ }
-    catch {
-        if ($_.Exception.Message -like $Like) { Write-Host "PASS $Name" -ForegroundColor Green }
-        else { Write-Host "FAIL $Name`n  error: $($_.Exception.Message)" -ForegroundColor Red; $script:failures++ }
-    }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("apppack-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -314,20 +303,20 @@ Installers:
     Assert-Equal "$($list.Name)|$($list.Version)|$($list.Type)|$($list.Status)|$($list.For)" 'VLC|3.0.21|nsis|Ready|All PCs' 'application list shows version, type and status'
 
     $zip = Join-Path $tmp 'VLC.zip'
-    Export-AppPack -AppRoot (Join-Path $root 'Applications') -Name 'VLC' -Path $zip | Out-Null
-    Import-AppPack -AppRoot (Join-Path $root 'Applications') -Path $zip -Name 'VLC-copy' | Out-Null
+    Export-LibraryItem -Kind Application -Root (Join-Path $root 'Applications') -Name 'VLC' -Path $zip | Out-Null
+    Import-LibraryItem -Kind Application -Root (Join-Path $root 'Applications') -Path $zip -Name 'VLC-copy' | Out-Null
     Assert-Equal "$(Test-Path (Join-Path $root 'Applications/VLC-copy/vlc-3.0.21-win64.exe'))|$((Read-AppPack -AppRoot (Join-Path $root 'Applications') -Name 'VLC-copy').version)" 'True|3.0.21' 'exported pack imports under a new name'
-    Assert-Throws { Import-AppPack -AppRoot (Join-Path $root 'Applications') -Path $zip -Name 'VLC' } '*already exists*' 'import does not overwrite without -Overwrite'
+    Assert-Throws { Import-LibraryItem -Kind Application -Root (Join-Path $root 'Applications') -Path $zip -Name 'VLC' } '*already exists*' 'import does not overwrite without -Overwrite'
     $notPack = Join-Path $tmp 'notpack.zip'
     [IO.Compression.ZipFile]::CreateFromDirectory($msixDir, $notPack)
-    Assert-Throws { Import-AppPack -AppRoot (Join-Path $root 'Applications') -Path $notPack } '*not an application pack*' 'a zip without app.json is refused'
+    Assert-Throws { Import-LibraryItem -Kind Application -Root (Join-Path $root 'Applications') -Path $notPack } '*not an exported application*' 'a zip without app.json is refused'
 
     $a = Get-NewAnswer -Name 'Lab'
     $a.Applications = @('VLC')
     Save-AnswerFromEditor -ContentRoot $root -Answer $a -IsNew | Out-Null
     Assert-Equal ((Get-ApplicationList -ContentRoot $root | Where-Object Name -eq 'VLC').UsedBy) 'Lab' 'list shows which answer files use an app'
-    Assert-Throws { Remove-Application -ContentRoot $root -Name 'VLC' } '*still in these answer files*' 'an app in use cannot be removed'
-    Remove-Application -ContentRoot $root -Name 'VLC-copy'
+    Assert-Throws { Remove-LibraryItem -Kind Application -ContentRoot $root -Name 'VLC' } '*still in these answer files*' 'an app in use cannot be removed'
+    Remove-LibraryItem -Kind Application -ContentRoot $root -Name 'VLC-copy'
     Assert-Equal (Test-Path (Join-Path $root 'Applications/VLC-copy')) $false 'unused app is removed'
 
     # Answer file issues include broken packs.
@@ -344,5 +333,4 @@ finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

@@ -9,15 +9,9 @@ function Show-ImageVersionsDialog {
         [Parameter(Mandatory)][string]$SrcDir,
         [Parameter(Mandatory)]$Image
     )
-    [xml]$vx = Get-Content -Raw (Join-Path $PSScriptRoot 'ImageVersions.xaml')
-    $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($vx))
-    $win.Owner = $Owner
-    Enable-WheelScrolling $win
-    $v = @{}
-    foreach ($node in $vx.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $v[$name] = $win.FindName($name)
-    }
+    $form = New-ConsoleWindow 'ImageVersions.xaml' -Owner $Owner
+    $win = $form.Window
+    $v = $form.Controls
     $v.TxtTitle.Text = "Versions of $($Image.Name)"
     $state = @{ Changed = $false }
     $imagePath = Join-Path (Join-Path $ContentRoot 'Images') $Image.Name

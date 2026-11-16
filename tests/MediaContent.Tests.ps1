@@ -6,11 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/MediaContent.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function Set-AnswerImage([string]$Path, [string]$File, [string]$Version) {
     [xml]$x = Get-Content -Raw $Path
     $x.deployment.image.file = $File
@@ -153,5 +149,4 @@ try {
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All media content checks passed' -ForegroundColor Green
+Complete-Tests 'All media content checks passed'

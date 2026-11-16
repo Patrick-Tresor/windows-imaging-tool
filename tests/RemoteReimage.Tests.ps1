@@ -6,16 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
-function Assert-Throws([scriptblock]$Action, $Name) {
-    $threw = $false
-    try { & $Action | Out-Null } catch { $threw = $true }
-    Assert-Equal $threw $true $Name
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Serial numbers
 Assert-Equal (ConvertTo-SerialKey ' 5cg1234xyz ') '5CG1234XYZ' 'a serial is trimmed and upper case'
@@ -243,5 +234,4 @@ foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
     Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 "$f is ASCII"
 }
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All remote reimage tests passed.' -ForegroundColor Green
+Complete-Tests 'All remote reimage tests passed.'

@@ -8,12 +8,7 @@ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'AppPack.psm1') -For
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'TaskPack.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'NamingList.psm1') -Force
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'SecretVault.psm1') -Force
-
-function Join-ContentPath {
-    # Catalog paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
-    param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'JsonFile.psm1') -Force
 
 function Get-ConsoleConfigPath {
     $base = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $HOME '.config' }
@@ -30,7 +25,7 @@ function Save-ConsoleConfig {
     param([Parameter(Mandatory)]$Config)
     $path = Get-ConsoleConfigPath
     New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
-    $Config | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject $Config
 }
 
 function Initialize-ContentRoot {
@@ -72,7 +67,7 @@ function Get-ImageList {
     $files = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.wim' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
     foreach ($f in $files) {
-        $parts = @(if ($f.Extension -eq '.swm') { Get-ChildItem -Path $dir -Filter "$($f.BaseName)*.swm" } else { $f })
+        $parts = @(Get-ImagePartFiles -ImagePath $f.FullName)
         $indexes = ''
         if (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue) {
             try {
@@ -138,7 +133,7 @@ function Remove-SampleDriverEntries {
     }
     if ($removed) {
         $catalog.entries = @($keep)
-        $catalog | ConvertTo-Json -Depth 5 | Set-Content -Path $path -Encoding utf8
+        Save-JsonFile -Path $path -InputObject $catalog -Depth 5
     }
     $removed
 }
@@ -185,7 +180,7 @@ function Save-DriverCatalog {
         [pscustomobject]$e
     }
     $catalog.entries = @($entries)
-    $catalog | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -Encoding utf8
+    Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -InputObject $catalog -Depth 5
 }
 
 function Import-DriverPack {
@@ -260,7 +255,7 @@ function New-CaptureConfig {
         newVersion       = [bool]$NewVersion
     }
     $path = Join-ContentPath $ContentRoot 'config\capture.json'
-    [pscustomobject]$cfg | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+    Save-JsonFile -Path $path -InputObject ([pscustomobject]$cfg)
     $path
 }
 
@@ -489,18 +484,74 @@ function Save-AnswerFromEditor {
     $dest
 }
 
+#region Library folders (Applications\<name>, Tasks\<name>)
+
+# What differs between an application pack and a task: its folder, its json file and how it is read and checked.
+$script:LibraryKinds = @{
+    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application'; Suffix = '.apppack'
+        Check = { param($Name, $Dir)
+            $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'app.json') | ConvertFrom-Json)
+            @(Test-AppPack -Definition $def -Folder $Dir | Where-Object { $_ -notlike 'Warning:*' }) } }
+    Task = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task'; Suffix = ''
+        Check = { param($Name, $Dir)
+            $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'task.json') | ConvertFrom-Json)
+            @(Test-TaskPack -Definition $def -Folder $Dir) } }
+}
+
+function Export-LibraryItem {
+    # Zips <Root>\<name> (installer or script, its json, other files) into one file to copy to another content root.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
+    $k = $script:LibraryKinds[$Kind]
+    $src = Join-Path $Root $Name
+    if (-not (Test-Path (Join-Path $src $k.Json))) { throw "$Name has no $($k.Json) in $src." }
+    if (Test-Path $Path) { Remove-Item $Path -Force }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
+    $Path
+}
+
+function Import-LibraryItem {
+    # Unzips an exported pack into <Root>\<name>; the name comes from the file unless -Name is given.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
+    $k = $script:LibraryKinds[$Kind]
+    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path); if ($k.Suffix) { $Name = $Name -replace "$([regex]::Escape($k.Suffix))$", '' } }
+    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "The $($k.What) name '$Name' may only contain letters, digits, dot, dash and underscore." }
+    $dest = Join-Path $Root $Name
+    if ((Test-Path $dest) -and -not $Overwrite) { throw "The $($k.What) $Name already exists." }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("libraryitem-" + [guid]::NewGuid())
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try {
+        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
+        if (-not (Test-Path (Join-Path $tmp $k.Json))) { throw "$Path is not an exported $($k.What) (no $($k.Json) at the top)." }
+        $problems = @(& $k.Check $Name $tmp)
+        if ($problems) { throw ($problems -join "`n") }
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        New-Item -ItemType Directory -Path $Root -Force | Out-Null
+        Move-Item $tmp $dest
+    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
+    $dest
+}
+
+function Remove-LibraryItem {
+    # Deletes <content root>\Applications\<name> or Tasks\<name>. Refuses while an answer file still uses it.
+    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][string]$Name)
+    $k = $script:LibraryKinds[$Kind]
+    $usage = if ($Kind -eq 'Application') { Get-ApplicationUsage -ContentRoot $ContentRoot } else { Get-TaskUsage -ContentRoot $ContentRoot }
+    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
+    $dir = Join-Path (Join-Path $ContentRoot $k.Folder) $Name
+    if (-not (Test-Path (Join-Path $dir $k.Json))) { throw "$Name is not a $($k.What) folder." }
+    Remove-Item $dir -Recurse -Force
+}
+
+#endregion
+
 function Get-ApplicationUsage {
     # Application name -> names of the answer files that install it.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        foreach ($n in $a.Applications) {
-            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
-            $usage[$n] += $f.BaseName
-        }
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) $a.Applications }
 }
 
 function Get-ApplicationList {
@@ -587,28 +638,10 @@ function Save-Application {
     Save-AppPack -AppRoot (Join-Path $ContentRoot 'Applications') -Definition $Definition -Source $Source -Overwrite
 }
 
-function Remove-Application {
-    # Deletes Applications\<name>. Refuses while an answer file still installs it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
-    $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
-    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
-    $dir = Join-Path (Join-Path $ContentRoot 'Applications') $Name
-    if (-not (Test-Path (Join-Path $dir 'app.json'))) { throw "$Name is not an application folder." }
-    Remove-Item $dir -Recurse -Force
-}
-
 function Get-TaskUsage {
     # Task library name -> names of the answer files that run it.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        foreach ($n in @($a.Tasks | Where-Object Script | ForEach-Object Script | Select-Object -Unique)) {
-            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
-            $usage[$n] += $f.BaseName
-        }
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) @($a.Tasks | Where-Object Script | ForEach-Object Script | Select-Object -Unique) }
 }
 
 function Get-TaskList {
@@ -649,27 +682,12 @@ function Save-Task {
     Save-TaskPack @save
 }
 
-function Remove-Task {
-    # Deletes Tasks\<name>. Refuses while an answer file still runs it.
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
-    $usage = Get-TaskUsage -ContentRoot $ContentRoot
-    if ($usage.ContainsKey($Name)) { throw "$Name is still in these answer files: $($usage[$Name] -join ', '). Remove it from them first." }
-    $dir = Join-Path (Join-Path $ContentRoot 'Tasks') $Name
-    if (-not (Test-Path (Join-Path $dir 'task.json'))) { throw "$Name is not a task folder." }
-    Remove-Item $dir -Recurse -Force
-}
-
 function Get-ImageUsage {
     # Image file name -> names of the answer files that deploy it, for the Images tab.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        $leaf = Split-Path ($a.ImageFile -replace '\\', '/') -Leaf
-        if (-not $usage.ContainsKey($leaf)) { $usage[$leaf] = @() }
-        $usage[$leaf] += if ($a.ImageVersion) { "$($f.BaseName) (version $($a.ImageVersion))" } else { $f.BaseName }
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) Split-Path ($a.ImageFile -replace '\\', '/') -Leaf } -Label {
+        param($a, $f) if ($a.ImageVersion) { "$($f.BaseName) (version $($a.ImageVersion))" } else { $f.BaseName }
     }
-    $usage
 }
 
 #endregion
@@ -823,8 +841,7 @@ function Add-ImageServicingRecord {
         resetBase = [bool]$ResetBase
         packages  = @($Results | ForEach-Object { [pscustomobject]@{ index = $_.index; package = $_.package; result = $_.result } })
     }
-    [pscustomobject]@{ history = $history } | ConvertTo-Json -Depth 5 |
-        Set-Content -LiteralPath (Get-ImageServicingHistoryPath -ImagePath $ImagePath) -Encoding utf8
+    Save-JsonFile -Path (Get-ImageServicingHistoryPath -ImagePath $ImagePath) -InputObject ([pscustomobject]@{ history = $history }) -Depth 5
 }
 
 function Get-ImageUpdateArguments {
@@ -979,7 +996,7 @@ function Get-DeploySettings {
 
 function Save-DeploySettings {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Settings)
-    $Settings | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -Encoding utf8
+    Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -InputObject $Settings -Depth 5
 }
 
 function Get-WdsSettings {
@@ -1289,10 +1306,10 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SecretFile, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
-    Get-TaskUsage, Get-TaskList, Save-Task, Remove-Task,
+    Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
-    Get-ApplicationUsage, Save-Application, Remove-Application,
+    Get-ApplicationUsage, Save-Application,
     Get-NamingListPath, Get-AnswerFileNames, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
     Get-VMCaptureArguments

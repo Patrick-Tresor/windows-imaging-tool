@@ -7,11 +7,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployStatus.psm1') -Force
 Import-Module (Join-Path $repo 'src/DeployProgress.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ("progress-tests-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -146,5 +142,4 @@ $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploy -match "Join-Path \`$PSScriptRoot 'DeployProgressWindow.ps1'") $true 'Deploy-Image starts DeployProgressWindow.ps1'
 Assert-Equal (Test-Path (Join-Path $repo 'src/DeployProgressWindow.ps1')) $true 'DeployProgressWindow.ps1 exists'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

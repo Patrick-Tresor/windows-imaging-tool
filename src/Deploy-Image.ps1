@@ -27,6 +27,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Win11Readiness.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
@@ -499,8 +500,7 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
         }
         if ($LASTEXITCODE -ne 0) { Write-DeployLog "Could not unload the new Windows' registry ($hive)." -Level WARN }
     }
-    [pscustomobject]@{ preventDeviceEncryptionSet = (-not $hasPrevent); controlSet = $controlSet } |
-        ConvertTo-Json | Set-Content -Path (Join-Path $folder 'sysprep.json') -Encoding utf8 -ErrorAction Stop
+    Save-JsonFile -Path (Join-Path $folder 'sysprep.json') -InputObject ([pscustomobject]@{ preventDeviceEncryptionSet = (-not $hasPrevent); controlSet = $controlSet })
     Add-Content -Path 'X:\Windows\Temp\Deploy.log' -Value ('{0:yyyy-MM-dd HH:mm:ss} [INFO] Sysprep set up for the first start of this PC.' -f (Get-Date)) -ErrorAction SilentlyContinue
 }
 
@@ -794,7 +794,7 @@ try {
     if ($logonPlan) {
         $logonDir = 'W:\ProgramData\ImagingTool\Tasks'
         Copy-Item (Join-Path $PSScriptRoot 'Run-LogonTask.ps1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') $logonDir -Force
-        ConvertTo-Json -InputObject $logonPlan -Depth 8 | Set-Content (Join-Path $logonDir 'logon-tasks.json') -Encoding utf8
+        Save-JsonFile -Path (Join-Path $logonDir 'logon-tasks.json') -InputObject $logonPlan -Depth 8
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
@@ -807,7 +807,7 @@ try {
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
-    $plan | ConvertTo-Json -Depth 8 | Set-Content 'W:\Temp\firstboot.json' -Encoding utf8
+    Save-JsonFile -Path 'W:\Temp\firstboot.json' -InputObject $plan -Depth 8
     # Made here so they get the same rights: first boot only writes into them (its progress, and the file it holds
     # open so only one run goes at a time).
     Set-Content -Path 'W:\Temp\firstboot-progress.json' -Value '{}' -Encoding ascii
@@ -833,8 +833,7 @@ try {
     # and would start WinPE again. BootNext makes the restart start Windows; it never fails the deployment.
     $bootNext = Set-WindowsBootNext -SystemDrive 'S:'
     Write-DeployLog $bootNext.Message -Level $(if ($bootNext.Ok) { 'INFO' } else { 'WARN' })
-    New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName |
-        ConvertTo-Json | Set-Content -Path 'W:\Temp\deployed.json' -Encoding utf8
+    Save-JsonFile -Path 'W:\Temp\deployed.json' -InputObject (New-DeployedMarker -Identity $hw -AnswerFile $answer.Name -ComputerName $ComputerName)
     Protect-StagedItem -Path 'W:\Temp\deployed.json'
 
     Write-DeployLog 'Deployment finished'

@@ -46,7 +46,7 @@ if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only co
 
 $root = $null
 $staging = $null
-$swapping = $false
+$swap = @{ Swapping = $false }
 $status = 'FAILED'
 try {
     Set-DeployConsole -Title 'Capture Windows image'
@@ -106,36 +106,18 @@ try {
         Remove-Item $wim
     }
 
-    if ($existing) {
-        $swapping = $true
-        foreach ($old in $existing) {
-            $v = Save-ImageVersion -ImagePath $old -Move -Reason 'Replaced by a new capture'
-            Write-DeployLog "Kept the previous $(Split-Path $old -Leaf) as version $($v.Version)"
-        }
-        Get-ChildItem -LiteralPath $staging -File | Move-Item -Destination $Destination
-        Remove-Item -LiteralPath $staging -Recurse -Force
-        $newLeaf = if ($SplitSizeMB -gt 0) { "$Name.swm" } else { "$Name.wim" }
-        if ($existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
-            Write-DeployLog "The new version is $newLeaf but the old one was $(($existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
-        }
-        if ($root) {
-            try {
-                $pruned = @(Invoke-ImageVersionRetention -ContentRoot $root -ImagePath (Join-Path $Destination $newLeaf))
-                if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
-            } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
-        }
-    }
+    [void](Publish-CapturedImage -Staging $staging -ImagesDir $Destination -Name $Name -SplitSizeMB $SplitSizeMB -Existing $existing -ContentRoot $root -State $swap)
 
     Write-DeployLog "Captured $source to $Destination"
     $status = 'OK'
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
-    if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $Destination\Previous." -Level WARN }
+    if ($swap.Swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $Destination\Previous." -Level WARN }
 }
 finally {
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
-    if ($staging -and $staging -ne $Destination -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($staging -and $staging -ne $Destination -and -not $swap.Swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     if ($root) {
         $logDir = Join-Path $root 'Logs'
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null

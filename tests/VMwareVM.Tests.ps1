@@ -6,11 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/VMwareVM.psm1') -Force
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("vmware-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $root | Out-Null
@@ -114,5 +110,4 @@ try {
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All VMware capture tests passed.' -ForegroundColor Green
+Complete-Tests 'All VMware capture tests passed.'

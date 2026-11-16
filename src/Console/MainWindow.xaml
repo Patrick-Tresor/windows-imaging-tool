@@ -3,41 +3,14 @@
         Title="Imaging Console" Width="1100" Height="720" MinWidth="900" MinHeight="560"
         WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="13" Background="#F4F5F7">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="14,6"/>
-      <Setter Property="Margin" Value="0,0,8,0"/>
-      <Setter Property="MinWidth" Value="90"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
-    </Style>
-    <Style TargetType="Label">
-      <Setter Property="VerticalAlignment" Value="Center"/>
-    </Style>
-    <Style TargetType="DataGrid">
-      <Setter Property="AutoGenerateColumns" Value="False"/>
-      <Setter Property="HeadersVisibility" Value="Column"/>
-      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
+    <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
       <Setter Property="Background" Value="White"/>
-      <Setter Property="RowHeight" Value="26"/>
       <Setter Property="SelectionMode" Value="Single"/>
     </Style>
     <Style x:Key="SectionTitle" TargetType="TextBlock">
       <Setter Property="FontSize" Value="18"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Margin" Value="0,0,0,4"/>
-    </Style>
-    <Style x:Key="Hint" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#5B6170"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
-      <Setter Property="Margin" Value="0,0,0,12"/>
     </Style>
   </Window.Resources>
 
@@ -54,8 +27,8 @@
     </Border>
 
     <!-- Status bar -->
-    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="#E1E3E8" BorderThickness="0,1,0,0" Padding="16,6">
-      <TextBlock x:Name="TxtStatus" Text="Ready" Foreground="#5B6170"/>
+    <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,6">
+      <TextBlock x:Name="TxtStatus" Text="Ready" Foreground="{DynamicResource MutedBrush}"/>
     </Border>
 
     <TabControl x:Name="Tabs" Margin="12" Padding="16" TabStripPlacement="Left" BorderThickness="0" Background="White">
@@ -165,10 +138,10 @@
                           <Button DockPanel.Dock="Right" Tag="remove" Content="Remove" Margin="6,0,0,0" Padding="10,2" MinWidth="70"
                                   IsEnabled="{Binding Finished}" ToolTip="Takes this finished download off the list"/>
                           <Button DockPanel.Dock="Right" Tag="log" Content="Open log" Margin="6,0,0,0" Padding="10,2" MinWidth="70"/>
-                          <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" Foreground="#5B6170" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                           <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         </DockPanel>
-                        <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="#5B6170" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
+                        <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
                         <ItemsControl ItemsSource="{Binding Steps}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -188,10 +161,10 @@
                                 </DockPanel>
                                 <ProgressBar x:Name="DlBar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
                                              Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
-                                             Foreground="#0F6CBD" Background="#E8EAEE" BorderThickness="0"/>
+                                             Foreground="{DynamicResource AccentBrush}" Background="#E8EAEE" BorderThickness="0"/>
                                 <TextBlock x:Name="DlStatus" Grid.Row="1" Grid.Column="1" Text="{Binding Status}" Margin="12,0,0,0"
-                                           VerticalAlignment="Center" Foreground="#5B6170"/>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="#5B6170" FontSize="12" Margin="0,2,0,0"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
                                            TextTrimming="CharacterEllipsis"/>
                               </Grid>
                               <DataTemplate.Triggers>
@@ -424,7 +397,7 @@
             <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
           </StackPanel>
           <TextBox x:Name="TxtAnswerIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
-                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="#B91C1C"/>
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>
           <DataGrid x:Name="GridAnswers" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Default" Binding="{Binding IsDefault}" Width="65"/>
@@ -478,7 +451,7 @@
           <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
             <CheckBox x:Name="ChkAppOnline" IsEnabled="False" Content="Download it from the internet when the PC installs it (no installer to keep in the pack)"
                       ToolTip="Uses the publisher's link the console already knows for this application. Untick to use the installer in the pack again."/>
-            <TextBlock x:Name="TxtAppOnline" Foreground="#5B6170" TextWrapping="Wrap" Margin="22,2,0,0"/>
+            <TextBlock x:Name="TxtAppOnline" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="22,2,0,0"/>
           </StackPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
@@ -543,7 +516,7 @@
             <Button x:Name="BtnNamingOpen" Content="Open folder"/>
           </StackPanel>
           <TextBox x:Name="TxtNamingIssues" DockPanel.Dock="Bottom" Height="70" Margin="0,10,0,0" IsReadOnly="True"
-                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="#B91C1C"/>
+                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>
           <DataGrid x:Name="GridNaming" CanUserAddRows="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="130"/>
@@ -596,7 +569,7 @@
                 <Label Grid.Row="2" Content="Password"/>
                 <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
                   <PasswordBox x:Name="PwdShare" Width="320" Padding="4,3" VerticalContentAlignment="Center"/>
-                  <TextBlock x:Name="TxtSharePwState" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#5B6170"/>
+                  <TextBlock x:Name="TxtSharePwState" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/>
                 </StackPanel>
                 <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
                   <Button x:Name="BtnShareTest" Content="Test connection"/>
@@ -629,7 +602,7 @@
               <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
                 <TextBox x:Name="TxtVersionsToKeep" Width="80"
                          ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. Versions an answer file is pinned to are never deleted."/>
-                <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="#5B6170"/>
+                <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/>
               </StackPanel>
             </Grid>
 
@@ -657,7 +630,7 @@
 
             <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
-              <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#B91C1C" TextWrapping="Wrap" MaxWidth="700"/>
+              <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" MaxWidth="700"/>
             </StackPanel>
             <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="#FFFBEB" BorderBrush="#F59E0B" BorderThickness="1" CornerRadius="4">
               <DockPanel>
@@ -711,7 +684,7 @@
                 <DockPanel Grid.Row="4" Grid.ColumnSpan="2">
                   <Button x:Name="BtnAdBuildBoot" DockPanel.Dock="Right" Content="Build network boot image" Margin="8,0,0,0"
                           ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
-                  <TextBlock x:Name="TxtAdBoot" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="#5B6170"/>
+                  <TextBlock x:Name="TxtAdBoot" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 </DockPanel>
                 <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal">
                   <Button x:Name="BtnAdReimage" Content="Reimage..." Style="{StaticResource Primary}"/>
@@ -749,18 +722,18 @@
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
                     <Setter Property="Background" Value="#F8FAFC"/>
-                    <Setter Property="BorderBrush" Value="#E1E3E8"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
                     <Setter Property="BorderThickness" Value="1"/>
                     <Setter Property="CornerRadius" Value="4"/>
                     <Setter Property="Padding" Value="12,8"/>
                     <Setter Property="Margin" Value="0,0,8,0"/>
                   </Style>
                 </UniformGrid.Resources>
-                <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#0F6CBD"/><TextBlock Text="Deploying" Foreground="#5B6170"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#15803D"/><TextBlock Text="Succeeded" Foreground="#5B6170"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B45309"/><TextBlock Text="With warnings" Foreground="#5B6170"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B91C1C"/><TextBlock Text="Failed or stalled" Foreground="#5B6170"/></StackPanel></Border>
-                <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="#5B6170"/></StackPanel></Border>
+                <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Deploying" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#15803D"/><TextBlock Text="Succeeded" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="#B45309"/><TextBlock Text="With warnings" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"/><TextBlock Text="Failed or stalled" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
               </UniformGrid>
             </StackPanel>
             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
@@ -814,7 +787,7 @@
                       <Style TargetType="TextBlock">
                         <Setter Property="ToolTip" Value="{Binding Checks}"/>
                         <Style.Triggers>
-                          <DataTrigger Binding="{Binding CheckResult}" Value="Failed"><Setter Property="Foreground" Value="#B91C1C"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                          <DataTrigger Binding="{Binding CheckResult}" Value="Failed"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
                           <DataTrigger Binding="{Binding CheckResult}" Value="Warning"><Setter Property="Foreground" Value="#B45309"/></DataTrigger>
                           <DataTrigger Binding="{Binding CheckResult}" Value="Passed"><Setter Property="Foreground" Value="#15803D"/></DataTrigger>
                         </Style.Triggers>

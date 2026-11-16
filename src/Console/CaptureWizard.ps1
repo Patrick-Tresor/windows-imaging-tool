@@ -8,15 +8,9 @@ function Show-CaptureWizard {
         [Parameter(Mandatory)][string]$SrcDir
     )
 
-    [xml]$wxaml = Get-Content -Raw (Join-Path $PSScriptRoot 'CaptureWizard.xaml')
-    $wiz = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($wxaml))
-    $wiz.Owner = $Owner
-    Enable-WheelScrolling $wiz
-    $w = @{}
-    foreach ($node in $wxaml.SelectNodes('//*[@*[local-name()="Name"]]')) {
-        $name = $node.GetAttribute('Name', 'http://schemas.microsoft.com/winfx/2006/xaml')
-        $w[$name] = $wiz.FindName($name)
-    }
+    $form = New-ConsoleWindow 'CaptureWizard.xaml' -Owner $Owner
+    $wiz = $form.Window
+    $w = $form.Controls
 
     # Check: the Check the disk page's run (checklist, result file, background process) for the disk in CheckedDisk.
     $state = @{ Page = 0; Last = 4; Checklist = $null; CheckedDisk = $null; CheckProc = $null; ResultPath = $null
@@ -297,16 +291,15 @@ function Show-CaptureWizard {
 
         if ($c.Mode -eq 'DiskFile') {
             # Its own minimized window, followed in the progress window (steps, bars, time left), like a media build.
-            $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-            $progressFile = Join-Path $env:TEMP "capture-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 8)).json"
-            $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
-            $logPath = [IO.Path]::Combine($logDir, "capture-$($c.Name)-$stamp.log")
             $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
-            $proc = Start-Process powershell.exe -WindowStyle Minimized -PassThru -ArgumentList (Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
-                -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath)
+            $job = Start-ConsoleJob -Name "capture-$($c.Name)" -ArgumentList {
+                param($progressFile, $logPath)
+                Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+                    -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
+                    -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
+            }
             $state.HandedOver = $true
-            Show-BuildProgress -Owner $Owner -ProgressFile $progressFile -LogPath $logPath -Process $proc -Title "Capturing $($c.Name)"
+            Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"
             return $true
         }
         $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `

@@ -58,17 +58,7 @@ $contentRoot = Split-Path $imagesDir -Parent
 $logDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images' -and (Test-Path (Join-Path $contentRoot 'Logs'))) { Join-Path $contentRoot 'Logs' } else { $WorkDir }
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 $logPath = Join-Path $WorkDir 'Update-OfflineImage.log'
-Set-Content -Path $logPath -Value $null
-# DeployCommon logs to X:\ (WinPE) by default; point it at the work folder.
-& (Get-Module DeployCommon) { param($p) $script:LogPath = $p } $logPath
-
-function Invoke-Dism {
-    # Like Invoke-Native, but returns the exit code so callers can accept "not applicable".
-    param([string[]]$ArgumentList)
-    Write-DeployLog "> dism.exe $($ArgumentList -join ' ')"
-    & dism.exe @ArgumentList 2>&1 | ForEach-Object { Add-Content -Path $logPath -Value "  $_" }
-    $LASTEXITCODE
-}
+Set-DeployLogPath -Path $logPath -New
 
 $mountDir = Join-Path $WorkDir 'Mount'
 $scratchDir = Join-Path $WorkDir 'Scratch'
@@ -88,10 +78,10 @@ try {
     }
 
     # A previous run that crashed can leave a mount behind; DISM refuses to mount over it.
-    Invoke-Dism @('/Cleanup-Mountpoints') | Out-Null
+    Invoke-Native dism.exe -NoThrow -ArgumentList @('/Cleanup-Mountpoints') | Out-Null
     if (Test-Path $mountDir) {
         if (@(Get-ChildItem -LiteralPath $mountDir -Force).Count) {
-            Invoke-Dism @('/Unmount-Image', "/MountDir:$mountDir", '/Discard') | Out-Null
+            Invoke-Native dism.exe -NoThrow -ArgumentList @('/Unmount-Image', "/MountDir:$mountDir", '/Discard') | Out-Null
         }
         Remove-Item -LiteralPath $mountDir -Recurse -Force
     }
@@ -132,7 +122,7 @@ try {
         $mounted = $true
 
         foreach ($pkg in $packages) {
-            $code = Invoke-Dism @("/Image:$mountDir", '/Add-Package', "/PackagePath:$($pkg.FullName)", "/ScratchDir:$scratchDir")
+            $code = Invoke-Native dism.exe -NoThrow -ArgumentList @("/Image:$mountDir", '/Add-Package', "/PackagePath:$($pkg.FullName)", "/ScratchDir:$scratchDir")
             $result = if ($code -eq 0 -or $code -eq $rebootRequired) { 'Installed' }
                       elseif ($code -in $notApplicable) { 'Not applicable' }
                       else { throw ("Adding {0} to index {1} failed with DISM code 0x{2:X8}. See {3}." -f $pkg.Name, $t.ImageIndex, $code, $logPath) }
@@ -185,7 +175,7 @@ try {
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
-    if ($mounted) { Invoke-Dism @('/Unmount-Image', "/MountDir:$mountDir", '/Discard') | Out-Null }
+    if ($mounted) { Invoke-Native dism.exe -NoThrow -ArgumentList @('/Unmount-Image', "/MountDir:$mountDir", '/Discard') | Out-Null }
     if (-not $swapping) { Write-DeployLog 'The original image was not changed.' -Level WARN }
     elseif ($backup) { Write-DeployLog "Failed while replacing the image. The previous version is in $backup; move it back to $imagesDir." -Level WARN }
 }

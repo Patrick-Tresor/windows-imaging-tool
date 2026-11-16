@@ -32,9 +32,7 @@ $imagesDir = Split-Path $ImagePath -Parent
 $contentRoot = Split-Path $imagesDir -Parent
 $logDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images' -and (Test-Path (Join-Path $contentRoot 'Logs'))) { Join-Path $contentRoot 'Logs' } else { $env:TEMP }
 $logPath = Join-Path $env:TEMP 'Invoke-ImageVersion.log'
-Set-Content -Path $logPath -Value $null
-# DeployCommon logs to X:\ (WinPE) by default; point it at a local file.
-& (Get-Module DeployCommon) { param($p) $script:LogPath = $p } $logPath
+Set-DeployLogPath -Path $logPath -New
 
 $status = 'FAILED'
 try {

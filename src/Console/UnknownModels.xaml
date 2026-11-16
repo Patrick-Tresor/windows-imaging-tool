@@ -3,25 +3,7 @@
         Title="Unknown Models" Width="1060" Height="600" MinWidth="780" MinHeight="400"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="14,6"/>
-      <Setter Property="Margin" Value="8,0,0,0"/>
-      <Setter Property="MinWidth" Value="90"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="Label">
-      <Setter Property="VerticalAlignment" Value="Center"/>
-    </Style>
-    <Style TargetType="DataGrid">
-      <Setter Property="AutoGenerateColumns" Value="False"/>
-      <Setter Property="HeadersVisibility" Value="Column"/>
-      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
-      <Setter Property="RowHeight" Value="26"/>
+    <Style TargetType="DataGrid" BasedOn="{StaticResource {x:Type DataGrid}}">
       <Setter Property="CanUserAddRows" Value="False"/>
     </Style>
   </Window.Resources>
@@ -29,7 +11,7 @@
   <DockPanel Margin="16">
     <StackPanel DockPanel.Dock="Top">
       <TextBlock FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" Text="PCs deployed without their driver pack"/>
-      <TextBlock Foreground="#5B6170" TextWrapping="Wrap" Margin="0,0,0,12"
+      <TextBlock Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"
                  Text="Every deployment records which drivers the PC got. These models got the maker's generic fallback, Windows inbox drivers only, or a catalog entry whose folder is missing. Models with a pack in the vendor catalog are ticked: click Download to fetch them all. A model leaves this list once the library covers it. Already-deployed PCs keep their drivers until they are reimaged."/>
       <DockPanel Margin="0,0,0,10">
         <Button x:Name="BtnOpenReports" DockPanel.Dock="Right" Content="Open reports folder"/>
@@ -44,7 +26,7 @@
       <CheckBox x:Name="ChkKeep" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="0,0,8,0" Content="Keep downloaded files"/>
       <Button x:Name="BtnInbox" Content="Use inbox drivers" Margin="0"
               ToolTip="For the highlighted rows: add a catalog entry with no folder (e.g. for VMs or PCs that need no pack), so they leave this list and deploy without a warning"/>
-      <TextBlock x:Name="TxtSelection" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#5B6170"/>
+      <TextBlock x:Name="TxtSelection" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource MutedBrush}"/>
     </DockPanel>
 
     <DataGrid x:Name="GridModels" SelectionMode="Extended">

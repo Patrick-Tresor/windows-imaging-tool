@@ -9,18 +9,14 @@ Import-Module (Join-Path $repo 'src/Console/DriverReport.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
 $fixtures = Join-Path $PSScriptRoot 'fixtures/driverpacks'
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 function New-Pc($Maker, $Model, $Sku, $MachineType, $Serial) {
     [pscustomobject]@{ Maker = $Maker; Model = $Model; Sku = $Sku; MachineType = $MachineType; Serial = $Serial }
 }
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("driverreport-test-" + [guid]::NewGuid())
-& $common { param($p) $script:LogPath = $p } (Join-Path $root 'test.log')
+Set-DeployLogPath -Path (Join-Path $root 'test.log')
 try {
     Initialize-ContentRoot -Path $root
     Copy-Item (Join-Path $PSScriptRoot 'fixtures/driver-catalog-sample.json') (Join-Path $root 'config/driver-catalog.json') -Force   # the old example rows
@@ -127,5 +123,4 @@ $injectPart = $deployText.Substring($injectAt, $deployText.IndexOf('# An image c
 Assert-Equal ($injectPart.Contains('$driverMatch.WinPEFallback') -and $injectPart.Contains('try { & $injectDrivers }')) $true 'deploy: the WinPE fallback injection is in a try'
 Assert-Equal ($injectPart.Contains('} else { & $injectDrivers }')) $true 'deploy: a real driver pack injection still stops on an error'
 
-if ($failures) { Write-Host "$failures test(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All tests passed' -ForegroundColor Green
+Complete-Tests 'All tests passed'

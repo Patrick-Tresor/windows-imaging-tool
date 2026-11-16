@@ -2,21 +2,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Build progress" Width="820" Height="600" MinWidth="560" MinHeight="360"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
-  <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="14,6"/>
-      <Setter Property="Margin" Value="8,0,0,0"/>
-      <Setter Property="MinWidth" Value="90"/>
-    </Style>
-  </Window.Resources>
 
   <DockPanel Margin="16">
     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
       <DockPanel>
-        <TextBlock x:Name="TxtElapsed" DockPanel.Dock="Right" FontSize="18" Foreground="#5B6170" VerticalAlignment="Center"/>
+        <TextBlock x:Name="TxtElapsed" DockPanel.Dock="Right" FontSize="18" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
         <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Text="Building media" TextTrimming="CharacterEllipsis"/>
       </DockPanel>
-      <TextBlock x:Name="TxtSummary" Foreground="#5B6170" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" Text="Starting..."/>
+      <TextBlock x:Name="TxtSummary" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" Text="Starting..."/>
     </StackPanel>
 
     <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
@@ -24,11 +17,11 @@
       <Button x:Name="BtnLog" DockPanel.Dock="Right" Content="Open log" IsEnabled="False"/>
       <Button x:Name="BtnWindow" DockPanel.Dock="Right" Content="Show build window"
               ToolTip="The build's own window, with every line DISM and the copy print"/>
-      <TextBlock x:Name="TxtNote" Foreground="#5B6170" VerticalAlignment="Center" TextWrapping="Wrap"
+      <TextBlock x:Name="TxtNote" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"
                  Text="Closing this window does not stop the build."/>
     </DockPanel>
 
-    <Border BorderBrush="#E1E3E8" BorderThickness="1" CornerRadius="4" Padding="16,8">
+    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="4" Padding="16,8">
       <ScrollViewer x:Name="ScrollSteps" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <ItemsControl x:Name="LstSteps">
           <ItemsControl.ItemTemplate>
@@ -49,10 +42,10 @@
                 </DockPanel>
                 <ProgressBar x:Name="Bar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
                              Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
-                             Foreground="#0F6CBD" Background="#E8EAEE" BorderThickness="0"/>
+                             Foreground="{DynamicResource AccentBrush}" Background="#E8EAEE" BorderThickness="0"/>
                 <TextBlock x:Name="Status" Grid.Row="1" Grid.Column="1" Grid.RowSpan="1" Text="{Binding Status}" Margin="12,0,0,0"
-                           VerticalAlignment="Center" Foreground="#5B6170"/>
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="#5B6170" FontSize="12" Margin="0,2,0,0"
+                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
                            TextTrimming="CharacterEllipsis"/>
               </Grid>
               <DataTemplate.Triggers>

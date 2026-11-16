@@ -6,11 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/ActiveDirectory.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
 # Domains and distinguished names
 Assert-Equal (ConvertTo-DomainDN 'corp.example.com') 'DC=corp,DC=example,DC=com' 'a DNS domain becomes its DN'
@@ -84,5 +80,4 @@ Assert-Equal $bare.JoinOU '' 'a PC in the Computers container'
 $bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'src/ActiveDirectory.psm1'))
 Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 'ActiveDirectory.psm1 is ASCII'
 
-if ($failures) { Write-Host "$failures failure(s)" -ForegroundColor Red; exit 1 }
-Write-Host 'All Active Directory tests passed.' -ForegroundColor Green
+Complete-Tests 'All Active Directory tests passed.'

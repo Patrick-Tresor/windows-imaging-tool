@@ -6,11 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 
-$failures = 0
-function Assert-Equal($Actual, $Expected, $Name) {
-    if ("$Actual" -ceq "$Expected") { Write-Host "PASS $Name" -ForegroundColor Green }
-    else { Write-Host "FAIL $Name`n  expected: $Expected`n  actual:   $Actual" -ForegroundColor Red; $script:failures++ }
-}
+. (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function New-TextFile([string]$Path, [string]$Text) {
     New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
     [IO.File]::WriteAllText($Path, $Text)
@@ -147,5 +143,4 @@ Assert-Equal ($build -match '\$peCacheThis = -not \$NoWinPECache -and -not \(\$i
 Assert-Equal ($build -match '/Add-Driver /Driver:') $true 'build: one DISM /Add-Driver over the staging folder'
 Assert-Equal ($build -match 'Add-WindowsDriver') $false 'build: no Add-WindowsDriver call per driver (about 10 s each)'
 
-if ($failures) { Write-Host "$failures check(s) failed" -ForegroundColor Red; exit 1 }
-Write-Host 'All WinPE build cache checks passed' -ForegroundColor Green
+Complete-Tests 'All WinPE build cache checks passed'

@@ -1,5 +1,5 @@
 # Application pack builder window: installer, silent command, detection rules and which PCs get the app.
-# Dot-sourced by ImagingConsole.ps1 after AnswerEditor.ps1 (for Get-XamlControls); uses AppPack.psm1 and ConsoleData.psm1.
+# Dot-sourced by ImagingConsole.ps1; loads its window with New-ConsoleWindow (XamlWindow.psm1) and uses AppPack.psm1 and ConsoleData.psm1.
 
 class DetectionRow {
     [string]$Type
@@ -25,11 +25,9 @@ function Show-AppPackEditor {
     $def = if ($isNew) { ConvertTo-AppDefinition -Name $(if ($SuggestedName) { $SuggestedName } else { 'NewApp' }) -Json ([pscustomobject]@{}) }
            else { Read-AppPack -AppRoot $appRoot -Name $Name }
 
-    [xml]$px = Get-Content -Raw (Join-Path $PSScriptRoot 'AppPackEditor.xaml')
-    $win = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($px))
-    $win.Owner = $Owner
-    Enable-WheelScrolling $win
-    $e = Get-XamlControls $px $win
+    $form = New-ConsoleWindow 'AppPackEditor.xaml' -Owner $Owner
+    $win = $form.Window
+    $e = $form.Controls
     $win.Title = if ($isNew) { 'New application' } else { "Application: $Name" }
     $state = @{ Saved = $null; AppFolder = if ($isNew) { $null } else { Join-Path $appRoot $Name } }
     $templates = @(Get-AppTemplates)

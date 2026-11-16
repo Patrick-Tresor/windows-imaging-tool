@@ -3,57 +3,7 @@
         Title="Answer File" Width="920" Height="660" MinWidth="820" MinHeight="560"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
   <Window.Resources>
-    <Style TargetType="Button">
-      <Setter Property="Padding" Value="12,5"/>
-      <Setter Property="Margin" Value="0,0,8,0"/>
-      <Setter Property="MinWidth" Value="80"/>
-    </Style>
-    <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Background" Value="#0F6CBD"/>
-      <Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#0F6CBD"/>
-    </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="PasswordBox">
-      <Setter Property="Padding" Value="4,3"/>
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="ComboBox">
-      <Setter Property="Margin" Value="0,0,0,8"/>
-    </Style>
-    <Style TargetType="CheckBox">
-      <Setter Property="Margin" Value="0,4,0,8"/>
-    </Style>
-    <Style TargetType="RadioButton">
-      <Setter Property="Margin" Value="0,4,16,8"/>
-    </Style>
-    <Style TargetType="Label">
-      <Setter Property="Padding" Value="0,4,8,4"/>
-      <Setter Property="VerticalAlignment" Value="Top"/>
-    </Style>
-    <Style x:Key="Title" TargetType="TextBlock">
-      <Setter Property="FontSize" Value="18"/>
-      <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Margin" Value="0,0,0,4"/>
-    </Style>
-    <Style x:Key="Hint" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#5B6170"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
-      <Setter Property="Margin" Value="0,0,0,14"/>
-    </Style>
-    <Style TargetType="DataGrid">
-      <Setter Property="AutoGenerateColumns" Value="False"/>
-      <Setter Property="HeadersVisibility" Value="Column"/>
-      <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-      <Setter Property="HorizontalGridLinesBrush" Value="#E1E3E8"/>
-      <Setter Property="RowHeight" Value="26"/>
-      <Setter Property="CanUserAddRows" Value="False"/>
-      <Setter Property="SelectionMode" Value="Single"/>
-    </Style>
+    <ResourceDictionary Source="FormStyles.xaml"/>
   </Window.Resources>
 
   <DockPanel>
@@ -84,7 +34,7 @@
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
         </StackPanel>
-        <TextBlock x:Name="TxtProblems" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+        <TextBlock x:Name="TxtProblems" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
       </DockPanel>
     </Border>
 
@@ -207,7 +157,7 @@
             <CheckBox x:Name="ChkAdmin" Grid.Row="7" Grid.Column="1" Content="Enable it with this password (needed to skip the local account page in Windows setup)"/>
             <StackPanel Grid.Row="8" Grid.Column="1">
               <PasswordBox x:Name="PwdAdmin" Width="260" HorizontalAlignment="Left"/>
-              <TextBlock x:Name="TxtAdminPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+              <TextBlock x:Name="TxtAdminPwState" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"/>
             </StackPanel>
           </Grid>
         </StackPanel>
@@ -267,7 +217,7 @@
             <Label Grid.Row="4" Content="Join account password"/>
             <StackPanel Grid.Row="4" Grid.Column="1">
               <PasswordBox x:Name="PwdJoin" Width="260" HorizontalAlignment="Left"/>
-              <TextBlock x:Name="TxtJoinPwState" Foreground="#5B6170" Margin="0,0,0,8"/>
+              <TextBlock x:Name="TxtJoinPwState" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"/>
             </StackPanel>
             <Label Grid.Row="5" Content="Workgroup"/>
             <TextBox x:Name="TxtWorkgroup" Grid.Row="5" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
@@ -312,7 +262,7 @@
           <Button x:Name="BtnShareRemove" Content="Remove"/>
           <TextBlock Text="Password for the selected share:" VerticalAlignment="Center" Margin="12,0,8,0"/>
           <PasswordBox x:Name="PwdShare" Width="200" Margin="0" VerticalContentAlignment="Center"/>
-          <TextBlock x:Name="TxtSharePwState" Foreground="#5B6170" VerticalAlignment="Center" Margin="8,0,0,0"/>
+          <TextBlock x:Name="TxtSharePwState" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
         <DataGrid x:Name="GridShares">
           <DataGrid.Columns>
@@ -345,7 +295,7 @@
             <Label Grid.Row="3" Content="Startup PIN"/>
             <StackPanel Grid.Row="3" Grid.Column="1">
               <PasswordBox x:Name="PwdBlPin" Width="260" HorizontalAlignment="Left" ToolTip="6 to 20 digits. Every PC deployed with this answer file gets the same PIN; users can change it later."/>
-              <TextBlock x:Name="TxtBlPinState" Foreground="#5B6170" Margin="0,0,0,8"/>
+              <TextBlock x:Name="TxtBlPinState" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"/>
             </StackPanel>
             <Label Grid.Row="4" Content="Recovery key backup"/>
             <CheckBox x:Name="ChkBlAD" Grid.Row="4" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>

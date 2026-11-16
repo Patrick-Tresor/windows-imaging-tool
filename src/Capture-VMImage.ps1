@@ -52,9 +52,7 @@ Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 $logPath = if ($LogPath) { $LogPath } elseif ($CheckOnly) { Join-Path $env:TEMP 'Capture-VMImage-check.log' } else { Join-Path $env:TEMP 'Capture-VMImage.log' }
 $logParent = Split-Path -Parent $logPath
 if ($logParent -and -not (Test-Path -LiteralPath $logParent)) { New-Item -ItemType Directory -Path $logParent -Force | Out-Null }
-Set-Content -Path $logPath -Value $null
-# DeployCommon logs to X:\ (WinPE) by default; point it at a local file.
-& (Get-Module DeployCommon) { param($p) $script:LogPath = $p } $logPath
+Set-DeployLogPath -Path $logPath -New
 
 function Mount-VMDisks {
     # Mounts the virtual disks and gives their partitions drive letters until the Windows one is found.
@@ -267,7 +265,7 @@ $imagesDir = Join-Path $ContentRoot 'Images'
 $logDir = Join-Path $ContentRoot 'Logs'
 $status = 'FAILED'
 $staging = $null
-$swapping = $false
+$swap = @{ Swapping = $false }
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
 
@@ -394,25 +392,7 @@ try {
     }
     Start-BuildStep 'save' -Detail $(if ($staging -notlike "$imagesDir*") { 'Copying the image from the PC''s disk' } else { '' })
 
-    if ($existing) {
-        $swapping = $true
-        foreach ($old in $existing) {
-            $v = Save-ImageVersion -ImagePath $old -Move -Reason 'Replaced by a new capture'
-            Write-DeployLog "Kept the previous $(Split-Path $old -Leaf) as version $($v.Version)"
-        }
-    }
-    Get-ChildItem -LiteralPath $staging -File | Move-Item -Destination $imagesDir
-    Remove-Item -LiteralPath $staging -Recurse -Force
-    $newLeaf = if ($SplitSizeMB -gt 0) { "$Name.swm" } else { "$Name.wim" }
-    if ($existing) {
-        if ($existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
-            Write-DeployLog "The new version is $newLeaf but the old one was $(($existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
-        }
-        try {
-            $pruned = @(Invoke-ImageVersionRetention -ContentRoot $ContentRoot -ImagePath (Join-Path $imagesDir $newLeaf))
-            if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
-        } catch { Write-DeployLog "Could not apply the keep limit: $($_.Exception.Message)" -Level WARN }
-    }
+    $newLeaf = Publish-CapturedImage -Staging $staging -ImagesDir $imagesDir -Name $Name -SplitSizeMB $SplitSizeMB -Existing $existing -ContentRoot $ContentRoot -State $swap
 
     Write-DeployLog "Captured the disk to $imagesDir\$newLeaf"
     Complete-BuildStep 'save' -Detail "Images\$newLeaf"
@@ -422,7 +402,7 @@ try {
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
     Stop-BuildProgress -Message $_.Exception.Message
-    if ($swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
+    if ($swap.Swapping) { Write-DeployLog "Failed while replacing the old image. The new capture is in $staging and the old one in $imagesDir\Previous." -Level WARN }
 }
 finally {
     # Release the disk before the temporary copy's deletion, which needs it free.
@@ -431,7 +411,7 @@ finally {
     # The check's copy is used once: reused above, or stale, or never reached because the capture failed earlier.
     if ($ReuseConvertedDisk) { Remove-ConvertedDisk $ReuseConvertedDisk }
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.
-    if ($staging -and -not $swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($staging -and -not $swap.Swapping) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     if ($status -ne 'CANCELLED') {
         New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
         Copy-Item $logPath (Join-Path $logDir ("CAPTURE-VM-{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $Name, (Get-Date), $status)) -ErrorAction SilentlyContinue
