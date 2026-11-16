@@ -80,6 +80,29 @@ try {
     Assert-Equal (Format-Duration ([timespan]::FromMinutes(75))) '1h 15m' 'durations over an hour'
     Assert-Equal (Format-Duration ([timespan]::FromSeconds(95))) '1m 35s' 'durations under an hour'
 
+    # USB deploys with no network folder: the console moves the stick's status into the dashboard
+    $stick = Join-Path $root 'stick'
+    $dash = Join-Path $root 'dash'
+    $logs = Join-Path $root 'Logs'
+    New-Item -ItemType Directory -Path (Join-Path $stick 'Status'), (Join-Path $stick 'Logs'), $dash -Force | Out-Null
+    $rec = { param($id, $updated) [pscustomobject]@{ id = $id; state = 'Succeeded'; started = $updated; updated = $updated } | ConvertTo-Json }
+    Set-Content (Join-Path $stick 'Status\USB1.json') (& $rec 'USB1' '2026-11-16T10:00:00Z')
+    Set-Content (Join-Path $stick 'Status\USB1.log') 'stick log'
+    Set-Content (Join-Path $stick 'Status\OLD1.json') (& $rec 'OLD1' '2026-11-16T09:00:00Z')
+    Set-Content (Join-Path $dash 'OLD1.json') (& $rec 'OLD1' '2026-11-16T11:00:00Z')
+    Set-Content (Join-Path $stick 'Status\junk.json') 'not json {'
+    Set-Content (Join-Path $stick 'Logs\USB1_20261116-1000_OK.log') 'final log'
+    $n = Import-StickDeployStatus -StickRoot $stick -Folder $dash -LogFolder $logs
+    Assert-Equal $n 1 'stick import counts the deployments it added'
+    Assert-Equal "$(Test-Path (Join-Path $dash 'USB1.json'))|$(Get-Content -Raw (Join-Path $dash 'USB1.log'))".Trim() 'True|stick log' 'stick status and live log move to the dashboard'
+    Assert-Equal (Get-Content -Raw (Join-Path $dash 'OLD1.json')).Contains('T11:00:00Z') $true 'an older stick record does not replace a newer one'
+    Assert-Equal "$(Test-Path (Join-Path $stick 'Status\USB1.json'))|$(Test-Path (Join-Path $stick 'Status\OLD1.json'))" 'False|False' 'imported records leave the stick, so cleared PCs do not come back'
+    Assert-Equal (Test-Path (Join-Path $stick 'Status\junk.json')) $true 'unreadable files stay on the stick'
+    Assert-Equal "$(Test-Path (Join-Path $logs 'USB1_20261116-1000_OK.log'))|$(Test-Path (Join-Path $stick 'Logs\USB1_20261116-1000_OK.log'))" 'True|True' 'final logs are copied to Deployment Logs and kept on the stick'
+    Assert-Equal (Import-StickDeployStatus -StickRoot $stick -Folder $dash -LogFolder $logs) 0 'a second import adds nothing'
+    Assert-Equal (Import-StickDeployStatus -StickRoot $stick -Folder (Join-Path $stick 'Status')) 0 'a dashboard folder on the stick itself is left alone'
+    Assert-Equal (Test-Path (Join-Path $stick 'Status\junk.json')) $true 'self import deletes nothing'
+
     $s = [pscustomobject]@{ reporting = [pscustomobject]@{ path = '\\srv\Status' } }
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings $s) '\\srv\Status' 'console reads the status share when set'
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings ([pscustomobject]@{ share = @{} })) (Join-Path $root 'Status') 'console defaults to the content root Status folder'

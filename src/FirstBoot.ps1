@@ -94,8 +94,16 @@ if ($plan.PSObject.Properties['status'] -and $plan.status.folder) {
     }
     Write-Log $(if ($reporting) { "Reporting status to $($plan.status.folder)" } else { "Status folder $($plan.status.folder) unreachable; not reporting" })
 }
+$script:nextStatusTry = (Get-Date).AddMinutes(2)
 function Set-Progress([string]$Step, [int]$Percent, [string]$Warning) {
-    if ($reporting) { Set-DeployStatus -Step $Step -Percent $Percent -Phase 'FirstBoot' -Warning $Warning -Fields @{ computerName = $env:COMPUTERNAME } }
+    # The status share was not reachable yet (network, domain join, or the computer account's rights still on their
+    # way): try again every 2 minutes, so the dashboard picks the PC up instead of leaving it Stalled.
+    if (-not $script:reporting -and $plan.PSObject.Properties['status'] -and $plan.status.folder -and (Get-Date) -ge $script:nextStatusTry) {
+        $script:nextStatusTry = (Get-Date).AddMinutes(2)
+        $script:reporting = Resume-DeployStatus -Folder $plan.status.folder -Id $plan.status.id -LogPath @("$env:WINDIR\Temp\Deploy.log", $log) 3>$null
+        if ($script:reporting) { Write-Log "Reporting status to $($plan.status.folder)" }
+    }
+    if ($script:reporting) { Set-DeployStatus -Step $Step -Percent $Percent -Phase 'FirstBoot' -Warning $Warning -Fields @{ computerName = $env:COMPUTERNAME } }
 }
 Set-Progress 'First boot: starting' 91
 # Each app is skipped when its detection rules find it already installed, and checked again after it runs.
@@ -279,6 +287,7 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
         $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults -ReportPath (Join-Path $toolDir 'last-check.json')
         foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
         Write-Log "Post-deploy checks: $($run.Summary.Text)"
+        $script:nextStatusTry = Get-Date; Set-Progress 'Post-deploy checks done' 98   # one more try at the status share first
         if ($reporting) { Set-DeployCheckResult -Results $run.Results -Summary $run.Summary -Warning (ConvertTo-CheckWarning $run.Summary) }
     } catch { Write-Log "Post-deploy checks could not run: $($_.Exception.Message)" }
 }
@@ -302,6 +311,7 @@ if (-not $taskDeleted) { & schtasks.exe /Query /TN $taskName 2>&1 | Out-Null; $t
 Write-Log "Startup task $taskName removed: $taskDeleted"
 Complete-FirstBootStep -Progress $progress -Step 'finished'; Save-Progress
 Write-Log "First boot finished; removing what deploy staged in $deployDir"
+if (-not $reporting) { $script:nextStatusTry = Get-Date; Set-Progress 'Finishing first boot' 99 }   # a last try at the status share
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }
 # C:\Temp can hold other files (the golden image's, or an installer's), so only what Deploy-Image.ps1 staged goes.
 # firstboot-progress.json stays: it says first boot finished, should the startup task still start this.

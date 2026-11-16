@@ -608,7 +608,7 @@
             <!-- 3. Dashboard -->
             <TextBlock Style="{StaticResource SettingsHead}" Text="3. Where PCs report progress (Dashboard)"/>
             <RadioButton x:Name="RbReportDefault" GroupName="SettingsReport" Margin="0,4"
-                         Content="Same place as the deployment: the share's Status folder, or the stick's for USB deploys."/>
+                         Content="Same place as the deployment: the share's Status folder, or the stick's for USB deploys (they show on the Dashboard when the stick is plugged into this PC)."/>
             <RadioButton x:Name="RbReportShare" GroupName="SettingsReport" Margin="0,4"
                          Content="A network folder, so USB deploys show up live too:"/>
             <Grid Margin="22,6,0,0">
@@ -740,7 +740,7 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Checks column shows the result, and the details below show each check. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Checks column shows the result, and the details below show each check. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick with no network folder to report to show up here when you plug the stick into this PC; their first boot (applications, checks) is only reported with a network folder (Deploy Settings, section 3)."/>
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">

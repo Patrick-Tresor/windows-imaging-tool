@@ -31,6 +31,8 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.1 | ISO or PXE boot.wim reaching the share | WinPE maps the share (password from the WinPE password vault or the share's password file) |
 | 2.2 | Publish to WDS, PXE boot a PC | WinPE starts with F12 (or without, when prestaged) |
 | 2.3 | Dashboard | Each PC shows live progress, then the post-deploy checks |
+| 2.3a | Dashboard with USB deploys, Deploy Settings section 3 on "Same place" | Deploy a PC from the stick with no network, then plug the stick into the console PC with the Dashboard open: the PC appears within 10 s (state Succeeded, "applications install at first boot"), its final log is on Deployment Logs, and the stick's `Status` folder is empty |
+| 2.3b | Dashboard with USB deploys, section 3 set to a network folder (Domain Computers can write to it) | The PC shows live from WinPE, then first boot (apps, checks) until "Deployment complete"; unplug the network cable in WinPE before the deploy and the status goes to the stick instead (2.3a) |
 | 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, an old `config\share.cred` is gone after Save, and ISO/PXE still maps the share |
 | 2.5 | Computers tab: Connect, Search | The domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
 | 2.6 | Build network boot image | `Boot\boot.wim` and `boot.json` on the content root; the tab says it is ready |

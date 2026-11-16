@@ -321,6 +321,16 @@ re-run replaces it. FirstBoot copies both modules, `Test-Deployment.ps1` and
 `C:\ProgramData\ImagingTool`, where `Test-Deployment.ps1` re-runs the checks
 and updates the record; it keeps the original finish time.
 
+USB deploys without a network folder (or when WinPE cannot reach it) keep
+their status on the stick's `Status` folder. Whenever a DEPLOY stick is
+plugged into the console PC, the Dashboard refresh (and a USB build, before it
+erases the stick) runs `Import-StickDeployStatus`: each record moves into the
+dashboard folder unless the one there is newer, and final logs in the stick's
+`Logs` are copied to the content root's `Logs`. Such deploys have no first boot
+reporting. At first boot, `FirstBoot.ps1` tries the status share again every
+2 minutes and before the checks and the end, so a PC whose share was not
+reachable at the start is picked up later instead of staying Stalled.
+
 The console's Dashboard tab reads the folder every 10 seconds with
 `Get-DeploymentStatus`, which marks a Running record with no update for 45
 minutes as Stalled.

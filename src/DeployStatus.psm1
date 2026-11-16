@@ -346,6 +346,69 @@ function Remove-DeploymentStatus {
     }
 }
 
+function Import-StickDeployStatus {
+    <#
+    .SYNOPSIS
+        Moves the status of PCs deployed from a USB stick into the dashboard folder. Without a network folder to report
+        to, WinPE writes Status\<id>.json on the stick's DEPLOY partition; the console calls this when the stick is
+        plugged in, so those deployments show too. A record already in the dashboard folder is replaced only when the
+        stick's copy is newer. The stick's copies are removed once moved, so a PC cleared from the dashboard does not
+        come back. Final logs in the stick's Logs folder are copied to the content root's Logs (kept on the stick).
+        Returns how many deployments were imported.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StickRoot,   # the DEPLOY partition, for example E:\
+        [Parameter(Mandatory)][string]$Folder,      # the dashboard folder (Get-StatusFolder)
+        [string]$LogFolder                          # <content root>\Logs
+    )
+    $src = [IO.Path]::Combine($StickRoot, 'Status')
+    $count = 0
+    $same = { param($a, $b) [IO.Path]::GetFullPath($a).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($b).TrimEnd('\', '/') }
+    if ([IO.Directory]::Exists($src) -and -not (& $same $src $Folder)) {
+        foreach ($file in [IO.Directory]::GetFiles($src, '*.json')) {
+            try { $s = [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { continue }   # a half-written or foreign file
+            if (-not $s.id) { continue }
+            [void][IO.Directory]::CreateDirectory($Folder)
+            $name = [IO.Path]::GetFileName($file)
+            $target = [IO.Path]::Combine($Folder, $name)
+            $newer = $true
+            if ([IO.File]::Exists($target)) {
+                try {
+                    $old = [IO.File]::ReadAllText($target) | ConvertFrom-Json
+                    $a = ConvertTo-StatusDate $s.updated; $b = ConvertTo-StatusDate $old.updated
+                    $newer = -not $b -or ($a -and $a -gt $b)
+                } catch { }
+            }
+            $log = [IO.Path]::ChangeExtension($file, '.log')
+            if ($newer) {
+                [IO.File]::Copy($file, $target, $true)
+                if ([IO.File]::Exists($log)) { [IO.File]::Copy($log, [IO.Path]::ChangeExtension($target, '.log'), $true) }
+                $count++
+            }
+            [IO.File]::Delete($file)
+            if ([IO.File]::Exists($log)) { [IO.File]::Delete($log) }
+        }
+    }
+    $logs = [IO.Path]::Combine($StickRoot, 'Logs')
+    if ($LogFolder -and [IO.Directory]::Exists($logs) -and -not (& $same $logs $LogFolder)) {
+        foreach ($file in [IO.Directory]::GetFiles($logs, '*.log')) {
+            $target = [IO.Path]::Combine($LogFolder, [IO.Path]::GetFileName($file))
+            if ([IO.File]::Exists($target)) { continue }
+            [void][IO.Directory]::CreateDirectory($LogFolder)
+            [IO.File]::Copy($file, $target)
+        }
+    }
+    $count
+}
+
+function Get-DeployStickRoots {
+    # DEPLOY partitions of sticks this tool built that are plugged into this PC. DriveInfo, not Get-Volume: the
+    # dashboard calls this every 10 seconds.
+    @([IO.DriveInfo]::GetDrives() | Where-Object {
+        try { $_.IsReady -and $_.VolumeLabel -eq 'DEPLOY' -and [IO.Directory]::Exists([IO.Path]::Combine($_.RootDirectory.FullName, 'Images')) } catch { $false }
+    } | ForEach-Object { $_.RootDirectory.FullName })
+}
+
 function ConvertTo-StatusDate($Value) {
     # ConvertFrom-Json in PowerShell 7 already turns ISO strings into dates; 5.1 leaves them as strings.
     if (-not $Value) { return $null }
@@ -367,4 +430,4 @@ function Format-Duration([timespan]$Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Remove-DeploymentStatus, Format-Duration
+    Remove-DeploymentStatus, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration
