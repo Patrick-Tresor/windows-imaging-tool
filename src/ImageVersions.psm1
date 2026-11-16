@@ -81,15 +81,9 @@ function Get-ImageVersions {
 function Get-ImageVersionUsage {
     # Version -> names of the answer files deploying it, for one image. '' is the current image.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -ne $ImageName) { continue }
-        $key = "$($a.ImageVersion)"
-        if (-not $usage.ContainsKey($key)) { $usage[$key] = @() }
-        $usage[$key] += $f.BaseName
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys {
+        param($a) if ((Split-Path ($a.ImageFile -replace '\\', '/') -Leaf) -eq $ImageName) { "$($a.ImageVersion)" }
+    }.GetNewClosure()
 }
 
 function Get-ImageVersionLimitPath {

@@ -492,15 +492,7 @@ function Save-AnswerFromEditor {
 function Get-ApplicationUsage {
     # Application name -> names of the answer files that install it.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        foreach ($n in $a.Applications) {
-            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
-            $usage[$n] += $f.BaseName
-        }
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) $a.Applications }
 }
 
 function Get-ApplicationList {
@@ -600,15 +592,7 @@ function Remove-Application {
 function Get-TaskUsage {
     # Task library name -> names of the answer files that run it.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        foreach ($n in @($a.Tasks | Where-Object Script | ForEach-Object Script | Select-Object -Unique)) {
-            if (-not $usage.ContainsKey($n)) { $usage[$n] = @() }
-            $usage[$n] += $f.BaseName
-        }
-    }
-    $usage
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) @($a.Tasks | Where-Object Script | ForEach-Object Script | Select-Object -Unique) }
 }
 
 function Get-TaskList {
@@ -662,14 +646,9 @@ function Remove-Task {
 function Get-ImageUsage {
     # Image file name -> names of the answer files that deploy it, for the Images tab.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $usage = @{}
-    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
-        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
-        $leaf = Split-Path ($a.ImageFile -replace '\\', '/') -Leaf
-        if (-not $usage.ContainsKey($leaf)) { $usage[$leaf] = @() }
-        $usage[$leaf] += if ($a.ImageVersion) { "$($f.BaseName) (version $($a.ImageVersion))" } else { $f.BaseName }
+    Get-AnswerFileUsage -ContentRoot $ContentRoot -Keys { param($a) Split-Path ($a.ImageFile -replace '\\', '/') -Leaf } -Label {
+        param($a, $f) if ($a.ImageVersion) { "$($f.BaseName) (version $($a.ImageVersion))" } else { $f.BaseName }
     }
-    $usage
 }
 
 #endregion

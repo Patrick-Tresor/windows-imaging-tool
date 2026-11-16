@@ -874,7 +874,27 @@ function ConvertFrom-DeployWizardAnswerFile {
     @{ Answer = $answer; Notes = @($notes) }
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+function Get-AnswerFileUsage {
+    # Key -> names of the answer files in <content root>\AnswerFiles that use it. -Keys gets each answer file
+    # (Read-AnswerFile) and returns what it uses; -Label says how the file is named in the list (default: its name).
+    param(
+        [Parameter(Mandatory)][string]$ContentRoot,
+        [Parameter(Mandatory)][scriptblock]$Keys,
+        [scriptblock]$Label = { param($Answer, $File) $File.BaseName }
+    )
+    $usage = @{}
+    foreach ($f in Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue) {
+        try { $a = Read-AnswerFile -Path $f.FullName -SkipValidation } catch { continue }
+        $text = & $Label $a $f
+        foreach ($k in @(& $Keys $a)) {
+            if (-not $usage.ContainsKey($k)) { $usage[$k] = @() }
+            $usage[$k] += $text
+        }
+    }
+    $usage
+}
+
+Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     Read-SecretFile, ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
     Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings
