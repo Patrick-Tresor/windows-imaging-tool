@@ -51,10 +51,9 @@ and click **Create folders** the first time. Then:
   and answer file (see below). Edit cells, **Import CSV...** to merge a list
   from Excel or an inventory export, **Export CSV...**, then **Save**. Each row
   shows its problems and the result of that PC's last deploy.
-- **Driver Library**: **Download from vendor...** lists every model in the Dell,
-  HP or Lenovo driver pack catalog for Windows 10 or 11; tick the models you
-  deploy and it downloads, checks, extracts and registers their packs, and shows
-  which ones have a newer pack. You can also import a pack you already have
+- **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
+  driver pack catalogs for a model, SKU or machine type; pick the pack and it
+  downloads, checks, extracts and registers it. You can also import a pack you already have
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
   **Unknown models...** (with a count when there are any) lists the models that
@@ -684,7 +683,7 @@ are both read. The deploy log says which entry was used.
    password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
    on it. Untested on Windows, including every conversion.
-4. **Add drivers** in the console's Driver Library tab (**Download from vendor...**),
+4. **Add drivers** in the console's Driver Library tab (**Find a model online**),
    or from the command line:
    `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
    (drop `-List` to download). After deploying, `Get-DriverPacks.ps1 -ContentRoot D:\Deploy -UnknownModels -List`

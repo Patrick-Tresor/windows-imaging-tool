@@ -361,7 +361,7 @@ by the deploy and the console.
 ## Driver packs
 
 The driver pack builder (`src/Console/DriverPacks.psm1`, the console's
-**Download from vendor...** window, and `src/Get-DriverPacks.ps1`) uses each
+**Find a model online** box, and `src/Get-DriverPacks.ps1`) uses each
 vendor's public catalog of enterprise driver packs:
 
 | Maker | Catalog | Pack | Matched by |
@@ -374,8 +374,8 @@ vendor's public catalog of enterprise driver packs:
 once (`Find-VendorDriverPackOnline`): type the model ("Latitude 5521",
 "EliteBook 840 G9", "T14 Gen 4"), a Dell/HP SKU or a Lenovo machine type, pick
 the pack and click **Download**. Every word must match (a number as a whole
-word); a maker name in the query reads only that catalog. The download runs in
-its own window through the same job file as **Download from vendor...**.
+word); a maker name in the query reads only that catalog. The download runs hidden
+through `Get-DriverPacks.ps1 -JobFile`, with its progress on the Driver Library page.
 
 Catalogs are cached for a day in `%LOCALAPPDATA%\ImagingConsole\VendorCatalogs`.
 For each model and OS only the newest x64 pack is offered (highest Windows
@@ -414,7 +414,7 @@ as the library covers it. The rest are grouped by maker, model and SKU / machine
 type, most PCs first. For Dell, HP and Lenovo it looks the model up in the
 vendor catalog (SKU or machine type, then model name). The console's
 **Unknown models...** window ticks every model that has a pack and hands them to
-the same download job as **Download from vendor...**. **Use inbox drivers**
+the same download job as **Find a model online**. **Use inbox drivers**
 adds a catalog entry with no folder, keyed on the SKU, machine type or model.
 `Get-DriverPacks.ps1 -UnknownModels [-List]` does the same from the command line.
 

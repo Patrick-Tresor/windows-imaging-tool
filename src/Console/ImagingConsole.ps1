@@ -767,14 +767,7 @@ $ui.BtnNamingExport.Add_Click({ Invoke-Safely {
 
 $ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
 $ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
-$ui.BtnDriversDownload.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    if (Show-DriverDownloader -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Set-Status 'Driver pack download started. The library refreshes when it is done.'
-    }
-} })
-
-# Find a model online: type the PC model, pick the pack, download it (in its own window, like Download from vendor...).
+# Find a model online: type the PC model, pick the pack, download it (the progress shows on the Driver Library page).
 $script:driverFound = @()
 function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
