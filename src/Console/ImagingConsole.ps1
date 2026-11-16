@@ -327,8 +327,23 @@ function Get-DashboardFolder {
     Get-StatusFolder -ContentRoot $script:root -Settings (Get-DeploySettings -ContentRoot $script:root)
 }
 
+function Import-StickDashboard([string]$Folder) {
+    # PCs deployed from a USB stick with no network folder to report to left their status on the stick: move it into
+    # the dashboard whenever a DEPLOY stick is plugged into this PC. Never fails the refresh.
+    $n = 0
+    foreach ($stick in Get-DeployStickRoots) {
+        try { $n += Import-StickDeployStatus -StickRoot $stick -Folder $Folder -LogFolder (Join-Path $script:root 'Logs') }
+        catch { Set-Status "Could not read the deployments on the USB stick $stick : $($_.Exception.Message)" }
+    }
+    if ($n) {
+        Set-Status "Added $n deployment(s) from the USB stick to the dashboard"
+        try { Update-Logs } catch { }
+    }
+}
+
 function Update-Dashboard {
     $folder = Get-DashboardFolder
+    if ($folder) { Import-StickDashboard $folder }
     $rows = @(if ($folder) { Get-DeploymentStatus -Folder $folder })
     $sum = Get-DeploymentSummary -Rows $rows
     $ui.TxtDashRunning.Text   = $sum.Running
@@ -1163,6 +1178,9 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         if ($ui.ChkUsbUpdate.IsChecked) {
             if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
         } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+        # Deployments the stick holds go to the dashboard first: erasing it would lose them.
+        $dashFolder = Get-DashboardFolder
+        if ($dashFolder) { Import-StickDashboard $dashFolder }
         $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
         if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
         if ($ui.ChkCopyContent.IsChecked) {

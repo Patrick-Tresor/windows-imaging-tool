@@ -452,6 +452,12 @@ function Connect-StatusFolder([string]$Root, $Settings) {
         Mount-NetworkShare -LocalName 'R:' -RemoteName $target.Map -User $user -Password $pw
         $target
     } catch {
+        # A USB deploy (content on the stick, not the share's Z:) keeps its status on the stick instead, so the
+        # console still shows it once the stick is plugged in there (Import-StickDeployStatus). No first boot reporting.
+        if ($Root.TrimEnd('\') -ne 'Z:') {
+            Write-DeployLog "Status share $($target.Map) unavailable ($($_.Exception.Message)); keeping the status on the USB stick for the console's dashboard" -Level WARN
+            return Resolve-StatusTarget -ContentRoot $Root
+        }
         Write-DeployLog "Status share $($target.Map) unavailable, no progress reporting: $($_.Exception.Message)" -Level WARN
         $null
     }
