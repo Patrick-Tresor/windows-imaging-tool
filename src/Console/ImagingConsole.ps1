@@ -82,6 +82,7 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -116,6 +117,11 @@ class NamingRow {
 $form = New-ConsoleWindow 'MainWindow.xaml'
 $window = $form.Window
 $ui = $form.Controls
+
+# This copy's version in the header; a stick built with an older one gets a banner (Update-StickVersionBanner).
+$script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
+$ui.TxtToolVersion.Text = "version $($script:toolVersion.Text)"
+$script:stickOldHidden = ''
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -447,6 +453,32 @@ function Get-UsbDiskChoices {
 function Update-UsbDisks {
     $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
+}
+
+function Update-StickVersionBanner {
+    # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
+    # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    if ($msg -and $msg -ne $script:stickOldHidden) {
+        $ui.TxtStickOld.Text = $msg
+        $ui.BdrStickOld.Visibility = 'Visible'
+    } else {
+        $ui.BdrStickOld.Visibility = 'Collapsed'
+    }
+}
+
+function Select-StickForUpdate {
+    # "Update the stick": the Media tab with the old stick's disk picked and "Update a stick" ticked.
+    $ui.Tabs.SelectedItem = $ui.TabMedia
+    Update-UsbDisks
+    $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    if ($old) {
+        $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
+        $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
+        if ($item) { $ui.CmbUsb.SelectedItem = $item }
+    }
+    $ui.ChkUsbUpdate.IsChecked = $true
+    Set-Status 'Check the answer files and driver packs for the stick, then click Build media.'
 }
 
 function Update-AdkStatus {
@@ -1356,7 +1388,15 @@ $ui.Tabs.Add_SelectionChanged({
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
     }
 })
-$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop() })
+$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop() })
+
+# A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
+$ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
+$ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
+$script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:stickTimer.Interval = [timespan]::FromSeconds(5)
+$script:stickTimer.Add_Tick({ try { Update-StickVersionBanner } catch { $script:stickTimer.Stop(); Set-Status "USB stick version check failed: $($_.Exception.Message)" } })
+$script:stickTimer.Start()
 
 #endregion
 
@@ -1372,5 +1412,6 @@ $ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Update-StickVersionBanner }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

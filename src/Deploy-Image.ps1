@@ -41,6 +41,7 @@ Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
 
 # Passwords: encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault), else typed
 # by the operator (kept in memory only). Plain password files are never read.
@@ -526,6 +527,9 @@ $status = 'FAILED'; $failure = $null
 try {
     # A wide console whose lines wrap instead of running off the right edge.
     Set-DeployConsole
+    # Which version of the tool built this media: the first thing to check when a fix "did not work" (old stick).
+    $toolVersion = Get-ToolVersion -SourceRoot $PSScriptRoot
+    Write-DeployLog "Imaging tool version $($toolVersion.Text)"
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
         $hw.Maker, $hw.Model, $hw.MachineType, $hw.Sku, $hw.Serial, $hw.IsUefi)
@@ -654,7 +658,7 @@ try {
     $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $job.computerName -eq $givenName) { 'kept from Active Directory' } else { 'parameter' } }
                   elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
-    Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName }
+    Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName; toolVersion = $toolVersion.Text }
 
     $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
     $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot

@@ -86,6 +86,16 @@ function Set-ModernLook {
     }
 }
 
+function Get-WizardVersionText {
+    # "Version 853ca2f (2026-11-20 17:12)" from ToolVersion.psm1 next to this module, or nothing.
+    try {
+        $mod = [IO.Path]::Combine($PSScriptRoot, 'ToolVersion.psm1')
+        if (-not [IO.File]::Exists($mod)) { return $null }
+        Import-Module $mod -Scope Local
+        'Version ' + (Get-ToolVersion -SourceRoot $PSScriptRoot).Text
+    } catch { $null }
+}
+
 function New-DeploySidebar {
     # The dark band down the left of a window: a heading and the steps. Returns the step labels.
     param([Parameter(Mandatory)]$Form, [string]$Heading = 'Deploy Windows')
@@ -102,6 +112,14 @@ function New-DeploySidebar {
     if ($logo) {
         $panel.Controls.Add((New-Object Windows.Forms.PictureBox -Property @{
             Location = (New-Object Drawing.Point(16, 18)); Size = (New-Object Drawing.Size(48, 48)); SizeMode = 'Zoom'; Image = $logo; BackColor = (Get-ThemeColor 'Sidebar')
+        }))
+    }
+    # The tool version at the bottom, small: which build this stick is, without opening the log.
+    $version = Get-WizardVersionText
+    if ($version) {
+        $panel.Controls.Add((New-Object Windows.Forms.Label -Property @{
+            Dock = 'Bottom'; Height = 28; Text = $version; TextAlign = 'MiddleLeft'; Padding = (New-Object Windows.Forms.Padding(14, 0, 0, 0))
+            Font = New-Object Drawing.Font('Segoe UI', 8); ForeColor = (Get-ThemeColor 'SidebarTodo'); BackColor = (Get-ThemeColor 'Sidebar')
         }))
     }
     $stepsTop = $headTop + 64
