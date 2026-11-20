@@ -652,7 +652,8 @@ function Find-WinPEFallbackPack {
 }
 
 function Resolve-DriverPack {
-    # Picks the most specific catalog entry for this PC. Returns a full path, or $null for inbox drivers only.
+    # Picks the most specific catalog entry for this PC. Returns a full path (a folder, or <folder>.wim on a stick),
+    # or $null for inbox drivers only.
     # -Detailed returns the Find-DriverCatalogMatch result with FullPath added (MissingFolder when it is not there).
     param(
         [Parameter(Mandatory)]$Identity,
@@ -673,6 +674,8 @@ function Resolve-DriverPack {
     $full = $null
     if ($m.Path) {
         $full = Join-Path $DriverRoot ($m.Path -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+        # A stick carries each pack as one file, <folder>.wim (DriverPackFile.psm1); the deploy unpacks it.
+        if (Test-Path -LiteralPath "$full.wim" -PathType Leaf) { $full = "$full.wim" }
         if (-not (Test-Path $full)) {
             Write-DeployLog "Driver folder missing: $full" -Level WARN
             $full = $null

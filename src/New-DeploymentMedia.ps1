@@ -44,6 +44,7 @@ param(
     [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
+    [switch]$LooseDriverFiles,       # with -ContentSource: copy driver packs as plain files, not one .wim each (much slower to copy to a stick)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
     [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
     [string]$LogPath,                # transcript of the build (the progress window's Open log button)
@@ -63,6 +64,8 @@ if ($LogPath) {
 $appDownloads = $Target -eq 'Usb' -and $ContentSource -and -not $NoAppDownloads
 $steps = @(, @('check', 'Checking the ADK and the content'))
 if ($appDownloads) { $steps += , @('apps', 'Downloading online applications') }
+$packDrivers = $Target -eq 'Usb' -and $ContentSource -and -not $LooseDriverFiles
+if ($packDrivers) { $steps += , @('packdrivers', 'Packing each driver pack into one file') }
 $steps += , @('copype', 'Copying WinPE files')
 if (-not $NoVendorWinPEDrivers) { $steps += , @('pedrivers', 'Getting the WinPE driver packs') }
 $steps += @(
@@ -102,6 +105,7 @@ Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DriverPackFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
@@ -177,6 +181,30 @@ if ($appDownloads -and $copyPlan) {
                  else { '{0} on the stick{1}' -f @($dl.Items).Count, $(if ($dl.Failed) { ", not downloaded: $($dl.Failed -join ', ')" }) }
     Complete-BuildStep 'apps' -Detail $appDetail
 } elseif ($appDownloads) { Start-BuildStep 'apps'; Complete-BuildStep 'apps' -Detail 'No content to copy' }
+
+if ($packDrivers) {
+    # Each driver pack goes on the stick as one .wim: a stick writes thousands of small driver files at a few MB/s,
+    # one big file many times faster. Packed once and cached on this PC; the deploy unpacks the PC's pack only.
+    Start-BuildStep 'packdrivers'
+    $packFolders = @(if ($copyPlan) { Get-DriverPackFolders -Plan $copyPlan -CatalogPath (Join-Path $ContentSource 'config\driver-catalog.json') -DriverRoots $content.DriverRoots })
+    if ($packFolders) {
+        $packCache = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'DriverPackFiles')
+        $onPackFolder = {
+            param($folder, $i, $count, $reused)
+            Set-BuildStepProgress 'packdrivers' -Percent ([int](100 * ($i - 1) / [Math]::Max(1, $count))) -Detail $(if ($reused) { "$folder (packed before)" } else { $folder })
+            Write-Host $(if ($reused) { "Driver pack ${folder}: packed before, reusing it" } else { "Packing driver pack $folder..." })
+        }
+        $copyPlan = ConvertTo-PackedDriverPlan -Plan $copyPlan -ContentRoot $ContentSource -Folders $packFolders -CacheRoot $packCache -OnPack $onPackFolder
+        foreach ($f in @($copyPlan.Failed)) { Write-Warning "Driver pack $($f.Folder) goes on the stick as plain files (slower to copy): $($f.Reason)" }
+        Remove-OldDriverPackFiles -CacheRoot $packCache -InUse @($copyPlan.Items | ForEach-Object { $_.Source } | Where-Object { $_ -like "$packCache*" })
+        $files = 0; $before = [int64]0; $after = [int64]0
+        foreach ($p in @($copyPlan.Packed)) { $files += $p.Files; $before += $p.Bytes; $after += $p.PackedBytes }
+        $packDetail = '{0} pack(s): {1} files, {2}, now {3}' -f @($copyPlan.Packed).Count, $files, (Format-MediaSize $before), (Format-MediaSize $after)
+        Write-Host "Driver packs: $packDetail"
+        Write-Host ('Content to copy now: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
+        Complete-BuildStep 'packdrivers' -Detail $packDetail
+    } else { Complete-BuildStep 'packdrivers' -State skipped -Detail 'No driver packs on this stick' }
+}
 
 # copype and MakeWinPEMedia expect the ADK environment variables that DandISetEnv.bat sets.
 Start-BuildStep 'copype'

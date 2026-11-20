@@ -21,6 +21,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.9 | Stick built **without** a WinPE password, answer file passwords typed in the editor | No Passwords page and no password window; `Deploy.log` says "encrypted password(s) decrypted"; the PC joins the domain; the answer file on the DEPLOY partition shows only `aes256:...` |
 | 1.10 | Update the stick in place (Media tab) after changing one answer file | Only the changed files are copied, it is much faster than a full build, and the stick still deploys |
 | 1.11 | USB copy speed | Note the MB/s the build prints for the image |
+| 1.11b | Driver packs as one file each | The build's "Packing each driver pack into one file" step lists the packs (a second build says "packed before"); `Drivers\<maker>\<model>.wim` is on the DEPLOY partition, not the folder; the build prints a `Small files` MB/s line; a deploy shows "Unpacking drivers" then "Injecting drivers", and `W:\_ImagingDrivers` is gone afterwards |
 | 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |
 | 1.13 | Stick built with **Online apps on USB** ticked, deployed with the network cable out | The build's Downloading online applications step lists the apps; `FirstBoot.log` says the installer "is already in the folder; not downloaded" and the apps install |
 

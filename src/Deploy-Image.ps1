@@ -733,11 +733,32 @@ try {
         # 72-79 % overall, by the count of drivers DISM has installed.
         Set-DeployStatus -Step 'Injecting drivers' -Percent 72
         $injectDrivers = {
-            Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverPack) -OnProgress {
-                param($pct, $info)
-                if ($info -and $info.Total) {
-                    Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
-                } else { Update-NativeStepStatus }
+            $driverSource = $driverPack
+            $unpacked = $null
+            try {
+                if ($driverPack -like '*.wim') {
+                    # The stick carries the pack as one file (fast to copy): unpack it onto the new Windows
+                    # partition, add the drivers from there, then delete the copy.
+                    $unpacked = 'W:\_ImagingDrivers'
+                    [void][IO.Directory]::CreateDirectory($unpacked)
+                    Set-DeployStatus -Step 'Unpacking drivers' -Percent 72
+                    Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList @('/Apply-Image', "/ImageFile:$driverPack", '/Index:1', "/ApplyDir:$unpacked") -OnProgress {
+                        param($pct)
+                        if ($null -ne $pct) { Update-NativeStepStatus -Step "Unpacking drivers: $pct %" -Percent 72 }
+                        else { Update-NativeStepStatus }
+                    }
+                    $driverSource = $unpacked
+                    Set-DeployStatus -Step 'Injecting drivers' -Percent 72
+                }
+                Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverSource) -OnProgress {
+                    param($pct, $info)
+                    if ($info -and $info.Total) {
+                        Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
+                    } else { Update-NativeStepStatus }
+                }
+            } finally {
+                # rd, not Remove-Item: W: was made by diskpart after PowerShell started, so it has no PowerShell drive.
+                if ($unpacked) { try { & cmd.exe /c "rd /s /q `"$unpacked`"" 2>&1 | Out-Null } catch { } }
             }
         }
         if ($driverMatch -and $driverMatch.PSObject.Properties['WinPEFallback'] -and $driverMatch.WinPEFallback) {
