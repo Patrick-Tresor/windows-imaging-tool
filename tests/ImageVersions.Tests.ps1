@@ -151,6 +151,25 @@ try {
     $leaf = Publish-CapturedImage -Staging $pubStage -ImagesDir $pubDir -Name 'Pub' -Existing @(Join-Path $pubDir 'Pub.wim') -State $swap
     Assert-Equal "$leaf|$($swap.Swapping)|$((Get-Content (Join-Path $pubDir 'Pub.wim')).Trim())|$(Test-Path $pubStage)" 'Pub.wim|True|new|False' 'a new capture moves in and the staging folder goes'
     Assert-Equal @(Get-ImageVersions -ImagePath (Join-Path $pubDir 'Pub.wim')).Count 1 'the replaced image is kept as a version'
+
+    # Smallest compression: an .esd, listed and replaced like a .wim, never split.
+    Assert-Equal (Get-ImageFileExtension -Compression recovery -SplitSizeMB 0) '.esd' 'Smallest makes an .esd'
+    Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 3800) '.swm' 'a split makes .swm parts'
+    Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 0) '.wim' 'Maximum makes a .wim'
+    Assert-Throws { Assert-CaptureCompression -Compression recovery -SplitSizeMB 3800 } '*cannot be split*' 'Smallest with a FAT32 split is refused'
+    Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery -SplitForFat32 } '*cannot be split*' 'the capture wizard refuses Smallest with a split'
+    $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery) | ConvertFrom-Json
+    Assert-Equal $cfg.compression 'recovery' 'capture config keeps Smallest'
+    Set-Content (Join-Path $pubDir 'Small.esd') 'old esd'
+    Assert-Equal ((Get-ExistingImageFiles -ImagesDir $pubDir -Name 'Small' | ForEach-Object { Split-Path $_ -Leaf }) -join ',') 'Small.esd' 'an existing .esd counts as the image of that name'
+    $esdStage = Join-Path $pubDir '.capture-Small'
+    New-Item -ItemType Directory -Path $esdStage -Force | Out-Null
+    Set-Content (Join-Path $esdStage 'Small.esd') 'new esd'
+    $leaf = Publish-CapturedImage -Staging $esdStage -ImagesDir $pubDir -Name 'Small' -Compression recovery -Existing @(Get-ExistingImageFiles -ImagesDir $pubDir -Name 'Small') -State @{ Swapping = $false }
+    Assert-Equal "$leaf|$((Get-Content (Join-Path $pubDir 'Small.esd')).Trim())" 'Small.esd|new esd' 'a Smallest capture replaces the .esd and keeps the old one'
+    New-Item -ItemType Directory -Path (Join-Path $root 'Images') -Force | Out-Null
+    Set-Content (Join-Path $root 'Images/Tiny.esd') 'x'
+    Assert-Equal (@(Get-ImageList -ContentRoot $root | Where-Object { $_.Name -eq 'Tiny.esd' }).Count) 1 'the Images tab lists .esd images'
     Remove-Item function:global:Write-DeployLog
 }
 finally {

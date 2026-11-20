@@ -5,3 +5,6 @@
 *.json text eol=crlf
 *.xaml text eol=crlf
 *.csv text eol=crlf
+
+# GitHub fills in the commit and date when main is downloaded as a zip (src/ToolVersion.psm1).
+src/version.txt export-subst

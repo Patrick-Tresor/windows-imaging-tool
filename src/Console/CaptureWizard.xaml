@@ -137,6 +137,8 @@
             <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
               <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
               <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
+              <ComboBoxItem Content="Smallest (.esd, slowest capture)" Tag="recovery"
+                            ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer. Cannot be split for FAT32."/>
             </ComboBox>
             <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
                       Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>

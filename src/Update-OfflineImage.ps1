@@ -51,6 +51,8 @@ $image = Get-Item -LiteralPath $ImagePath
 $name = $image.BaseName
 $imagesDir = $image.DirectoryName
 $isSplit = $image.Extension -eq '.swm'
+# An .esd (Smallest compression) cannot be mounted: it is exported to a .wim to service, and back to .esd at the end.
+$isEsd = $image.Extension -eq '.esd'
 $parts = if ($isSplit) { @(Get-ChildItem -LiteralPath $imagesDir -Filter "$name*.swm" | Where-Object { $_.BaseName -match "^$([regex]::Escape($name))\d*$" }) } else { @($image) }
 
 # Logs go to the content root's Logs folder when the image is in <root>\Images, so the console shows them.
@@ -103,6 +105,11 @@ try {
             Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Export-Image', "/SourceImageFile:$($image.FullName)", "/SWMFile:$swmPattern",
                 "/SourceIndex:$i", "/DestinationImageFile:$sourceWim", '/Compress:max', '/CheckIntegrity')
         }
+    } elseif ($isEsd) {
+        foreach ($i in (Get-WindowsImage -ImagePath $image.FullName).ImageIndex) {
+            Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Export-Image', "/SourceImageFile:$($image.FullName)", "/SourceIndex:$i",
+                "/DestinationImageFile:$sourceWim", '/Compress:max', '/CheckIntegrity')
+        }
     } else {
         Copy-Item -LiteralPath $image.FullName -Destination $sourceWim
     }
@@ -149,6 +156,12 @@ try {
             "/DestinationImageFile:$outWim", '/Compress:max', '/CheckIntegrity')
     }
     if (@(Get-WindowsImage -ImagePath $outWim).Count -ne $editions.Count) { throw 'The exported image is missing editions; the original was left unchanged.' }
+    $builds = @(Get-WindowsImage -ImagePath $outWim | ForEach-Object { (Get-WindowsImage -ImagePath $outWim -Index $_.ImageIndex).Version } | Select-Object -Unique)
+    $outFile = $outWim
+    if ($isEsd) {
+        Write-DeployLog 'Compressing the updated image back to .esd (Smallest)'
+        $outFile = Convert-ImageToEsd -WimPath $outWim
+    }
 
     $swapping = $true
     if (-not $NoBackup) {
@@ -164,11 +177,11 @@ try {
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Split-Image', "/ImageFile:$outWim", "/SWMFile:$(Join-Path $imagesDir "$name.swm")", "/FileSize:$SplitSizeMB")
     } else {
         Write-DeployLog "Copying the updated image to $imagesDir"
-        Copy-Item -LiteralPath $outWim -Destination (Join-Path $imagesDir "$name.wim")
+        Copy-Item -LiteralPath $outFile -Destination (Join-Path $imagesDir $image.Name)
     }
 
     Add-ImageServicingRecord -ImagePath (Join-Path $imagesDir $image.Name) -Results $results `
-        -Builds @(Get-WindowsImage -ImagePath $outWim | ForEach-Object { (Get-WindowsImage -ImagePath $outWim -Index $_.ImageIndex).Version } | Select-Object -Unique) `
+        -Builds $builds `
         -Cleanup:$Cleanup -ResetBase:$ResetBase
     Write-DeployLog "Updated $($image.Name). Answer files that use it get the updates on the next deploy."
     $status = 'OK'
@@ -180,7 +193,7 @@ catch {
     elseif ($backup) { Write-DeployLog "Failed while replacing the image. The previous version is in $backup; move it back to $imagesDir." -Level WARN }
 }
 finally {
-    Remove-Item -LiteralPath $sourceWim, $outWim, $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $sourceWim, $outWim, ([IO.Path]::ChangeExtension($outWim, '.esd')), $scratchDir -Recurse -Force -ErrorAction SilentlyContinue
     if ($status -ne 'CANCELLED') {
         Copy-Item $logPath (Join-Path $logDir ("SERVICE-{0}_{1:yyyyMMdd-HHmm}_{2}.log" -f $name, (Get-Date), $status)) -ErrorAction SilentlyContinue
     }

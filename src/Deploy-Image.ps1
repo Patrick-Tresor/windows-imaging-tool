@@ -41,6 +41,7 @@ Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
 
 # Passwords: encrypted in the answer file (decrypted with the answer file key in boot.wim or the vault), else typed
 # by the operator (kept in memory only). Plain password files are never read.
@@ -526,6 +527,11 @@ $status = 'FAILED'; $failure = $null
 try {
     # A wide console whose lines wrap instead of running off the right edge.
     Set-DeployConsole
+    # Which version of the tool built this media: the first thing to check when a fix "did not work" (old stick).
+    $toolVersion = Get-ToolVersion -SourceRoot $PSScriptRoot
+    $deployStarted = Get-Date
+    $script:DriversInjected = $null
+    Write-DeployLog "Imaging tool version $($toolVersion.Text)"
     $hw = Get-HardwareIdentity
     Write-DeployLog ("Hardware: {0} | {1} | type {2} | SKU {3} | serial {4} | UEFI {5}" -f
         $hw.Maker, $hw.Model, $hw.MachineType, $hw.Sku, $hw.Serial, $hw.IsUefi)
@@ -654,11 +660,12 @@ try {
     $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $job.computerName -eq $givenName) { 'kept from Active Directory' } else { 'parameter' } }
                   elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
-    Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName }
+    Set-DeployStatus -Step 'Checking the answer file' -Percent 6 -Fields @{ answerFile = $answer.Name; image = $answer.ImageFile; computerName = $ComputerName; toolVersion = $toolVersion.Text }
 
     $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
     $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot
-    Set-DeployStatus -Fields @{ driverPack = $(if (-not $driverPack) { 'inbox only' } elseif ($driverPack.StartsWith($driverRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { $driverPack }) }
+    $driverPackName = if (-not $driverPack) { 'inbox only' } elseif ($driverPack.StartsWith($driverRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { $driverPack }
+    Set-DeployStatus -Fields @{ driverPack = $driverPackName }
     if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.
@@ -753,6 +760,7 @@ try {
                 Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList (Get-AddDriverArgs -ImageRoot 'W:\' -DriverPath $driverSource) -OnProgress {
                     param($pct, $info)
                     if ($info -and $info.Total) {
+                        $script:DriversInjected = [int]$info.Total
                         Update-NativeStepStatus -Step "Injecting drivers: $($info.Done) of $($info.Total) ($pct %)" -Percent (72 + [int]($pct * 0.07))
                     } else { Update-NativeStepStatus }
                 }
@@ -770,6 +778,11 @@ try {
                 Set-DeployStatus -Warning "Some WinPE drivers not added for $($hw.Maker) $($hw.Model)"
             }
         } else { & $injectDrivers }
+        # For the end-of-deploy summary (dashboard and C:\Windows\Temp\DeployResult.txt).
+        if ($null -ne $script:DriversInjected) {
+            Write-DeployLog "$($script:DriversInjected) driver(s) added from $driverPackName"
+            Set-DeployStatus -Fields @{ driversAdded = $script:DriversInjected }
+        }
     }
 
     # An image captured from a VM that was only shut down (the capture wizard's "sysprep on each PC" choice) is
@@ -823,6 +836,11 @@ try {
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
+    # What WinPE did, for the end-of-deploy summary first boot writes (also without a status folder).
+    $plan | Add-Member -NotePropertyName deploy -NotePropertyValue ([pscustomobject]@{
+        started = $deployStarted.ToString('o'); toolVersion = $toolVersion.Text; answerFile = $answer.Name; image = $answer.ImageFile
+        maker = $hw.Maker; model = $hw.Model; serial = $hw.Serial; computerName = $ComputerName
+        driverPack = $driverPackName; driversAdded = $script:DriversInjected })
     # The new Windows can keep reporting only to a UNC path (as the computer account), not to WinPE's drive letters.
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })

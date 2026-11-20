@@ -111,6 +111,13 @@ Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
+
+# The version of the tool this build puts on the media: shown in the WinPE wizard, written in every Deploy.log, and
+# read back by the console to say a stick is older than the console.
+$toolVersion = Get-ToolVersion
+$versionRecord = ConvertTo-ToolVersionRecord -Version $toolVersion -Target $(if ($CaptureConfig) { 'Capture' } else { $Target })
+Write-Host "Imaging tool version $($toolVersion.Text)"
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
 $adkStatus = Get-AdkStatus
@@ -366,6 +373,7 @@ try {
     # The logo shown in the WinPE wizard and progress window.
     Copy-Item "$repo\src\Assets" "$deployDir\Assets" -Recurse -Force
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
+    Save-JsonFile -Path "$deployDir\config\tool-version.json" -InputObject $versionRecord
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
@@ -417,7 +425,7 @@ switch ($Target) {
         # What the console's Computers tab checks before it starts this image on PCs over the network: a WinPE
         # password would leave each PC waiting for someone to type it.
         Save-JsonFile -Path (Join-Path $OutputPath 'boot.json') -InputObject ([ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm')
-            locked = [bool]$WinPEPasswordFile; share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)" })
+            locked = [bool]$WinPEPasswordFile; share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"; toolVersion = $toolVersion.Text })
         Complete-BuildStep 'wim'
         Write-Host "boot.wim written to $OutputPath."
     }
@@ -521,6 +529,8 @@ switch ($Target) {
             }
         }
         if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
+        # The version on the DEPLOY partition too, where the console can read it without opening boot.wim.
+        Save-JsonFile -Path "${dataLetter}:\tool-version.json" -InputObject $versionRecord
         # The vendor WinPE packs on the stick too, so WinPE can load them with drvload when boot.wim lacks a driver.
         # Only the x64 drivers, with progress, and on an update only the files that changed.
         if ($vendorPacks) { Start-BuildStep 'packs' }
@@ -541,6 +551,7 @@ switch ($Target) {
         Write-Host '==============================================' -ForegroundColor Green
         Write-Host ' USB media ready' -ForegroundColor Green
         Write-Host " WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)" -ForegroundColor Green
+        Write-Host " Tool version $($toolVersion.Text)" -ForegroundColor Green
         Write-Host ' Eject the stick in Windows before you unplug it.' -ForegroundColor Green
         Write-Host ' Boot menu key: Dell F12, HP F9, Lenovo F12 (or the Novo button), Microsoft Surface: hold Volume down' -ForegroundColor Green
         Write-Host '==============================================' -ForegroundColor Green

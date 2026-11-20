@@ -322,6 +322,24 @@ $taskDeleted = $LASTEXITCODE -eq 0
 if (-not $taskDeleted) { & schtasks.exe /Query /TN $taskName 2>&1 | Out-Null; $taskDeleted = $LASTEXITCODE -ne 0 }
 Write-Log "Startup task $taskName removed: $taskDeleted"
 Complete-FirstBootStep -Progress $progress -Step 'finished'; Save-Progress
+# One clear result for this PC: ready or not, drivers, applications, tasks, join, BitLocker and total time.
+# Kept in C:\Windows\Temp\DeployResult.txt next to FirstBoot.log; the Dashboard shows the same lines.
+try {
+    # Not -Force: importing it again would drop the status record that reporting to the dashboard uses.
+    if (-not (Get-Command Get-DeployResultSummary -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $deployDir 'DeployStatus.psm1') }
+    $deployInfo = if ($plan.PSObject.Properties['deploy'] -and $plan.deploy) { $plan.deploy } else { [pscustomobject]@{ answerFile = $plan.answerFile } }
+    $deployInfo | Add-Member -NotePropertyName finished -NotePropertyValue ((Get-Date).ToString('o')) -Force
+    $deployInfo | Add-Member -NotePropertyName state -NotePropertyValue 'Succeeded' -Force
+    if (-not $deployInfo.PSObject.Properties['computerName'] -or -not $deployInfo.computerName) { $deployInfo | Add-Member -NotePropertyName computerName -NotePropertyValue $env:COMPUTERNAME -Force }
+    # Without post-deploy checks, the install and task results alone.
+    $checkResults = if ((Get-Variable run -ErrorAction SilentlyContinue) -and $run) { @($run.Results) } else {
+        @(@($appResults) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ name = "App: $($_.name)"; result = $(if ($_.ok) { 'Passed' } else { 'Failed' }); detail = "$($_.status): $($_.message)" } }) +
+        @(@($taskResults) | Where-Object { $_ -and $_.status -ne 'Ran' } | ForEach-Object { [pscustomobject]@{ name = "Task: $($_.name)"; result = $(if ($_.ok) { 'Passed' } else { 'Failed' }); detail = "$($_.message)" } })
+    }
+    $summary = Get-DeployResultSummary -Deploy $deployInfo -Checks $checkResults
+    Set-Content -Path "$env:WINDIR\Temp\DeployResult.txt" -Value $summary.Text -Encoding utf8
+    Write-Log ('Deployment result:' + [Environment]::NewLine + $summary.Text)
+} catch { Write-Log "Could not write the deployment result: $($_.Exception.Message)" }
 Write-Log "First boot finished; removing what deploy staged in $deployDir"
 if (-not $reporting) { $script:nextStatusTry = Get-Date; Set-Progress 'Finishing first boot' 99 }   # a last try at the status share
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }

@@ -82,6 +82,8 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'HardwareTests.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -116,6 +118,11 @@ class NamingRow {
 $form = New-ConsoleWindow 'MainWindow.xaml'
 $window = $form.Window
 $ui = $form.Controls
+
+# This copy's version in the header; a stick built with an older one gets a banner (Update-StickVersionBanner).
+$script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
+$ui.TxtToolVersion.Text = "version $($script:toolVersion.Text)"
+$script:stickOldHidden = ''
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -404,18 +411,12 @@ function Update-Dashboard {
 function Update-DashboardDetail {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
-    $parts = @(
-        "Image: $($r.Image)", "Drivers: $($r.DriverPack)", "MAC: $($r.MacAddress)", "Phase: $($r.Phase)",
-        "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })"
-    )
+    # The deployment's result first (one line each: drivers, applications, tasks, join, BitLocker, time), then the rest.
+    $parts = @("MAC: $($r.MacAddress)", "Phase: $($r.Phase)", "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })")
     if ($r.Message)  { $parts += "Error: $($r.Message)" }
     if ($r.Warnings) { $parts += "Warnings: $($r.Warnings)" }
-    $ui.TxtDashDetail.Text = $parts -join '    '
-    if ($r.CheckResults) {
-        $when = if ($r.Checked) { ' (' + $r.Checked.ToString('yyyy-MM-dd HH:mm') + ')' } else { '' }
-        $lines = foreach ($c in $r.CheckResults) { '  {0,-8} {1}: {2}' -f $c.result, $c.name, $c.detail }
-        $ui.TxtDashDetail.Text += "`nPost-deploy checks$when`n" + ($lines -join "`n")
-    }
+    $ui.TxtDashDetail.Text = $(if ($r.ResultText) { $r.ResultText + "`n" } else { '' }) + ($parts -join '    ')
+    if ($r.Checked) { $ui.TxtDashDetail.Text += "    Checked: $($r.Checked.ToString('yyyy-MM-dd HH:mm'))" }
     $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }
@@ -428,6 +429,47 @@ function Update-Apps {
 function Update-Tasks {
     $ui.GridTaskLibrary.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-TaskList -ContentRoot $script:root })
     $ui.TxtTaskIssues.Text = ''
+}
+
+function Update-HwTests {
+    # The Hardware Tests tab: the doc's tests with their saved results, filtered, the same test kept selected.
+    $doc = [IO.Path]::Combine((Split-Path $srcDir -Parent), 'docs', 'HARDWARE-TESTS.md')
+    $rows = @(Get-HardwareTestRows -DocPath $doc -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) -CurrentVersion $script:toolVersion.Text)
+    $ui.TxtHwSummary.Text = (Get-HardwareTestSummary -Rows $rows).Text
+    $shown = @(switch ($ui.CmbHwFilter.SelectedIndex) {
+        1 { $rows | Where-Object { $_.Status -in 'Not tested', 'Passed (older version)' } }
+        2 { $rows | Where-Object Result -eq 'Failed' }
+        3 { $rows | Where-Object Result -eq 'Passed' }
+        default { $rows }
+    })
+    $selectedId = if ($ui.GridHwTests.SelectedItem) { $ui.GridHwTests.SelectedItem.Id } else { $null }
+    $ui.GridHwTests.ItemsSource = $shown
+    if ($selectedId) { $ui.GridHwTests.SelectedItem = @($shown | Where-Object Id -eq $selectedId)[0] }
+}
+
+function Update-HwTestDetail {
+    $t = $ui.GridHwTests.SelectedItem
+    $ui.TxtHwTest.Text = if ($t) { "$($t.Id)  $($t.Test)" } else { 'Pick a test in the list.' }
+    $ui.TxtHwPassWhen.Text = if ($t) { "Passes when: $($t.PassWhen)" } else { '' }
+    $ui.TxtHwNote.Text = if ($t) { $t.Note } else { '' }
+    $ui.TxtHwLog.Text = if ($t -and $t.Log) { "Log: $($t.Log)" } elseif ($t -and $t.Version) { "Tested with version $($t.Version)" } else { '' }
+    if ($t -and $t.Log -and $t.Version) { $ui.TxtHwLog.Text += ", version $($t.Version)" }
+    foreach ($b in 'BtnHwPassed', 'BtnHwFailed', 'BtnHwSkipped', 'BtnHwClear', 'BtnHwAttach') { $ui.$b.IsEnabled = [bool]$t }
+    $ui.BtnHwOpenLog.IsEnabled = [bool]($t -and $t.Log)
+}
+
+function Save-HwTest([string]$Result, [switch]$KeepResult, [string]$Log) {
+    # Saves the selected test with the note in the box; -KeepResult only changes the note or log.
+    if (-not (Test-RootReady)) { return }
+    $t = $ui.GridHwTests.SelectedItem
+    if (-not $t) { return }
+    $resultArgs = @{ ContentRoot = $script:root; Id = $t.Id; Note = $ui.TxtHwNote.Text.Trim() }
+    if ($KeepResult) { $resultArgs.Result = $t.Result; $resultArgs.Version = $t.Version } else { $resultArgs.Result = $Result; $resultArgs.Version = $script:toolVersion.Text }
+    if ($PSBoundParameters.ContainsKey('Log')) { $resultArgs.Log = $Log }
+    Set-HardwareTestResult @resultArgs
+    Update-HwTests
+    Update-HwTestDetail
+    Set-Status $(if ($KeepResult) { "Test $($t.Id) saved" } elseif ($Result) { "Test $($t.Id): $Result" } else { "Test $($t.Id): not tested" })
 }
 
 function Update-Logs {
@@ -449,6 +491,32 @@ function Update-UsbDisks {
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
 }
 
+function Update-StickVersionBanner {
+    # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
+    # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    if ($msg -and $msg -ne $script:stickOldHidden) {
+        $ui.TxtStickOld.Text = $msg
+        $ui.BdrStickOld.Visibility = 'Visible'
+    } else {
+        $ui.BdrStickOld.Visibility = 'Collapsed'
+    }
+}
+
+function Select-StickForUpdate {
+    # "Update the stick": the Media tab with the old stick's disk picked and "Update a stick" ticked.
+    $ui.Tabs.SelectedItem = $ui.TabMedia
+    Update-UsbDisks
+    $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    if ($old) {
+        $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
+        $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
+        if ($item) { $ui.CmbUsb.SelectedItem = $item }
+    }
+    $ui.ChkUsbUpdate.IsChecked = $true
+    Set-Status 'Check the answer files and driver packs for the stick, then click Build media.'
+}
+
 function Update-AdkStatus {
     # Shown on the Media tab; media builds and captures need the ADK and the WinPE add-on.
     $s = Get-AdkStatus
@@ -465,6 +533,7 @@ function Update-AdkStatus {
 function Update-All {
     $ui.TxtRoot.Text = $script:root
     Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard; Update-Logs
+    Update-HwTests
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -1356,7 +1425,41 @@ $ui.Tabs.Add_SelectionChanged({
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
     }
 })
-$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop() })
+$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop() })
+
+# A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
+$ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
+$ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
+$script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:stickTimer.Interval = [timespan]::FromSeconds(5)
+$script:stickTimer.Add_Tick({ try { Update-StickVersionBanner } catch { $script:stickTimer.Stop(); Set-Status "USB stick version check failed: $($_.Exception.Message)" } })
+$script:stickTimer.Start()
+
+#endregion
+
+#region Hardware tests
+
+$ui.CmbHwFilter.Add_SelectionChanged({ Invoke-Safely { Update-HwTests } })
+$ui.GridHwTests.Add_SelectionChanged({ Invoke-Safely { Update-HwTestDetail } })
+$ui.BtnHwPassed.Add_Click({ Invoke-Safely { Save-HwTest 'Passed' } })
+$ui.BtnHwFailed.Add_Click({ Invoke-Safely { Save-HwTest 'Failed' } })
+$ui.BtnHwSkipped.Add_Click({ Invoke-Safely { Save-HwTest 'Skipped' } })
+$ui.BtnHwClear.Add_Click({ Invoke-Safely { Save-HwTest '' } })
+$ui.TxtHwNote.Add_LostFocus({ Invoke-Safely {
+    $t = $ui.GridHwTests.SelectedItem
+    if ($t -and $ui.TxtHwNote.Text.Trim() -ne $t.Note) { Save-HwTest -KeepResult }
+} })
+$ui.BtnHwAttach.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $log = Find-LatestDeployLog -ContentRoot $script:root
+    if (-not $log) { Show-Error 'No log in the Logs folder of the content root yet. Deploy a PC, or use Copy logs in WinPE.'; return }
+    Save-HwTest -KeepResult -Log $log
+} })
+$ui.BtnHwOpenLog.Add_Click({ Invoke-Safely {
+    $t = $ui.GridHwTests.SelectedItem
+    if ($t -and $t.Log) { Invoke-Item ([IO.Path]::Combine($script:root, $t.Log)) }
+} })
+Update-HwTestDetail
 
 #endregion
 
@@ -1372,5 +1475,6 @@ $ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Update-StickVersionBanner }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()
