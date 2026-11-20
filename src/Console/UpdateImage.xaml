@@ -1,15 +1,15 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Update Image" Width="780" Height="620" MinWidth="640" MinHeight="520"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
   <Window.Resources>
-    <Style TargetType="CheckBox">
+    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
       <Setter Property="Margin" Value="0,4"/>
     </Style>
   </Window.Resources>
 
   <DockPanel>
-    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+    <Border DockPanel.Dock="Bottom" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button x:Name="BtnStart" Content="Start update" Style="{StaticResource Primary}"/>
         <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
@@ -31,7 +31,7 @@
                   Content="Also reset the base: smallest image, but these updates can no longer be uninstalled on deployed PCs"/>
         <CheckBox x:Name="ChkBackup" IsChecked="True"
                   Content="Keep the current version in Images\Previous so it can be restored"/>
-        <TextBlock Style="{StaticResource Body}" Foreground="#6B7280" Margin="0,8,0,0"
+        <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0"
                    Text="The update runs in a separate window and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy."/>
       </StackPanel>
 

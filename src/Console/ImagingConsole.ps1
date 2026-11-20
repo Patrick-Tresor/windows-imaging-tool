@@ -1191,7 +1191,7 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
     if ($user -and -not $pw -and $script:sharePwSaved) { $pw = Get-SharePassword -ContentRoot $script:root }
-    Set-ShareTestText "Connecting to $target..." '#5B6170'
+    Set-ShareTestText "Connecting to $target..." '#64748B'
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
         $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks

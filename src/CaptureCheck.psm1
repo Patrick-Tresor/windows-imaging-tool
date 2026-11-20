@@ -214,7 +214,7 @@ function Get-CaptureCheckView {
         [pscustomobject]@{
             Id = $id; Name = $name; Detail = $detail
             Mark  = $(if ($ok -eq $true) { $tick } elseif ($ok -eq $false) { $cross } else { $wait })
-            Color = $(if ($ok -eq $true) { '#2E9E5B' } elseif ($ok -eq $false) { '#C4314B' } else { '#9CA3AF' })
+            Color = $(if ($ok -eq $true) { '#15803D' } elseif ($ok -eq $false) { '#B91C1C' } else { '#94A3B8' })
         }
     }
     $rows = New-Object Collections.ArrayList

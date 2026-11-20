@@ -163,19 +163,19 @@ function New-DeployProgressForm {
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $true
         BackColor = [Drawing.Color]::White
     }
-    $ui.Title = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 34)); Font = New-Object Drawing.Font('Segoe UI', (16 * $FontScale)) }
-    $ui.Hardware = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 52)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
+    $ui.Title = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 34)); Font = New-Object Drawing.Font('Segoe UI Semibold', (16 * $FontScale)) }
+    $ui.Hardware = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 52)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = (Get-ThemeColor 'Muted') }
     $ui.Facts = New-Object Windows.Forms.Label -Property @{
         Location = (New-Object Drawing.Point(224, 84)); Size = (New-Object Drawing.Size(672, 84))
         Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, (10 * $FontScale))
     }
     $ui.Detail = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 174)); Size = (New-Object Drawing.Size(672, 44)); Font = New-Object Drawing.Font('Segoe UI', (11 * $FontScale)) }
     $ui.Bar = New-Object Windows.Forms.ProgressBar -Property @{ Location = (New-Object Drawing.Point(224, 222)); Size = (New-Object Drawing.Size(672, 26)); Minimum = 0; Maximum = 100; Style = 'Continuous' }
-    $ui.Percent = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 252)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
+    $ui.Percent = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 252)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = (Get-ThemeColor 'Muted') }
     $ui.Message = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 276)); Size = (New-Object Drawing.Size(672, 44)) }
     $ui.Log = New-Object Windows.Forms.TextBox -Property @{
         Location = (New-Object Drawing.Point(224, 324)); Size = (New-Object Drawing.Size(672, 160)); Multiline = $true; ReadOnly = $true
-        ScrollBars = 'Vertical'; WordWrap = $true; BackColor = [Drawing.Color]::WhiteSmoke
+        ScrollBars = 'Vertical'; WordWrap = $true; BackColor = (Get-ThemeColor 'Subtle')
         Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, (9 * $FontScale))
     }
     $ui.ViewLog  = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(224, 496)); Size = (New-Object Drawing.Size(100, 32)); Text = 'View log' }
@@ -187,6 +187,7 @@ function New-DeployProgressForm {
     $ui.Form.Controls.AddRange(@($ui.Title, $ui.Hardware, $ui.Facts, $ui.Detail, $ui.Bar, $ui.Percent, $ui.Message, $ui.Log,
         $ui.ViewLog, $ui.Cmd, $ui.CopyLogs, $ui.Change, $ui.Shutdown, $ui.Restart))
     $ui.Sidebar = New-DeploySidebar -Form $ui.Form
+    Set-ModernLook -Root $ui.Form -Primary $ui.Restart
     Update-DeployProgressLayout -Ui $ui
     $ui
 }
@@ -222,10 +223,10 @@ function Update-DeployProgressForm {
     # Shows a view (Get-ProgressView) and the log tail. Only changed text is set, so the window does not flicker.
     param([Parameter(Mandatory)][hashtable]$Ui, [Parameter(Mandatory)]$View, [string[]]$LogLines = @())
     $colors = @{
-        Normal  = [Drawing.Color]::Black
-        Good    = [Drawing.Color]::ForestGreen
-        Warning = [Drawing.Color]::DarkOrange
-        Bad     = [Drawing.Color]::Firebrick
+        Normal  = Get-ThemeColor 'Text'
+        Good    = Get-ThemeColor 'Good'
+        Warning = Get-ThemeColor 'Warning'
+        Bad     = Get-ThemeColor 'Bad'
     }
     $set = { param($Control, $Text) if ($Control.Text -cne $Text) { $Control.Text = $Text } }
     & $set $Ui.Title $View.Title
