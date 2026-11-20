@@ -34,7 +34,7 @@ Assert-Equal (& $line 'Drivers').Detail 'Dell\Latitude 5521, 87 driver(s) added'
 Assert-Equal (& $line 'Applications').Detail '2 of 2 installed' 'applications: count'
 Assert-Equal (& $line 'Total time').Detail '47m 00s' 'total time from WinPE start to the end of first boot'
 Assert-Equal ($s.Text -like 'PC-0042 (Dell Inc. Latitude 5521) - Ready*') $true 'text starts with the PC and the verdict'
-Assert-Equal ($s.Text -match '(?m)^  OK\s+Domain join\s+Joined to corp\.local$') $true 'text has a line per part'
+Assert-Equal ($s.Text -match '(?m)^  OK\s+Domain join\s+Joined to corp\.local\r?$') $true 'text has a line per part'
 
 # A failed application: Not ready, and which one.
 $bad = @($checks | Where-Object name -ne 'App: Zoom') + [pscustomobject]@{ name = 'App: Zoom'; result = 'Failed'; detail = 'Failed: exit 1603' }
