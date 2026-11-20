@@ -66,14 +66,16 @@ function Resolve-ContentPath([string]$Root, [string]$Path) {
 function Get-AnswerFileNames([string]$Root) {
     # The answer file says which image to deploy, so without one there is nothing to do. Old USB sticks were built
     # without the AnswerFiles folder; say how to fix that instead of PowerShell's "Cannot find path".
-    $dir = Join-Path $Root 'AnswerFiles'
-    $names = @(Get-ChildItem -Path $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
+    # Always returns an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
+    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20).
+    $dir = [IO.Path]::Combine($Root, 'AnswerFiles')
+    $names = @(Get-ChildItem -LiteralPath $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
     if (-not $names) {
         throw ("No answer files in $dir, so this media doesn't know which image to deploy. " +
             'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
             'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
     }
-    $names
+    ,$names
 }
 
 function Select-AnswerFile([string[]]$Names, [string]$Default) {
@@ -114,8 +116,9 @@ function Add-AnswerPasswords([string]$Root, $Answer) {
 
 function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
     # Reads an answer file; a naming list entry's OU replaces the answer file's (domain joins only).
-    $path = Join-Path $Root "AnswerFiles\$Name.xml"
-    if (-not (Test-Path $path)) { throw "Answer file $Name not found in $Root\AnswerFiles." }
+    $dir = [IO.Path]::Combine($Root, 'AnswerFiles')
+    $path = [IO.Path]::Combine($dir, "$Name.xml")
+    if (-not [IO.File]::Exists($path)) { throw "Answer file $Name not found in $dir." }
     $a = Read-AnswerFile -Path $path
     Add-AnswerPasswords -Root $Root -Answer $a
     if ($Listed -and $Listed.OU) {
@@ -588,7 +591,7 @@ try {
         $listed = [pscustomobject]@{ Serial = "$($hw.Serial)"; ComputerName = $(if ($listed) { $listed.ComputerName } else { '' }); OU = $job.ou; AnswerFile = $job.answerFile }
     }
 
-    $names = Get-AnswerFileNames -Root $root
+    $names = @(Get-AnswerFileNames -Root $root)
     if (-not $AnswerFile) {
         if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
         elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
