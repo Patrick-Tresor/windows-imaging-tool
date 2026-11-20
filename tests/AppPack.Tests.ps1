@@ -124,6 +124,29 @@ try {
     Assert-Equal "$($found[0].Name)|$($found[0].Id)|$($found[0].Version)" 'VLC media player|VideoLAN.VLC|3.0.21' 'winget search: name, id and version from the French columns'
     Assert-Equal "$($found[1].Id)|$($found[1].Version)" 'VideoLAN.VLC.Nightly|4.0.0' 'winget search: the match column is not part of the version'
     Assert-Equal @(ConvertFrom-WingetSearch -Lines @('Aucun package ne correspond aux criteres d''entree.')).Count 0 'winget search: no result gives an empty list'
+    # Newer winget writes colour and taskbar progress codes before the header: they must not shift the columns.
+    $esc = [string][char]27; $bel = [string][char]7; $wide = [string][char]0x8C37 + [char]0x6B4C
+    $search = @(
+        "$esc]9;4;3;0$bel$esc[2K`r$esc[0mName                     Id                       Version       Match       Source",
+        '----------------------------------------------------------------------------------------------',
+        'Google Chrome            Google.Chrome            142.0.7444.60               winget',
+        "$wide Chrome Helper       Wide.ChromeHelper        1.2           Tag: chrome winget",
+        'Chromium                 Hibbiki.Chromium         142.0.7444.0  Tag: chrome winget')
+    $found = @(ConvertFrom-WingetSearch -Lines $search)
+    Assert-Equal (($found | ForEach-Object { "$($_.Id) $($_.Version)" }) -join ';') 'Google.Chrome 142.0.7444.60;Wide.ChromeHelper 1.2;Hibbiki.Chromium 142.0.7444.0' 'winget search: escape codes before the header and wide letters in a name are read'
+    $logFile = Join-Path $tmp 'winget-search.log'
+    $run = { param($a) [pscustomobject]@{ Lines = $search; ExitCode = 0 } }
+    Assert-Equal @(Find-WingetPackage -Query chrome -Runner $run -LogPath $logFile).Count 3 'winget search: rows come back through Find-WingetPackage'
+    Assert-Equal ((Get-Content -LiteralPath $logFile -Raw) -match 'Exit code: 0x00000000  Rows read: 3') $true 'winget search: every search is logged with its exit code'
+    $none = { param($a) [pscustomobject]@{ Lines = @('No package found matching input criteria.'); ExitCode = -1978335212 } }
+    Assert-Equal @(Find-WingetPackage -Query zzz -Runner $none -LogPath $logFile).Count 0 'winget search: no match is an empty list, not an error'
+    $failed = { param($a) [pscustomobject]@{ Lines = @('   - ', 'Failed when searching source: winget', 'An unexpected error occurred while executing the command:', '0x8a15000f : Data required by the source is missing'); ExitCode = -1978335217 } }
+    Assert-Throws { Find-WingetPackage -Query chrome -Runner $failed -LogPath $logFile } "*catalog is missing*" 'winget search: a missing catalog says why'
+    $odd = { param($a) [pscustomobject]@{ Lines = @('Something went wrong: 0x80072ee7'); ExitCode = -2147012889 } }
+    Assert-Throws { Find-WingetPackage -Query chrome -Runner $odd -LogPath $logFile } "*0x80072EE7*Something went wrong*" 'winget search: another failure shows the exit code and winget''s last message'
+    $script:calls = @()
+    $oldWinget = { param($a) $script:calls += , @($a); if ($a -contains '--disable-interactivity') { [pscustomobject]@{ Lines = @('Argument name was not recognized'); ExitCode = -1978335230 } } else { [pscustomobject]@{ Lines = $search; ExitCode = 0 } } }
+    Assert-Equal "$(@(Find-WingetPackage -Query chrome -Runner $oldWinget -LogPath $logFile).Count)|$($script:calls.Count)" '3|2' 'winget search: an old winget is asked again without --disable-interactivity'
     Assert-Equal (Get-WingetManifestUrl -Id 'VideoLAN.VLC' -Version '3.0.21') 'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/v/VideoLAN/VLC/3.0.21/VideoLAN.VLC.installer.yaml' 'winget manifest address'
 
     $vlcYaml = @'
