@@ -297,7 +297,11 @@ Assert-Equal @($cfg.scanExclusionsDone).Count 3 'scan exclusions: remembered onc
 Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config $cfg) $null 'scan tip: hidden once every folder was added'
 $tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ contentRoot = 'D:\Deploy' }) -Reason 'Windows refused the change (Tamper Protection or a policy)'
 Assert-Equal ($tip.Text -like '*could not add*(Windows refused the change (Tamper Protection or a policy))*Windows Security*C:\WinPE_Build*') $true 'scan tip: says why in one line, where to add them, and lists them'
-Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })) $null 'scan tip: hidden once the admin clicked Done'
+Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })).Count 3 'scan exclusions: the old Done flag does not stop the automatic add'
+$cfg = [pscustomobject]@{ scanExclusionsDone = $folders; scanTipDismissed = $folders }
+Assert-Equal (@(Get-ScanExclusionTodo -ContentRoot 'E:\Moved' -Config $cfg) -join ',') ([IO.Path]::Combine('E:\Moved', 'Images')) 'scan exclusions: a moved content root gets its new Images folder added'
+Assert-Equal ((Get-ScanExclusionTip -ContentRoot 'E:\Moved' -Config $cfg -Reason 'x').Folders -join ',') ([IO.Path]::Combine('E:\Moved', 'Images')) 'scan tip: Done hid the old folders only, a refused new location shows again'
+Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDismissed = $folders })) $null 'scan tip: hidden for the folders the admin clicked Done on'
 Assert-Equal (Read-ScanExclusionResult -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), 'no-such-scan-result.json'))).Ok $false 'scan exclusions: no result file = the script did not run'
 $resPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "scan-result-$([guid]::NewGuid().ToString('N')).json")
 try {

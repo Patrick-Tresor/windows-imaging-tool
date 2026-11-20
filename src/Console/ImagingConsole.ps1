@@ -1269,7 +1269,9 @@ $ui.BtnScanTipCopy.Add_Click({ Invoke-Safely {
 } })
 $ui.BtnScanTipDone.Add_Click({ Invoke-Safely {
     $c = Get-ConsoleConfig
-    $c | Add-Member -NotePropertyName scanTipDone -NotePropertyValue $true -Force
+    $tip = Get-ScanExclusionTip -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root } else { '' }) -Config $c
+    $hide = @(@(if ($c.PSObject.Properties['scanTipDismissed']) { @($c.scanTipDismissed) }) + @(if ($tip) { $tip.Folders }) | Where-Object { $_ } | Select-Object -Unique)
+    $c | Add-Member -NotePropertyName scanTipDismissed -NotePropertyValue $hide -Force
     Save-ConsoleConfig $c
     Update-ScanTip
 } })

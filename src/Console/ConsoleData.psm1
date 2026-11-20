@@ -1003,10 +1003,10 @@ function Get-ScanExclusionFolders {
 }
 
 function Get-ScanExclusionTodo {
-    # The folders the console still has to add: none once the admin clicked Done or every folder was added before
-    # (console.json scanExclusionsDone keeps the ones Defender took, so a new content root adds only its Images).
+    # The folders the console still has to add, worked out again at each start and each content root change, so a
+    # moved content root gets its new Images folder added (console.json scanExclusionsDone keeps the ones Defender
+    # took). The old scanTipDone flag from the manual-only banner is ignored: it must not stop the automatic add.
     param([string]$ContentRoot, $Config = (Get-ConsoleConfig))
-    if ($Config -and $Config.PSObject.Properties['scanTipDone'] -and $Config.scanTipDone) { return @() }
     $done = @(if ($Config -and $Config.PSObject.Properties['scanExclusionsDone']) { @($Config.scanExclusionsDone) | ForEach-Object { "$_".TrimEnd('\').ToLowerInvariant() } })
     @(Get-ScanExclusionFolders -ContentRoot $ContentRoot | Where-Object { $done -notcontains "$_".TrimEnd('\').ToLowerInvariant() })
 }
@@ -1035,7 +1035,9 @@ function Get-ScanExclusionTip {
     # or $null when there is nothing left to add.
     param([string]$ContentRoot, $Config = (Get-ConsoleConfig), [string]$Reason)
     $folders = @(Get-ScanExclusionTodo -ContentRoot $ContentRoot -Config $Config)
-    if (-not $folders.Count) { return $null }
+    # Done, hide this hides the tip for these folders only; a new location shows it again if Windows refuses again.
+    $hidden = @(if ($Config -and $Config.PSObject.Properties['scanTipDismissed']) { @($Config.scanTipDismissed) | ForEach-Object { "$_".TrimEnd('\').ToLowerInvariant() } })
+    if (-not @($folders | Where-Object { $hidden -notcontains "$_".TrimEnd('\').ToLowerInvariant() }).Count) { return $null }
     $why = if ($Reason) { " ($($Reason.TrimEnd('.')))" } else { '' }
     [pscustomobject]@{
         Text    = "The console could not add these folders to Microsoft Defender's exclusions$why. Builds and captures are faster when Defender skips them. Add them once in Windows Security (Virus & threat protection settings, Exclusions, Add an exclusion, Folder): $($folders -join '; ')"
