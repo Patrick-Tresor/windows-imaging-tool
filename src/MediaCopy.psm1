@@ -94,11 +94,13 @@ using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace ImagingTool {
-    // Copies one file on a background thread with CopyFileEx and no flags: the buffered copy that File Explorer,
-    // Copy-Item and File.Copy use. PowerShell polls Done for the progress bar. History on Patrick's Kingston stick:
-    // CopyFileEx unbuffered (COPY_FILE_NO_BUFFERING, robocopy /J style) gave 3 MB/s, a chunked FileStream copy
-    // 6-7 MB/s, Explorer about 40 MB/s. A big file is flushed to the stick at its end, so 100% means written.
-    public class MediaFileCopy {
+    // Copies a list of files, one after the other, on one background thread with CopyFileEx and no flags: the
+    // buffered copy that File Explorer, Copy-Item and File.Copy use. PowerShell polls Done for the progress bar.
+    // History on Patrick's Kingston stick: CopyFileEx unbuffered (COPY_FILE_NO_BUFFERING, robocopy /J style) gave
+    // 3 MB/s, a chunked FileStream copy 6-7 MB/s, Explorer about 40 MB/s. Thousands of small driver files go in one
+    // list, so PowerShell does no work (thread, paths, polling) per file. A file of FlushFrom bytes or more is
+    // flushed to the stick at its end, so 100% means written.
+    public class MediaBatchCopy {
         delegate uint ProgressRoutine(long total, long transferred, long streamSize, long streamTransferred,
             uint streamNumber, uint reason, IntPtr source, IntPtr destination, IntPtr data);
 
@@ -106,23 +108,30 @@ namespace ImagingTool {
         static extern bool CopyFileEx(string source, string destination, ProgressRoutine progress, IntPtr data,
             IntPtr cancel, uint flags);
 
-        long done;
-        readonly string source;
-        readonly string destination;
-        readonly bool big;
+        readonly object gate = new object();
+        long finished;      // bytes of the files already copied (their planned length)
+        long current;       // bytes of the file being copied
+        int completed;      // files already copied
+        readonly string[] sources;
+        readonly string[] destinations;
+        readonly long[] lengths;
+        readonly long flushFrom;
         ProgressRoutine callback;
         Thread thread;
 
         public volatile bool Cancel;
         public string ErrorMessage;
+        public int FailedIndex = -1;
 
-        public MediaFileCopy(string source, string destination, bool big) {
-            this.source = source;
-            this.destination = destination;
-            this.big = big;
+        public MediaBatchCopy(string[] sources, string[] destinations, long[] lengths, long flushFrom) {
+            this.sources = sources;
+            this.destinations = destinations;
+            this.lengths = lengths;
+            this.flushFrom = flushFrom;
         }
 
-        public long Done { get { return Interlocked.Read(ref done); } }
+        // Bytes copied so far over the whole list, the files done and the current file's bytes, read together.
+        public long[] Snapshot() { lock (gate) { return new long[] { finished + current, completed, current }; } }
 
         public void Start() {
             callback = OnProgress;
@@ -134,28 +143,39 @@ namespace ImagingTool {
         public bool Wait(int milliseconds) { return thread.Join(milliseconds); }
 
         void Run() {
-            try {
-                // CopyFileEx can't replace a read-only or hidden file (an update, or a stick built before):
-                // make it a plain file first.
-                if (File.Exists(destination)) File.SetAttributes(destination, FileAttributes.Normal);
-                if (!CopyFileEx(source, destination, callback, IntPtr.Zero, IntPtr.Zero, 0)) {
-                    ErrorMessage = Cancel ? "The copy was cancelled." : new Win32Exception(Marshal.GetLastWin32Error()).Message;
+            for (int i = 0; i < sources.Length; i++) {
+                if (Cancel) { FailedIndex = i; ErrorMessage = "The copy was cancelled."; return; }
+                string source = sources[i];
+                string destination = destinations[i];
+                try {
+                    string parent = Path.GetDirectoryName(destination);
+                    if (!String.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+                    // CopyFileEx can't replace a read-only or hidden file (an update, or a stick built before):
+                    // make it a plain file first.
+                    if (File.Exists(destination)) File.SetAttributes(destination, FileAttributes.Normal);
+                    if (!CopyFileEx(source, destination, callback, IntPtr.Zero, IntPtr.Zero, 0)) {
+                        FailedIndex = i;
+                        ErrorMessage = Cancel ? "The copy was cancelled." : new Win32Exception(Marshal.GetLastWin32Error()).Message;
+                        return;
+                    }
+                    // The copy keeps the source's attributes; a read-only file would block the next update of the stick.
+                    var attributes = File.GetAttributes(destination);
+                    if ((attributes & FileAttributes.ReadOnly) != 0) File.SetAttributes(destination, attributes & ~FileAttributes.ReadOnly);
+                    if (lengths[i] >= flushFrom) {
+                        using (var f = new FileStream(destination, FileMode.Open, FileAccess.Write, FileShare.Read)) { f.Flush(true); }
+                    }
+                } catch (Exception e) {
+                    FailedIndex = i;
+                    ErrorMessage = e.Message;
                     return;
                 }
-                // The copy keeps the source's attributes; a read-only file would block the next update of the stick.
-                var attributes = File.GetAttributes(destination);
-                if ((attributes & FileAttributes.ReadOnly) != 0) File.SetAttributes(destination, attributes & ~FileAttributes.ReadOnly);
-                if (big) {
-                    using (var f = new FileStream(destination, FileMode.Open, FileAccess.Write, FileShare.Read)) { f.Flush(true); }
-                }
-            } catch (Exception e) {
-                ErrorMessage = e.Message;
+                lock (gate) { finished += lengths[i]; current = 0; completed = i + 1; }
             }
         }
 
         uint OnProgress(long total, long transferred, long streamSize, long streamTransferred, uint streamNumber,
             uint reason, IntPtr source, IntPtr destination, IntPtr data) {
-            Interlocked.Exchange(ref done, transferred);
+            lock (gate) { current = transferred; }
             return Cancel ? 1u : 0u;  // PROGRESS_CANCEL : PROGRESS_CONTINUE
         }
     }
@@ -165,14 +185,14 @@ namespace ImagingTool {
 function Test-NativeCopy {
     # True when the copy helper (CopyFileEx, Windows only) is there, compiling it the first time.
     if ([IO.Path]::DirectorySeparatorChar -ne '\') { return $false }
-    if (-not ('ImagingTool.MediaFileCopy' -as [type])) { Add-Type -TypeDefinition $script:NativeCopySource }
+    if (-not ('ImagingTool.MediaBatchCopy' -as [type])) { Add-Type -TypeDefinition $script:NativeCopySource }
     $true
 }
 
 function Copy-MediaContent {
     <#
     .SYNOPSIS
-        Copies a Get-MediaCopyPlan to Destination on a background thread (ImagingTool.MediaFileCopy: CopyFileEx
+        Copies a Get-MediaCopyPlan to Destination on a background thread (ImagingTool.MediaBatchCopy: CopyFileEx
         buffered, as File Explorer copies; big files flushed at their end), while PowerShell only reads the byte
         count for the progress bar. Returns what it copied.
     .PARAMETER OnProgress
@@ -249,26 +269,39 @@ function Copy-MediaContent {
 
     $item = $null
     $fileDone = [int64]0
+    $items = @($Plan.Items)
+    $smallFiles = 0; $smallBytes = [int64]0; $smallSecs = 0.0
+    $at = 0
     try {
-        foreach ($item in @($Plan.Items)) {
-            $index++
-            $target = Join-CopyPath $Destination $item.Relative
-            $parent = Split-Path $target -Parent
-            if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-            $big = $item.Length -ge $LineEvery10PercentFrom
+        while ($at -lt $count) {
+            # One big file on its own (its own text lines, flushed at its end), or every small file up to the next
+            # big one in one batch: the copy thread runs through them with no PowerShell work per file.
+            $first = $items[$at]
+            $big = $first.Length -ge $LineEvery10PercentFrom
+            $batch = @(if ($big) { $first } else {
+                $end = $at
+                while ($end -lt $count -and $items[$end].Length -lt $LineEvery10PercentFrom) { $items[$end]; $end++ }
+            })
+            $sources = [string[]]@($batch | ForEach-Object { $_.Source })
+            $targets = [string[]]@($batch | ForEach-Object { Join-CopyPath $Destination $_.Relative })
+            $lengths = [int64[]]@($batch | ForEach-Object { [int64]$_.Length })
+            $batchBytes = [int64]0
+            foreach ($l in $lengths) { $batchBytes += $l }
             # Only big files get a line of their own: a line per driver file would be thousands of slow console writes.
-            if ($big -and -not $Quiet) { Write-Host ("Copying {0} ({1})..." -f $item.Relative, (Format-MediaSize $item.Length)) }
+            if ($big -and -not $Quiet) { Write-Host ("Copying {0} ({1})..." -f $first.Relative, (Format-MediaSize $first.Length)) }
             $fileClock = [Diagnostics.Stopwatch]::StartNew()
-            $fileDone = [int64]0
             $doneBefore = $done
             $nextLine = 10
+            $item = $first; $index = $at + 1; $fileDone = [int64]0
             & $show $item 0 $big
-            $job = New-Object ImagingTool.MediaFileCopy($item.Source, $target, $big)
+            $job = New-Object ImagingTool.MediaBatchCopy($sources, $targets, $lengths, $LineEvery10PercentFrom)
             $job.Start()
             try {
                 while (-not $job.Wait(250)) {
-                    $fileDone = $job.Done
-                    $done = $doneBefore + $fileDone
+                    $snap = $job.Snapshot()
+                    $n = [int][Math]::Min($snap[1], $batch.Count - 1)
+                    $item = $batch[$n]; $index = $at + $n + 1; $fileDone = $snap[2]
+                    $done = $doneBefore + $snap[0]
                     & $show $item $fileDone $false
                     & $lines $item $fileDone
                 }
@@ -277,17 +310,26 @@ function Copy-MediaContent {
                 if (-not $job.Wait(0)) { $job.Cancel = $true; [void]$job.Wait(5000) }
             }
             if ($job.ErrorMessage) {
-                throw "Copying $($item.Relative) to the USB stick failed: $($job.ErrorMessage) Is the stick full or was it unplugged?"
+                $failed = $batch[[Math]::Max(0, $job.FailedIndex)]
+                throw "Copying $($failed.Relative) to the USB stick failed: $($job.ErrorMessage) Is the stick full or was it unplugged?"
             }
+            $at += $batch.Count
+            $item = $batch[-1]; $index = $at
             $fileDone = $item.Length
-            $done = $doneBefore + $fileDone
+            $done = $doneBefore + $batchBytes
             & $show $item $fileDone $big
-            if ($big -and -not $Quiet) {
-                $fileSecs = [Math]::Max(0.001, $fileClock.Elapsed.TotalSeconds)
-                Write-Host ('  done in {0} ({1}/s)' -f (Format-MediaDuration $fileSecs), (Format-MediaSize ([int64]($item.Length / $fileSecs))))
+            $secs = [Math]::Max(0.001, $fileClock.Elapsed.TotalSeconds)
+            if ($big) {
+                if (-not $Quiet) { Write-Host ('  done in {0} ({1}/s)' -f (Format-MediaDuration $secs), (Format-MediaSize ([int64]($item.Length / $secs)))) }
+            } else {
+                $smallFiles += $batch.Count; $smallBytes += $batchBytes; $smallSecs += $secs
             }
         }
         if ($item) { & $show $item $fileDone $true }
+        # Where the time went: thousands of small files write far slower to a stick than one big image.
+        if ($smallFiles -and -not $Quiet) {
+            Write-Host ('Small files: {0} file(s), {1} in {2} ({3}/s)' -f $smallFiles, (Format-MediaSize $smallBytes), (Format-MediaDuration $smallSecs), (Format-MediaSize ([int64]($smallBytes / [Math]::Max(0.001, $smallSecs)))))
+        }
     } finally {
         if (-not $Quiet) {
             Write-Progress -Id 2 -Activity 'Copying' -Completed

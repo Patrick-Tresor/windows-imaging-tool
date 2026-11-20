@@ -77,7 +77,7 @@ function Get-MediaContent {
     $all = Get-MediaAnswerFileNames -ContentRoot $ContentRoot
     $names = @(if ($AnswerFiles) { $AnswerFiles } else { $all })
     # Plain arrays: everything is added with +=, and paths are deduplicated at the end.
-    $folders = @(); $files = @(); $problems = @(); $notes = @(); $rows = @()
+    $folders = @(); $files = @(); $problems = @(); $notes = @(); $rows = @(); $driverRoots = @()
 
     if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
@@ -129,6 +129,7 @@ function Get-MediaContent {
         foreach ($dir in @($a.DriverRoot, $a.AppLocation, $taskDir)) {
             if (-not $dir) { continue }
             if (Test-MediaRooted $dir) { $notes += "Answer file $name reads $dir at deploy time; it is not copied."; continue }
+            if ($dir -eq $a.DriverRoot) { $driverRoots += ConvertTo-MediaRelative $dir }
             if ($pickPacks -and $dir -eq $a.DriverRoot) {
                 # Only the chosen packs; PCs whose pack is left off get the maker fallback if it is on, else inbox drivers.
                 foreach ($p in $packs) {
@@ -167,6 +168,8 @@ function Get-MediaContent {
         Folders     = $folders
         Files       = $files
         Exclude     = $exclude
+        # Driver folders on the stick (relative), where the build packs each driver pack into one file.
+        DriverRoots = @($driverRoots | Where-Object { $_ } | Select-Object -Unique)
         Problems    = $problems
         Notes       = $notes
     }
