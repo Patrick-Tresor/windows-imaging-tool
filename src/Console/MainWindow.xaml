@@ -324,7 +324,7 @@
           <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
           </StackPanel>
-          <!-- The tool never changes Defender's settings itself: the admin adds these folders once. -->
+          <!-- Shown only when the console could not add these folders to Defender's exclusions itself (Add-ScanExclusions.ps1). -->
           <Border x:Name="BdrScanTip" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource InfoSoftBrush}" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8">
             <StackPanel>
               <TextBlock x:Name="TxtScanTip" TextWrapping="Wrap"/>
