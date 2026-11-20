@@ -280,15 +280,30 @@ try {
     Assert-Equal ((Get-DriverCatalog -ContentRoot $root).fallbacks.Dell) 'Dell\_Generic WinPE-Storage-Net' 'old content root: fallbacks stay'
 } finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
-# Faster builds: the folders the Media tab asks the admin to exclude in Windows Security (the tool never does it).
+# Faster builds: the folders the console adds to Defender's exclusions itself; the Media tab lists them only on failure.
 $folders = @(Get-ScanExclusionFolders -ContentRoot 'D:\Deploy' -WorkDir 'C:\WinPE_Build')
 Assert-Equal $folders[0] 'C:\WinPE_Build' 'scan tip: the WinPE work folder first'
 Assert-Equal ($folders[1] -like '*ImagingConsole*WinPEBuilds') $true 'scan tip: the WinPE build cache'
 Assert-Equal ($folders[2] -like 'D:\Deploy*Images') $true 'scan tip: the content root''s Images folder'
 Assert-Equal @(Get-ScanExclusionFolders -ContentRoot '\\server\Deploy').Count 2 'scan tip: a network share is not listed (its server scans it)'
 Assert-Equal (@($folders | Where-Object { $_ -match '^[A-Za-z]:\\?$' -or $_ -match '\.exe$' }).Count) 0 'scan tip: never a drive root or a program'
-$tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ contentRoot = 'D:\Deploy' })
-Assert-Equal ($tip.Text -like '*Windows Security*C:\WinPE_Build*') $true 'scan tip: says where to add them and lists them'
+$cfg = [pscustomobject]@{ contentRoot = 'D:\Deploy' }
+Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg).Count 3 'scan exclusions: all three to add at first start'
+$cfg = Add-ScanExclusionsDone -Config $cfg -Folders $folders[0], $folders[1]
+Assert-Equal (@(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg) -join ',') $folders[2] 'scan exclusions: only the folders not added yet (a new content root adds its Images)'
+$cfg = Add-ScanExclusionsDone -Config $cfg -Folders ($folders[2] + '\')
+Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg).Count 0 'scan exclusions: nothing left once all were added (trailing backslash ignored)'
+Assert-Equal @($cfg.scanExclusionsDone).Count 3 'scan exclusions: remembered once each'
+Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config $cfg) $null 'scan tip: hidden once every folder was added'
+$tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ contentRoot = 'D:\Deploy' }) -Reason 'Windows refused the change (Tamper Protection or a policy)'
+Assert-Equal ($tip.Text -like '*could not add*(Windows refused the change (Tamper Protection or a policy))*Windows Security*C:\WinPE_Build*') $true 'scan tip: says why in one line, where to add them, and lists them'
 Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })) $null 'scan tip: hidden once the admin clicked Done'
+Assert-Equal (Read-ScanExclusionResult -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), 'no-such-scan-result.json'))).Ok $false 'scan exclusions: no result file = the script did not run'
+$resPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "scan-result-$([guid]::NewGuid().ToString('N')).json")
+try {
+    [IO.File]::WriteAllText($resPath, '{"Ok":true,"NoDefender":false,"Added":["C:\\WinPE_Build"],"Message":"Added 1 folder(s)."}')
+    $r = Read-ScanExclusionResult -Path $resPath
+    Assert-Equal ($r.Ok -and @($r.Added).Count -eq 1) $true 'scan exclusions: reads the script''s result'
+} finally { Remove-Item $resPath -Force -ErrorAction SilentlyContinue }
 
 Complete-Tests 'All tests passed'

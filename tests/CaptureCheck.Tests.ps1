@@ -146,11 +146,16 @@ Assert-Equal (Test-SlowImageTarget -DriveType Network) $true 'slow target: netwo
 $captureText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Capture-VMImage.ps1')
 Assert-Equal ($captureText -match "'/Verify'") $false 'capture does not read the whole image back with /Verify'
 
-# No script changes Microsoft Defender's settings. The build and the capture used to add temporary exclusions; on
-# 2026-11-13 Defender blocked CaptureCheck.psm1 as malicious for that code, and the console could not start.
+# Only Add-ScanExclusions.ps1 changes Microsoft Defender's settings. The build and the capture used to add temporary
+# exclusions inside CaptureCheck.psm1; on 2026-11-13 Defender blocked that module as malicious and the console could
+# not start. Now one separate script, run in its own process by the console, adds folder exclusions only.
 $src = Join-Path $repo 'src'
 $touching = @(Get-ChildItem -LiteralPath $src -Recurse -File -Include *.ps1, *.psm1 |
     Where-Object { (Get-Content -Raw -LiteralPath $_.FullName) -match '(?i)\b(Add|Set|Remove)-MpPreference\b|-Exclusion(Path|Process|Extension)\b' } | ForEach-Object Name)
-Assert-Equal ($touching -join ', ') '' 'no script adds or removes Defender exclusions'
+Assert-Equal ($touching -join ', ') 'Add-ScanExclusions.ps1' 'only Add-ScanExclusions.ps1 changes Defender exclusions'
+$scanText = Get-Content -Raw -LiteralPath (Join-Path $src 'Add-ScanExclusions.ps1')
+Assert-Equal ($scanText -match '(?i)\b(Set|Remove)-MpPreference\b|-Exclusion(Process|Extension)\b|Disable') $false 'Defender exclusions: folders only, never a program or file type, never removed or turned off'
+$consoleText = Get-Content -Raw -LiteralPath (Join-Path $src 'Console\ImagingConsole.ps1')
+Assert-Equal ($consoleText -match "Start-Process powershell\.exe[^\r\n]*-WindowStyle Hidden" -and $consoleText -match "'Add-ScanExclusions\.ps1'") $true 'Defender exclusions run in their own hidden process, so a Defender block cannot stop the console'
 
 Complete-Tests 'All capture check tests passed.'

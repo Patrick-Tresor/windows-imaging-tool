@@ -180,11 +180,62 @@ function Update-Answers {
 }
 
 function Update-ScanTip {
-    # The Media tab's tip: which folders to add as Defender exclusions in Windows Security (the admin does it once).
-    $tip = Get-ScanExclusionTip -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root } else { '' })
+    # Defender exclusions for the build folders: the console adds them itself (Add-ScanExclusions.ps1, hidden, once
+    # per set of folders) and the Media tab's tip shows only when Windows refused, with the folders to add by hand.
+    $root = if (Test-ContentRoot $script:root) { $script:root } else { '' }
+    $todo = @(Get-ScanExclusionTodo -ContentRoot $root)
+    $key = $todo -join '|'
+    $show = $false
+    if ($todo.Count -and -not $script:scanRun) {
+        if ($script:scanTriedKey -ne $key) { $script:scanTriedKey = $key; Start-ScanExclusions $todo }
+        else { $show = $true }
+    }
+    $tip = if ($show) { Get-ScanExclusionTip -ContentRoot $root -Reason $script:scanFailReason }
     $ui.BdrScanTip.Visibility = if ($tip) { 'Visible' } else { 'Collapsed' }
     $ui.TxtScanTip.Text = if ($tip) { $tip.Text } else { '' }
 }
+
+function Start-ScanExclusions([string[]]$Folders) {
+    $id = [guid]::NewGuid().ToString('N')
+    $logDir = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'Logs')
+    $run = @{ Folders = $Folders; ResultPath = [IO.Path]::Combine($env:TEMP, "scan-exclusions-$id.json")
+        LogPath = [IO.Path]::Combine($logDir, 'defender-exclusions.log'); Started = Get-Date; Proc = $null }
+    try {
+        $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg (Join-Path $srcDir 'Add-ScanExclusions.ps1')),
+            '-Folder', (ConvertTo-Arg ($Folders -join '|')), '-ResultPath', (ConvertTo-Arg $run.ResultPath), '-LogPath', (ConvertTo-Arg $run.LogPath))
+        $run.Proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle Hidden -PassThru
+        $null = $run.Proc.Handle   # PowerShell 5.1 only keeps HasExited if the handle was read
+        $script:scanRun = $run
+        $script:scanTimer.Start()
+    } catch { $script:scanFailReason = 'the helper script could not start (Defender may have blocked it)' }
+}
+
+function Complete-ScanExclusions {
+    $run = $script:scanRun
+    if (-not $run) { $script:scanTimer.Stop(); return }
+    if (-not $run.Proc.HasExited) {
+        if (((Get-Date) - $run.Started).TotalMinutes -lt 2) { return }
+        try { $run.Proc.Kill() } catch { }
+    }
+    $script:scanTimer.Stop()
+    $script:scanRun = $null
+    $r = Read-ScanExclusionResult -Path $run.ResultPath
+    try { [IO.File]::Delete($run.ResultPath) } catch { }
+    if ($r.Ok) {
+        $script:scanFailReason = $null
+        Save-ConsoleConfig (Add-ScanExclusionsDone -Config (Get-ConsoleConfig) -Folders $run.Folders)
+        if (@($r.Added).Count) { Set-Status 'Microsoft Defender now skips the build folders, so builds and captures are faster.' }
+    }
+    else { $script:scanFailReason = "$($r.Message)" }
+    Update-ScanTip
+}
+
+$script:scanRun = $null
+$script:scanTriedKey = ''
+$script:scanFailReason = $null
+$script:scanTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:scanTimer.Interval = [timespan]::FromSeconds(1)
+$script:scanTimer.Add_Tick({ try { Complete-ScanExclusions } catch { $script:scanTimer.Stop(); $script:scanRun = $null; Set-Status "Defender exclusions: $($_.Exception.Message)" } })
 
 function Update-MediaPacks {
     # The Media tab's driver pack list: keeps what was unchecked, checks packs that are new since last time.
@@ -1303,7 +1354,7 @@ $ui.Tabs.Add_SelectionChanged({
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
     }
 })
-$window.Add_Closed({ $script:dashTimer.Stop() })
+$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop() })
 
 #endregion
 

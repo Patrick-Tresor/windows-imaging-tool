@@ -988,8 +988,8 @@ function Get-ScanExclusionFolders {
     .SYNOPSIS
         The folders the media build and the VM capture write many files to, which Microsoft Defender scans one by one
         and so slows down: the WinPE work folder, the WinPE build cache and the content root's Images folder. The
-        console shows them on the Media tab for the admin to add once in Windows Security. The tool itself never
-        changes Defender's settings: on 2026-11-13 Defender blocked a script of this tool as malicious for doing that.
+        console adds them to Defender's exclusions itself when it starts (src\Add-ScanExclusions.ps1, a separate
+        script so a Defender block can't stop the console) and shows them on the Media tab only if that fails.
         Folders only, never a drive root or a program, so nothing else on the PC goes unscanned.
     #>
     param([string]$ContentRoot, [string]$WorkDir = 'C:\WinPE_Build')
@@ -1002,13 +1002,43 @@ function Get-ScanExclusionFolders {
     @($out | Where-Object { $_ } | Select-Object -Unique)
 }
 
-function Get-ScanExclusionTip {
-    # The Media tab's tip: one line and the folder list, or $null once the admin said it is done.
+function Get-ScanExclusionTodo {
+    # The folders the console still has to add: none once the admin clicked Done or every folder was added before
+    # (console.json scanExclusionsDone keeps the ones Defender took, so a new content root adds only its Images).
     param([string]$ContentRoot, $Config = (Get-ConsoleConfig))
-    if ($Config -and $Config.PSObject.Properties['scanTipDone'] -and $Config.scanTipDone) { return $null }
-    $folders = @(Get-ScanExclusionFolders -ContentRoot $ContentRoot)
+    if ($Config -and $Config.PSObject.Properties['scanTipDone'] -and $Config.scanTipDone) { return @() }
+    $done = @(if ($Config -and $Config.PSObject.Properties['scanExclusionsDone']) { @($Config.scanExclusionsDone) | ForEach-Object { "$_".TrimEnd('\').ToLowerInvariant() } })
+    @(Get-ScanExclusionFolders -ContentRoot $ContentRoot | Where-Object { $done -notcontains "$_".TrimEnd('\').ToLowerInvariant() })
+}
+
+function Add-ScanExclusionsDone {
+    # Remembers folders Defender now skips (or all of them when Defender is not the antivirus), so they aren't added again.
+    param([Parameter(Mandatory)]$Config, [string[]]$Folders)
+    $all = @(@(if ($Config.PSObject.Properties['scanExclusionsDone']) { @($Config.scanExclusionsDone) }) + @($Folders) |
+        Where-Object { $_ } | Select-Object -Unique)
+    $Config | Add-Member -NotePropertyName scanExclusionsDone -NotePropertyValue $all -Force
+    $Config
+}
+
+function Read-ScanExclusionResult {
+    # Add-ScanExclusions.ps1's JSON result. No file means the script never ran: Defender may have blocked it.
+    param([string]$Path)
+    if (-not $Path -or -not [IO.File]::Exists($Path)) {
+        return [pscustomobject]@{ Ok = $false; NoDefender = $false; Added = @(); Message = 'the helper script did not run (Defender may have blocked it)' }
+    }
+    try { [IO.File]::ReadAllText($Path) | ConvertFrom-Json }
+    catch { [pscustomobject]@{ Ok = $false; NoDefender = $false; Added = @(); Message = 'its result could not be read' } }
+}
+
+function Get-ScanExclusionTip {
+    # The Media tab's tip, shown only when the console could not add the folders itself: one line and the folders,
+    # or $null when there is nothing left to add.
+    param([string]$ContentRoot, $Config = (Get-ConsoleConfig), [string]$Reason)
+    $folders = @(Get-ScanExclusionTodo -ContentRoot $ContentRoot -Config $Config)
+    if (-not $folders.Count) { return $null }
+    $why = if ($Reason) { " ($($Reason.TrimEnd('.')))" } else { '' }
     [pscustomobject]@{
-        Text    = "Builds and captures are faster when Microsoft Defender skips these folders. Add them once in Windows Security (Virus & threat protection settings, Exclusions, Add an exclusion, Folder): $($folders -join '; ')"
+        Text    = "The console could not add these folders to Microsoft Defender's exclusions$why. Builds and captures are faster when Defender skips them. Add them once in Windows Security (Virus & threat protection settings, Exclusions, Add an exclusion, Folder): $($folders -join '; ')"
         Folders = $folders
     }
 }
@@ -1244,7 +1274,7 @@ function Get-DeploymentLogs {
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings,
-    Get-ScanExclusionFolders, Get-ScanExclusionTip,
+    Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
