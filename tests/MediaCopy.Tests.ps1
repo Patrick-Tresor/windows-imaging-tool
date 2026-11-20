@@ -111,6 +111,35 @@ try {
     Assert-Equal @($lines | Where-Object { $_ -like 'Copying*' }).Count 0 'text: no line per small file'
     Assert-Equal (Test-Path (Join-T $dst 'Drivers\Dell\Latitude 5521\a.inf')) $true 'text: small files still copied'
 
+    # Small files go to the copy thread as one list (no PowerShell work per file); the progress still names each one.
+    Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null
+    for ($i = 1; $i -le 120; $i++) { New-TestFile (Join-T $src ('Drivers\Many\sub{0}\f{1:000}.inf' -f ($i % 7), $i)) (100 + $i) }
+    $many = Get-MediaCopyPlan -ContentRoot $src -Folders 'Drivers'
+    $updates = New-Object System.Collections.ArrayList
+    $result = Copy-MediaContent -Plan $many -Destination $dst -Quiet -OnProgress { param($s) [void]$updates.Add($s) }
+    Assert-Equal $result.FileCount $many.FileCount 'batch: every small file counted'
+    Assert-Equal $result.Bytes $many.TotalBytes 'batch: every byte counted'
+    $missingOnStick = @($many.Items | Where-Object { -not (Test-Path -LiteralPath (Join-T $dst $_.Relative)) })
+    Assert-Equal $missingOnStick.Count 0 'batch: every small file is on the stick, folders created'
+    Assert-Equal ([IO.File]::ReadAllBytes((Join-T $dst 'Drivers\Many\sub1\f050.inf')).Length) 150 'batch: file content copied'
+    Assert-Equal $updates[-1].FileIndex $many.FileCount 'batch: progress ends on the last file'
+    Assert-Equal $updates[-1].Percent 100 'batch: progress ends at 100%'
+    $rising = $true
+    for ($i = 1; $i -lt $updates.Count; $i++) { if ($updates[$i].BytesDone -lt $updates[$i - 1].BytesDone) { $rising = $false } }
+    Assert-Equal $rising $true 'batch: progress never goes backwards'
+
+    # A file that fails in the middle of a batch is the one named; the files before it are copied.
+    Remove-Item $dst -Recurse -Force; New-Item -ItemType Directory -Path $dst | Out-Null
+    $mixed = [pscustomobject]@{ Items = @(
+            [pscustomobject]@{ Relative = 'config\deploy-settings.json'; Source = (Join-T $src 'config\deploy-settings.json'); Length = 50 },
+            [pscustomobject]@{ Relative = 'Drivers\Gone.inf'; Source = (Join-T $src 'Drivers\Gone.inf'); Length = 5 },
+            [pscustomobject]@{ Relative = 'AnswerFiles\Staff.xml'; Source = (Join-T $src 'AnswerFiles\Staff.xml'); Length = 100 })
+        Directories = @(); TotalBytes = 155 }
+    $msg = ''
+    try { Copy-MediaContent -Plan $mixed -Destination $dst -Quiet | Out-Null } catch { $msg = $_.Exception.Message }
+    Assert-Equal ($msg -like 'Copying Drivers\Gone.inf to the USB stick failed:*') $true 'batch: error names the file that failed'
+    Assert-Equal (Test-Path (Join-T $dst 'config\deploy-settings.json')) $true 'batch: files before the failure are copied'
+
     # A source that can't be read gives a plain message naming the file.
     $bad = [pscustomobject]@{ Items = @([pscustomobject]@{ Relative = 'Images\Gone.wim'; Source = (Join-T $src 'Images\Gone.wim'); Length = 5 }); Directories = @(); TotalBytes = 5 }
     $msg = ''

@@ -413,6 +413,11 @@ switch ($Target) {
         Write-Host "ISO written to $iso"
     }
     'Usb' {
+        function Disable-ShortNames([string]$Letter) {
+            # No 8.3 short names on DEPLOY: NTFS makes one for every new file, an extra write per driver file on a
+            # slow stick. Nothing here uses them. A failure only costs that speed.
+            try { & fsutil.exe 8dot3name set "${Letter}:" 1 2>&1 | Out-Null } catch { Write-Verbose "fsutil 8dot3name: $_" }
+        }
         if ($UsbDiskNumber -lt 0) { throw 'Pass -UsbDiskNumber (see Get-Disk). That disk will be erased.' }
         $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
         $update = $null
@@ -438,6 +443,7 @@ switch ($Target) {
             Complete-BuildStep 'bootfiles'
             if ($update) {
                 Start-BuildStep 'content'
+                Disable-ShortNames $dataLetter
                 Remove-StaleMediaFiles -UpdatePlan $update -Destination "${dataLetter}:\"
                 $copied = Copy-MediaContent -Plan $update.Copy -Destination "${dataLetter}:\" -OnProgress $onCopy
                 Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
@@ -465,6 +471,7 @@ switch ($Target) {
 
             $bootLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $boot.PartitionNumber).DriveLetter
             $dataLetter = (Get-Partition -DiskNumber $UsbDiskNumber -PartitionNumber $data.PartitionNumber).DriveLetter
+            Disable-ShortNames $dataLetter
             Complete-BuildStep 'stick' -Detail "WINPE on ${bootLetter}:, DEPLOY on ${dataLetter}:"
             Write-Host "Copying WinPE boot files to ${bootLetter}:..."
             Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
