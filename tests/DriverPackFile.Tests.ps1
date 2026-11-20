@@ -21,6 +21,8 @@ $base = Join-Path ([IO.Path]::GetTempPath()) ("drvpack-" + [guid]::NewGuid().ToS
 $src = Join-Path $base 'content'
 $cache = Join-Path $base 'cache'
 try {
+    [void][IO.Directory]::CreateDirectory($base)
+    Set-DeployLogPath -Path (Join-Path $base 'test.log')
     New-T $src 'config\driver-catalog.json' (@'
 { "entries": [
     { "maker": "Dell", "model": "Latitude 5521", "path": "Dell\\Latitude 5521" },
