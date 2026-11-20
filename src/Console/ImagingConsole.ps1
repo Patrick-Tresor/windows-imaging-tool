@@ -410,18 +410,12 @@ function Update-Dashboard {
 function Update-DashboardDetail {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
-    $parts = @(
-        "Image: $($r.Image)", "Drivers: $($r.DriverPack)", "MAC: $($r.MacAddress)", "Phase: $($r.Phase)",
-        "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })"
-    )
+    # The deployment's result first (one line each: drivers, applications, tasks, join, BitLocker, time), then the rest.
+    $parts = @("MAC: $($r.MacAddress)", "Phase: $($r.Phase)", "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })")
     if ($r.Message)  { $parts += "Error: $($r.Message)" }
     if ($r.Warnings) { $parts += "Warnings: $($r.Warnings)" }
-    $ui.TxtDashDetail.Text = $parts -join '    '
-    if ($r.CheckResults) {
-        $when = if ($r.Checked) { ' (' + $r.Checked.ToString('yyyy-MM-dd HH:mm') + ')' } else { '' }
-        $lines = foreach ($c in $r.CheckResults) { '  {0,-8} {1}: {2}' -f $c.result, $c.name, $c.detail }
-        $ui.TxtDashDetail.Text += "`nPost-deploy checks$when`n" + ($lines -join "`n")
-    }
+    $ui.TxtDashDetail.Text = $(if ($r.ResultText) { $r.ResultText + "`n" } else { '' }) + ($parts -join '    ')
+    if ($r.Checked) { $ui.TxtDashDetail.Text += "    Checked: $($r.Checked.ToString('yyyy-MM-dd HH:mm'))" }
     $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }

@@ -293,6 +293,13 @@ function Get-DeploymentStatus {
         if ($state -eq 'Running' -and $updated -and ($Now - $updated).TotalMinutes -ge $StaleMinutes) { $state = 'Stalled' }
         $end = if ($finished) { $finished } elseif ($state -eq 'Running') { $Now } else { $updated }
         $log = [IO.Path]::ChangeExtension($file.FullName, '.log')
+        $result = $null
+        try {
+            $deploy = [pscustomobject]@{ computerName = $s.computerName; maker = $s.maker; model = $s.model; answerFile = $s.answerFile; image = $s.image
+                driverPack = $s.driverPack; driversAdded = $(if ($s.PSObject.Properties['driversAdded']) { $s.driversAdded }); toolVersion = $(if ($s.PSObject.Properties['toolVersion']) { $s.toolVersion })
+                started = $s.started; finished = $s.finished; state = $state; message = $s.message }
+            $result = Get-DeployResultSummary -Deploy $deploy -Checks $(if ($s.PSObject.Properties['checks']) { @($s.checks) } else { @() }) -Now $Now
+        } catch { $result = $null }
         [pscustomobject]@{
             Id           = $s.id
             ComputerName = $s.computerName
@@ -319,6 +326,10 @@ function Get-DeploymentStatus {
             LastSeen     = if ($updated) { Format-Duration ($Now - $updated) } else { '' }
             LogPath      = if (Test-Path $log) { $log } else { $null }
             StatusPath   = $file.FullName
+            ToolVersion  = if ($s.PSObject.Properties['toolVersion']) { $s.toolVersion } else { '' }
+            Result       = if ($result) { $result.Verdict } else { '' }
+            ResultState  = if ($result) { $result.Result } else { '' }
+            ResultText   = if ($result) { $result.Text } else { '' }
         }
     }
     @($rows) | Sort-Object Started -Descending
@@ -401,6 +412,75 @@ function Import-StickDeployStatus {
     $count
 }
 
+function Get-DeployResultSummary {
+    <#
+    .SYNOPSIS
+        One clear result for a deployment: is the PC ready, and drivers, applications, tasks, domain join, BitLocker
+        and total time in one line each. Used by the console's Dashboard and by FirstBoot.ps1 (DeployResult.txt).
+    .DESCRIPTION
+        -Deploy holds what WinPE recorded (status record or firstboot.json's deploy part): computerName, maker, model,
+        answerFile, image, driverPack, driversAdded, toolVersion, started, and when known finished, state, message.
+        -Checks are the post-deploy check results ({ name, result, detail }). Returns { Verdict, Result, Lines, Text }:
+        Result is Ready, Warning, NotReady, Failed or Running; each line is { Item, Result (OK, Warning, Failed, Info), Detail }.
+    #>
+    param([Parameter(Mandatory)]$Deploy, [object[]]$Checks = @(), [datetime]$Now = (Get-Date))
+    $get = { param($n) if ($Deploy -and $Deploy.PSObject.Properties[$n]) { $Deploy.$n } else { $null } }
+    $Checks = @($Checks | Where-Object { $_ })
+    $lines = [Collections.Generic.List[object]]::new()
+    $add = { param($item, $result, $detail) $lines.Add([pscustomobject]@{ Item = $item; Result = $result; Detail = "$detail" }) }
+    $fromCheck = { param($r) switch ("$r") { 'Passed' { 'OK' } 'Failed' { 'Failed' } 'Warning' { 'Warning' } default { 'Info' } } }
+
+    $pc = (@((& $get 'maker'), (& $get 'model')) | Where-Object { $_ }) -join ' '
+    & $add 'Windows' 'OK' ((@("$(& $get 'image')", $(if (& $get 'answerFile') { "answer file $(& $get 'answerFile')" })) | Where-Object { $_ }) -join ', ')
+
+    # Drivers: the pack WinPE added, and the Device drivers check (errors in Device Manager) when it ran.
+    $pack = "$(& $get 'driverPack')"
+    $added = & $get 'driversAdded'
+    $devCheck = @($Checks | Where-Object name -eq 'Device drivers') | Select-Object -First 1
+    $driverText = if (-not $pack -or $pack -eq 'inbox only') { "No driver pack for $(if ($pc) { $pc } else { 'this model' }): Windows' own drivers" }
+                  elseif ($null -ne $added -and "$added" -ne '') { "$pack, $added driver(s) added" } else { $pack }
+    $driverResult = if ($devCheck) { & $fromCheck $devCheck.result } elseif (-not $pack -or $pack -eq 'inbox only') { 'Warning' } else { 'OK' }
+    if ($devCheck -and $devCheck.result -ne 'Passed') { $driverText += "; $($devCheck.detail)" }
+    elseif ($driverResult -eq 'OK' -and (-not $pack -or $pack -eq 'inbox only')) { $driverResult = 'Warning' }
+    & $add 'Drivers' $driverResult $driverText
+
+    foreach ($kind in @(@('Applications', 'App: ', 'installed'), @('Tasks', 'Task: ', 'succeeded'))) {
+        $list = @($Checks | Where-Object { "$($_.name)".StartsWith($kind[1]) })
+        if (-not $list) { continue }
+        $bad = @($list | Where-Object result -ne 'Passed')
+        $text = '{0} of {1} {2}' -f ($list.Count - $bad.Count), $list.Count, $kind[2]
+        if ($bad) { $text += ': ' + (($bad | ForEach-Object { "$("$($_.name)".Substring($kind[1].Length)) ($($_.detail))" }) -join '; ') }
+        & $add $kind[0] $(if (@($bad | Where-Object result -eq 'Failed')) { 'Failed' } elseif ($bad) { 'Warning' } else { 'OK' }) $text
+    }
+    foreach ($name in 'Computer name', 'Domain join', 'Workgroup', 'BitLocker') {
+        $c = @($Checks | Where-Object name -eq $name) | Select-Object -First 1
+        if ($c) { & $add $name (& $fromCheck $c.result) $c.detail }
+    }
+
+    $started = ConvertTo-StatusDate (& $get 'started')
+    $finished = ConvertTo-StatusDate (& $get 'finished')
+    $state = "$(& $get 'state')"
+    if ($started) {
+        $end = if ($finished) { $finished } else { $Now }
+        & $add 'Total time' 'Info' ((Format-Duration ($end - $started)) + $(if (-not $finished -and $state -in 'Running', '') { ' so far' } else { '' }))
+    }
+    if (& $get 'toolVersion') { & $add 'Tool version' 'Info' (& $get 'toolVersion') }
+
+    $result = if ($state -eq 'Failed') { 'Failed' } elseif ($state -in 'Running', 'Stalled') { 'Running' }
+              elseif (@($lines | Where-Object Result -eq 'Failed')) { 'NotReady' } elseif (@($lines | Where-Object Result -eq 'Warning')) { 'Warning' } else { 'Ready' }
+    $verdict = switch ($result) {
+        'Failed'   { "Deployment failed: $(& $get 'message')".TrimEnd(': ') }
+        'Running'  { if ($state -eq 'Stalled') { 'Not finished: the PC stopped reporting' } else { 'Still deploying' } }
+        'NotReady' { 'Not ready: ' + ((@($lines | Where-Object Result -eq 'Failed' | ForEach-Object Item)) -join ', ') + ' failed' }
+        'Warning'  { 'Ready, with warnings: ' + ((@($lines | Where-Object Result -eq 'Warning' | ForEach-Object Item)) -join ', ') }
+        default    { 'Ready' }
+    }
+    $head = (@((& $get 'computerName'), $(if ($pc) { "($pc)" })) | Where-Object { $_ }) -join ' '
+    $textLines = @($(if ($head) { "$head - $verdict" } else { $verdict })) +
+        @($lines | ForEach-Object { '  {0,-8} {1,-13} {2}' -f $(switch ($_.Result) { 'OK' { 'OK' } 'Failed' { 'FAILED' } 'Warning' { 'WARNING' } default { '' } }), $_.Item, $_.Detail })
+    [pscustomobject]@{ Verdict = $verdict; Result = $result; Lines = $lines.ToArray(); Text = ($textLines -join [Environment]::NewLine) }
+}
+
 function Get-DeployStickRoots {
     # DEPLOY partitions of sticks this tool built that are plugged into this PC. DriveInfo, not Get-Volume: the
     # dashboard calls this every 10 seconds.
@@ -430,4 +510,4 @@ function Format-Duration([timespan]$Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Remove-DeploymentStatus, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration
+    Remove-DeploymentStatus, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

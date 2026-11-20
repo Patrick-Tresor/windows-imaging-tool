@@ -687,7 +687,7 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Checks column shows the result, and the details below show each check. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick with no network folder to report to show up here when you plug the stick into this PC; their first boot (applications, checks) is only reported with a network folder (Deploy Settings, section 3)."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick with no network folder to report to show up here when you plug the stick into this PC; their first boot (applications, checks) is only reported with a network folder (Deploy Settings, section 3)."/>
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
@@ -752,14 +752,15 @@
                     </DataGridTemplateColumn.CellTemplate>
                   </DataGridTemplateColumn>
                   <DataGridTextColumn Header="Step" Binding="{Binding Step}" Width="2*"/>
-                  <DataGridTextColumn Header="Checks" Binding="{Binding Checks}" Width="1.5*">
+                  <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="1.5*">
                     <DataGridTextColumn.ElementStyle>
                       <Style TargetType="TextBlock">
-                        <Setter Property="ToolTip" Value="{Binding Checks}"/>
+                        <Setter Property="ToolTip" Value="{Binding ResultText}"/>
                         <Style.Triggers>
-                          <DataTrigger Binding="{Binding CheckResult}" Value="Failed"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
-                          <DataTrigger Binding="{Binding CheckResult}" Value="Warning"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
-                          <DataTrigger Binding="{Binding CheckResult}" Value="Passed"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding ResultState}" Value="Failed"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                          <DataTrigger Binding="{Binding ResultState}" Value="NotReady"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+                          <DataTrigger Binding="{Binding ResultState}" Value="Warning"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding ResultState}" Value="Ready"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
                         </Style.Triggers>
                       </Style>
                     </DataGridTextColumn.ElementStyle>
