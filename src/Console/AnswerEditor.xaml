@@ -1,20 +1,15 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Answer File" Width="920" Height="660" MinWidth="820" MinHeight="560"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
   <Window.Resources>
     <ResourceDictionary Source="FormStyles.xaml"/>
   </Window.Resources>
 
   <DockPanel>
     <!-- Sections -->
-    <Border DockPanel.Dock="Left" Width="190" Background="#1F2937">
-      <ListBox x:Name="LstSections" Background="Transparent" BorderThickness="0" Foreground="#E5E7EB" Padding="0,12" FontSize="14">
-        <ListBox.ItemContainerStyle>
-          <Style TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="18,9"/>
-          </Style>
-        </ListBox.ItemContainerStyle>
+    <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource SidebarBrush}">
+      <ListBox x:Name="LstSections" Style="{StaticResource NavList}" ItemContainerStyle="{StaticResource NavItem}">
         <ListBoxItem Content="General"/>
         <ListBoxItem Content="Image and disk"/>
         <ListBoxItem Content="Applications"/>
@@ -28,7 +23,7 @@
     </Border>
 
     <!-- Problems and buttons -->
-    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+    <Border DockPanel.Dock="Bottom" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>

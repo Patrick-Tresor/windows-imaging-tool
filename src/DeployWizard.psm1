@@ -8,19 +8,86 @@ $script:DeploySteps = 'Answer file', 'Passwords', 'Computer name', 'Applications
 
 function Get-DeploySteps { $script:DeploySteps }
 
+# Colours of the WinPE windows: the same palette as the admin console (src\Console\Styles.xaml).
+$script:ThemeColors = @{
+    Accent = '#2563EB'; AccentHover = '#1D4ED8'; AccentPressed = '#1E40AF'; AccentOff = '#93C5FD'
+    Text = '#1E293B'; Muted = '#64748B'; Line = '#E2E8F0'; ControlBorder = '#CBD5E1'
+    Hover = '#F1F5F9'; Pressed = '#E2E8F0'; Subtle = '#F8FAFC'; Track = '#E2E8F0'
+    Sidebar = '#0F172A'; SidebarSelected = '#1E3A8A'; SidebarText = '#FFFFFF'; SidebarDone = '#94A3B8'; SidebarTodo = '#64748B'
+    Good = '#15803D'; Warning = '#B45309'; Bad = '#B91C1C'
+}
+
+function Get-ThemeColor {
+    # A palette colour by name, as a System.Drawing colour.
+    param([Parameter(Mandatory)][string]$Name)
+    [Drawing.ColorTranslator]::FromHtml($script:ThemeColors[$Name])
+}
+
+function Set-ThemeButton {
+    # Flat button with a thin border and a hover colour. Primary: filled with the accent colour (lighter while disabled).
+    param([Parameter(Mandatory)]$Button, [switch]$Primary)
+    $Button.FlatStyle = 'Flat'
+    $Button.UseVisualStyleBackColor = $false
+    $Button.Cursor = [Windows.Forms.Cursors]::Hand
+    $Button.FlatAppearance.BorderSize = 1
+    if ($Primary) {
+        $Button.Tag = 'Primary'
+        $back = if ($Button.Enabled) { 'Accent' } else { 'AccentOff' }
+        $Button.BackColor = Get-ThemeColor $back
+        $Button.ForeColor = [Drawing.Color]::White
+        $Button.FlatAppearance.BorderColor = Get-ThemeColor $back
+        $Button.FlatAppearance.MouseOverBackColor = Get-ThemeColor 'AccentHover'
+        $Button.FlatAppearance.MouseDownBackColor = Get-ThemeColor 'AccentPressed'
+    } else {
+        $Button.BackColor = [Drawing.Color]::White
+        $Button.ForeColor = Get-ThemeColor 'Text'
+        $Button.FlatAppearance.BorderColor = Get-ThemeColor 'ControlBorder'
+        $Button.FlatAppearance.MouseOverBackColor = Get-ThemeColor 'Hover'
+        $Button.FlatAppearance.MouseDownBackColor = Get-ThemeColor 'Pressed'
+    }
+}
+
+function Set-ModernLook {
+    <#
+    .SYNOPSIS
+        Gives a WinPE window (WinForms) the console's look: flat buttons with a thin border (Primary ones filled
+        with the accent colour), thin borders on text boxes and lists, an accent progress bar. Colours only:
+        sizes and positions stay as the layout helpers set them. Run it on the form, or on a panel whose
+        controls were added later.
+    #>
+    param([Parameter(Mandatory)]$Root, [object[]]$Primary = @())
+    # Labels, check boxes and lists without a colour of their own take the form's text colour.
+    if ($Root -is [Windows.Forms.Form]) { $Root.ForeColor = Get-ThemeColor 'Text' }
+    foreach ($c in @($Root.Controls)) {
+        if ($c -is [Windows.Forms.Button]) {
+            $isPrimary = [bool]@($Primary | Where-Object { [object]::ReferenceEquals($_, $c) }).Count
+            $hooked = "$($c.Tag)" -eq 'Primary'
+            Set-ThemeButton -Button $c -Primary:$isPrimary
+            # The wizard disables Next until the erase box is ticked: keep it readable as disabled.
+            if ($isPrimary -and -not $hooked) { $c.add_EnabledChanged({ Set-ThemeButton -Button $this -Primary }) }
+        }
+        elseif ($c -is [Windows.Forms.TextBoxBase] -or $c -is [Windows.Forms.ListBox]) { $c.BorderStyle = 'FixedSingle' }
+        elseif ($c -is [Windows.Forms.ProgressBar]) {
+            # WinPE has no visual styles, so the bar is drawn in these colours there.
+            $c.ForeColor = Get-ThemeColor 'Accent'; $c.BackColor = Get-ThemeColor 'Track'
+        }
+        elseif ($c -is [Windows.Forms.Panel] -and $c.Dock -ne 'Left') { Set-ModernLook -Root $c -Primary $Primary }
+    }
+}
+
 function New-DeploySidebar {
     # The dark band down the left of a window: a heading and the steps. Returns the step labels.
     param([Parameter(Mandatory)]$Form, [string]$Heading = 'Deploy Windows')
-    $panel = New-Object Windows.Forms.Panel -Property @{ Dock = 'Left'; Width = 200; BackColor = [Drawing.Color]::FromArgb(31, 58, 95) }
+    $panel = New-Object Windows.Forms.Panel -Property @{ Dock = 'Left'; Width = 200; BackColor = (Get-ThemeColor 'Sidebar') }
     $panel.Controls.Add((New-Object Windows.Forms.Label -Property @{
         Location = (New-Object Drawing.Point(14, 20)); Size = (New-Object Drawing.Size(180, 34)); Text = $Heading
-        Font = New-Object Drawing.Font('Segoe UI', 14); ForeColor = [Drawing.Color]::White
+        Font = New-Object Drawing.Font('Segoe UI Semibold', 14); ForeColor = [Drawing.Color]::White
     }))
     Set-FittingFont -Label $panel.Controls[0]
     $labels = for ($i = 0; $i -lt $script:DeploySteps.Count; $i++) {
         $l = New-Object Windows.Forms.Label -Property @{
-            Location = (New-Object Drawing.Point(14, (84 + 34 * $i))); Size = (New-Object Drawing.Size(180, 30))
-            Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]
+            Location = (New-Object Drawing.Point(12, (84 + 36 * $i))); Size = (New-Object Drawing.Size(176, 32))
+            Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]; Padding = (New-Object Windows.Forms.Padding(10, 0, 0, 0)); TextAlign = 'MiddleLeft'
         }
         $panel.Controls.Add($l); $l
     }
@@ -107,13 +174,12 @@ function Set-ButtonRow {
 }
 
 function Set-DeploySidebarStep {
-    # Steps before Current are done, Current is bold and white, the rest are dimmed.
+    # Steps before Current are done, Current is bold and white on a highlight, the rest are dimmed.
     param([Parameter(Mandatory)][object[]]$Labels, [Parameter(Mandatory)][int]$Current)
     for ($i = 0; $i -lt $Labels.Count; $i++) {
         $Labels[$i].Font = New-Object Drawing.Font('Segoe UI', 10, $(if ($i -eq $Current) { [Drawing.FontStyle]::Bold } else { [Drawing.FontStyle]::Regular }))
-        $Labels[$i].ForeColor = if ($i -eq $Current) { [Drawing.Color]::White }
-                                elseif ($i -lt $Current) { [Drawing.Color]::FromArgb(170, 200, 230) }
-                                else { [Drawing.Color]::FromArgb(120, 140, 165) }
+        $Labels[$i].ForeColor = Get-ThemeColor $(if ($i -eq $Current) { 'SidebarText' } elseif ($i -lt $Current) { 'SidebarDone' } else { 'SidebarTodo' })
+        $Labels[$i].BackColor = Get-ThemeColor $(if ($i -eq $Current) { 'SidebarSelected' } else { 'Sidebar' })
         Set-FittingFont -Label $Labels[$i]
     }
 }
@@ -263,13 +329,13 @@ function Show-DeployWizard {
         TopMost = $true; BackColor = [Drawing.Color]::White
     }
     $title = New-Object Windows.Forms.Label -Property @{
-        Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI', 15)
+        Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI Semibold', 15)
     }
     $hwText = "$($Hardware.Maker) $($Hardware.Model)   Serial $($Hardware.Serial)$(if ($Hardware.Sku) { "   SKU $($Hardware.Sku)" })"
-    $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = [Drawing.Color]::DimGray }
+    $hwLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 50)); Size = (New-Object Drawing.Size(672, 22)); Text = $hwText; ForeColor = (Get-ThemeColor 'Muted') }
     # One or two short lines; the details of a problem go to the deploy log. AutoEllipsis ends anything longer
     # with "..." instead of cutting a line in half or needing a scroll bar.
-    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 42)); ForeColor = [Drawing.Color]::Firebrick; AutoEllipsis = $true }
+    $err = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(224, 410)); Size = (New-Object Drawing.Size(672, 42)); ForeColor = (Get-ThemeColor 'Bad'); AutoEllipsis = $true }
     $back   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(584, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = '< Back' }
     $next   = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(690, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Next >' }
     $cancel = New-Object Windows.Forms.Button -Property @{ Location = (New-Object Drawing.Point(796, 456)); Size = (New-Object Drawing.Size(100, 32)); Text = 'Cancel'; DialogResult = 'Cancel' }
@@ -311,7 +377,7 @@ function Show-DeployWizard {
     # Page 2: computer name, OU, disk.
     $w.NameBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(0, 24)); Size = (New-Object Drawing.Size(300, 26)); MaxLength = 15; CharacterCasing = 'Upper' }
     # The hint goes under the box: beside it, a second line had no room and was cut off.
-    $w.NameHint = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 54)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = [Drawing.Color]::DimGray }
+    $w.NameHint = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 54)); Size = (New-Object Drawing.Size(672, 22)); ForeColor = (Get-ThemeColor 'Muted') }
     $w.JoinLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 70)); Size = (New-Object Drawing.Size(672, 22)) }
     $w.OuLabel = New-Object Windows.Forms.Label -Property @{ Location = (New-Object Drawing.Point(0, 100)); Size = (New-Object Drawing.Size(672, 22)); Text = 'Organizational unit (empty for the default Computers container)' }
     $w.OuBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(0, 124)); Size = (New-Object Drawing.Size(672, 26)) }
@@ -329,14 +395,15 @@ function Show-DeployWizard {
     # Page 4: summary and confirmation.
     $w.Summary = New-Object Windows.Forms.TextBox -Property @{
         Location = (New-Object Drawing.Point(0, 0)); Size = (New-Object Drawing.Size(672, 260)); Multiline = $true; ReadOnly = $true; ScrollBars = 'Vertical'
-        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, 10); BackColor = [Drawing.Color]::WhiteSmoke
+        Font = New-Object Drawing.Font([Drawing.FontFamily]::GenericMonospace, 10); BackColor = (Get-ThemeColor 'Subtle')
     }
-    $w.Confirm = New-Object Windows.Forms.CheckBox -Property @{ Location = (New-Object Drawing.Point(0, 276)); Size = (New-Object Drawing.Size(672, 26)); ForeColor = [Drawing.Color]::Firebrick }
+    $w.Confirm = New-Object Windows.Forms.CheckBox -Property @{ Location = (New-Object Drawing.Point(0, 276)); Size = (New-Object Drawing.Size(672, 26)); ForeColor = (Get-ThemeColor 'Bad') }
     $pages[4].Controls.AddRange(@($w.Summary, $w.Confirm))
 
     $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Cancel = $cancel; $w.Form = $form
     $w.HwLabel = $hwLabel; $w.IsDomain = $true; $w.Win11Anyway = $anyway; $w.Cmd = $cmdBtn; $w.CopyLogs = $logsBtn; $w.Serial = $Hardware.Serial
     $w.Layout = { Update-DeployWizardLayout -Wiz $script:wiz }
+    Set-ModernLook -Root $form -Primary $next
 
     $w.Show = {
         $w = $script:wiz
@@ -387,7 +454,7 @@ function Show-DeployWizard {
         try {
             $a = & $w.ReadAnswer $w.List.SelectedItem
             $w.Answer = $a
-            $w.About.ForeColor = [Drawing.Color]::Black
+            $w.About.ForeColor = Get-ThemeColor 'Text'
             $w.About.Text = (@(
                 "Image: $($a.ImageFile) (index $($a.ImageIndex))",
                 "Naming: $($a.NamingMode)$(if ($a.Prefix) { ", prefix $($a.Prefix)" })",
@@ -399,7 +466,7 @@ function Show-DeployWizard {
             ) -join "`n")
         }
         catch {
-            $w.About.ForeColor = [Drawing.Color]::Firebrick
+            $w.About.ForeColor = Get-ThemeColor 'Bad'
             $w.About.Text = $_.Exception.Message
         }
     })
@@ -498,6 +565,7 @@ function Set-SecretRows {
         $label = New-Object Windows.Forms.Label -Property @{ Text = $s.Label; Size = (New-Object Drawing.Size(400, 22)) }
         $box = New-Object Windows.Forms.TextBox -Property @{ UseSystemPasswordChar = $true; Size = (New-Object Drawing.Size(400, 26)) }
         $page.Controls.AddRange(@($label, $box))
+        $box.BorderStyle = 'FixedSingle'
         [pscustomobject]@{ Key = $s.Key; Label = $label; Box = $box }
     })
 }
@@ -606,12 +674,13 @@ function Show-PasswordPrompt {
     }
     $width = 520 - 40
     $msg = New-Object Windows.Forms.Label -Property @{ Text = $Message; Left = 20; Width = $width; Font = $font }
-    $err = New-Object Windows.Forms.Label -Property @{ Text = $Problem; Left = 20; Width = $width; Font = $font; ForeColor = [Drawing.Color]::Firebrick; Visible = [bool]$Problem }
+    $err = New-Object Windows.Forms.Label -Property @{ Text = $Problem; Left = 20; Width = $width; Font = $font; ForeColor = (Get-ThemeColor 'Bad'); Visible = [bool]$Problem }
     $box = New-Object Windows.Forms.TextBox -Property @{ Left = 20; Width = $width; UseSystemPasswordChar = $true; Font = $font }
     $ok = New-Object Windows.Forms.Button -Property @{ Text = 'OK'; DialogResult = 'OK' }
     $cancel = New-Object Windows.Forms.Button -Property @{ Text = $CancelText; DialogResult = 'Cancel' }
     $form.Controls.AddRange(@($msg, $err, $box, $ok, $cancel))
     $form.AcceptButton = $ok; $form.CancelButton = $cancel
+    Set-ModernLook -Root $form -Primary $ok
     # Heights from the text, never fixed: WinPE's fallback font is taller than Segoe UI.
     Set-FittedHeight -Control $msg -MaxLines 4
     $shown = @($msg) + @(if ($Problem) { Set-FittedHeight -Control $err -MaxLines 2; $err }) + @($box)
@@ -654,7 +723,7 @@ function Show-SecretsPrompt {
     }
     $width = 560 - 40
     $msg = New-Object Windows.Forms.Label -Property @{ Text = $intro; Left = 20; Width = $width; Font = $font }
-    $err = New-Object Windows.Forms.Label -Property @{ Text = 'Type every password.'; Left = 20; Width = $width; Font = $font; ForeColor = [Drawing.Color]::Firebrick; Visible = $false }
+    $err = New-Object Windows.Forms.Label -Property @{ Text = 'Type every password.'; Left = 20; Width = $width; Font = $font; ForeColor = (Get-ThemeColor 'Bad'); Visible = $false }
     $form.Controls.AddRange(@($msg, $err))
     Set-FittedHeight -Control $msg -MaxLines 4
     Set-FittedHeight -Control $err -MaxLines 1
@@ -673,6 +742,7 @@ function Show-SecretsPrompt {
     $cancel = New-Object Windows.Forms.Button -Property @{ Text = 'Cancel'; DialogResult = 'Cancel' }
     $form.Controls.AddRange(@($ok, $cancel))
     $form.AcceptButton = $ok; $form.CancelButton = $cancel
+    Set-ModernLook -Root $form -Primary $ok
     # Heights from the text, never fixed: WinPE's fallback font is taller than Segoe UI.
     $bottom = Set-StackLayout -Controls $shown -Top 16 -Gap 2 -GapAfter $gaps
     [void](Set-ButtonRow -Buttons @($ok, $cancel) -Right ($width + 20) -Bottom ($bottom + 52))
@@ -748,4 +818,4 @@ function Test-DeployWizardAvailable {
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable

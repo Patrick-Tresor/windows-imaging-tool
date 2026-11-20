@@ -1,29 +1,29 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Capture Wizard" Width="760" Height="620" MinWidth="620" MinHeight="460" ResizeMode="CanResizeWithGrip"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
   <Window.Resources>
     <!-- Long check box and option labels wrap instead of running off the right edge. -->
     <DataTemplate x:Key="WrapLabel">
       <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
     </DataTemplate>
-    <Style TargetType="CheckBox">
+    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
       <Setter Property="ContentTemplate" Value="{StaticResource WrapLabel}"/>
     </Style>
-    <Style TargetType="RadioButton">
+    <Style TargetType="RadioButton" BasedOn="{StaticResource {x:Type RadioButton}}">
       <Setter Property="ContentTemplate" Value="{StaticResource WrapLabel}"/>
     </Style>
     <Style x:Key="StepLabel" TargetType="TextBlock">
-      <Setter Property="Margin" Value="0,6"/>
-      <Setter Property="Foreground" Value="#9CA3AF"/>
+      <Setter Property="Margin" Value="0,7"/>
+      <Setter Property="Foreground" Value="{DynamicResource SidebarMutedBrush}"/>
     </Style>
   </Window.Resources>
 
   <DockPanel>
     <!-- Step list -->
-    <Border DockPanel.Dock="Left" Width="180" Background="#1F2937" Padding="18,20">
+    <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource SidebarBrush}" Padding="20,24">
       <StackPanel>
-        <TextBlock Text="Capture an image" Foreground="White" FontWeight="SemiBold" FontSize="15" Margin="0,0,0,16"/>
+        <TextBlock Text="Capture an image" Foreground="White" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,20"/>
         <TextBlock x:Name="Step0" Text="1. Reference machine" Style="{StaticResource StepLabel}"/>
         <TextBlock x:Name="Step1" Text="2. Run sysprep" Style="{StaticResource StepLabel}"/>
         <TextBlock x:Name="Step2" Text="3. Check the disk" Style="{StaticResource StepLabel}"/>
@@ -33,7 +33,7 @@
     </Border>
 
     <!-- Buttons -->
-    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+    <Border DockPanel.Dock="Bottom" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button x:Name="BtnBack" Content="Back"/>
         <Button x:Name="BtnNext" Content="Next" Style="{StaticResource Primary}"/>
@@ -78,7 +78,7 @@
             <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
             <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
           </DockPanel>
-          <TextBlock x:Name="TxtPrepHint" Style="{StaticResource Body}" Foreground="#6B7280"
+          <TextBlock x:Name="TxtPrepHint" Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}"
                      Text="Add -CheckOnly to only report problems, or -RemoveUserApps to remove the Store apps that block sysprep."/>
           <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
                     Content="The reference machine has been prepared with sysprep and is shut down"/>
@@ -102,14 +102,14 @@
                   <TextBlock Text="{Binding Mark}" Foreground="{Binding Color}" FontWeight="Bold" FontSize="15"/>
                   <StackPanel Grid.Column="1">
                     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                    <TextBlock Text="{Binding Detail}" Foreground="#4B5563" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource BodyBrush}" TextWrapping="Wrap"/>
                   </StackPanel>
                 </Grid>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <ProgressBar x:Name="BarCheck" Height="8" Margin="26,6,0,0" Minimum="0" Maximum="100" Visibility="Collapsed"
-                       Foreground="{DynamicResource AccentBrush}" Background="#E8EAEE" BorderThickness="0"/>
+                       Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
           <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
             <Button x:Name="BtnCheckAgain" Content="Check again" Margin="0"/>
             <Button x:Name="BtnCheckLog" Content="Open log" IsEnabled="False"/>
@@ -155,7 +155,7 @@
                    Text="Clicking Build and start opens a window that builds the capture media (a few minutes). Boot the reference machine from it to capture. The new image appears on the Images tab when it finishes."/>
         <TextBlock x:Name="TxtIssues" DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="{DynamicResource ErrorBrush}" Margin="0,10,0,0"/>
         <TextBox x:Name="TxtSummary" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap"
-                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Background="#F9FAFB"/>
+                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SubtleBrush}"/>
       </DockPanel>
     </Grid>
   </DockPanel>

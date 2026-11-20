@@ -158,7 +158,7 @@ function Update-BuildProgressWindow {
         $view = Get-BuildStepView -Data $data
         $b.TxtElapsed.Text = $view.Elapsed
         $b.TxtSummary.Text = $view.Summary
-        $b.TxtSummary.Foreground = ConvertTo-BuildBrush $(if ($view.Failed) { '#C4314B' } elseif ($view.Finished) { '#2E9E5B' } else { '#5B6170' })
+        $b.TxtSummary.Foreground = ConvertTo-BuildBrush $(if ($view.Failed) { '#B91C1C' } elseif ($view.Finished) { '#15803D' } else { '#64748B' })
         Update-BuildStepRows -Target $Ctx.Rows -Rows @($view.Rows)
         if ($view.Finished) {
             $Ctx.Timer.Stop()
@@ -168,7 +168,7 @@ function Update-BuildProgressWindow {
             $Ctx.Timer.Stop()
             Invoke-BuildFinished $Ctx
             $b.TxtSummary.Text = if ($Ctx.Hidden) { "The $($Ctx.Noun) stopped before the end. Click Open log to see why." } else { "The $($Ctx.Noun) window was closed before the $($Ctx.Noun) finished." }
-            $b.TxtSummary.Foreground = ConvertTo-BuildBrush '#C4314B'
+            $b.TxtSummary.Foreground = ConvertTo-BuildBrush '#B91C1C'
         }
     } catch { $b.TxtSummary.Text = "Can't read the build progress: $($_.Exception.Message)" }
 }

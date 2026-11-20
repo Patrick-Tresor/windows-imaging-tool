@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Build progress" Width="820" Height="600" MinWidth="560" MinHeight="360"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
 
   <DockPanel Margin="16">
     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
@@ -21,7 +21,7 @@
                  Text="Closing this window does not stop the build."/>
     </DockPanel>
 
-    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="4" Padding="16,8">
+    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="16,10">
       <ScrollViewer x:Name="ScrollSteps" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <ItemsControl x:Name="LstSteps">
           <ItemsControl.ItemTemplate>
@@ -37,12 +37,12 @@
                   <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <DockPanel Grid.Row="0" Grid.Column="0">
-                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="#3B3F48" Margin="8,0,0,0"/>
-                  <TextBlock x:Name="StepName" Text="{Binding Name}" Foreground="#1F2329" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="{DynamicResource BodyBrush}" Margin="8,0,0,0"/>
+                  <TextBlock x:Name="StepName" Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"/>
                 </DockPanel>
                 <ProgressBar x:Name="Bar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
                              Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
-                             Foreground="{DynamicResource AccentBrush}" Background="#E8EAEE" BorderThickness="0"/>
+                             Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
                 <TextBlock x:Name="Status" Grid.Row="1" Grid.Column="1" Grid.RowSpan="1" Text="{Binding Status}" Margin="12,0,0,0"
                            VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
@@ -50,23 +50,23 @@
               </Grid>
               <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding State}" Value="pending">
-                  <Setter TargetName="StepName" Property="Foreground" Value="#8A8F99"/>
+                  <Setter TargetName="StepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding State}" Value="done">
-                  <Setter TargetName="Bar" Property="Foreground" Value="#2E9E5B"/>
-                  <Setter TargetName="Status" Property="Foreground" Value="#2E9E5B"/>
+                  <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding State}" Value="reused">
-                  <Setter TargetName="Bar" Property="Foreground" Value="#2E9E5B"/>
-                  <Setter TargetName="Status" Property="Foreground" Value="#2E9E5B"/>
+                  <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding State}" Value="skipped">
-                  <Setter TargetName="Bar" Property="Foreground" Value="#C9CDD4"/>
-                  <Setter TargetName="StepName" Property="Foreground" Value="#8A8F99"/>
+                  <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ControlBorderBrush}"/>
+                  <Setter TargetName="StepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding State}" Value="failed">
-                  <Setter TargetName="Bar" Property="Foreground" Value="#C4314B"/>
-                  <Setter TargetName="Status" Property="Foreground" Value="#C4314B"/>
+                  <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+                  <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
                   <Setter TargetName="Status" Property="FontWeight" Value="SemiBold"/>
                 </DataTrigger>
               </DataTemplate.Triggers>

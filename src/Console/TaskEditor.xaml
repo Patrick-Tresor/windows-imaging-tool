@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Task" Width="860" Height="720" MinWidth="680" MinHeight="520"
-        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="White">
+        WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
   <Window.Resources>
     <ResourceDictionary Source="FormStyles.xaml"/>
     <Style x:Key="Heading" TargetType="TextBlock">
@@ -13,7 +13,7 @@
 
   <DockPanel>
     <!-- Problems and buttons -->
-    <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,10">
+    <Border DockPanel.Dock="Bottom" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
