@@ -419,6 +419,7 @@ function Get-WingetSearchFailure {
         '0x8A150044' { return "winget's source agreements were not accepted (exit $hex). Run 'winget search chrome' once in a command prompt." }
         '0x8A15000F' { return "winget's catalog is missing (exit $hex). Run 'winget source reset --force' as administrator." }
         '0x8A150011' { return "winget has no 'winget' source (exit $hex). Run 'winget source reset --force' as administrator." }
+        '0xC0000005' { return "winget crashed (exit $hex). Update App Installer from the Microsoft Store or github.com/microsoft/winget-cli/releases." }
     }
     $last = @($Lines | ForEach-Object { Remove-ConsoleControl "$_" } | Where-Object { $_ -match '\w' -and $_ -notmatch '^-{5,}\s*$' -and $_ -notmatch '^\s*[\d.]+\s*[KMG]?B\s*/' } | Select-Object -Last 1)
     $why = if ($last) { $last[0].Trim() } else { 'no message' }
@@ -447,7 +448,8 @@ function Find-WingetPackage {
     $wingetArgs = @('search', '--query', $Query, '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
     $r = & $Runner $wingetArgs
     # winget before 1.4 doesn't know --disable-interactivity and stops on it.
-    if (('0x{0:X8}' -f [int]$r.ExitCode) -eq '0x8A150002') { $wingetArgs = $wingetArgs[0..5]; $r = & $Runner $wingetArgs }
+    $oldWinget = ('0x{0:X8}' -f [int]$r.ExitCode) -eq '0x8A150002'
+    if ($oldWinget) { $wingetArgs = $wingetArgs[0..5]; $r = & $Runner $wingetArgs }
     $lines = @($r.Lines)
     $found = @(ConvertFrom-WingetSearch -Lines $lines)
     if ($LogPath) {
@@ -460,6 +462,7 @@ function Find-WingetPackage {
     }
     if ($found.Count) { return $found }
     $why = Get-WingetSearchFailure -Lines $lines -ExitCode ([int]$r.ExitCode)
+    if ($why -and $oldWinget) { $why = "winget on this PC is too old (before 1.4) and failed (exit $('0x{0:X8}' -f [int]$r.ExitCode)). Update App Installer from the Microsoft Store or github.com/microsoft/winget-cli/releases." }
     if ($why) { throw "$why Details: $LogPath" }
     # winget printed a results table but no row could be read: say so, it isn't "nothing found".
     if (@($lines | Where-Object { (Remove-ConsoleControl $_) -match '^-{5,}\s*$' }).Count) {
