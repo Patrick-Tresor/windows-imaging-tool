@@ -325,7 +325,8 @@ Complete-FirstBootStep -Progress $progress -Step 'finished'; Save-Progress
 # One clear result for this PC: ready or not, drivers, applications, tasks, join, BitLocker and total time.
 # Kept in C:\Windows\Temp\DeployResult.txt next to FirstBoot.log; the Dashboard shows the same lines.
 try {
-    Import-Module (Join-Path $deployDir 'DeployStatus.psm1') -Force
+    # Not -Force: importing it again would drop the status record that reporting to the dashboard uses.
+    if (-not (Get-Command Get-DeployResultSummary -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $deployDir 'DeployStatus.psm1') }
     $deployInfo = if ($plan.PSObject.Properties['deploy'] -and $plan.deploy) { $plan.deploy } else { [pscustomobject]@{ answerFile = $plan.answerFile } }
     $deployInfo | Add-Member -NotePropertyName finished -NotePropertyValue ((Get-Date).ToString('o')) -Force
     $deployInfo | Add-Member -NotePropertyName state -NotePropertyValue 'Succeeded' -Force
