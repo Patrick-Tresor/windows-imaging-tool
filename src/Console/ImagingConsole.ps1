@@ -36,6 +36,16 @@ if ($HideConsole) {
     } catch { }
 }
 
+# The console runs inside powershell.exe, so Windows grouped it under PowerShell on the taskbar and showed
+# PowerShell's icon. Its own app ID, set before any window opens, gives it a taskbar button of its own that shows
+# the window's icon (the logo, Set-ConsoleLogo in XamlWindow.psm1).
+try {
+    Add-Type -Namespace ImagingTool -Name AppId -MemberDefinition @'
+[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+'@
+    [void][ImagingTool.AppId]::SetCurrentProcessExplicitAppUserModelID('ImagingTool.ImagingConsole')
+} catch { }
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
