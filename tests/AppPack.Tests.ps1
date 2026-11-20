@@ -145,8 +145,8 @@ try {
     $odd = { param($a) [pscustomobject]@{ Lines = @('Something went wrong: 0x80072ee7'); ExitCode = -2147012889 } }
     Assert-Throws { Find-WingetPackage -Query chrome -Runner $odd -LogPath $logFile } "*0x80072EE7*Something went wrong*" 'winget search: another failure shows the exit code and winget''s last message'
     $script:calls = @()
-    $old = { param($a) $script:calls += , @($a); if ($a -contains '--disable-interactivity') { [pscustomobject]@{ Lines = @('Argument name was not recognized'); ExitCode = -1978335230 } } else { [pscustomobject]@{ Lines = $search; ExitCode = 0 } } }
-    Assert-Equal "$(@(Find-WingetPackage -Query chrome -Runner $old -LogPath $logFile).Count)|$($script:calls.Count)" '3|2' 'winget search: an old winget is asked again without --disable-interactivity'
+    $oldWinget = { param($a) $script:calls += , @($a); if ($a -contains '--disable-interactivity') { [pscustomobject]@{ Lines = @('Argument name was not recognized'); ExitCode = -1978335230 } } else { [pscustomobject]@{ Lines = $search; ExitCode = 0 } } }
+    Assert-Equal "$(@(Find-WingetPackage -Query chrome -Runner $oldWinget -LogPath $logFile).Count)|$($script:calls.Count)" '3|2' 'winget search: an old winget is asked again without --disable-interactivity'
     Assert-Equal (Get-WingetManifestUrl -Id 'VideoLAN.VLC' -Version '3.0.21') 'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/v/VideoLAN/VLC/3.0.21/VideoLAN.VLC.installer.yaml' 'winget manifest address'
 
     $vlcYaml = @'
