@@ -335,6 +335,8 @@ try {
     $deployDir = Join-Path $mount 'Deploy'
     New-Item -ItemType Directory -Path "$deployDir\config" -Force | Out-Null
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
+    # The logo shown in the WinPE wizard and progress window.
+    Copy-Item "$repo\src\Assets" "$deployDir\Assets" -Recurse -Force
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.

@@ -23,6 +23,13 @@ function Get-ThemeColor {
     [Drawing.ColorTranslator]::FromHtml($script:ThemeColors[$Name])
 }
 
+function Get-LogoImage {
+    # The tool's logo as a WinForms image, or $null when Assets\logo.png is missing or unreadable.
+    $png = [IO.Path]::Combine($PSScriptRoot, 'Assets', 'logo.png')
+    try { if ([IO.File]::Exists($png)) { return [Drawing.Image]::FromFile($png) } } catch { }
+    $null
+}
+
 function Set-ThemeButton {
     # Flat button with a thin border and a hover colour. Primary: filled with the accent colour (lighter while disabled).
     param([Parameter(Mandatory)]$Button, [switch]$Primary)
@@ -57,7 +64,11 @@ function Set-ModernLook {
     #>
     param([Parameter(Mandatory)]$Root, [object[]]$Primary = @())
     # Labels, check boxes and lists without a colour of their own take the form's text colour.
-    if ($Root -is [Windows.Forms.Form]) { $Root.ForeColor = Get-ThemeColor 'Text' }
+    if ($Root -is [Windows.Forms.Form]) {
+        $Root.ForeColor = Get-ThemeColor 'Text'
+        $ico = [IO.Path]::Combine($PSScriptRoot, 'Assets', 'logo.ico')
+        try { if ([IO.File]::Exists($ico)) { $Root.Icon = New-Object Drawing.Icon($ico) } } catch { }
+    }
     foreach ($c in @($Root.Controls)) {
         if ($c -is [Windows.Forms.Button]) {
             $isPrimary = [bool]@($Primary | Where-Object { [object]::ReferenceEquals($_, $c) }).Count
@@ -79,14 +90,24 @@ function New-DeploySidebar {
     # The dark band down the left of a window: a heading and the steps. Returns the step labels.
     param([Parameter(Mandatory)]$Form, [string]$Heading = 'Deploy Windows')
     $panel = New-Object Windows.Forms.Panel -Property @{ Dock = 'Left'; Width = 200; BackColor = (Get-ThemeColor 'Sidebar') }
+    # The logo above the heading when Assets\logo.png is there (X:\Deploy\Assets in WinPE). The heading is the
+    # panel's first control.
+    $logo = Get-LogoImage
+    $headTop = if ($logo) { 72 } else { 20 }
     $panel.Controls.Add((New-Object Windows.Forms.Label -Property @{
-        Location = (New-Object Drawing.Point(14, 20)); Size = (New-Object Drawing.Size(180, 34)); Text = $Heading
+        Location = (New-Object Drawing.Point(14, $headTop)); Size = (New-Object Drawing.Size(180, 34)); Text = $Heading
         Font = New-Object Drawing.Font('Segoe UI Semibold', 14); ForeColor = [Drawing.Color]::White
     }))
     Set-FittingFont -Label $panel.Controls[0]
+    if ($logo) {
+        $panel.Controls.Add((New-Object Windows.Forms.PictureBox -Property @{
+            Location = (New-Object Drawing.Point(16, 18)); Size = (New-Object Drawing.Size(48, 48)); SizeMode = 'Zoom'; Image = $logo; BackColor = (Get-ThemeColor 'Sidebar')
+        }))
+    }
+    $stepsTop = $headTop + 64
     $labels = for ($i = 0; $i -lt $script:DeploySteps.Count; $i++) {
         $l = New-Object Windows.Forms.Label -Property @{
-            Location = (New-Object Drawing.Point(12, (84 + 36 * $i))); Size = (New-Object Drawing.Size(176, 32))
+            Location = (New-Object Drawing.Point(12, ($stepsTop + 36 * $i))); Size = (New-Object Drawing.Size(176, 32))
             Text = '{0}   {1}' -f ($i + 1), $script:DeploySteps[$i]; Padding = (New-Object Windows.Forms.Padding(10, 0, 0, 0)); TextAlign = 'MiddleLeft'
         }
         $panel.Controls.Add($l); $l
@@ -818,4 +839,4 @@ function Test-DeployWizardAvailable {
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable

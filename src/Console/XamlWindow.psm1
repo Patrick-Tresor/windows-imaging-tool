@@ -42,6 +42,23 @@ function Get-XamlControls {
     $map
 }
 
+function Set-ConsoleLogo {
+    # The tool's logo (src\Assets): the window's icon, and the picture of an Image named ImgLogo in the window.
+    # A missing or unreadable file leaves the window without it.
+    param([Parameter(Mandatory)]$Window, [hashtable]$Controls = @{})
+    $assets = [IO.Path]::Combine((Split-Path $PSScriptRoot -Parent), 'Assets')
+    try {
+        $ico = [IO.Path]::Combine($assets, 'logo.ico')
+        if ([IO.File]::Exists($ico)) { $Window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($ico)) }
+        $png = [IO.Path]::Combine($assets, 'logo.png')
+        if ($Controls['ImgLogo'] -and [IO.File]::Exists($png)) {
+            $bmp = New-Object Windows.Media.Imaging.BitmapImage
+            $bmp.BeginInit(); $bmp.CacheOption = 'OnLoad'; $bmp.UriSource = [Uri]::new($png); $bmp.EndInit()
+            $Controls['ImgLogo'].Source = $bmp
+        }
+    } catch { }
+}
+
 function New-ConsoleWindow {
     # Loads src\Console\<Name>, with the shared styles, wheel scrolling and -Owner. Returns Window and Controls.
     param([Parameter(Mandatory)][string]$Name, $Owner)
@@ -49,7 +66,9 @@ function New-ConsoleWindow {
     $window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
     if ($Owner) { $window.Owner = $Owner }
     Enable-WheelScrolling $window
-    [pscustomobject]@{ Window = $window; Controls = (Get-XamlControls -Xaml $xaml -Window $window) }
+    $controls = Get-XamlControls -Xaml $xaml -Window $window
+    Set-ConsoleLogo -Window $window -Controls $controls
+    [pscustomobject]@{ Window = $window; Controls = $controls }
 }
 
-Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, New-ConsoleWindow
+Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, Set-ConsoleLogo, New-ConsoleWindow

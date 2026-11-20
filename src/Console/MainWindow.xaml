@@ -17,6 +17,7 @@
     <!-- Content root bar -->
     <Border DockPanel.Dock="Top" Background="{DynamicResource SidebarBrush}" Padding="18,12">
       <DockPanel>
+        <Image x:Name="ImgLogo" Width="30" Height="30" Margin="0,0,10,0" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
         <TextBlock Text="Imaging Console" Foreground="White" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,28,0"/>
         <Label Content="Content root" Foreground="{DynamicResource SidebarTextBrush}"/>
         <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
