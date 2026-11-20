@@ -65,7 +65,7 @@ function Get-ImageList {
     $dir = Join-Path $ContentRoot 'Images'
     # Split images: list only the first part (Name.swm); Name2.swm, Name3.swm... belong to it.
     $files = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -eq '.wim' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
+        Where-Object { $_.Extension -in '.wim', '.esd' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
     foreach ($f in $files) {
         $parts = @(Get-ImagePartFiles -ImagePath $f.FullName)
         $indexes = ''
@@ -235,14 +235,15 @@ function New-CaptureConfig {
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
-        [ValidateSet('fast', 'max')][string]$Compression = 'max',
+        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
         [switch]$SplitForFat32,
         [switch]$Unattended,
         [switch]$NewVersion   # replace an existing image of this name; the old one is kept as a version
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $images = Join-Path $ContentRoot 'Images'
-    if (-not $NewVersion -and ((Test-Path (Join-Path $images "$Name.wim")) -or (Test-Path (Join-Path $images "$Name.swm")))) {
+    if ($Compression -eq 'recovery' -and $SplitForFat32) { throw 'The Smallest compression makes an .esd file, which cannot be split for FAT32. Pick Maximum to split.' }
+    if (-not $NewVersion -and (Get-ExistingImageFiles -ImagesDir $images -Name $Name)) {
         throw "An image named $Name already exists. Pick another name, or capture it as a new version."
     }
     $cfg = [ordered]@{
@@ -860,7 +861,7 @@ function Get-VMCaptureArguments {
         [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
-        [ValidateSet('fast', 'max')][string]$Compression = 'max',
+        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
         [switch]$Split,
         [switch]$NewVersion,
         [switch]$SysprepAtDeploy,

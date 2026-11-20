@@ -85,6 +85,13 @@ function Show-CaptureWizard {
         if ($dlg.ShowDialog() -eq 'OK') { $w.TxtIsoFolder.Text = $dlg.SelectedPath }
     })
 
+    # Smallest makes an .esd, which DISM cannot split: no FAT32 split with it.
+    $w.CmbCompression.Add_SelectionChanged({
+        $esd = "$($w.CmbCompression.SelectedItem.Tag)" -eq 'recovery'
+        if ($esd) { $w.ChkSplit.IsChecked = $false }
+        $w.ChkSplit.IsEnabled = -not $esd
+    })
+
     $getChoice = {
         [pscustomobject]@{
             Name        = $w.TxtName.Text.Trim()

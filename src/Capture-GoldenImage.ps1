@@ -18,7 +18,7 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'Direct')][string]$Name,
     [Parameter(ParameterSetName = 'Direct')][string]$Description,
-    [Parameter(ParameterSetName = 'Direct')][ValidateSet('fast', 'max')][string]$Compression = 'max',
+    [Parameter(ParameterSetName = 'Direct')][ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
     [Parameter(ParameterSetName = 'Direct')][int]$SplitSizeMB = 0,   # e.g. 3800 to fit a FAT32 USB; 0 = no split
     [Parameter(ParameterSetName = 'Direct')][switch]$NewVersion,     # replace an existing image, keeping the old one as a version
     [Parameter(Mandatory, ParameterSetName = 'Config')][string]$ConfigPath,
@@ -80,7 +80,8 @@ try {
         $Destination = Join-Path $root 'Images'
     }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    $existing = @((Join-Path $Destination "$Name.wim"), (Join-Path $Destination "$Name.swm")) | Where-Object { Test-Path $_ }
+    Assert-CaptureCompression -Compression $Compression -SplitSizeMB $SplitSizeMB
+    $existing = @(Get-ExistingImageFiles -ImagesDir $Destination -Name $Name)
     if ($existing -and -not $NewVersion) {
         throw "An image named $Name already exists in $Destination. Pick another name, or capture it as a new version."
     }
@@ -96,9 +97,11 @@ try {
     if (-not $NoPrompt -and (Read-Host 'Type YES to start the capture') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; return }
 
     $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$source", "/Name:$Name",
-        "/Compress:$Compression", '/CheckIntegrity', '/Verify')
+        "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity', '/Verify')
     if ($Description) { $captureArgs += "/Description:$Description" }
     Invoke-Native -FilePath 'dism.exe' -ArgumentList $captureArgs
+    # Smallest: recompressed into an .esd (DISM cannot capture to recovery compression directly).
+    if ($Compression -eq 'recovery') { $esd = Convert-ImageToEsd -WimPath $wim; Write-DeployLog "Compressed to $esd" }
 
     if ($SplitSizeMB -gt 0) {
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
@@ -106,7 +109,7 @@ try {
         Remove-Item $wim
     }
 
-    [void](Publish-CapturedImage -Staging $staging -ImagesDir $Destination -Name $Name -SplitSizeMB $SplitSizeMB -Existing $existing -ContentRoot $root -State $swap)
+    [void](Publish-CapturedImage -Staging $staging -ImagesDir $Destination -Name $Name -SplitSizeMB $SplitSizeMB -Compression $Compression -Existing $existing -ContentRoot $root -State $swap)
 
     Write-DeployLog "Captured $source to $Destination"
     $status = 'OK'
