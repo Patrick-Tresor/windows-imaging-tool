@@ -83,6 +83,7 @@ Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'HardwareTests.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
@@ -430,6 +431,47 @@ function Update-Tasks {
     $ui.TxtTaskIssues.Text = ''
 }
 
+function Update-HwTests {
+    # The Hardware Tests tab: the doc's tests with their saved results, filtered, the same test kept selected.
+    $doc = [IO.Path]::Combine((Split-Path $srcDir -Parent), 'docs', 'HARDWARE-TESTS.md')
+    $rows = @(Get-HardwareTestRows -DocPath $doc -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) -CurrentVersion $script:toolVersion.Text)
+    $ui.TxtHwSummary.Text = (Get-HardwareTestSummary -Rows $rows).Text
+    $shown = @(switch ($ui.CmbHwFilter.SelectedIndex) {
+        1 { $rows | Where-Object { $_.Status -in 'Not tested', 'Passed (older version)' } }
+        2 { $rows | Where-Object Result -eq 'Failed' }
+        3 { $rows | Where-Object Result -eq 'Passed' }
+        default { $rows }
+    })
+    $selectedId = if ($ui.GridHwTests.SelectedItem) { $ui.GridHwTests.SelectedItem.Id } else { $null }
+    $ui.GridHwTests.ItemsSource = $shown
+    if ($selectedId) { $ui.GridHwTests.SelectedItem = @($shown | Where-Object Id -eq $selectedId)[0] }
+}
+
+function Update-HwTestDetail {
+    $t = $ui.GridHwTests.SelectedItem
+    $ui.TxtHwTest.Text = if ($t) { "$($t.Id)  $($t.Test)" } else { 'Pick a test in the list.' }
+    $ui.TxtHwPassWhen.Text = if ($t) { "Passes when: $($t.PassWhen)" } else { '' }
+    $ui.TxtHwNote.Text = if ($t) { $t.Note } else { '' }
+    $ui.TxtHwLog.Text = if ($t -and $t.Log) { "Log: $($t.Log)" } elseif ($t -and $t.Version) { "Tested with version $($t.Version)" } else { '' }
+    if ($t -and $t.Log -and $t.Version) { $ui.TxtHwLog.Text += ", version $($t.Version)" }
+    foreach ($b in 'BtnHwPassed', 'BtnHwFailed', 'BtnHwSkipped', 'BtnHwClear', 'BtnHwAttach') { $ui.$b.IsEnabled = [bool]$t }
+    $ui.BtnHwOpenLog.IsEnabled = [bool]($t -and $t.Log)
+}
+
+function Save-HwTest([string]$Result, [switch]$KeepResult, [string]$Log) {
+    # Saves the selected test with the note in the box; -KeepResult only changes the note or log.
+    if (-not (Test-RootReady)) { return }
+    $t = $ui.GridHwTests.SelectedItem
+    if (-not $t) { return }
+    $resultArgs = @{ ContentRoot = $script:root; Id = $t.Id; Note = $ui.TxtHwNote.Text.Trim() }
+    if ($KeepResult) { $resultArgs.Result = $t.Result; $resultArgs.Version = $t.Version } else { $resultArgs.Result = $Result; $resultArgs.Version = $script:toolVersion.Text }
+    if ($PSBoundParameters.ContainsKey('Log')) { $resultArgs.Log = $Log }
+    Set-HardwareTestResult @resultArgs
+    Update-HwTests
+    Update-HwTestDetail
+    Set-Status $(if ($KeepResult) { "Test $($t.Id) saved" } elseif ($Result) { "Test $($t.Id): $Result" } else { "Test $($t.Id): not tested" })
+}
+
 function Update-Logs {
     $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-DeploymentLogs -ContentRoot $script:root })
     $ui.TxtLog.Text = ''
@@ -491,6 +533,7 @@ function Update-AdkStatus {
 function Update-All {
     $ui.TxtRoot.Text = $script:root
     Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard; Update-Logs
+    Update-HwTests
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -1391,6 +1434,32 @@ $script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:stickTimer.Interval = [timespan]::FromSeconds(5)
 $script:stickTimer.Add_Tick({ try { Update-StickVersionBanner } catch { $script:stickTimer.Stop(); Set-Status "USB stick version check failed: $($_.Exception.Message)" } })
 $script:stickTimer.Start()
+
+#endregion
+
+#region Hardware tests
+
+$ui.CmbHwFilter.Add_SelectionChanged({ Invoke-Safely { Update-HwTests } })
+$ui.GridHwTests.Add_SelectionChanged({ Invoke-Safely { Update-HwTestDetail } })
+$ui.BtnHwPassed.Add_Click({ Invoke-Safely { Save-HwTest 'Passed' } })
+$ui.BtnHwFailed.Add_Click({ Invoke-Safely { Save-HwTest 'Failed' } })
+$ui.BtnHwSkipped.Add_Click({ Invoke-Safely { Save-HwTest 'Skipped' } })
+$ui.BtnHwClear.Add_Click({ Invoke-Safely { Save-HwTest '' } })
+$ui.TxtHwNote.Add_LostFocus({ Invoke-Safely {
+    $t = $ui.GridHwTests.SelectedItem
+    if ($t -and $ui.TxtHwNote.Text.Trim() -ne $t.Note) { Save-HwTest -KeepResult }
+} })
+$ui.BtnHwAttach.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $log = Find-LatestDeployLog -ContentRoot $script:root
+    if (-not $log) { Show-Error 'No log in the Logs folder of the content root yet. Deploy a PC, or use Copy logs in WinPE.'; return }
+    Save-HwTest -KeepResult -Log $log
+} })
+$ui.BtnHwOpenLog.Add_Click({ Invoke-Safely {
+    $t = $ui.GridHwTests.SelectedItem
+    if ($t -and $t.Log) { Invoke-Item ([IO.Path]::Combine($script:root, $t.Log)) }
+} })
+Update-HwTestDetail
 
 #endregion
 

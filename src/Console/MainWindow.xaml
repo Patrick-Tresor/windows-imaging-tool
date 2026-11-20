@@ -803,6 +803,64 @@
           </Grid>
         </DockPanel>
       </TabItem>
+
+      <!-- Hardware tests: docs\HARDWARE-TESTS.md with a result per test (config\hardware-tests.json) -->
+      <TabItem x:Name="TabHwTests" Header="Hardware Tests">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Hardware tests"/>
+            <TextBlock Style="{StaticResource Hint}" Text="What has been proven on a real PC, stick and network. Pick a test, try it, then mark it Passed or Failed and attach the latest log. A pass made with an older version of the tool is shown as such, so you know what to test again after an update. Results are saved in config\hardware-tests.json on the content root."/>
+            <DockPanel Margin="0,0,0,8">
+              <Label Content="Show"/>
+              <ComboBox x:Name="CmbHwFilter" Width="170" SelectedIndex="0" VerticalContentAlignment="Center">
+                <ComboBoxItem Content="All"/>
+                <ComboBoxItem Content="Not tested or older"/>
+                <ComboBoxItem Content="Failed"/>
+                <ComboBoxItem Content="Passed"/>
+              </ComboBox>
+              <TextBlock x:Name="TxtHwSummary" Margin="14,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            </DockPanel>
+          </StackPanel>
+          <Border DockPanel.Dock="Bottom" Margin="0,10,0,0" Padding="12,10" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8">
+            <StackPanel>
+              <TextBlock x:Name="TxtHwTest" FontWeight="SemiBold" TextWrapping="Wrap" Text="Pick a test in the list."/>
+              <TextBlock x:Name="TxtHwPassWhen" TextWrapping="Wrap" Margin="0,4,0,8" Foreground="{DynamicResource BodyBrush}"/>
+              <DockPanel>
+                <Label Content="Note"/>
+                <TextBox x:Name="TxtHwNote" ToolTip="What you saw, the PC model, anything to remember. Saved with the result."/>
+              </DockPanel>
+              <DockPanel Margin="0,8,0,0">
+                <Button x:Name="BtnHwPassed" Content="Passed" Style="{StaticResource Primary}"/>
+                <Button x:Name="BtnHwFailed" Content="Failed" Margin="8,0,0,0"/>
+                <Button x:Name="BtnHwSkipped" Content="Skip" Margin="8,0,0,0"/>
+                <Button x:Name="BtnHwClear" Content="Not tested" Margin="8,0,0,0"/>
+                <Button x:Name="BtnHwOpenLog" DockPanel.Dock="Right" Content="Open log" Margin="8,0,0,0"/>
+                <Button x:Name="BtnHwAttach" DockPanel.Dock="Right" Content="Attach the latest log" Margin="8,0,0,0"/>
+                <TextBlock x:Name="TxtHwLog" Margin="12,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}"/>
+              </DockPanel>
+            </StackPanel>
+          </Border>
+          <DataGrid x:Name="GridHwTests" IsReadOnly="True">
+            <DataGrid.RowStyle>
+              <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding Result}" Value="Failed"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
+                  <DataTrigger Binding="{Binding Status}" Value="Passed"><Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/></DataTrigger>
+                  <DataTrigger Binding="{Binding Status}" Value="Passed (older version)"><Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/></DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50"/>
+              <DataGridTextColumn Header="Area" Binding="{Binding Section}" Width="130"/>
+              <DataGridTextColumn Header="Test" Binding="{Binding Test}" Width="3*"/>
+              <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="150"/>
+              <DataGridTextColumn Header="Date" Binding="{Binding Date}" Width="85"/>
+              <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
     </TabControl>
   </DockPanel>
 </Window>

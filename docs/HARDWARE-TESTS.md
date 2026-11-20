@@ -1,8 +1,9 @@
 # Hardware test checklist
 
 Everything below passes the Windows CI tests, but CI has no real WinPE, USB stick, network or laptop.
-Work through it in this order: each step needs the ones before it. Note the date and result next to each
-line, and when one fails, use **Copy logs** in WinPE and keep the `Logs\<serial>-<date>` folder.
+Work through it in this order: each step needs the ones before it. Mark each result on the console's
+**Hardware Tests** tab (it reads this list), and when one fails, use **Copy logs** in WinPE, then **Attach the
+latest log** on that tab.
 
 Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP or Lenovo) when you can.
 
@@ -24,6 +25,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.11b | Driver packs as one file each | The build's "Packing each driver pack into one file" step lists the packs (a second build says "packed before"); `Drivers\<maker>\<model>.wim` is on the DEPLOY partition, not the folder; the build prints a `Small files` MB/s line; a deploy shows "Unpacking drivers" then "Injecting drivers", and `W:\_ImagingDrivers` is gone afterwards |
 | 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |
 | 1.13 | Stick built with **Online apps on USB** ticked, deployed with the network cable out | The build's Downloading online applications step lists the apps; `FirstBoot.log` says the installer "is already in the folder; not downloaded" and the apps install |
+| 1.14 | Tool version on the stick | The console header shows the version; the WinPE wizard shows the same one at the bottom of its left band and `Deploy.log` starts with "Imaging tool version"; a stick built before an update gets the yellow "built with version ..." banner in the console, and **Update the stick** opens the Media tab with that stick and Update ticked |
 
 ## 2. Network (LAN share)
 
@@ -48,6 +50,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 3.2 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
 | 3.2b | Same PC, tick **Install Windows 11 anyway on this PC** and press Next | The wizard goes on; the Ready to deploy summary shows the failed requirement; `Deploy.log` has "Deploying Windows 11 anyway"; Windows 11 starts and joins the domain |
 | 3.3 | Passwords removed from unattend.xml | After the first logon (OOBE over), `C:\Windows\Panther\unattend.xml` shows `*removed*` for every password, `C:\Windows\Temp\FirstBoot.log` says "unattend.xml passwords: removed N from ...", and the `ImagingTool\ClearUnattend` task and `C:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1` are gone; OOBE still skipped the account page and the domain join worked |
+| 3.4 | End-of-deploy result | `C:\Windows\Temp\DeployResult.txt` says Ready (or what failed) with one line each for drivers, applications, tasks, domain join, BitLocker and total time; the Dashboard's Result column and details say the same |
 
 ## 4. Capture and image upkeep
 
@@ -63,3 +66,4 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
 | 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
 | 4.4 | Roll back a version | Answer files deploy the older image |
+| 4.5 | Capture with compression **Smallest (.esd)** | The capture shows a "Compressing to the smallest size" step and logs the .esd size (about 70-80 % of Maximum); the Images tab lists `Name.esd`; a stick with it deploys normally; Update image works on it |
