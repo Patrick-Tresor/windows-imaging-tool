@@ -375,7 +375,10 @@ from the catalog; nothing big is downloaded when you add it. The PC downloads
 the installer at first boot and refuses it if its SHA256 changed (the
 publisher replaced the file): add the application again to get the new
 version. Packs whose catalog entry gives no silent switch say so in their
-notes; test those on a VM first.
+notes; test those on a VM first. Every search is written to
+`%LOCALAPPDATA%\ImagingConsole\winget-search.log` (winget's exit code and full
+output); when winget itself fails, the status line says why instead of
+"Nothing found".
 
 **Export...** zips a pack (installer included) to copy it to another content
 root; **Import...** adds it back.
