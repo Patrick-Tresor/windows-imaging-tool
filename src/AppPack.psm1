@@ -361,12 +361,13 @@ function ConvertFrom-WingetSearch {
         dashes, so it works whatever the language winget speaks (Nom/ID/Version in French).
     #>
     param([string[]]$Lines)
-    $lines = @($Lines | ForEach-Object { "$_" -split "`r" | Select-Object -Last 1 })
+    $lines = @($Lines | ForEach-Object { Remove-ConsoleControl "$_" })
     $dash = -1
     for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^-{5,}\s*$') { $dash = $i; break } }
     if ($dash -lt 1) { return }
     $starts = @([regex]::Matches($lines[$dash - 1], '\S+') | ForEach-Object Index)
     if ($starts.Count -lt 3) { return }
+    $idPattern = '^[A-Za-z0-9][\w+-]*(\.[\w+-]+)+$'
     $cut = { param($line, $c)
         if ($line.Length -le $starts[$c]) { return '' }
         $end = if ($c + 1 -lt $starts.Count) { [Math]::Min($starts[$c + 1], $line.Length) } else { $line.Length }
@@ -374,23 +375,97 @@ function ConvertFrom-WingetSearch {
     foreach ($line in $lines[($dash + 1)..($lines.Count - 1)]) {
         if (-not $line.Trim()) { continue }
         $id = & $cut $line 1
+        # The id must start where the ID column starts, or the row is shifted (see below).
+        if ($id -match $idPattern -and ($starts[1] -eq 0 -or $line[$starts[1] - 1] -match '\s')) {
+            [pscustomobject]@{ Name = $line.Substring(0, [Math]::Min($starts[1], $line.Length)).Trim(); Id = $id; Version = & $cut $line 2 }
+            continue
+        }
+        # winget lines its columns up by screen width, so a name with wide letters (Chinese, emoji) shifts the row:
+        # take the catalog id closest to the ID column, and the version right after it.
+        $tokens = @([regex]::Matches($line, '\S+'))
+        $best = $null
+        for ($t = 1; $t -lt $tokens.Count - 1; $t++) {
+            # Wide letters only move the id to the left, and a version number (1.0) is never an id.
+            if ($tokens[$t].Index -gt $starts[1] -or $tokens[$t].Value -notmatch $idPattern -or $tokens[$t].Value -match '^[\d.]+$') { continue }
+            if (-not $best -or [Math]::Abs($tokens[$t].Index - $starts[1]) -lt [Math]::Abs($tokens[$best].Index - $starts[1])) { $best = $t }
+        }
         # A cut-off id (winget ends it with ...) can't be looked up.
-        if ($id -notmatch '^[A-Za-z0-9][\w+-]*(\.[\w+-]+)+$') { continue }
-        [pscustomobject]@{ Name = $line.Substring(0, [Math]::Min($starts[1], $line.Length)).Trim(); Id = $id; Version = & $cut $line 2 }
+        if (-not $best) { continue }
+        [pscustomobject]@{ Name = $line.Substring(0, $tokens[$best].Index).Trim(); Id = $tokens[$best].Value; Version = $tokens[$best + 1].Value }
     }
+}
+
+function Remove-ConsoleControl {
+    # A console line as it shows on screen: what is left after the last carriage return (spinners, progress bars),
+    # without colour and taskbar progress codes (ESC[...m, ESC]9;4;...) or other control characters.
+    param([string]$Line)
+    $Line = $Line -replace '\x1b\][^\x07\x1b]*(\x07|\x1b\\)?', '' -replace '\x1b\[[0-?]*[ -/]*[@-~]', '' -replace '\x1b[@-_]?', ''
+    $Line = @($Line -split "`r" | Where-Object { $_.Trim() } | Select-Object -Last 1) -join ''
+    $Line -replace '[\x00-\x08\x0b-\x1f\x7f]', ''
+}
+
+function Get-WingetSearchFailure {
+    <#
+    .SYNOPSIS
+        Why "winget search" gave no rows, in one short line, or $null when it simply found no match.
+        Reads winget's exit code first, then its last message.
+    #>
+    param([string[]]$Lines, [int]$ExitCode)
+    $hex = '0x{0:X8}' -f $ExitCode
+    switch ($hex) {
+        '0x00000000' { return $null }
+        '0x8A150014' { return $null }   # no package matches
+        '0x8A150002' { return "winget on this PC is too old (exit $hex). Update App Installer from the Microsoft Store." }
+        '0x8A150044' { return "winget's source agreements were not accepted (exit $hex). Run 'winget search chrome' once in a command prompt." }
+        '0x8A15000F' { return "winget's catalog is missing (exit $hex). Run 'winget source reset --force' as administrator." }
+        '0x8A150011' { return "winget has no 'winget' source (exit $hex). Run 'winget source reset --force' as administrator." }
+    }
+    $last = @($Lines | ForEach-Object { Remove-ConsoleControl "$_" } | Where-Object { $_ -match '\w' -and $_ -notmatch '^-{5,}\s*$' -and $_ -notmatch '^\s*[\d.]+\s*[KMG]?B\s*/' } | Select-Object -Last 1)
+    $why = if ($last) { $last[0].Trim() } else { 'no message' }
+    if ($why.Length -gt 120) { $why = $why.Substring(0, 117) + '...' }
+    "winget search failed (exit $hex): $why"
 }
 
 function Find-WingetPackage {
     # Searches Microsoft's winget catalog with winget.exe on this PC (Windows 10 1809 and later have it).
-    param([Parameter(Mandatory)][string]$Query)
-    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-        throw 'winget is not on this PC. Install App Installer from the Microsoft Store, then search again.'
+    # Every search is written to %LOCALAPPDATA%\ImagingConsole\winget-search.log (command, exit code, full output).
+    # No match gives an empty list; a winget failure throws one short line that says why.
+    param([Parameter(Mandatory)][string]$Query, [string]$LogPath = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'winget-search.log'),
+        [scriptblock]$Runner)
+    if (-not $Runner) {
+        if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+            throw 'winget is not on this PC (or not for this admin account). Install App Installer from the Microsoft Store, then search again.'
+        }
+        $Runner = { param([string[]]$WingetArgs)
+            $old = try { [Console]::OutputEncoding } catch { $null }
+            try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+            try { $out = @(& winget.exe @WingetArgs 2>&1 | ForEach-Object { "$_" }); [pscustomobject]@{ Lines = $out; ExitCode = [int]$LASTEXITCODE } }
+            catch { [pscustomobject]@{ Lines = @("$($_.Exception.Message)"); ExitCode = -1 } }
+            finally { if ($old) { try { [Console]::OutputEncoding = $old } catch { } } }
+        }
     }
-    $old = try { [Console]::OutputEncoding } catch { $null }
-    try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
-    try { $out = & winget.exe search --query $Query --source winget --accept-source-agreements --disable-interactivity 2>&1 }
-    finally { if ($old) { try { [Console]::OutputEncoding = $old } catch { } } }
-    @(ConvertFrom-WingetSearch -Lines @($out | ForEach-Object { "$_" }))
+    $wingetArgs = @('search', '--query', $Query, '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
+    $r = & $Runner $wingetArgs
+    # winget before 1.4 doesn't know --disable-interactivity and stops on it.
+    if (('0x{0:X8}' -f [int]$r.ExitCode) -eq '0x8A150002') { $wingetArgs = $wingetArgs[0..5]; $r = & $Runner $wingetArgs }
+    $lines = @($r.Lines)
+    $found = @(ConvertFrom-WingetSearch -Lines $lines)
+    if ($LogPath) {
+        try {
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LogPath))
+            $text = "==== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  winget $($wingetArgs -join ' ')`r`nExit code: $('0x{0:X8}' -f [int]$r.ExitCode)  Rows read: $($found.Count)`r`n" +
+                (($lines | ForEach-Object { Remove-ConsoleControl $_ }) -join "`r`n") + "`r`n"
+            [IO.File]::AppendAllText($LogPath, $text, [Text.Encoding]::UTF8)
+        } catch { }
+    }
+    if ($found.Count) { return $found }
+    $why = Get-WingetSearchFailure -Lines $lines -ExitCode ([int]$r.ExitCode)
+    if ($why) { throw "$why Details: $LogPath" }
+    # winget printed a results table but no row could be read: say so, it isn't "nothing found".
+    if (@($lines | Where-Object { (Remove-ConsoleControl $_) -match '^-{5,}\s*$' }).Count) {
+        throw "winget found packages but the list could not be read. Details: $LogPath"
+    }
+    @()
 }
 
 function Get-WingetManifestUrl {
@@ -809,7 +884,7 @@ function Invoke-AppInstall {
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, New-AppFromCatalog, Get-AppKnownDownload,
-    ConvertFrom-WingetSearch, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
+    ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Get-MediaAppDownloads, Add-MediaCopyItems,
     Save-AppPack,
