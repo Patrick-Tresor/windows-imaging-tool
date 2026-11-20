@@ -74,7 +74,7 @@ try {
 function Set-DeployConsole { }
 function Start-ProgressWindow { $false }
 function Find-ContentRoot { $env:E2E_ROOT }
-function Get-ContentDiskNumber { $null }
+function Get-ContentDiskNumber { }   # a network share: no disk (no output, as the real one)
 function Get-HardwareIdentity { [pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5521'; MachineType = $null; Sku = '0A20'; Serial = $env:E2E_SERIAL; IsUefi = $true } }
 function Get-Disk { param([int]$Number = -1)
     $d = [pscustomobject]@{ Number = 0; FriendlyName = 'E2E NVMe SSD'; Size = 256GB; BusType = 'NVMe'; PartitionStyle = 'GPT'; Model = 'E2E NVMe SSD' }
