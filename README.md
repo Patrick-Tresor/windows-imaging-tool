@@ -670,8 +670,7 @@ are both read. The deploy log says which entry was used.
    `Unattended` answer files skip the wizard after their
    countdown (the progress window's **Change settings** button, or any key on the
    console, opens it instead), and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
-   entirely. If the WinPE image has no WinForms (built without WinPE-NetFX), the
-   same questions are asked on the console.
+   entirely.
 
 ## Status
 

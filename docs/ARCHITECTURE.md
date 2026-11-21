@@ -46,7 +46,7 @@ BitLocker) that the wizard shows before the ERASE line. The choices come back as
 answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
 replaced, and the deploy continues exactly as for a command-line run.
 `-NoPrompt` and an `Unattended` countdown skip the window;
-a key pressed during the countdown opens it. Without WinForms the console prompts are used instead.
+a key pressed during the countdown opens it.
 
 Both the wizard and the progress window list the steps (answer file, computer
 name, applications, confirm, install, finish) down a sidebar.
