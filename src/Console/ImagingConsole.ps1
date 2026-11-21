@@ -310,7 +310,7 @@ function Show-NamingRows($Rows) {
 
 function Update-Naming {
     # The answer file column is a drop-down of the content root's answer files; empty means the default.
-    $names = @(if (Test-ContentRoot $script:root) { Get-AnswerFileNames -ContentRoot $script:root | Sort-Object })
+    $names = @(if (Test-ContentRoot $script:root) { Get-AnswerFileNames -ContentRoot $script:root })
     $ui.GridNaming.Columns[3].ItemsSource = @('') + $names
     Show-NamingRows @(if (Test-ContentRoot $script:root) { Get-NamingListRows -ContentRoot $script:root })
 }

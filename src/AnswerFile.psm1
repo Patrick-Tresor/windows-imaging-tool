@@ -872,6 +872,23 @@ function Join-ContentPath {
     Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
 }
 
+function Get-AnswerFileNames {
+    # The answer files in <content root>\AnswerFiles, by name without .xml, sorted: the console's lists and the
+    # deploy in WinPE. Always an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
+    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20); callers still wrap it in @().
+    # -Required (the deploy): none is an error that says how to fix it, instead of PowerShell's "Cannot find path"
+    # (old USB sticks were built without the AnswerFiles folder).
+    param([Parameter(Mandatory)][string]$ContentRoot, [switch]$Required)
+    $dir = [IO.Path]::Combine($ContentRoot, 'AnswerFiles')
+    $names = @(Get-ChildItem -LiteralPath $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
+    if ($Required -and -not $names) {
+        throw ("No answer files in $dir, so this media doesn't know which image to deploy. " +
+            'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
+            'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
+    }
+    ,$names
+}
+
 function Get-AnswerFileUsage {
     # Key -> names of the answer files in <content root>\AnswerFiles that use it. -Keys gets each answer file
     # (Read-AnswerFile) and returns what it uses; -Label says how the file is named in the list (default: its name).
@@ -892,7 +909,7 @@ function Get-AnswerFileUsage {
     $usage
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
     Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

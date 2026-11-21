@@ -860,11 +860,6 @@ function Get-NamingListPath {
     Join-ContentPath $ContentRoot 'config\naming-list.csv'
 }
 
-function Get-AnswerFileNames {
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    @(Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
-}
-
 function Get-NamingListRows {
     # Naming list rows for the grid, with each row's problems and the result of the last deploy of that serial.
     param([Parameter(Mandatory)][string]$ContentRoot, [object[]]$Entries)
@@ -1270,5 +1265,5 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
     Get-ApplicationUsage, Save-Application,
-    Get-NamingListPath, Get-AnswerFileNames, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
+    Get-NamingListPath, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
     Get-VMCaptureArguments

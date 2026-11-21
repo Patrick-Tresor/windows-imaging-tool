@@ -64,21 +64,6 @@ function Resolve-ContentPath([string]$Root, [string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $Root $Path }
 }
 
-function Get-AnswerFileNames([string]$Root) {
-    # The answer file says which image to deploy, so without one there is nothing to do. Old USB sticks were built
-    # without the AnswerFiles folder; say how to fix that instead of PowerShell's "Cannot find path".
-    # Always returns an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
-    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20).
-    $dir = [IO.Path]::Combine($Root, 'AnswerFiles')
-    $names = @(Get-ChildItem -LiteralPath $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
-    if (-not $names) {
-        throw ("No answer files in $dir, so this media doesn't know which image to deploy. " +
-            'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
-            'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
-    }
-    ,$names
-}
-
 function Add-AnswerPasswords([string]$Root, $Answer) {
     # The passwords encrypted in the answer file, decrypted now (key = normalized password file path), as
     # $Answer.Passwords. One that can't be decrypted is logged and left out: the wizard's Passwords page or
@@ -580,7 +565,7 @@ try {
         $listed = [pscustomobject]@{ Serial = "$($hw.Serial)"; ComputerName = $(if ($listed) { $listed.ComputerName } else { '' }); OU = $job.ou; AnswerFile = $job.answerFile }
     }
 
-    $names = @(Get-AnswerFileNames -Root $root)
+    $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     if (-not $AnswerFile) {
         if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
         elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
