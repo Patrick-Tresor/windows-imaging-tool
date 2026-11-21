@@ -38,7 +38,8 @@ param(
     [string]$ReuseConvertedDisk, # a temporary VHD the check made; used when the disk has not changed since
     [string]$ProgressFile,       # step-by-step progress for the console's window
     [switch]$SysprepAtDeploy,    # capture a VM that was not sysprepped; each PC runs sysprep at its first start
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$ImagesDir           # where the image is saved (a local folder or \\server\share\...); empty = <ContentRoot>\Images
 )
 
 $ErrorActionPreference = 'Stop'
@@ -262,7 +263,7 @@ if (-not $Name) { throw '-Name is required.' }
 if (-not $ContentRoot) { throw '-ContentRoot is required.' }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
 
-$imagesDir = Join-Path $ContentRoot 'Images'
+$imagesDir = if ("$ImagesDir".Trim()) { "$ImagesDir".Trim().TrimEnd('\') } else { Join-Path $ContentRoot 'Images' }
 $logDir = Join-Path $ContentRoot 'Logs'
 $status = 'FAILED'
 $staging = $null

@@ -227,6 +227,19 @@ try {
 
     $vcs = Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'D:\Share' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -SysprepAtDeploy
     Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vcs[-1]))) "& 'x.ps1' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ContentRoot 'D:\Share' -Compression max -SysprepAtDeploy -NoPrompt" 'VM capture command passes sysprep on each PC'
+    $vci = Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'D:\Share' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ImagesDir '\\SERVER\Deploy\Images'
+    Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vci[-1]))) "& 'x.ps1' -DiskPath 'D:\VMs\a.vmdk' -Name 'W11' -ContentRoot 'D:\Share' -Compression max -ImagesDir '\\SERVER\Deploy\Images' -NoPrompt" 'VM capture command passes the chosen Save to folder'
+    Assert-Equal ([bool](Get-CaptureSaveFolderProblem -Path '')) $true 'Save to: an empty folder is refused'
+    Assert-Equal ([bool](Get-CaptureSaveFolderProblem -Path 'Images')) $true 'Save to: a relative folder is refused'
+    Assert-Equal ([bool](Get-CaptureSaveFolderProblem -Path '\\SERVER')) $true 'Save to: a server name without a share is refused'
+    $saveRoot = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'savetest-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($saveRoot)
+    if ($saveRoot -match '^[A-Za-z]:\\') {
+        Assert-Equal (Get-CaptureSaveFolderProblem -Path $saveRoot) $null 'Save to: an existing folder is accepted'
+        Assert-Equal (Get-CaptureSaveFolderProblem -Path ([IO.Path]::Combine($saveRoot, 'Images'))) $null 'Save to: a new folder in an existing one is accepted'
+        Assert-Equal ([bool](Get-CaptureSaveFolderProblem -Path ([IO.Path]::Combine($saveRoot, 'a', 'b')))) $true 'Save to: a folder whose parent is missing is refused'
+    }
+    [IO.Directory]::Delete($saveRoot, $true)
 
     $vhdxConv = Get-DiskConversionCommand -SourcePath 'D:\VMs\a.vhdx' -DestinationPath 'T\b.vhd' -QemuImg 'C:\qemu\qemu-img.exe'
     Assert-Equal $vhdxConv $null 'a VHDX needs no conversion'

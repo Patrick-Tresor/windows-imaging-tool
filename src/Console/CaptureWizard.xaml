@@ -122,12 +122,13 @@
       <ScrollViewer x:Name="Page3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Image details"/>
-          <TextBlock Style="{StaticResource Body}" Text="The image is saved to the Images folder of the content root."/>
+          <TextBlock x:Name="TxtDetailsIntro" Style="{StaticResource Body}" Text="Name the image and choose where to save it."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
               <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
               <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
+              <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/>
             </Grid.RowDefinitions>
             <Label Content="Name"/>
             <TextBox x:Name="TxtName" Grid.Column="1" ToolTip="Letters, digits, dot, dash and underscore. Becomes the file name."/>
@@ -147,6 +148,14 @@
             <CheckBox x:Name="ChkNewVersion" Grid.Row="10" Grid.Column="1"
                       Content="If an image with this name exists, replace it and keep the old one as an earlier version"
                       ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>
+            <Label x:Name="LblSaveTo" Grid.Row="12" Content="Save to"/>
+            <DockPanel x:Name="PnlSaveTo" Grid.Row="12" Grid.Column="1">
+              <Button x:Name="BtnSaveToDefault" DockPanel.Dock="Right" Content="Default" Margin="6,0,0,0"
+                      ToolTip="The Images folder of the content root"/>
+              <Button x:Name="BtnSaveTo" DockPanel.Dock="Right" Content="Browse..."/>
+              <TextBox x:Name="TxtSaveTo" ToolTip="A folder on this PC or a server share, like \\server\share\Images"/>
+            </DockPanel>
+            <TextBlock x:Name="TxtSaveToHint" Grid.Row="14" Grid.Column="1" Style="{StaticResource Body}" Margin="0"/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

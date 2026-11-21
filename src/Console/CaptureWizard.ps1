@@ -57,6 +57,28 @@ function Show-CaptureWizard {
     # Page 3 defaults.
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
 
+    # Save to (VM disk file only): the content root's Images folder by default, or any folder on this PC or a server.
+    $defaultSaveTo = [IO.Path]::Combine($ContentRoot.TrimEnd('\'), 'Images')
+    $isDefaultSaveTo = { param($p) "$p".Trim().Trim('"').TrimEnd('\') -ieq $defaultSaveTo }
+    $updateSaveToHint = {
+        $w.TxtSaveToHint.Text = if (& $isDefaultSaveTo $w.TxtSaveTo.Text) {
+            'The Images folder of the content root, so the image shows on the Images tab.'
+        } else {
+            'Another folder: the image shows on the Images tab only when the console has that folder''s content root open.'
+        }
+    }
+    $w.TxtSaveTo.Text = $defaultSaveTo
+    $w.TxtSaveTo.Add_TextChanged({ try { & $updateSaveToHint } catch { } })
+    $w.BtnSaveToDefault.Add_Click({ $w.TxtSaveTo.Text = $defaultSaveTo })
+    $w.BtnSaveTo.Add_Click({
+        $dlg = [Windows.Forms.FolderBrowserDialog]::new()
+        $dlg.Description = 'Where to save the image: a folder on this PC, or Network > your server > its share.'
+        $current = $w.TxtSaveTo.Text.Trim().Trim('"')
+        if ($current -and [IO.Directory]::Exists($current)) { $dlg.SelectedPath = $current }
+        if ($dlg.ShowDialog() -eq 'OK') { $w.TxtSaveTo.Text = $dlg.SelectedPath }
+    })
+    & $updateSaveToHint
+
     # Page 1: reference machine choices.
     # The disk file choice starts at the current disk of the first VMware Workstation VM, when there is one.
     $prefillDiskFile = {
@@ -104,6 +126,7 @@ function Show-CaptureWizard {
             Mode        = if ($w.RbDiskFile.IsChecked) { 'DiskFile' } else { 'Iso' }
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             IsoFolder   = $w.TxtIsoFolder.Text.Trim()
+            SaveTo      = $w.TxtSaveTo.Text.Trim().Trim('"').TrimEnd('\')
         }
     }
 
@@ -213,7 +236,11 @@ function Show-CaptureWizard {
             }
             3 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
-                elseif (-not $c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
+                elseif ($c.Mode -eq 'DiskFile' -and ($saveProblem = Get-CaptureSaveFolderProblem -Path $c.SaveTo)) { $saveProblem }
+                elseif ($c.Mode -eq 'DiskFile' -and -not $c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
+                    "An image named $($c.Name) already exists in $($c.SaveTo). Pick another name, or tick the box to capture it as a new version."
+                }
+                elseif ($c.Mode -ne 'DiskFile' -and -not $c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
                     "An image named $($c.Name) already exists. Pick another name, or tick the box to capture it as a new version."
                 }
             }
@@ -234,7 +261,7 @@ function Show-CaptureWizard {
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
         }
         $saveTo = switch ($c.Mode) {
-            { $_ -in $onThisPC } { "$ContentRoot\Images" }
+            { $_ -in $onThisPC } { $c.SaveTo }
             default  { "$($settings.share.path)\Images" }
         }
         $w.TxtSummary.Text = @(
@@ -242,8 +269,9 @@ function Show-CaptureWizard {
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
             $(if ($c.Mode -notin $onThisPC) { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
-            $(if ($c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
-                "Existing image: replaced after the capture succeeds; the old one is kept in Images\Previous" })
+            $(if ($c.NewVersion -and $(if ($c.Mode -eq 'DiskFile') { @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count }
+                    else { @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count })) {
+                "Existing image: replaced after the capture succeeds; the old one is kept in Previous next to it" })
             ''
             "Media:         $target"
             "Saved to:      $saveTo"
@@ -267,6 +295,9 @@ function Show-CaptureWizard {
         $isDisk = (& $getChoice).Mode -eq 'DiskFile'
         # Sysprep on each PC needs the disk check, so only for a VM's disk file.
         $w.ChkSysprepAtDeploy.Visibility = if ($isDisk) { 'Visible' } else { 'Collapsed' }
+        # The ISO capture saves from WinPE to the network share, so only the disk file capture has a Save to folder.
+        foreach ($n in 'LblSaveTo', 'PnlSaveTo', 'TxtSaveToHint') { $w[$n].Visibility = if ($isDisk) { 'Visible' } else { 'Collapsed' } }
+        $w.TxtDetailsIntro.Text = if ($isDisk) { 'Name the image and choose where to save it.' } else { 'The image is saved to the Images folder of the network share.' }
         & $updatePrepPage
         $w.Step2.Text = if ($isDisk) { '3. Check the disk' } else { '3. Check the disk (VM disk only)' }
         for ($i = 0; $i -le $state.Last; $i++) {
@@ -290,7 +321,7 @@ function Show-CaptureWizard {
                 param($progressFile, $logPath)
                 Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                     -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                    -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
+                    -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
             }
             $state.HandedOver = $true
             Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"
