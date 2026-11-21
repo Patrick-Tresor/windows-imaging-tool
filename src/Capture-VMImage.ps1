@@ -377,10 +377,14 @@ try {
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
     $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description
-    Start-BuildStep 'capture'
+    # DISM first scans every file on the disk with no percent (half an hour on a big disk), so say so under the bar.
+    $scanText = 'Scanning the files on the disk (no percent from DISM yet)'
+    Start-BuildStep 'capture' -Detail $scanText
     $captureClock = [Diagnostics.Stopwatch]::StartNew()
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
-        param($pct) Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
+        param($pct)
+        $scanning = $null -eq $pct -or $pct -le 0
+        Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 }) -Detail $(if ($scanning) { $scanText } else { 'Writing the image' })
     }
     $wimSize = (Get-Item -LiteralPath $wim).Length
     $read = if ($windowsInfo) { " from $(Format-ByteSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
