@@ -693,18 +693,11 @@ function Update-DeployWizardLayout {
 function Show-PasswordPrompt {
     <#
     .SYNOPSIS
-        Asks the operator for a password in a small window (WinForms), or on the console without WinForms.
+        Asks the operator for a password in a small window (WinForms).
         Returns the text typed, or $null when they cancel. Message says what the password is for; Problem (red)
         why the last one was refused.
     #>
     param([string]$Title = 'Deploy Windows', [Parameter(Mandatory)][string]$Message, [string]$Problem, [string]$CancelText = 'Cancel')
-    if (-not (Test-DeployWizardAvailable)) {
-        if ($Problem) { Write-Host $Problem -ForegroundColor Red }
-        $secure = Read-Host -AsSecureString $Message
-        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-        try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-        if ($text) { return $text } else { return $null }
-    }
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     $font = New-Object Drawing.Font('Segoe UI', 10)
     $form = New-Object Windows.Forms.Form -Property @{
@@ -736,24 +729,12 @@ function Show-PasswordPrompt {
 function Show-SecretsPrompt {
     <#
     .SYNOPSIS
-        Asks for several passwords in one window (WinForms), or one after the other on the console without WinForms.
+        Asks for several passwords in one window (WinForms).
         Secrets: Key and Label of each. Returns a hashtable Key -> text, or $null when the operator cancels.
         Used when the deploy starts without the wizard (unattended answer file); the wizard has its Passwords page.
     #>
     param([Parameter(Mandatory)][object[]]$Secrets, [string]$Title = 'Deploy Windows')
     $intro = 'These passwords are not on this USB stick. Type them once here: they are kept in memory for this deployment only, and nothing else is asked once Windows starts installing.'
-    if (-not (Test-DeployWizardAvailable)) {
-        Write-Host $intro
-        $values = @{}
-        foreach ($s in $Secrets) {
-            $secure = Read-Host -AsSecureString $s.Label
-            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-            try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-            if (-not $text) { return $null }
-            $values[$s.Key] = $text
-        }
-        return $values
-    }
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     $font = New-Object Drawing.Font('Segoe UI', 10)
     $form = New-Object Windows.Forms.Form -Property @{
@@ -851,10 +832,5 @@ function Copy-DeployLogs {
     [pscustomobject]@{ Path = $folder; Count = $count }
 }
 
-function Test-DeployWizardAvailable {
-    # WinForms needs the WinPE-NetFX component. Without it Deploy-Image falls back to console prompts.
-    try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $true } catch { $false }
-}
-
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs, Test-DeployWizardAvailable
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs

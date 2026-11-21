@@ -77,6 +77,7 @@ Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'CaptureCheck.psm1') -Force
+Import-Module (Join-Path $srcDir 'Format.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
@@ -309,7 +310,7 @@ function Show-NamingRows($Rows) {
 
 function Update-Naming {
     # The answer file column is a drop-down of the content root's answer files; empty means the default.
-    $names = @(if (Test-ContentRoot $script:root) { Get-AnswerFileNames -ContentRoot $script:root | Sort-Object })
+    $names = @(if (Test-ContentRoot $script:root) { Get-AnswerFileNames -ContentRoot $script:root })
     $ui.GridNaming.Columns[3].ItemsSource = @('') + $names
     Show-NamingRows @(if (Test-ContentRoot $script:root) { Get-NamingListRows -ContentRoot $script:root })
 }
@@ -473,7 +474,10 @@ function Save-HwTest([string]$Result, [switch]$KeepResult, [string]$Log) {
 }
 
 function Update-Logs {
-    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-DeploymentLogs -ContentRoot $script:root })
+    # Deployments still on the Dashboard show their log there; this tab lists everything else.
+    $onDash = @()
+    try { $folder = Get-DashboardFolder; if ($folder) { $onDash = @(Get-DeploymentStatus -Folder $folder | ForEach-Object LogFile) } } catch { }
+    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-LogTabRows -ContentRoot $script:root -DashboardLogFiles $onDash })
     $ui.TxtLog.Text = ''
 }
 
@@ -524,8 +528,9 @@ function Update-AdkStatus {
     if ($s.Warnings) { $text += ' ' + ($s.Warnings -join ' ') }
     $ui.TxtAdk.Text = $text
     $ok = $s.Ready -and -not $s.Warnings
-    $ui.BrdAdk.Background = if ($s.Ready) { if ($ok) { '#ECFDF3' } else { '#FFFBEB' } } else { '#FEF2F2' }
-    $ui.BrdAdk.BorderBrush = if ($s.Ready) { if ($ok) { '#A6F4C5' } else { '#FDE68A' } } else { '#FECACA' }
+    $tone = if ($s.Ready) { if ($ok) { 'Success' } else { 'Warning' } } else { 'Error' }
+    $ui.BrdAdk.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, "${tone}SoftBrush")
+    $ui.BrdAdk.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, "${tone}LineBrush")
     $ui.BtnAdkDownload.Visibility = if ($s.Ready) { 'Collapsed' } else { 'Visible' }
     $s
 }
@@ -586,7 +591,7 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
+        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Logs tab when it finishes."
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
@@ -711,18 +716,6 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
-# Click, not Checked: selecting a row sets the box too and must not change the application.
-$ui.ChkAppOnline.Add_Click({ Invoke-Safely {
-    $row = $ui.GridApps.SelectedItem
-    if (-not $row) { return }
-    $on = [bool]$ui.ChkAppOnline.IsChecked
-    try { Set-ApplicationOnline -ContentRoot $script:root -Name $row.Name -On $on | Out-Null }
-    finally {
-        Update-Apps
-        $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $row.Name)[0]
-    }
-    Set-Status $(if ($on) { "$($row.Name) downloads from the internet when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
-} })
 # Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
 $script:appFound = @()
 function Find-AppOnline {
@@ -759,12 +752,6 @@ $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.Selected
 
 $ui.GridApps.Add_SelectionChanged({
     $row = $ui.GridApps.SelectedItem
-    $ui.ChkAppOnline.IsChecked = [bool]($row -and $row.Download)
-    $ui.ChkAppOnline.IsEnabled = [bool]($row -and ($row.Download -or $row.KnownDownload))
-    $ui.TxtAppOnline.Text = if (-not $row) { '' }
-        elseif ($row.Download) { "Downloads from $($row.Download)" }
-        elseif ($row.KnownDownload) { "Can download from $($row.KnownDownload)" }
-        else { 'No known download for this application: it installs from the installer in its pack.' }
     $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
         $lines = @("Install: $($row.Command)")
         if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
@@ -1002,7 +989,7 @@ function Update-AdAccount {
     if ($ui.ChkAdUseShare.IsChecked) {
         $ui.TxtAdUser.Text = if ($share) { $share.ShareUser } else { '' }
         $ui.TxtAdUser.IsReadOnly = $true
-        $ui.TxtAdUser.Background = '#F3F4F6'
+        $ui.TxtAdUser.SetResourceReference([Windows.Controls.Control]::BackgroundProperty, 'ControlHoverBrush')
     } else {
         $ui.TxtAdUser.Text = "$($script:adOwnUser)"
         $ui.TxtAdUser.IsReadOnly = $false
@@ -1045,7 +1032,7 @@ function Update-AdBootStatus {
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
     $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share)." }
-    $ui.TxtAdBoot.Foreground = if ($problems) { '#B45309' } else { '#15803D' }
+    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
 }
 
 function Show-AdRows {
@@ -1303,8 +1290,8 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
 #region Settings
 
-function Set-ShareTestText([string]$Text, [string]$Color) {
-    $ui.TxtShareTest.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($Color)
+function Set-ShareTestText([string]$Text, [string]$Brush) {
+    $ui.TxtShareTest.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Brush)
     $ui.TxtShareTest.Text = $Text
 }
 foreach ($rb in 'RbSettingsUsb', 'RbSettingsShare', 'RbReportDefault', 'RbReportShare') {
@@ -1317,17 +1304,17 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     $share = if ($ui.RbSettingsShare.IsChecked) { $ui.TxtSharePath.Text.Trim() } else { '' }
     $report = if ($ui.RbReportShare.IsChecked) { $ui.TxtReportPath.Text.Trim() } else { '' }
     $target = if ($share) { $share } elseif ($report) { $report } else { '' }
-    if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' '#B91C1C'; return }
+    if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' 'ErrorBrush'; return }
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
     if ($user -and -not $pw -and $script:sharePwSaved) { $pw = Get-SharePassword -ContentRoot $script:root }
-    Set-ShareTestText "Connecting to $target..." '#64748B'
+    Set-ShareTestText "Connecting to $target..." 'MutedBrush'
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
         $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks
         $r = Test-ShareConnection -SharePath $target -User $user -Password $pw -StatusPath $report -StatusOnly:(-not $share)
     } finally { $window.Cursor = $null; $pw = $null }
-    Set-ShareTestText $r.Message $(if ($r.Ok) { '#15803D' } else { '#B91C1C' })
+    Set-ShareTestText $r.Message $(if ($r.Ok) { 'SuccessBrush' } else { 'ErrorBrush' })
     Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
 } })
 
@@ -1389,7 +1376,8 @@ $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
-    Set-Status "Removed $($r.Serial) from the dashboard. Its final log stays in Deployment Logs."
+    Update-Logs
+    Set-Status "Removed $($r.Serial) from the dashboard. Its final log is now on the Logs tab."
 } })
 
 $ui.BtnDashClear.Add_Click({ Invoke-Safely {
@@ -1397,9 +1385,10 @@ $ui.BtnDashClear.Add_Click({ Invoke-Safely {
     if (-not $folder) { return }
     $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
     if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay, and final logs stay in Deployment Logs.")) { return }
+    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. The cleared PCs' final logs move to the Logs tab.")) { return }
     Remove-DeploymentStatus -Rows $done
     Update-Dashboard
+    Update-Logs
     Set-Status "Cleared $($done.Count) finished deployment(s)"
 } })
 

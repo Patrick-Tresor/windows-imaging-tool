@@ -8,9 +8,10 @@ $script = Join-Path $repo 'src/Deploy-Image.ps1'
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
-# The script needs WinPE and admin rights, so load only the functions under test.
+Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
+# The script needs WinPE and admin rights, so load only the function under test.
 $ast = [Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$null)
-foreach ($fnName in 'Get-AnswerFileNames', 'Read-DeployAnswer') {
+foreach ($fnName in 'Read-DeployAnswer') {
     $fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $true)
     . ([scriptblock]::Create($fn.Extent.Text))
 }
@@ -22,20 +23,20 @@ try {
     Set-Content -LiteralPath (Join-Path $dir 'W11-Staff.xml') -Value '<x/>'
 
     # One answer file.
-    $one = Get-AnswerFileNames -Root $root
+    $one = Get-AnswerFileNames -ContentRoot $root -Required
     Assert-Equal ($one -is [array]) $true 'one answer file still comes back as an array'
     Assert-Equal $one.Count 1 'one answer file: one name'
     Assert-Equal $one[0] 'W11-Staff' 'one answer file: [0] is the whole name, not its first letter'
 
     # The selection Deploy-Image does when there is no default.
-    $names = @(Get-AnswerFileNames -Root $root)
+    $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     $AnswerFile = $null
     if ($names.Count -eq 1) { $AnswerFile = $names[0] }
     Assert-Equal $AnswerFile 'W11-Staff' 'the only answer file is chosen by its full name'
 
     # Several answer files, sorted.
     Set-Content -LiteralPath (Join-Path $dir 'A-Lab.xml') -Value '<x/>'
-    $two = Get-AnswerFileNames -Root $root
+    $two = Get-AnswerFileNames -ContentRoot $root
     Assert-Equal ($two -join ',') 'A-Lab,W11-Staff' 'several answer files come back sorted'
 
     # A content root at the top of a drive (E:\) must not give E:\\AnswerFiles in the message.
@@ -50,6 +51,8 @@ try {
 
 # Deploy-Image.ps1 keeps the list an array where it calls the function.
 $text = [IO.File]::ReadAllText($script)
-Assert-Equal ($text -match '\$names = @\(Get-AnswerFileNames -Root \$root\)') $true 'Deploy-Image wraps Get-AnswerFileNames in @()'
+Assert-Equal ($text -match '\$names = @\(Get-AnswerFileNames -ContentRoot \$root -Required\)') $true 'Deploy-Image wraps Get-AnswerFileNames in @()'
+Assert-Throws { Get-AnswerFileNames -ContentRoot (Join-Path $root 'none') -Required } 'No answer files in *' 'the deploy says how to fix media without answer files'
+Assert-Equal @(Get-AnswerFileNames -ContentRoot (Join-Path $root 'none')).Count 0 'the console gets an empty list'
 
 Complete-Tests

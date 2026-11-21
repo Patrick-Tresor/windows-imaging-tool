@@ -85,9 +85,6 @@ try {
     Assert-Equal (Join-InputLocale 'fr-CA' 'en-US') 'fr-CA; en-US' 'second keyboard goes after the main one'
     Assert-Equal (Join-InputLocale ' fr-CA ' '') 'fr-CA' 'no second keyboard leaves one'
     Assert-Equal (Join-InputLocale 'fr-CA' 'fr-CA') 'fr-CA' 'the same keyboard is not added twice'
-    Assert-Equal ((Split-InputLocale 'fr-CA; en-US') -join '|') 'fr-CA|en-US' 'list splits into main and second keyboard'
-    Assert-Equal ((Split-InputLocale '0c0c:00001009;0409:00000409') -join '|') '0c0c:00001009|0409:00000409' 'keyboard IDs split too'
-    Assert-Equal ((Split-InputLocale '') -join '|') '|' 'empty list gives two empty boxes'
     # Language settings, as Patrick's college image uses them: two keyboards, French display with English fallback.
     $l = $default.PSObject.Copy()
     $l.InputLocale = '0c0c:00001009; 0409:00000409'; $l.SystemLocale = 'fr-CA'; $l.UILanguage = 'fr-CA'

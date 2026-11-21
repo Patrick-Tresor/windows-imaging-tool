@@ -157,6 +157,8 @@ try {
     Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 3800) '.swm' 'a split makes .swm parts'
     Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 0) '.wim' 'Maximum makes a .wim'
     Assert-Throws { Assert-CaptureCompression -Compression recovery -SplitSizeMB 3800 } '*cannot be split*' 'Smallest with a FAT32 split is refused'
+    Assert-Equal ((Get-CaptureImageArgs -WimPath 'D:\S\W.wim' -CaptureDir 'C:\' -Name 'W' -Compression recovery -Description 'Ref' -Verify) -join ' ') '/Capture-Image /ImageFile:D:\S\W.wim /CaptureDir:C:\ /Name:W /Compress:max /CheckIntegrity /Verify /Description:Ref' 'Smallest captures with max first, both capture scripts build the same DISM line'
+    Assert-Equal ((Get-CaptureImageArgs -WimPath 'W.wim' -CaptureDir 'V:\' -Name 'W' -Compression fast) -join ' ') '/Capture-Image /ImageFile:W.wim /CaptureDir:V:\ /Name:W /Compress:fast /CheckIntegrity' 'VM capture: no /Verify'
     Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery -SplitForFat32 } '*cannot be split*' 'the capture wizard refuses Smallest with a split'
     $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery) | ConvertFrom-Json
     Assert-Equal $cfg.compression 'recovery' 'capture config keeps Smallest'

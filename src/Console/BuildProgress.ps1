@@ -34,7 +34,6 @@ namespace ImagingTool {
 }
 '@
 
-function ConvertTo-BuildBrush([string]$Color) { [Windows.Media.BrushConverter]::new().ConvertFromString($Color) }
 
 function Update-BuildStepRows {
     # Copies Get-BuildStepView rows onto the window's rows (made once, then changed in place); done steps get a
@@ -158,7 +157,7 @@ function Update-BuildProgressWindow {
         $view = Get-BuildStepView -Data $data
         $b.TxtElapsed.Text = $view.Elapsed
         $b.TxtSummary.Text = $view.Summary
-        $b.TxtSummary.Foreground = ConvertTo-BuildBrush $(if ($view.Failed) { '#B91C1C' } elseif ($view.Finished) { '#15803D' } else { '#64748B' })
+        $b.TxtSummary.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($view.Failed) { 'ErrorBrush' } elseif ($view.Finished) { 'SuccessBrush' } else { 'MutedBrush' }))
         Update-BuildStepRows -Target $Ctx.Rows -Rows @($view.Rows)
         if ($view.Finished) {
             $Ctx.Timer.Stop()
@@ -168,7 +167,7 @@ function Update-BuildProgressWindow {
             $Ctx.Timer.Stop()
             Invoke-BuildFinished $Ctx
             $b.TxtSummary.Text = if ($Ctx.Hidden) { "The $($Ctx.Noun) stopped before the end. Click Open log to see why." } else { "The $($Ctx.Noun) window was closed before the $($Ctx.Noun) finished." }
-            $b.TxtSummary.Foreground = ConvertTo-BuildBrush '#B91C1C'
+            $b.TxtSummary.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrorBrush')
         }
     } catch { $b.TxtSummary.Text = "Can't read the build progress: $($_.Exception.Message)" }
 }

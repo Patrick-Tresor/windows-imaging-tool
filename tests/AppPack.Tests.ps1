@@ -78,7 +78,9 @@ try {
     Assert-Equal (($catalog | ForEach-Object name | Sort-Object) -join ',') 'DotNet-Desktop-Runtime-8,Google-Chrome,Microsoft-365-Apps,Mozilla-Firefox,Teams,Zoom' 'the catalog lists the downloadable applications'
     $catRoot = Join-Path $tmp 'CatalogApps'
     foreach ($t in $catalog) {
-        $dest = New-AppFromCatalog -AppRoot $catRoot -Template $t
+        # What the application pack builder saves for a template with no installer picked.
+        $dest = Save-AppPack -AppRoot $catRoot -Definition (New-AppDefinitionFromTemplate -Template $t -Name $t.name -Online)
+        Copy-AppTemplateFiles -Template $t -Destination $dest
         $cd = Read-AppPack -AppRoot $catRoot -Name $t.name
         $errs = @(Test-AppPack -Definition $cd -Folder $dest | Where-Object { $_ -notlike 'Warning:*' })
         Assert-Equal "$($cd.downloadUrl -like 'https://*')|$($errs -join '; ')" 'True|' "catalog $($t.name): a valid pack with a download address and no installer"
@@ -86,7 +88,7 @@ try {
     Assert-Equal (Test-Path (Join-Path $catRoot 'Microsoft-365-Apps/configuration.xml')) $true 'the Office pack gets configuration.xml'
     Assert-Equal (Read-AppPack -AppRoot $catRoot -Name 'Teams').command '"teamsbootstrapper.exe" -p' 'Teams from the internet uses the online bootstrapper command'
     Assert-Equal (Read-AppPack -AppRoot $catRoot -Name 'DotNet-Desktop-Runtime-8').command '"windowsdesktop-runtime-8-win-x64.exe" /install /quiet /norestart' '.NET 8 installs silently from the downloaded file'
-    Assert-Throws { New-AppFromCatalog -AppRoot $catRoot -Template ($catalog | Where-Object name -eq 'Zoom') } '*already exists*' 'adding the same application twice is refused'
+    Assert-Throws { Save-AppPack -AppRoot $catRoot -Definition (New-AppDefinitionFromTemplate -Template ($catalog | Where-Object name -eq 'Zoom') -Name 'Zoom' -Online) } '*already exists*' 'adding the same application twice is refused'
     Assert-Throws { New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Name 'VLC' -Templates $templates) -Online } '*no download*' 'a template without a download address cannot be online'
     $bad = ConvertTo-AppDefinition -Name 'Bad' -Json @{ command = 'x.exe'; downloadUrl = 'ftp://x/y.exe' }
     Assert-Equal @(@(Test-AppPack -Definition $bad) -like '*must start with https*').Count 1 'a download address must be http(s)'

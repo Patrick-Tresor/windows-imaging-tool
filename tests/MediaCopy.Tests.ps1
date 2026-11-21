@@ -5,6 +5,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
+Import-Module (Join-Path $repo 'src/Format.psm1') -Force
+Import-Module (Join-Path $repo 'src/DeployStatus.psm1') -Force
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function New-TestFile([string]$Path, [int]$Bytes) {
@@ -15,13 +17,14 @@ function New-TestFile([string]$Path, [int]$Bytes) {
 }
 function Join-T([string]$Root, [string]$Rel) { Join-Path $Root ($Rel -replace '\\', [IO.Path]::DirectorySeparatorChar) }
 
-Assert-Equal (Format-MediaSize 500) '500 bytes' 'size: bytes'
-Assert-Equal (Format-MediaSize 1536) ('{0:N1} KB' -f 1.5) 'size: KB'
-Assert-Equal (Format-MediaSize 700MB) ('{0:N0} MB' -f 700) 'size: MB'
-Assert-Equal (Format-MediaSize ([int64](5.5 * 1GB))) ('{0:N2} GB' -f 5.5) 'size: GB'
-Assert-Equal (Format-MediaDuration 42) '42s' 'duration: seconds'
-Assert-Equal (Format-MediaDuration 192) '3m 12s' 'duration: minutes'
-Assert-Equal (Format-MediaDuration 3900) '1h 05m' 'duration: hours'
+# One size and one duration formatter for the whole tool (Format.psm1, DeployStatus.psm1).
+Assert-Equal (Format-ByteSize 500) '500 bytes' 'size: bytes'
+Assert-Equal (Format-ByteSize 1536) '1.5 KB' 'size: KB'
+Assert-Equal (Format-ByteSize 700MB) '700 MB' 'size: MB'
+Assert-Equal (Format-ByteSize ([int64](5.5 * 1GB))) '5.5 GB' 'size: GB'
+Assert-Equal (Format-Duration 42) '42s' 'duration: seconds'
+Assert-Equal (Format-Duration 192) '3m 12s' 'duration: minutes'
+Assert-Equal (Format-Duration 3900) '1h 05m' 'duration: hours'
 
 $base = Join-Path ([IO.Path]::GetTempPath()) ("imaging-copy-" + [guid]::NewGuid())
 $src = Join-Path $base 'content'

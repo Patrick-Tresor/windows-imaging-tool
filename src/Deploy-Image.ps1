@@ -64,37 +64,6 @@ function Resolve-ContentPath([string]$Root, [string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $Root $Path }
 }
 
-function Get-AnswerFileNames([string]$Root) {
-    # The answer file says which image to deploy, so without one there is nothing to do. Old USB sticks were built
-    # without the AnswerFiles folder; say how to fix that instead of PowerShell's "Cannot find path".
-    # Always returns an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
-    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20).
-    $dir = [IO.Path]::Combine($Root, 'AnswerFiles')
-    $names = @(Get-ChildItem -LiteralPath $dir -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object BaseName)
-    if (-not $names) {
-        throw ("No answer files in $dir, so this media doesn't know which image to deploy. " +
-            'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
-            'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
-    }
-    ,$names
-}
-
-function Select-AnswerFile([string[]]$Names, [string]$Default) {
-    # Console fallback when WinPE has no WinForms (media built without WinPE-NetFX).
-    if ($Names.Count -eq 1) { return $Names[0] }
-    Write-Host ''
-    Write-Host 'Answer files:'
-    for ($i = 0; $i -lt $Names.Count; $i++) {
-        $mark = if ($Names[$i] -eq $Default) { ' (default)' } else { '' }
-        Write-Host ("  {0}. {1}{2}" -f ($i + 1), $Names[$i], $mark)
-    }
-    $pick = Read-Host 'Number to deploy (Enter for the default)'
-    if (-not $pick -and $Default) { return $Default }
-    $n = 0
-    if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $Names.Count) { return $Names[$n - 1] }
-    throw "No answer file number '$pick'."
-}
-
 function Add-AnswerPasswords([string]$Root, $Answer) {
     # The passwords encrypted in the answer file, decrypted now (key = normalized password file path), as
     # $Answer.Passwords. One that can't be decrypted is logged and left out: the wizard's Passwords page or
@@ -317,12 +286,13 @@ function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string
         throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
     }
     # Get-AnswerSecrets lists every password up front, so this is only reached for one it does not know about.
+    # Same window as for the others (Request-DeploySecrets).
     Write-DeployLog "The $Label ($RelativePath) was not asked for with the other passwords" -Level WARN
-    $typed = Show-PasswordPrompt -Message "Type the $Label. It is not on this USB stick, and is kept in memory only for this deployment."
-    if ($null -eq $typed) { throw "The $Label was not typed." }
-    Write-DeployLog "$Label typed by the operator ($RelativePath is not on the media)"
-    $script:TypedSecrets[$key] = $typed
-    $typed
+    $secret = [pscustomobject]@{ Key = $key; Label = $Label; RelativePath = $RelativePath }
+    $typed = Show-SecretsPrompt -Secrets @($secret)
+    if ($null -eq $typed -or -not $typed[$key]) { throw "The $Label was not typed." }
+    Save-TypedSecrets -Values $typed -Secrets @($secret)
+    $script:TypedSecrets[$key]
 }
 
 function Test-DeploySecretKnown([string]$Root, [string]$RelativePath, $Answer) {
@@ -352,7 +322,7 @@ function Save-TypedSecrets([hashtable]$Values, [object[]]$Secrets) {
 }
 
 function Request-DeploySecrets([string]$Root, $Answer) {
-    # Without the wizard (unattended answer file, no WinForms): every missing password in one window, before the
+    # Without the wizard (unattended answer file, -NoPrompt): every missing password in one window, before the
     # countdown and before anything is erased. With the wizard its Passwords page has asked already: nothing to do.
     $missing = @(Get-MissingDeploySecrets -Root $Root -Answer $Answer)
     if (-not $missing) { return }
@@ -403,8 +373,6 @@ function Wait-MediaRemoval([string]$Root, [int]$Seconds = 60) {
 
 function Start-ProgressWindow([string]$ProgressPath) {
     # The window on this PC's screen (DeployProgressWindow.ps1), in its own process so it keeps redrawing while DISM runs.
-    # Without WinForms (media built without WinPE-NetFX) the console shows the log as before.
-    if (-not (Test-DeployWizardAvailable)) { return $false }
     try {
         $script = Join-Path $PSScriptRoot 'DeployProgressWindow.ps1'
         Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
@@ -597,7 +565,7 @@ try {
         $listed = [pscustomobject]@{ Serial = "$($hw.Serial)"; ComputerName = $(if ($listed) { $listed.ComputerName } else { '' }); OU = $job.ou; AnswerFile = $job.answerFile }
     }
 
-    $names = @(Get-AnswerFileNames -Root $root)
+    $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     if (-not $AnswerFile) {
         if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
         elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
@@ -639,7 +607,7 @@ try {
         }
     }
 
-    if (-not $confirmed -and (Test-DeployWizardAvailable)) {
+    if (-not $confirmed) {
         Set-DeployStatus -Step 'Waiting for the operator' -Percent 5
         $choice = Show-DeployWizard -Hardware $hw -AnswerFiles $names -Default $AnswerFile -ComputerName $ComputerName `
             -ReadAnswer $readAnswer -PreparePlan $preparePlan -MissingSecrets $missingSecrets -SaveSecrets $saveSecrets -Disks @(Get-TargetDisks -Exclude @(Get-ContentDiskNumber $root)) -Notice $wizardNotice
@@ -648,15 +616,8 @@ try {
         $confirmed = $true
     }
 
-    if (-not $answer) { $answer = & $readAnswer (Select-AnswerFile -Names $names -Default $settings.defaultAnswerFile) }
     if (-not $deployPlan) { $deployPlan = & $preparePlan $answer }
-    if (-not $ComputerName) {
-        $ComputerName = $deployPlan.DefaultName
-        if ($answer.NamingMode -eq 'Prompt' -and -not $confirmed -and -not ($listed -and $listed.ComputerName)) {
-            $typed = Read-Host "Computer name (Enter for $ComputerName)"
-            if ($typed) { $ComputerName = Resolve-ComputerName -Answer $answer -WmiValue $deployPlan.WmiValue -Serial $hw.Serial -Typed $typed }
-        }
-    }
+    if (-not $ComputerName) { $ComputerName = $deployPlan.DefaultName }
     $nameSource = if ($givenName -and $ComputerName -eq $givenName) { if ($job -and $job.computerName -eq $givenName) { 'kept from Active Directory' } else { 'parameter' } }
                   elseif ($ComputerName -eq $deployPlan.DefaultName) { $deployPlan.NameSource } else { 'typed by the operator' }
     Write-DeployLog "Answer file: $($answer.Name) ($($answer.Mode)), name $ComputerName ($nameSource), disk $($answer.DiskNumber)"
@@ -710,12 +671,6 @@ try {
 
     $summary = @(Get-DeploySummary -Answer $answer -Plan $deployPlan -ComputerName $ComputerName -Disk $disk -Applications @($apps | ForEach-Object name))
     foreach ($line in $summary) { Write-DeployLog $line }
-    if (-not $confirmed) {
-        Write-Host ''
-        $summary | ForEach-Object { Write-Host $_ -ForegroundColor $(if ($_ -like 'ERASE*') { 'Red' } elseif ($_ -like 'Windows 11:   NOT READY*') { 'Yellow' } else { 'Gray' }) }
-        Set-DeployStatus -Step 'Waiting for the operator'
-        if ((Read-Host 'Type YES to continue') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
-    }
 
     # 1. Partition: EFI, MSR, Windows, Recovery.
     Set-DeployStatus -Step 'Partitioning the disk' -Percent 8

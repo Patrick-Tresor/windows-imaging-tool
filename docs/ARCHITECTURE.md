@@ -46,7 +46,7 @@ BitLocker) that the wizard shows before the ERASE line. The choices come back as
 answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
 replaced, and the deploy continues exactly as for a command-line run.
 `-NoPrompt` and an `Unattended` countdown skip the window;
-a key pressed during the countdown opens it. Without WinForms the console prompts are used instead.
+a key pressed during the countdown opens it.
 
 Both the wizard and the progress window list the steps (answer file, computer
 name, applications, confirm, install, finish) down a sidebar.
@@ -381,8 +381,8 @@ release, then newest date; Dell WinPE packs are skipped). Installing a pack:
    model name, at the top of `driver-catalog.json`, replacing older entries
    with the same key.
 
-The downloads run in their own PowerShell window (`Get-DriverPacks.ps1
--JobFile`), like media builds, so the console stays usable.
+The downloads run in a hidden PowerShell process (`Get-DriverPacks.ps1
+-JobFile`, the script's only mode), like media builds, so the console stays usable.
 
 Packs can still be added by hand: extract one to `Drivers\<Maker>\<Model>\`
 and import it from the Driver Library tab.
@@ -404,7 +404,6 @@ vendor catalog (SKU or machine type, then model name). The console's
 **Unknown models...** window ticks every model that has a pack and hands them to
 the same download job as **Find a model online**. **Use inbox drivers**
 adds a catalog entry with no folder, keyed on the SKU, machine type or model.
-`Get-DriverPacks.ps1 -UnknownModels [-List]` does the same from the command line.
 
 PCs already deployed keep the drivers they got. Reimage them, or install the
 pack on them by other means, once it is in the library.

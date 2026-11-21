@@ -284,36 +284,20 @@ function Get-AppTemplates {
     @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
 }
 
-function New-AppFromCatalog {
-    <#
-    .SYNOPSIS
-        Creates Applications\<name> from a catalog template: app.json with the download address, plus the template's
-        extra files (Office's configuration.xml) from config\. Nothing is downloaded now; the PC does it at first boot.
-    #>
+function Copy-AppTemplateFiles {
+    # The template's extra files (Office's configuration.xml) from config\ into the application's folder. The
+    # application pack builder calls it when it saves an application made from such a template.
     param(
-        [Parameter(Mandatory)][string]$AppRoot,
         [Parameter(Mandatory)]$Template,
-        [string]$Name,
-        [string]$ConfigDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config'),
-        # Turns an existing application into the online one (the Applications tab's download tick box).
-        [switch]$Overwrite
+        [Parameter(Mandatory)][string]$Destination,
+        [string]$ConfigDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config')
     )
-    $d = New-AppDefinitionFromTemplate -Template $Template -Name $(if ($Name) { $Name } else { $Template.name }) -Online
-    $dest = Save-AppPack -AppRoot $AppRoot -Definition $d -Overwrite:$Overwrite
-    if ($Template.PSObject.Properties['files'] -and $Template.files) {
-        foreach ($f in $Template.files.PSObject.Properties) {
-            Copy-Item -LiteralPath (Join-Path $ConfigDir $f.Value) -Destination (Join-Path $dest $f.Name) -Force
-        }
+    if (-not ($Template.PSObject.Properties['files'] -and $Template.files)) { return }
+    foreach ($f in $Template.files.PSObject.Properties) {
+        $target = Join-Path $Destination $f.Name
+        # An edited configuration.xml in the pack is kept.
+        if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath (Join-Path $ConfigDir $f.Value) -Destination $target }
     }
-    $dest
-}
-
-function Get-AppKnownDownload {
-    # The catalog template that knows where to download this application (by installer file or name), or $null.
-    param([Parameter(Mandatory)]$Definition, [object[]]$Templates = (Get-AppTemplates))
-    $t = Find-AppTemplate -Installer $Definition.installer -Templates $Templates
-    if (-not $t -or -not ($t.PSObject.Properties['download'] -and $t.download.url)) { $t = Find-AppTemplate -Name $Definition.name -Templates $Templates }
-    if ($t -and $t.PSObject.Properties['download'] -and $t.download.url) { $t } else { $null }
 }
 
 function Find-AppTemplate {
@@ -886,7 +870,7 @@ function Invoke-AppInstall {
 
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
-    Get-AppTemplates, New-AppFromCatalog, Get-AppKnownDownload,
+    Get-AppTemplates, Copy-AppTemplateFiles,
     ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
     Get-MediaAppDownloads, Add-MediaCopyItems,

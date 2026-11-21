@@ -85,7 +85,7 @@ and click **Create folders** the first time. Then:
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
   See [Deployment dashboard](#deployment-dashboard).
-- **Deployment Logs**: one log per deployed PC, with result and full text.
+- **Logs**: capture and image update logs, and the final log of each deployment cleared from the Dashboard.
 
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
@@ -356,11 +356,9 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`. An
-application the console already knows (by its name or installer, for
-example an Office pack built from `OfficeSetup.exe`) can switch: select it
-on the Applications tab and tick **Download it from the internet when the PC
-installs it**. No link to paste: it uses the publisher's link from the
-catalog, and unticking brings back the pack's own installer. The **Download
+To make one, click **New...** on the Applications tab, pick the template,
+leave the installer empty and click **Apply**: the pack gets the publisher's
+link (and, for Office, `configuration.xml`). The **Download
 link** column shows which packs download, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
@@ -479,7 +477,7 @@ the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
 name, so answer files pick it up without changes. Split images (`.swm`) are joined,
 updated and split again. The Images tab shows when each image was last updated and
-with which KBs, and the log appears on the Deployment Logs tab as `SERVICE-<name>`.
+with which KBs, and the log appears on the Logs tab as `SERVICE-<name>`.
 
 It needs about three times the image size free on the system drive (or pass
 `-WorkDir`). A package that does not apply to the image is logged and skipped; any
@@ -562,7 +560,7 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 ```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; final logs stay in Deployment Logs. A PC
+succeeded, warning and cancelled PCs; their final logs move to the Logs tab. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
@@ -632,7 +630,7 @@ are both read. The deploy log says which entry was used.
       window with each step (copy, read, capture, save), its bar and the time left.
    The image is saved to the content root's `Images` folder (disk file) or the share's
    `Images` folder (ISO), and a
-   `CAPTURE-<name>` log appears on the Deployment Logs tab.
+   `CAPTURE-<name>` log appears on the Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 
@@ -649,11 +647,9 @@ are both read. The deploy log says which entry was used.
    password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
    on it. Untested on Windows, including every conversion.
-4. **Add drivers** in the console's Driver Library tab (**Find a model online**),
-   or from the command line:
-   `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
-   (drop `-List` to download). After deploying, `Get-DriverPacks.ps1 -ContentRoot D:\Deploy -UnknownModels -List`
-   shows the models that had no pack (drop `-List` to download their packs). You can also extract a pack into
+4. **Add drivers** in the console's Driver Library tab (**Find a model online**).
+   After deploying, **Unknown models...** on the same tab lists the models that had
+   no pack and downloads theirs. You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, add the new cumulative update with **Update image...** instead of
@@ -672,8 +668,7 @@ are both read. The deploy log says which entry was used.
    `Unattended` answer files skip the wizard after their
    countdown (the progress window's **Change settings** button, or any key on the
    console, opens it instead), and `Deploy-Image.ps1 -AnswerFile <name> -NoPrompt` skips it
-   entirely. If the WinPE image has no WinForms (built without WinPE-NetFX), the
-   same questions are asked on the console.
+   entirely.
 
 ## Status
 

@@ -46,6 +46,7 @@ Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'CaptureCheck.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Format.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 
@@ -213,7 +214,7 @@ if ($CheckOnly) {
         $check.imageState = "$($offline.ImageState)"; $check.lastError = "$($offline.LastError)"
         $check.generalized = Test-Generalized -Root $mount.Root
         $check.hibernated = Test-HibernatedWindows -Root $mount.Root
-        Write-DeployLog "Found $($info.Name), $(Format-DiskSize $info.UsedBytes) used; generalized: $($check.generalized) ($($check.imageState)); hibernated: $($check.hibernated)"
+        Write-DeployLog "Found $($info.Name), $(Format-ByteSize $info.UsedBytes) used; generalized: $($check.generalized) ($($check.imageState)); hibernated: $($check.hibernated)"
         $check.state = 'done'; $check.detail = ''
     }
     catch {
@@ -374,34 +375,29 @@ try {
     Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
-    # Smallest: DISM captures with max, then recompresses into an .esd (it cannot capture to recovery directly).
-    $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
-        "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
-    if ($Description) { $captureArgs += "/Description:$Description" }
+    $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description
     Start-BuildStep 'capture'
     $captureClock = [Diagnostics.Stopwatch]::StartNew()
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
         param($pct) Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
     }
     $wimSize = (Get-Item -LiteralPath $wim).Length
-    $read = if ($windowsInfo) { " from $(Format-DiskSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
+    $read = if ($windowsInfo) { " from $(Format-ByteSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }
     # The compression is in the line so captures with Fast and Maximum can be compared from the logs.
-    Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}, {3} compression." -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $read, $Compression)
-    Complete-BuildStep 'capture' -Detail ("{0} in {1:hh\:mm}, {2} compression" -f (Format-DiskSize $wimSize), $captureClock.Elapsed, $Compression)
+    Write-DeployLog ("Captured {0} in {1:hh\:mm\:ss}{2}, {3} compression." -f (Format-ByteSize $wimSize), $captureClock.Elapsed, $read, $Compression)
+    Complete-BuildStep 'capture' -Detail ("{0} in {1:hh\:mm}, {2} compression" -f (Format-ByteSize $wimSize), $captureClock.Elapsed, $Compression)
 
     if ($Compression -eq 'recovery') {
         Start-BuildStep 'compress'
         $compressClock = [Diagnostics.Stopwatch]::StartNew()
         $esd = Convert-ImageToEsd -WimPath $wim -OnProgress { param($pct) Set-BuildStepProgress 'compress' -Percent $(if ($null -ne $pct) { $pct } else { -1 }) }
         $esdSize = (Get-Item -LiteralPath $esd).Length
-        Write-DeployLog ("Compressed to {0} (.esd, {1}% of the .wim) in {2:hh\:mm\:ss}." -f (Format-DiskSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)), $compressClock.Elapsed)
-        Complete-BuildStep 'compress' -Detail ("{0}, {1}% of Maximum" -f (Format-DiskSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)))
+        Write-DeployLog ("Compressed to {0} (.esd, {1}% of the .wim) in {2:hh\:mm\:ss}." -f (Format-ByteSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)), $compressClock.Elapsed)
+        Complete-BuildStep 'compress' -Detail ("{0}, {1}% of Maximum" -f (Format-ByteSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)))
     }
     if ($SplitSizeMB -gt 0) {
         Start-BuildStep 'split'
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
-            '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $staging "$Name.swm")", "/FileSize:$SplitSizeMB")
-        Remove-Item $wim
+        Split-CapturedImage -WimPath $wim -SplitSizeMB $SplitSizeMB
         Complete-BuildStep 'split'
     }
     Start-BuildStep 'save' -Detail $(if ($staging -notlike "$imagesDir*") { 'Copying the image from the PC''s disk' } else { '' })

@@ -75,6 +75,7 @@ try {
 
     Assert-Equal (Format-Duration ([timespan]::FromMinutes(75))) '1h 15m' 'durations over an hour'
     Assert-Equal (Format-Duration ([timespan]::FromSeconds(95))) '1m 35s' 'durations under an hour'
+    Assert-Equal (Format-Duration 42.4) '42s' 'durations under a minute, also from seconds'
 
     # USB deploys with no network folder: the console moves the stick's status into the dashboard
     $stick = Join-Path $root 'stick'

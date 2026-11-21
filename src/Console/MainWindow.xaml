@@ -28,7 +28,7 @@
     </Border>
 
     <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
-    <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="#FCD34D" BorderThickness="0,0,0,1">
+    <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
@@ -153,48 +153,7 @@
                           <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         </DockPanel>
                         <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
-                        <ItemsControl ItemsSource="{Binding Steps}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid Margin="0,3">
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="*"/>
-                                  <ColumnDefinition Width="190"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                  <RowDefinition Height="Auto"/>
-                                  <RowDefinition Height="Auto"/>
-                                  <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <DockPanel Grid.Row="0" Grid.Column="0">
-                                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="{DynamicResource BodyBrush}" Margin="8,0,0,0"/>
-                                  <TextBlock x:Name="DlStepName" Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"/>
-                                </DockPanel>
-                                <ProgressBar x:Name="DlBar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
-                                             Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
-                                             Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
-                                <TextBlock x:Name="DlStatus" Grid.Row="1" Grid.Column="1" Text="{Binding Status}" Margin="12,0,0,0"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
-                                           TextTrimming="CharacterEllipsis"/>
-                              </Grid>
-                              <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding State}" Value="pending">
-                                  <Setter TargetName="DlStepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding State}" Value="done">
-                                  <Setter TargetName="DlBar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding State}" Value="failed">
-                                  <Setter TargetName="DlBar" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="FontWeight" Value="SemiBold"/>
-                                </DataTrigger>
-                              </DataTemplate.Triggers>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding Steps}" ItemTemplate="{DynamicResource StepRowTemplate}"/>
                       </StackPanel>
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding Outcome}" Value="ok">
@@ -329,7 +288,7 @@
 
             <Label Grid.Row="14" Content="Online apps on USB"/>
             <CheckBox x:Name="ChkAppDownloads" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="True" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
-                      Content="Download the applications that install from the internet (Find an app online, Download tick box) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
+                      Content="Download the applications that install from the internet (Find an app online, or New... from a template) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
 
@@ -337,7 +296,7 @@
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
           </StackPanel>
           <!-- Shown only when the console could not add these folders to Defender's exclusions itself (Add-ScanExclusions.ps1). -->
-          <Border x:Name="BdrScanTip" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource InfoSoftBrush}" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8">
+          <Border x:Name="BdrScanTip" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource InfoSoftBrush}" BorderBrush="{DynamicResource InfoLineBrush}" BorderThickness="1" CornerRadius="8">
             <StackPanel>
               <TextBlock x:Name="TxtScanTip" TextWrapping="Wrap"/>
               <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -418,11 +377,6 @@
           </Grid>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-            <CheckBox x:Name="ChkAppOnline" IsEnabled="False" Content="Download it from the internet when the PC installs it (no installer to keep in the pack)"
-                      ToolTip="Uses the publisher's link the console already knows for this application. Untick to use the installer in the pack again."/>
-            <TextBlock x:Name="TxtAppOnline" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="22,2,0,0"/>
-          </StackPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
@@ -602,7 +556,7 @@
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
               <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" MaxWidth="700"/>
             </StackPanel>
-            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="#FCD34D" BorderThickness="1" CornerRadius="8">
+            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
               <DockPanel>
                 <Button x:Name="BtnSettingsMedia" DockPanel.Dock="Right" Content="Open the Media tab" Margin="12,0,0,0"/>
                 <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>
@@ -780,20 +734,21 @@
       </TabItem>
 
       <!-- Logs -->
-      <TabItem Header="Deployment Logs">
+      <TabItem Header="Logs">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment logs"/>
-            <TextBlock Style="{StaticResource Hint}" Text="One log per deployed PC, written to the content root's Logs folder when the deploy finishes or fails."/>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Logs"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Captures, image updates, and deployments no longer on the Dashboard. A PC on the Dashboard shows its log there."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
             <Button x:Name="BtnLogsRefresh" Content="Refresh"/>
           </StackPanel>
           <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="440"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <DataGrid x:Name="GridLogs" IsReadOnly="True">
               <DataGrid.Columns>
                 <DataGridTextColumn Header="When" Binding="{Binding When, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
+                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="90"/>
                 <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="*"/>
                 <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="70"/>
               </DataGrid.Columns>

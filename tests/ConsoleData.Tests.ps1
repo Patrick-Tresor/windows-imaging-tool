@@ -117,22 +117,6 @@ try {
     New-Application -ContentRoot $root -Name 'Zoom' -Source $inst -Command 'msiexec /i zoom-src.msi /qn' | Out-Null
     $appList = @(Get-ApplicationList -ContentRoot $root)
     Assert-Equal "$($appList.Name)|$($appList.Status)|$(Test-Path (Join-Path $root 'Applications/Zoom/zoom-src.msi'))" 'Zoom|Ready (no detection)|True' 'new application copies the installer and writes app.json'
-    # Download tick box on the Applications tab: no link to paste, the console knows it from the catalog.
-    $oi = Join-Path $root 'OfficeSetup.exe'
-    Set-Content $oi 'exe'
-    New-Application -ContentRoot $root -Name 'Microsoft-Office' -Source $oi -Command '"OfficeSetup.exe" /S' | Out-Null
-    $mo = @(Get-ApplicationList -ContentRoot $root | Where-Object Name -eq 'Microsoft-Office')[0]
-    Assert-Equal "[$($mo.Download)]|$($mo.KnownDownload)" '[]|https://officecdn.microsoft.com/pr/wsus/setup.exe' 'an application the catalog knows can be ticked to download'
-    $on = Set-ApplicationOnline -ContentRoot $root -Name 'Microsoft-Office' -On $true
-    Assert-Equal "$($on.downloadUrl)|$($on.command)|$(Test-Path (Join-Path $root 'Applications/Microsoft-Office/configuration.xml'))" 'https://officecdn.microsoft.com/pr/wsus/setup.exe|"setup.exe" /configure configuration.xml|True' 'ticking it makes the online Office (Deployment Tool and configuration.xml)'
-    $off = Set-ApplicationOnline -ContentRoot $root -Name 'Microsoft-Office' -On $false
-    Assert-Equal "[$($off.downloadUrl)]|$($off.command)" '[]|"OfficeSetup.exe" /S' 'unticking brings back the settings from before'
-    $zon = Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $true
-    $zoff = Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $false
-    Assert-Equal "$($zon.downloadUrl)|[$($zoff.downloadUrl)]|$($zoff.command)" 'https://zoom.us/client/latest/ZoomInstallerFull.msi|[]|msiexec /i zoom-src.msi /qn' 'Zoom is known too, and unticking uses its own installer again'
-    $err = try { Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $true | Out-Null; Set-ApplicationOnline -ContentRoot $root -Name 'Zoom' -On $false | Out-Null; '' } catch { $_.Exception.Message }
-    Assert-Equal "$err" '' 'ticking twice works'
-    Remove-Item (Join-Path $root 'Applications/Microsoft-Office') -Recurse -Force
 
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'
@@ -256,6 +240,13 @@ try {
 
     Set-Content (Join-Path $root 'Logs/SERVICE-Win11_20261023-1000_OK.log') 'x'
     Assert-Equal ((Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'SERVICE-*').Status) 'OK' 'update log is parsed'
+
+    # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.
+    $tab = @(Get-LogTabRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
+    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Count) 0 'Logs tab hides a deployment that is on the Dashboard'
+    Assert-Equal ((@($tab | ForEach-Object Kind) | Sort-Object) -join ',') 'Capture,Image update' 'Logs tab keeps capture and image update logs'
+    $tab = @(Get-LogTabRows -ContentRoot $root)
+    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Kind) 'Deployment' 'Logs tab lists a deployment cleared from the Dashboard'
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

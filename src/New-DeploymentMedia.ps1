@@ -105,6 +105,8 @@ Import-Module (Join-Path $PSScriptRoot 'AdkCheck.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'UsbDisk.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaContent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'MediaCopy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Format.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPackFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
@@ -165,7 +167,7 @@ $copyPlan = $null
 if ($content) {
     # Every file to copy and the total, for the progress bar and to check the stick is big enough before it is erased.
     $copyPlan = Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude
-    Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
+    Write-Host ('Content to copy: {0} files, {1}' -f $copyPlan.FileCount, (Format-ByteSize $copyPlan.TotalBytes))
 }
 if ($UpdateOnly) {
     # Check the stick is one of ours before spending minutes on the build.
@@ -173,10 +175,10 @@ if ($UpdateOnly) {
     $null = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
 }
 
-Complete-BuildStep 'check' -Detail $(if ($copyPlan) { '{0} files, {1} to copy' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes) } else { '' })
+Complete-BuildStep 'check' -Detail $(if ($copyPlan) { '{0} files, {1} to copy' -f $copyPlan.FileCount, (Format-ByteSize $copyPlan.TotalBytes) } else { '' })
 
 if ($appDownloads -and $copyPlan) {
-    # Applications that download at first boot (Find an app online, the Download tick box): download them here
+    # Applications that download at first boot (Find an app online, or a template with no installer in New...): download them here
     # once, so an offline stick installs them without internet. Cached for the next build; a failure only warns.
     Start-BuildStep 'apps'
     $appCache = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'AppDownloads')
@@ -206,9 +208,9 @@ if ($packDrivers) {
         Remove-OldDriverPackFiles -CacheRoot $packCache -InUse @($copyPlan.Items | ForEach-Object { $_.Source } | Where-Object { $_ -like "$packCache*" })
         $files = 0; $before = [int64]0; $after = [int64]0
         foreach ($p in @($copyPlan.Packed)) { $files += $p.Files; $before += $p.Bytes; $after += $p.PackedBytes }
-        $packDetail = '{0} pack(s): {1} files, {2}, now {3}' -f @($copyPlan.Packed).Count, $files, (Format-MediaSize $before), (Format-MediaSize $after)
+        $packDetail = '{0} pack(s): {1} files, {2}, now {3}' -f @($copyPlan.Packed).Count, $files, (Format-ByteSize $before), (Format-ByteSize $after)
         Write-Host "Driver packs: $packDetail"
-        Write-Host ('Content to copy now: {0} files, {1}' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes))
+        Write-Host ('Content to copy now: {0} files, {1}' -f $copyPlan.FileCount, (Format-ByteSize $copyPlan.TotalBytes))
         Complete-BuildStep 'packdrivers' -Detail $packDetail
     } else { Complete-BuildStep 'packdrivers' -State skipped -Detail 'No driver packs on this stick' }
 }
@@ -458,7 +460,7 @@ switch ($Target) {
         $disk = Get-UsbTargetDisk -DiskNumber $UsbDiskNumber
         $update = $null
         # The content copy's percent, speed and time left for the progress window.
-        $onCopy = { param($p) Set-BuildStepProgress 'content' -Percent $p.Percent -Detail ('{0} of {1}, {2}/s, about {3} left' -f (Format-MediaSize $p.BytesDone), (Format-MediaSize $p.TotalBytes), (Format-MediaSize ([int64]$p.BytesPerSecond)), (Format-MediaDuration $p.SecondsLeft)) }
+        $onCopy = { param($p) Set-BuildStepProgress 'content' -Percent $p.Percent -Detail ('{0} of {1}, {2}/s, about {3} left' -f (Format-ByteSize $p.BytesDone), (Format-ByteSize $p.TotalBytes), (Format-ByteSize ([int64]$p.BytesPerSecond)), (Format-Duration $p.SecondsLeft)) }
         if ($UpdateOnly) {
             # A stick built before: keep its partitions, refresh WinPE, copy only what changed, delete what was dropped.
             Start-BuildStep 'stick'
@@ -466,9 +468,9 @@ switch ($Target) {
             $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
             if ($copyPlan) {
                 $update = Get-MediaUpdatePlan -Plan $copyPlan -Destination "${dataLetter}:\"
-                Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-MediaSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
+                Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-ByteSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
                 if ($update.NeededBytes -gt ($sticks.Data.FreeBytes - 64MB)) {
-                    throw ('The update needs {0} more but the stick''s DEPLOY partition has {1} free. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $update.NeededBytes), (Format-MediaSize $sticks.Data.FreeBytes))
+                    throw ('The update needs {0} more but the stick''s DEPLOY partition has {1} free. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-ByteSize $update.NeededBytes), (Format-ByteSize $sticks.Data.FreeBytes))
                 }
             }
             Complete-BuildStep 'stick' -Detail $(if ($update) { '{0} file(s) to copy, {1} unchanged, {2} to delete' -f $update.Copy.FileCount, $update.Unchanged, @($update.Stale).Count } else { '' })
@@ -482,8 +484,8 @@ switch ($Target) {
                 Disable-ShortNames $dataLetter
                 Remove-StaleMediaFiles -UpdatePlan $update -Destination "${dataLetter}:\"
                 $copied = Copy-MediaContent -Plan $update.Copy -Destination "${dataLetter}:\" -OnProgress $onCopy
-                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
-                Write-Host ('Copied {0} files, {1}, in {2}; {3} file(s) were already up to date' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), $update.Unchanged)
+                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-ByteSize $copied.Bytes), (Format-Duration $copied.Seconds))
+                Write-Host ('Copied {0} files, {1}, in {2}; {3} file(s) were already up to date' -f $copied.FileCount, (Format-ByteSize $copied.Bytes), (Format-Duration $copied.Seconds), $update.Unchanged)
             }
         }
         if (-not $UpdateOnly) {
@@ -491,7 +493,7 @@ switch ($Target) {
                 # 2 GB WINPE partition, plus a little for NTFS itself.
                 $room = [int64]$disk.Size - 2GB - [int64]($disk.Size * 0.02)
                 if ($copyPlan.TotalBytes -gt $room) {
-                    throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-MediaSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-MediaSize ([Math]::Max(0, $room))))
+                    throw ('The content is {0} but USB disk {1} only has room for about {2}. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-ByteSize $copyPlan.TotalBytes), $UsbDiskNumber, (Format-ByteSize ([Math]::Max(0, $room))))
                 }
             }
             if (-not $Force -and (Read-Host "ERASE disk $UsbDiskNumber ($($disk.FriendlyName))? Type YES") -ne 'YES') { Stop-BuildProgress -Message 'Cancelled: the stick was not erased.'; return }
@@ -524,8 +526,8 @@ switch ($Target) {
                 # The answer files, the image each one names, and what they use, copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
                 Start-BuildStep 'content'
                 $copied = Copy-MediaContent -Plan $copyPlan -Destination "${dataLetter}:\" -OnProgress $onCopy
-                Write-Host ('Copied {0} files, {1}, in {2} ({3}/s on average)' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds), (Format-MediaSize ([int64]($copied.Bytes / [Math]::Max(0.001, $copied.Seconds)))))
-                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-MediaSize $copied.Bytes), (Format-MediaDuration $copied.Seconds))
+                Write-Host ('Copied {0} files, {1}, in {2} ({3}/s on average)' -f $copied.FileCount, (Format-ByteSize $copied.Bytes), (Format-Duration $copied.Seconds), (Format-ByteSize ([int64]($copied.Bytes / [Math]::Max(0.001, $copied.Seconds)))))
+                Complete-BuildStep 'content' -Detail ('{0} files, {1}, in {2}' -f $copied.FileCount, (Format-ByteSize $copied.Bytes), (Format-Duration $copied.Seconds))
             }
         }
         if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
@@ -539,12 +541,12 @@ switch ($Target) {
             $pack = $vendorPacks[$n]
             $packPlan = (Get-MediaUpdatePlan -Plan (Get-WinPEPackCopyPlan -PackPath $pack.Path) -Destination "${dataLetter}:\").Copy
             if (-not $packPlan.FileCount) { Write-Host "$($pack.Source) is already on the stick."; continue }
-            Write-Host ('Copying {0} to the stick: {1} files, {2}' -f $pack.Source, $packPlan.FileCount, (Format-MediaSize $packPlan.TotalBytes))
+            Write-Host ('Copying {0} to the stick: {1} files, {2}' -f $pack.Source, $packPlan.FileCount, (Format-ByteSize $packPlan.TotalBytes))
             $packBase = 100 * $n / $vendorPacks.Count; $packShare = 100 / $vendorPacks.Count; $packName = $pack.Source
-            $onPack = { param($p) Set-BuildStepProgress 'packs' -Percent ($packBase + $packShare * $p.Percent / 100) -Detail ('{0}: {1} of {2}' -f $packName, (Format-MediaSize $p.BytesDone), (Format-MediaSize $p.TotalBytes)) }
+            $onPack = { param($p) Set-BuildStepProgress 'packs' -Percent ($packBase + $packShare * $p.Percent / 100) -Detail ('{0}: {1} of {2}' -f $packName, (Format-ByteSize $p.BytesDone), (Format-ByteSize $p.TotalBytes)) }
             $copied = Copy-MediaContent -Plan $packPlan -Destination "${dataLetter}:\" -OnProgress $onPack
             $packCopied++
-            Write-Host ('Copied in {0}' -f (Format-MediaDuration $copied.Seconds))
+            Write-Host ('Copied in {0}' -f (Format-Duration $copied.Seconds))
         }
         if ($vendorPacks) { Complete-BuildStep 'packs' -Detail $(if ($packCopied) { "$packCopied pack(s) copied" } else { 'Already on the stick' }) }
         Write-Host ''
