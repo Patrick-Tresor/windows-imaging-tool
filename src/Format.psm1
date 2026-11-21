@@ -6,7 +6,7 @@ function Format-ByteSize {
     # 500 -> '500 bytes', 1536 -> '1.5 KB', 734003200 -> '700 MB', 20508000000 -> '19.1 GB'.
     param([double]$Bytes)
     $inv = [Globalization.CultureInfo]::InvariantCulture
-    $Bytes = [Math]::Max(0, $Bytes)
+    $Bytes = [Math]::Max([double]0, $Bytes)
     if ($Bytes -ge 1GB) { return [string]::Format($inv, '{0:0.0} GB', $Bytes / 1GB) }
     if ($Bytes -ge 1MB) { return [string]::Format($inv, '{0:0} MB', $Bytes / 1MB) }
     if ($Bytes -ge 1KB) { return [string]::Format($inv, '{0:0.0} KB', $Bytes / 1KB) }

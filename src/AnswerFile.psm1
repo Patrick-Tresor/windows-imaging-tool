@@ -878,6 +878,8 @@ function Get-AnswerFileNames {
             'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
             'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
     }
+    # An empty list returns nothing (@() around the call gives an empty array; ,@() would give one empty item).
+    if (-not $names) { return }
     ,$names
 }
 

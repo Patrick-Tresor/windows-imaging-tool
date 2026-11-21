@@ -864,7 +864,7 @@ function Get-NamingListRows {
     # Naming list rows for the grid, with each row's problems and the result of the last deploy of that serial.
     param([Parameter(Mandatory)][string]$ContentRoot, [object[]]$Entries)
     if (-not $PSBoundParameters.ContainsKey('Entries')) { $Entries = @(Read-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot)) }
-    $answers = Get-AnswerFileNames -ContentRoot $ContentRoot
+    $answers = @(Get-AnswerFileNames -ContentRoot $ContentRoot)
     $last = @{}
     foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
         # Logs come newest first; keep the first per serial.
@@ -899,7 +899,7 @@ function Save-NamingListFromConsole {
             Notes        = "$($_.Notes)".Trim()
         }
     })
-    $problems = @(Test-NamingList -Entries $entries -AnswerFileNames (Get-AnswerFileNames -ContentRoot $ContentRoot))
+    $problems = @(Test-NamingList -Entries $entries -AnswerFileNames @(Get-AnswerFileNames -ContentRoot $ContentRoot))
     if ($problems) { throw "The naming list was not saved:`n - " + ($problems -join "`n - ") }
     Save-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot) -Entries $entries
     $entries.Count

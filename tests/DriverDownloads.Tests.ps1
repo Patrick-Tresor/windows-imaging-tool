@@ -30,6 +30,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     # The Downloads group from MainWindow.xaml, on its own off-screen window.
     $grp = [Windows.Markup.XamlReader]::Parse($grpNode.OuterXml)
     $win = New-Object Windows.Window -Property @{ Left = -10000; Top = -10000; Width = 900; Height = 500; ShowInTaskbar = $false; Content = $grp }
+    # The shared styles, as the console window has them (the step rows use StepRowTemplate from Styles.xaml).
+    $win.Resources.MergedDictionaries.Add([Windows.Markup.XamlReader]::Parse((Get-Content -Raw (Join-Path $repo 'src/Console/Styles.xaml'))))
     $lst = $grp.FindName('LstDriverDownloads')
     $dir = Join-Path ([IO.Path]::GetTempPath()) ("dl-panel-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $dir | Out-Null
