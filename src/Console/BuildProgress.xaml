@@ -23,7 +23,7 @@
 
     <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="16,10">
       <ScrollViewer x:Name="ScrollSteps" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <ItemsControl x:Name="LstSteps" ItemTemplate="{StaticResource StepRowTemplate}"/>
+        <ItemsControl x:Name="LstSteps" ItemTemplate="{DynamicResource StepRowTemplate}"/>
       </ScrollViewer>
     </Border>
   </DockPanel>

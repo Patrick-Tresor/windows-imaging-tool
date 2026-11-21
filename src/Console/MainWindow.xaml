@@ -153,7 +153,7 @@
                           <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         </DockPanel>
                         <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
-                        <ItemsControl ItemsSource="{Binding Steps}" ItemTemplate="{StaticResource StepRowTemplate}"/>
+                        <ItemsControl ItemsSource="{Binding Steps}" ItemTemplate="{DynamicResource StepRowTemplate}"/>
                       </StackPanel>
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding Outcome}" Value="ok">
