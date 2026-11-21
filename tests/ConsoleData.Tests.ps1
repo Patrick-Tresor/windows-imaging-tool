@@ -241,6 +241,20 @@ try {
     Set-Content (Join-Path $root 'Logs/SERVICE-Win11_20261023-1000_OK.log') 'x'
     Assert-Equal ((Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'SERVICE-*').Status) 'OK' 'update log is parsed'
 
+    # Deleting an answer file (Answer Files tab, Delete): says what it affects, clears the default.
+    Set-Content (Join-Path $root 'AnswerFiles/ToDelete.xml') '<x/>'
+    Set-Content (Join-Path $root 'config/naming-list.csv') "Serial,ComputerName,OU,AnswerFile,Notes`r`nSN1,PC1,,ToDelete,`r`nSN2,PC2,,Other,"
+    $ds = Get-DeploySettings -ContentRoot $root
+    if ($ds.PSObject.Properties['defaultAnswerFile']) { $ds.defaultAnswerFile = 'ToDelete' } else { $ds | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue 'ToDelete' }
+    Save-DeploySettings -ContentRoot $root -Settings $ds
+    $chk = Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete'
+    Assert-Equal "$($chk.IsDefault)|$($chk.Serials -join ',')" 'True|SN1' 'delete check: default and the naming list rows that use it'
+    Assert-Equal ($chk.Text -like '*default answer file*SN1*') $true 'delete check: the question names both'
+    [void](Remove-AnswerFile -ContentRoot $root -Name 'ToDelete')
+    Assert-Equal "$(Test-Path (Join-Path $root 'AnswerFiles/ToDelete.xml'))|[$((Get-DeploySettings -ContentRoot $root).defaultAnswerFile)]" 'False|[]' 'delete: the file is gone and there is no default'
+    Assert-Throws { Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete' } '*no answer file named ToDelete*' 'delete: a missing answer file is refused'
+    Remove-Item (Join-Path $root 'config/naming-list.csv') -Force
+
     # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.
     $tab = @(Get-LogTabRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
     Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Count) 0 'Logs tab hides a deployment that is on the Dashboard'

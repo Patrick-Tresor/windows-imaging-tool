@@ -322,6 +322,7 @@
             <Button x:Name="BtnAnswerImport" Content="Import answer file XML..."/>
             <Button x:Name="BtnAnswerEdit" Content="Edit"/>
             <Button x:Name="BtnAnswerDefault" Content="Set as default"/>
+            <Button x:Name="BtnAnswerDelete" Content="Delete" ToolTip="Deletes the selected answer file after asking. Its image and applications stay."/>
             <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
             <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
           </StackPanel>

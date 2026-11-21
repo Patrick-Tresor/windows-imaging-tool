@@ -853,6 +853,46 @@ function Get-VMCaptureArguments {
 
 #endregion
 
+#region Deleting an answer file
+
+function Get-AnswerFileDeleteCheck {
+    <#
+    .SYNOPSIS
+        What deleting AnswerFiles\<name>.xml affects, for the Answer Files tab's Delete: whether it is the default
+        answer file, and the naming list serials that still name it (those PCs stop with "answer file not found",
+        before anything is erased, until their row is changed). Text is the confirmation question.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    $path = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
+    if (-not (Test-Path -LiteralPath $path)) { throw "There is no answer file named $Name." }
+    $isDefault = "$((Get-DeploySettings -ContentRoot $ContentRoot).defaultAnswerFile)" -eq $Name
+    $serials = @(Read-NamingList -Path (Get-NamingListPath -ContentRoot $ContentRoot) | Where-Object { "$($_.AnswerFile)" -eq $Name } | ForEach-Object Serial)
+    $lines = @("Delete the answer file $Name (AnswerFiles\$Name.xml)? This cannot be undone.")
+    if ($isDefault) { $lines += 'It is the default answer file: no answer file is the default after this, so the deploy asks which one to use. Set another one as default after.' }
+    if ($serials) {
+        $shown = @($serials | Select-Object -First 5) -join ', '
+        $more = if ($serials.Count -gt 5) { " and $($serials.Count - 5) more" } else { '' }
+        $lines += "The naming list still gives it to $($serials.Count) PC(s): $shown$more. Those PCs stop with 'answer file not found' (nothing is erased) until you change their row on the Naming List tab."
+    }
+    $lines += 'Its image and applications stay. USB sticks keep their copy until you update them.'
+    [pscustomobject]@{ Name = $Name; Path = $path; IsDefault = $isDefault; Serials = $serials; Text = ($lines -join "`n`n") }
+}
+
+function Remove-AnswerFile {
+    # Deletes AnswerFiles\<name>.xml and, when it was the default, clears defaultAnswerFile in deploy-settings.json.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
+    $check = Get-AnswerFileDeleteCheck -ContentRoot $ContentRoot -Name $Name
+    Remove-Item -LiteralPath $check.Path -Force
+    if ($check.IsDefault) {
+        $s = Get-DeploySettings -ContentRoot $ContentRoot
+        $s.defaultAnswerFile = ''
+        Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
+    }
+    $check
+}
+
+#endregion
+
 #region Naming list
 
 function Get-NamingListPath {
@@ -1265,5 +1305,5 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
     Get-ApplicationUsage, Save-Application,
-    Get-NamingListPath, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
+    Get-AnswerFileDeleteCheck, Remove-AnswerFile, Get-NamingListPath, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
     Get-VMCaptureArguments
