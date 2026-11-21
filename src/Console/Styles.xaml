@@ -467,4 +467,53 @@
     <Setter Property="CornerRadius" Value="8"/>
     <Setter Property="Padding" Value="14,10"/>
   </Style>
+
+  <!-- One step row with its bar (Name, Time, Percent, Indeterminate, Status, Detail, State): the Build progress
+       window and the driver downloads on the Driver Library page. -->
+  <DataTemplate x:Key="StepRowTemplate">
+    <Grid Margin="0,6">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="190"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+      <DockPanel Grid.Row="0" Grid.Column="0">
+        <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="{DynamicResource BodyBrush}" Margin="8,0,0,0"/>
+        <TextBlock x:Name="StepName" Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+      <ProgressBar x:Name="Bar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
+                   Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
+                   Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
+      <TextBlock x:Name="Status" Grid.Row="1" Grid.Column="1" Text="{Binding Status}" Margin="12,0,0,0"
+                 VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
+                 TextTrimming="CharacterEllipsis"/>
+    </Grid>
+    <DataTemplate.Triggers>
+      <DataTrigger Binding="{Binding State}" Value="pending">
+        <Setter TargetName="StepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
+      </DataTrigger>
+      <DataTrigger Binding="{Binding State}" Value="done">
+        <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+        <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+      </DataTrigger>
+      <DataTrigger Binding="{Binding State}" Value="reused">
+        <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+        <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+      </DataTrigger>
+      <DataTrigger Binding="{Binding State}" Value="skipped">
+        <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ControlBorderBrush}"/>
+        <Setter TargetName="StepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
+      </DataTrigger>
+      <DataTrigger Binding="{Binding State}" Value="failed">
+        <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+        <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+        <Setter TargetName="Status" Property="FontWeight" Value="SemiBold"/>
+      </DataTrigger>
+    </DataTemplate.Triggers>
+  </DataTemplate>
 </ResourceDictionary>

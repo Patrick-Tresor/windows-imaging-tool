@@ -153,48 +153,7 @@
                           <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                         </DockPanel>
                         <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
-                        <ItemsControl ItemsSource="{Binding Steps}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid Margin="0,3">
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="*"/>
-                                  <ColumnDefinition Width="190"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                  <RowDefinition Height="Auto"/>
-                                  <RowDefinition Height="Auto"/>
-                                  <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <DockPanel Grid.Row="0" Grid.Column="0">
-                                  <TextBlock DockPanel.Dock="Right" Text="{Binding Time}" Foreground="{DynamicResource BodyBrush}" Margin="8,0,0,0"/>
-                                  <TextBlock x:Name="DlStepName" Text="{Binding Name}" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis"/>
-                                </DockPanel>
-                                <ProgressBar x:Name="DlBar" Grid.Row="1" Grid.Column="0" Height="8" Margin="0,4,0,0" Minimum="0" Maximum="100"
-                                             Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
-                                             Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
-                                <TextBlock x:Name="DlStatus" Grid.Row="1" Grid.Column="1" Text="{Binding Status}" Margin="12,0,0,0"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="0,2,0,0"
-                                           TextTrimming="CharacterEllipsis"/>
-                              </Grid>
-                              <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding State}" Value="pending">
-                                  <Setter TargetName="DlStepName" Property="Foreground" Value="{DynamicResource FaintBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding State}" Value="done">
-                                  <Setter TargetName="DlBar" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding State}" Value="failed">
-                                  <Setter TargetName="DlBar" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-                                  <Setter TargetName="DlStatus" Property="FontWeight" Value="SemiBold"/>
-                                </DataTrigger>
-                              </DataTemplate.Triggers>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding Steps}" ItemTemplate="{StaticResource StepRowTemplate}"/>
                       </StackPanel>
                       <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding Outcome}" Value="ok">
