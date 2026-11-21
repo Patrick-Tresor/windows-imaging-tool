@@ -647,11 +647,9 @@ are both read. The deploy log says which entry was used.
    password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
    on it. Untested on Windows, including every conversion.
-4. **Add drivers** in the console's Driver Library tab (**Find a model online**),
-   or from the command line:
-   `.\src\Get-DriverPacks.ps1 -ContentRoot D:\Deploy -Maker Dell -Model 'Latitude 54*' -List`
-   (drop `-List` to download). After deploying, `Get-DriverPacks.ps1 -ContentRoot D:\Deploy -UnknownModels -List`
-   shows the models that had no pack (drop `-List` to download their packs). You can also extract a pack into
+4. **Add drivers** in the console's Driver Library tab (**Find a model online**).
+   After deploying, **Unknown models...** on the same tab lists the models that had
+   no pack and downloads theirs. You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, add the new cumulative update with **Update image...** instead of
