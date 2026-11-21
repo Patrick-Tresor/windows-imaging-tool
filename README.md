@@ -626,10 +626,13 @@ are both read. The deploy log says which entry was used.
       and shows its edition, version, size and whether sysprep has run. Next stays off until every
       line has a tick, so a disk that was not generalized is caught here, not after the capture
       started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
-   4. Name the image and choose compression.
+   4. Name the image, choose compression and, for a disk file, **Save to**: the content root's
+      `Images` folder by default (**Default** puts it back), or **Browse...** to any folder on this PC
+      or a server share (`\\server\share\Images`). An image saved outside the open content root
+      shows on the Images tab when the console opens that folder's content root.
    5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
       window with each step (copy, read, capture, save), its bar and the time left.
-   The image is saved to the content root's `Images` folder (disk file) or the share's
+   The image is saved to the Save to folder (disk file) or the share's
    `Images` folder (ISO), and a
    `CAPTURE-<name>` log appears on the Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run

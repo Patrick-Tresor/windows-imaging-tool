@@ -38,7 +38,8 @@ param(
     [string]$ReuseConvertedDisk, # a temporary VHD the check made; used when the disk has not changed since
     [string]$ProgressFile,       # step-by-step progress for the console's window
     [switch]$SysprepAtDeploy,    # capture a VM that was not sysprepped; each PC runs sysprep at its first start
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$ImagesDir           # where the image is saved (a local folder or \\server\share\...); empty = <ContentRoot>\Images
 )
 
 $ErrorActionPreference = 'Stop'
@@ -262,7 +263,7 @@ if (-not $Name) { throw '-Name is required.' }
 if (-not $ContentRoot) { throw '-ContentRoot is required.' }
 if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
 
-$imagesDir = Join-Path $ContentRoot 'Images'
+$imagesDir = if ("$ImagesDir".Trim()) { "$ImagesDir".Trim().TrimEnd('\') } else { Join-Path $ContentRoot 'Images' }
 $logDir = Join-Path $ContentRoot 'Logs'
 $status = 'FAILED'
 $staging = $null
@@ -376,10 +377,14 @@ try {
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
     $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description
-    Start-BuildStep 'capture'
+    # DISM first scans every file on the disk with no percent (half an hour on a big disk), so say so under the bar.
+    $scanText = 'Scanning the files on the disk (no percent from DISM yet)'
+    Start-BuildStep 'capture' -Detail $scanText
     $captureClock = [Diagnostics.Stopwatch]::StartNew()
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
-        param($pct) Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 })
+        param($pct)
+        $scanning = $null -eq $pct -or $pct -le 0
+        Set-BuildStepProgress 'capture' -Percent $(if ($null -ne $pct) { $pct } else { -1 }) -Detail $(if ($scanning) { $scanText } else { 'Writing the image' })
     }
     $wimSize = (Get-Item -LiteralPath $wim).Length
     $read = if ($windowsInfo) { " from $(Format-ByteSize $windowsInfo.UsedBytes) on the disk, $([int]($windowsInfo.UsedBytes / 1MB / [Math]::Max(1, $captureClock.Elapsed.TotalSeconds))) MB/s" } else { '' }

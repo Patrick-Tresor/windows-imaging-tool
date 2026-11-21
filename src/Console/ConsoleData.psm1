@@ -820,6 +820,21 @@ function Get-ImageUpdateArguments {
     @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
+function Get-CaptureSaveFolderProblem {
+    # Why the capture wizard's Save to folder can't be used, or nothing. A missing folder is fine when its parent
+    # exists (the capture creates it); a share must be written \\server\share\...
+    param([string]$Path)
+    $p = "$Path".Trim().Trim('"')
+    if (-not $p) { return 'Choose where to save the image.' }
+    if ($p -match '^\\\\[^\\]+$' -or ($p -notmatch '^\\\\[^\\]+\\[^\\]+' -and $p -notmatch '^[A-Za-z]:\\')) {
+        return 'Save to must be a full folder path, like D:\Images or \\server\share\Images.'
+    }
+    if ([IO.Directory]::Exists($p)) { return $null }
+    $parent = [IO.Path]::GetDirectoryName($p.TrimEnd('\'))
+    if ($parent -and [IO.Directory]::Exists($parent)) { return $null }
+    "The folder $p can't be reached. Check the path, and for a server that this PC can open the share."
+}
+
 function Get-VMCaptureArguments {
     # Command line for Capture-VMImage.ps1, run by the console in its own window: a shut-down VM's disk file,
     # sysprepped, or not with -SysprepAtDeploy (each PC runs sysprep at its first start).
@@ -835,12 +850,14 @@ function Get-VMCaptureArguments {
         [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,
         [string]$ProgressFile,
-        [string]$LogPath
+        [string]$LogPath,
+        [string]$ImagesDir   # where the image is saved; empty = the content root's Images folder
     )
     if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
     $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
+    if ($ImagesDir) { $cmd += " -ImagesDir $(& $quote $ImagesDir)" }
     if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
     if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
@@ -1306,4 +1323,4 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
     Get-ApplicationUsage, Save-Application,
     Get-AnswerFileDeleteCheck, Remove-AnswerFile, Get-NamingListPath, Get-NamingListRows, Save-NamingListFromConsole, Merge-NamingList,
-    Get-VMCaptureArguments
+    Get-VMCaptureArguments, Get-CaptureSaveFolderProblem
