@@ -2,29 +2,14 @@
 # the whole copy and for the current file (percent, GB copied, speed, time left), and text lines so a log or a
 # host without progress bars still shows the copy moving. Used by New-DeploymentMedia.ps1. PowerShell 5.1 compatible.
 
+Import-Module (Join-Path $PSScriptRoot 'Format.psm1')
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')
+
 function Join-CopyPath {
     # Content paths use backslashes; normalize so the module also runs in tests off Windows.
     param([string]$Root, [string]$Child)
     if (-not $Child) { return $Root }
     Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
-
-function Format-MediaSize {
-    # 1536 -> '1.5 KB', 734003200 -> '700 MB', 5905580032 -> '5.50 GB'.
-    param([int64]$Bytes)
-    if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
-    if ($Bytes -ge 1MB) { return ('{0:N0} MB' -f ($Bytes / 1MB)) }
-    if ($Bytes -ge 1KB) { return ('{0:N1} KB' -f ($Bytes / 1KB)) }
-    "$Bytes bytes"
-}
-
-function Format-MediaDuration {
-    # 42 -> '42s', 192 -> '3m 12s', 3900 -> '1h 05m'.
-    param([double]$Seconds)
-    $s = [int64][Math]::Max(0, [Math]::Round($Seconds))
-    if ($s -ge 3600) { return ('{0}h {1:00}m' -f [Math]::Floor($s / 3600), [Math]::Floor(($s % 3600) / 60)) }
-    if ($s -ge 60) { return ('{0}m {1:00}s' -f [Math]::Floor($s / 60), ($s % 60)) }
-    "${s}s"
 }
 
 function Get-MediaCopyPlan {
@@ -251,9 +236,9 @@ function Copy-MediaContent {
         }
         if ($OnProgress) { & $OnProgress $state }
         if (-not $Quiet) {
-            $status = '{0} of {1} ({2}%)  {3}/s  about {4} left' -f (Format-MediaSize $done), (Format-MediaSize $total), $overall, (Format-MediaSize ([int64]$speed)), (Format-MediaDuration $left)
+            $status = '{0} of {1} ({2}%)  {3}/s  about {4} left' -f (Format-ByteSize $done), (Format-ByteSize $total), $overall, (Format-ByteSize ([int64]$speed)), (Format-Duration $left)
             Write-Progress -Id 1 -Activity 'Copying content to the USB stick' -Status $status -PercentComplete $overall
-            Write-Progress -Id 2 -ParentId 1 -Activity "File $index of ${count}: $($item.Relative)" -Status ('{0} of {1} ({2}%)' -f (Format-MediaSize $fileDone), (Format-MediaSize $item.Length), $filePct) -PercentComplete $filePct
+            Write-Progress -Id 2 -ParentId 1 -Activity "File $index of ${count}: $($item.Relative)" -Status ('{0} of {1} ({2}%)' -f (Format-ByteSize $fileDone), (Format-ByteSize $item.Length), $filePct) -PercentComplete $filePct
         }
     }
     $lines = {
@@ -262,7 +247,7 @@ function Copy-MediaContent {
         if (-not $big -or $Quiet -or $item.Length -le 0) { return }
         $pct = [Math]::Floor($fileDone * 100.0 / $item.Length)
         if ($pct -ge $nextLine -and $pct -lt 100) {
-            Write-Host ('  {0}%  {1} of {2}' -f $pct, (Format-MediaSize $fileDone), (Format-MediaSize $item.Length))
+            Write-Host ('  {0}%  {1} of {2}' -f $pct, (Format-ByteSize $fileDone), (Format-ByteSize $item.Length))
             Set-Variable -Name nextLine -Value (([Math]::Floor($pct / 10) + 1) * 10) -Scope 1
         }
     }
@@ -288,7 +273,7 @@ function Copy-MediaContent {
             $batchBytes = [int64]0
             foreach ($l in $lengths) { $batchBytes += $l }
             # Only big files get a line of their own: a line per driver file would be thousands of slow console writes.
-            if ($big -and -not $Quiet) { Write-Host ("Copying {0} ({1})..." -f $first.Relative, (Format-MediaSize $first.Length)) }
+            if ($big -and -not $Quiet) { Write-Host ("Copying {0} ({1})..." -f $first.Relative, (Format-ByteSize $first.Length)) }
             $fileClock = [Diagnostics.Stopwatch]::StartNew()
             $doneBefore = $done
             $nextLine = 10
@@ -320,7 +305,7 @@ function Copy-MediaContent {
             & $show $item $fileDone $big
             $secs = [Math]::Max(0.001, $fileClock.Elapsed.TotalSeconds)
             if ($big) {
-                if (-not $Quiet) { Write-Host ('  done in {0} ({1}/s)' -f (Format-MediaDuration $secs), (Format-MediaSize ([int64]($item.Length / $secs)))) }
+                if (-not $Quiet) { Write-Host ('  done in {0} ({1}/s)' -f (Format-Duration $secs), (Format-ByteSize ([int64]($item.Length / $secs)))) }
             } else {
                 $smallFiles += $batch.Count; $smallBytes += $batchBytes; $smallSecs += $secs
             }
@@ -328,7 +313,7 @@ function Copy-MediaContent {
         if ($item) { & $show $item $fileDone $true }
         # Where the time went: thousands of small files write far slower to a stick than one big image.
         if ($smallFiles -and -not $Quiet) {
-            Write-Host ('Small files: {0} file(s), {1} in {2} ({3}/s)' -f $smallFiles, (Format-MediaSize $smallBytes), (Format-MediaDuration $smallSecs), (Format-MediaSize ([int64]($smallBytes / [Math]::Max(0.001, $smallSecs)))))
+            Write-Host ('Small files: {0} file(s), {1} in {2} ({3}/s)' -f $smallFiles, (Format-ByteSize $smallBytes), (Format-Duration $smallSecs), (Format-ByteSize ([int64]($smallBytes / [Math]::Max(0.001, $smallSecs)))))
         }
     } finally {
         if (-not $Quiet) {
@@ -413,4 +398,4 @@ function Remove-StaleMediaFiles {
     }
 }
 
-Export-ModuleMember -Function Format-MediaSize, Format-MediaDuration, Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy, Get-MediaUpdatePlan, Remove-StaleMediaFiles
+Export-ModuleMember -Function Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy, Get-MediaUpdatePlan, Remove-StaleMediaFiles

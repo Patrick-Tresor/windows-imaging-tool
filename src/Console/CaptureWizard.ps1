@@ -228,7 +228,7 @@ function Show-CaptureWizard {
                 "Disk file $current, captured on this PC" +
                 $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" }) +
                 $(if ($state.Result -and "$($state.Result.state)" -eq 'done') {
-                    "`r`nWindows:       $($state.Result.windowsName), $(Format-DiskSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
+                    "`r`nWindows:       $($state.Result.windowsName), $(Format-ByteSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
                 $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
             }
             'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }

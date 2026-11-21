@@ -499,11 +499,15 @@ function ConvertTo-StatusDate($Value) {
     $null
 }
 
-function Format-Duration([timespan]$Span) {
+function Format-Duration($Span) {
+    # The one duration formatter (dashboard, WinPE progress window, media build and USB copy): a timespan or a
+    # number of seconds. 42 -> '42s', 192 -> '3m 12s', 3900 -> '1h 05m', 2 days -> '2d 0h'.
+    if ($Span -isnot [timespan]) { $Span = [timespan]::FromSeconds([Math]::Round([double]$Span)) }
     if ($Span.TotalSeconds -lt 0) { $Span = [timespan]::Zero }
     if ($Span.TotalHours -ge 24) { return '{0}d {1}h' -f [int][Math]::Floor($Span.TotalDays), $Span.Hours }
     if ($Span.TotalMinutes -ge 60) { return '{0}h {1:00}m' -f [int][Math]::Floor($Span.TotalHours), $Span.Minutes }
-    '{0}m {1:00}s' -f [int][Math]::Floor($Span.TotalMinutes), $Span.Seconds
+    if ($Span.TotalMinutes -ge 1) { return '{0}m {1:00}s' -f [int][Math]::Floor($Span.TotalMinutes), $Span.Seconds }
+    '{0}s' -f [int][Math]::Floor($Span.TotalSeconds)
 }
 
 #endregion

@@ -77,6 +77,7 @@ Import-Module (Join-Path $srcDir 'AppPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'TaskPack.psm1') -Force
 Import-Module (Join-Path $srcDir 'VMwareVM.psm1') -Force
 Import-Module (Join-Path $srcDir 'CaptureCheck.psm1') -Force
+Import-Module (Join-Path $srcDir 'Format.psm1') -Force
 Import-Module (Join-Path $srcDir 'NamingList.psm1') -Force
 Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force

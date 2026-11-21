@@ -6,6 +6,7 @@
 
 Import-Module (Join-Path $PSScriptRoot 'VMwareVM.psm1')
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Format.psm1')
 
 function Find-VBoxManage {
     # VirtualBox's VBoxManage converts VMDK and VDI disks when qemu-img is not installed.
@@ -15,14 +16,6 @@ function Find-VBoxManage {
         $path = [IO.Path]::Combine($env:ProgramFiles, 'Oracle', 'VirtualBox', 'VBoxManage.exe')
         if ([IO.File]::Exists($path)) { return $path }
     }
-}
-
-function Format-DiskSize {
-    # 20508000000 -> '19.1 GB' (always a dot, whatever the PC's language).
-    param([double]$Bytes)
-    $inv = [Globalization.CultureInfo]::InvariantCulture
-    if ($Bytes -ge 1GB) { return [string]::Format($inv, '{0:0.0} GB', $Bytes / 1GB) }
-    [string]::Format($inv, '{0:0} MB', [Math]::Max(0, $Bytes) / 1MB)
 }
 
 function Get-DiskSourceFiles {
@@ -152,12 +145,12 @@ function Get-CaptureDiskChecklist {
         $free = [double]$tempDrive.AvailableFreeSpace
         $where = $tempDrive.Name.TrimEnd('\')
         [void]$rows.Add($(if ($free -ge $need + 2GB) {
-            New-CheckRow 'space' 'Space for the temporary copy' $true "Needs about $(Format-DiskSize $need); $(Format-DiskSize $free) free on $where."
+            New-CheckRow 'space' 'Space for the temporary copy' $true "Needs about $(Format-ByteSize $need); $(Format-ByteSize $free) free on $where."
         } else {
-            New-CheckRow 'space' 'Space for the temporary copy' $false "Needs about $(Format-DiskSize ($need + 2GB)) but only $(Format-DiskSize $free) is free on $where. Free some space, or set TEMP to a bigger drive."
+            New-CheckRow 'space' 'Space for the temporary copy' $false "Needs about $(Format-ByteSize ($need + 2GB)) but only $(Format-ByteSize $free) is free on $where. Free some space, or set TEMP to a bigger drive."
         }))
     } catch {
-        [void]$rows.Add((New-CheckRow 'space' 'Space for the temporary copy' $true "Needs about $(Format-DiskSize $need); could not read the free space."))
+        [void]$rows.Add((New-CheckRow 'space' 'Space for the temporary copy' $true "Needs about $(Format-ByteSize $need); could not read the free space."))
     }
     & $result $read
 }
@@ -232,7 +225,7 @@ function Get-CaptureCheckView {
     } elseif ("$($Result.state)" -ne 'done') {
         [void]$rows.Add((& $view $false 'windows' 'Windows on the disk' $(if ($Result.error) { "$($Result.error)" } else { 'The check stopped.' })))
     } else {
-        $size = if ([double]$Result.totalBytes -gt 0) { ", $(Format-DiskSize ([double]$Result.usedBytes)) used of $(Format-DiskSize ([double]$Result.totalBytes))" } else { '' }
+        $size = if ([double]$Result.totalBytes -gt 0) { ", $(Format-ByteSize ([double]$Result.usedBytes)) used of $(Format-ByteSize ([double]$Result.totalBytes))" } else { '' }
         [void]$rows.Add((& $view $true 'windows' 'Windows on the disk' "$($Result.windowsName)$size"))
         if ($Result.generalized -eq $true) {
             [void]$rows.Add((& $view $true 'sysprep' 'Sysprep has run (generalized)' 'Ready to capture.'))
@@ -259,6 +252,6 @@ function Test-SlowImageTarget {
     ($DriveType -in 'Removable', 'Network') -or ($BusType -in 'USB', 'SD', 'MMC', 'iSCSI')
 }
 
-Export-ModuleMember -Function Test-SlowImageTarget, Find-VBoxManage, Format-DiskSize, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
+Export-ModuleMember -Function Test-SlowImageTarget, Find-VBoxManage, Get-DiskSourceFiles, Get-DiskSourceSignature, Save-ConvertedDiskSource,
     Test-ConvertedDiskReusable, Remove-ConvertedDisk, Get-CaptureDiskChecklist, ConvertFrom-RegQuery, Get-WindowsDisplayName,
     Write-CaptureCheckResult, Read-CaptureCheckResult, Get-CaptureCheckView

@@ -5,13 +5,14 @@
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/CaptureCheck.psm1') -Force
+Import-Module (Join-Path $repo 'src/Format.psm1') -Force
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 function Get-Row($List, $Id) { @($List.Rows | Where-Object Id -eq $Id)[0] }
 $tick = [string][char]0x2713; $cross = [string][char]0x2717; $wait = [string][char]0x25CB
 
-Assert-Equal (Format-DiskSize 20508000000) '19.1 GB' 'size in GB with a dot'
-Assert-Equal (Format-DiskSize 104857600) '100 MB' 'size under 1 GB in MB'
+Assert-Equal (Format-ByteSize 20508000000) '19.1 GB' 'size in GB with a dot'
+Assert-Equal (Format-ByteSize 104857600) '100 MB' 'size under 1 GB in MB'
 
 Assert-Equal (Get-WindowsDisplayName -ProductName 'Windows 10 Pro' -DisplayVersion '24H2' -Build 26100) 'Windows 11 Pro 24H2 (build 26100)' 'Windows 11 still called Windows 10 in the registry'
 Assert-Equal (Get-WindowsDisplayName -ProductName 'Windows 10 Enterprise' -DisplayVersion '22H2' -Build 19045) 'Windows 10 Enterprise 22H2 (build 19045)' 'Windows 10 keeps its name'
