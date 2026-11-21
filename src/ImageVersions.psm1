@@ -42,6 +42,33 @@ function Assert-CaptureCompression {
     }
 }
 
+function Get-CaptureImageArgs {
+    # DISM's /Capture-Image arguments for both capture scripts. Smallest (recovery) captures with max first:
+    # DISM cannot capture to recovery directly, Convert-ImageToEsd recompresses it after.
+    param(
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)][string]$CaptureDir,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$Compression = 'max',
+        [string]$Description,
+        [switch]$Verify
+    )
+    $a = @('/Capture-Image', "/ImageFile:$WimPath", "/CaptureDir:$CaptureDir", "/Name:$Name",
+        "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
+    if ($Verify) { $a += '/Verify' }
+    if ($Description) { $a += "/Description:$Description" }
+    $a
+}
+
+function Split-CapturedImage {
+    # Splits a captured .wim into Name.swm, Name2.swm... of SplitSizeMB each (FAT32) and deletes the .wim.
+    # Needs DeployCommon.psm1 (Invoke-Native) imported by the caller.
+    param([Parameter(Mandatory)][string]$WimPath, [Parameter(Mandatory)][int]$SplitSizeMB)
+    $swm = [IO.Path]::ChangeExtension($WimPath, '.swm')
+    Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Split-Image', "/ImageFile:$WimPath", "/SWMFile:$swm", "/FileSize:$SplitSizeMB")
+    [IO.File]::Delete($WimPath)
+}
+
 function Convert-ImageToEsd {
     <#
     .SYNOPSIS
@@ -364,7 +391,7 @@ function Publish-CapturedImage {
     $newLeaf
 }
 
-Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Assert-CaptureCompression, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Assert-CaptureCompression, Get-CaptureImageArgs, Split-CapturedImage, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

@@ -96,18 +96,10 @@ try {
     Write-DeployLog ("Capturing {0} ({1:N0} GB used) to {2}" -f $source, (($windows.Size - $windows.SizeRemaining) / 1GB), $wim)
     if (-not $NoPrompt -and (Read-Host 'Type YES to start the capture') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; return }
 
-    $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$source", "/Name:$Name",
-        "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity', '/Verify')
-    if ($Description) { $captureArgs += "/Description:$Description" }
-    Invoke-Native -FilePath 'dism.exe' -ArgumentList $captureArgs
-    # Smallest: recompressed into an .esd (DISM cannot capture to recovery compression directly).
+    Invoke-Native -FilePath 'dism.exe' -ArgumentList (Get-CaptureImageArgs -WimPath $wim -CaptureDir $source -Name $Name -Compression $Compression -Description $Description -Verify)
+    # Smallest: recompressed into an .esd.
     if ($Compression -eq 'recovery') { $esd = Convert-ImageToEsd -WimPath $wim; Write-DeployLog "Compressed to $esd" }
-
-    if ($SplitSizeMB -gt 0) {
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
-            '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $staging "$Name.swm")", "/FileSize:$SplitSizeMB")
-        Remove-Item $wim
-    }
+    if ($SplitSizeMB -gt 0) { Split-CapturedImage -WimPath $wim -SplitSizeMB $SplitSizeMB }
 
     [void](Publish-CapturedImage -Staging $staging -ImagesDir $Destination -Name $Name -SplitSizeMB $SplitSizeMB -Compression $Compression -Existing $existing -ContentRoot $root -State $swap)
 

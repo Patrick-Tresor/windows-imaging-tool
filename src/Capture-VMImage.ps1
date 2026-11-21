@@ -374,10 +374,7 @@ try {
     Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
-    # Smallest: DISM captures with max, then recompresses into an .esd (it cannot capture to recovery directly).
-    $captureArgs = @('/Capture-Image', "/ImageFile:$wim", "/CaptureDir:$windowsRoot", "/Name:$Name",
-        "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
-    if ($Description) { $captureArgs += "/Description:$Description" }
+    $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description
     Start-BuildStep 'capture'
     $captureClock = [Diagnostics.Stopwatch]::StartNew()
     Invoke-NativeWithProgress -FilePath 'dism.exe' -ArgumentList $captureArgs -OnProgress {
@@ -399,9 +396,7 @@ try {
     }
     if ($SplitSizeMB -gt 0) {
         Start-BuildStep 'split'
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList @(
-            '/Split-Image', "/ImageFile:$wim", "/SWMFile:$(Join-Path $staging "$Name.swm")", "/FileSize:$SplitSizeMB")
-        Remove-Item $wim
+        Split-CapturedImage -WimPath $wim -SplitSizeMB $SplitSizeMB
         Complete-BuildStep 'split'
     }
     Start-BuildStep 'save' -Detail $(if ($staging -notlike "$imagesDir*") { 'Copying the image from the PC''s disk' } else { '' })
