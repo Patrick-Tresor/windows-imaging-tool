@@ -325,6 +325,7 @@ function Get-DeploymentStatus {
             Duration     = if ($started -and $end) { Format-Duration ($end - $started) } else { '' }
             LastSeen     = if ($updated) { Format-Duration ($Now - $updated) } else { '' }
             LogPath      = if (Test-Path $log) { $log } else { $null }
+            LogFile      = if ($s.PSObject.Properties['logFile']) { "$($s.logFile)" } else { '' }
             StatusPath   = $file.FullName
             ToolVersion  = if ($s.PSObject.Properties['toolVersion']) { $s.toolVersion } else { '' }
             Result       = if ($result) { $result.Verdict } else { '' }

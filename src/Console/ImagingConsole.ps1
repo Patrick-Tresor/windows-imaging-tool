@@ -473,7 +473,10 @@ function Save-HwTest([string]$Result, [switch]$KeepResult, [string]$Log) {
 }
 
 function Update-Logs {
-    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-DeploymentLogs -ContentRoot $script:root })
+    # Deployments still on the Dashboard show their log there; this tab lists everything else.
+    $onDash = @()
+    try { $folder = Get-DashboardFolder; if ($folder) { $onDash = @(Get-DeploymentStatus -Folder $folder | ForEach-Object LogFile) } } catch { }
+    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-LogTabRows -ContentRoot $script:root -DashboardLogFiles $onDash })
     $ui.TxtLog.Text = ''
 }
 
@@ -586,7 +589,7 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Deployment Logs tab when it finishes."
+        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Logs tab when it finishes."
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
@@ -1389,7 +1392,8 @@ $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
-    Set-Status "Removed $($r.Serial) from the dashboard. Its final log stays in Deployment Logs."
+    Update-Logs
+    Set-Status "Removed $($r.Serial) from the dashboard. Its final log is now on the Logs tab."
 } })
 
 $ui.BtnDashClear.Add_Click({ Invoke-Safely {
@@ -1397,9 +1401,10 @@ $ui.BtnDashClear.Add_Click({ Invoke-Safely {
     if (-not $folder) { return }
     $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
     if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay, and final logs stay in Deployment Logs.")) { return }
+    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. The cleared PCs' final logs move to the Logs tab.")) { return }
     Remove-DeploymentStatus -Rows $done
     Update-Dashboard
+    Update-Logs
     Set-Status "Cleared $($done.Count) finished deployment(s)"
 } })
 

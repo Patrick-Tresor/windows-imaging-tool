@@ -1272,6 +1272,20 @@ function Get-DeploymentLogs {
         }
 }
 
+function Get-LogTabRows {
+    # The Logs tab: captures, image updates, and the deployments that are no longer on the Dashboard (removed or
+    # cleared). A deployment still on the Dashboard shows its log there, so it is not listed twice.
+    # DashboardLogFiles: the Logs\ file names the Dashboard rows point to (their status record's logFile).
+    param([Parameter(Mandatory)][string]$ContentRoot, [string[]]$DashboardLogFiles = @())
+    $onDash = @{}
+    foreach ($f in $DashboardLogFiles) { if ($f) { $onDash[$f.ToUpperInvariant()] = $true } }
+    foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
+        $kind = if ($log.Serial -like 'CAPTURE-*') { 'Capture' } elseif ($log.Serial -like 'SERVICE-*') { 'Image update' } else { 'Deployment' }
+        if ($kind -eq 'Deployment' -and $onDash.ContainsKey([IO.Path]::GetFileName($log.FullName).ToUpperInvariant())) { continue }
+        $log | Add-Member -NotePropertyName Kind -NotePropertyValue $kind -PassThru
+    }
+}
+
 #endregion
 
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
@@ -1279,7 +1293,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
-    Get-DeploymentLogs,
+    Get-DeploymentLogs, Get-LogTabRows,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,

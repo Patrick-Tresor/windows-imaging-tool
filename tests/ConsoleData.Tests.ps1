@@ -256,6 +256,13 @@ try {
 
     Set-Content (Join-Path $root 'Logs/SERVICE-Win11_20261023-1000_OK.log') 'x'
     Assert-Equal ((Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'SERVICE-*').Status) 'OK' 'update log is parsed'
+
+    # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.
+    $tab = @(Get-LogTabRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
+    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Count) 0 'Logs tab hides a deployment that is on the Dashboard'
+    Assert-Equal ((@($tab | ForEach-Object Kind) | Sort-Object) -join ',') 'Capture,Image update' 'Logs tab keeps capture and image update logs'
+    $tab = @(Get-LogTabRows -ContentRoot $root)
+    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Kind) 'Deployment' 'Logs tab lists a deployment cleared from the Dashboard'
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

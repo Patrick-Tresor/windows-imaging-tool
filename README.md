@@ -85,7 +85,7 @@ and click **Create folders** the first time. Then:
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
   See [Deployment dashboard](#deployment-dashboard).
-- **Deployment Logs**: one log per deployed PC, with result and full text.
+- **Logs**: capture and image update logs, and the final log of each deployment cleared from the Dashboard.
 
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
@@ -479,7 +479,7 @@ the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
 name, so answer files pick it up without changes. Split images (`.swm`) are joined,
 updated and split again. The Images tab shows when each image was last updated and
-with which KBs, and the log appears on the Deployment Logs tab as `SERVICE-<name>`.
+with which KBs, and the log appears on the Logs tab as `SERVICE-<name>`.
 
 It needs about three times the image size free on the system drive (or pass
 `-WorkDir`). A package that does not apply to the image is logged and skipped; any
@@ -562,7 +562,7 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 ```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; final logs stay in Deployment Logs. A PC
+succeeded, warning and cancelled PCs; their final logs move to the Logs tab. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
@@ -632,7 +632,7 @@ are both read. The deploy log says which entry was used.
       window with each step (copy, read, capture, save), its bar and the time left.
    The image is saved to the content root's `Images` folder (disk file) or the share's
    `Images` folder (ISO), and a
-   `CAPTURE-<name>` log appears on the Deployment Logs tab.
+   `CAPTURE-<name>` log appears on the Logs tab.
    Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
    `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
 
