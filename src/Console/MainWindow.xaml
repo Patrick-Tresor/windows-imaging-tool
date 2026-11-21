@@ -28,7 +28,7 @@
     </Border>
 
     <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
-    <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="#FCD34D" BorderThickness="0,0,0,1">
+    <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
@@ -296,7 +296,7 @@
             <Button x:Name="BtnBuild" Content="Build media" Style="{StaticResource Primary}"/>
           </StackPanel>
           <!-- Shown only when the console could not add these folders to Defender's exclusions itself (Add-ScanExclusions.ps1). -->
-          <Border x:Name="BdrScanTip" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource InfoSoftBrush}" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="8">
+          <Border x:Name="BdrScanTip" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource InfoSoftBrush}" BorderBrush="{DynamicResource InfoLineBrush}" BorderThickness="1" CornerRadius="8">
             <StackPanel>
               <TextBlock x:Name="TxtScanTip" TextWrapping="Wrap"/>
               <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -556,7 +556,7 @@
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
               <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" MaxWidth="700"/>
             </StackPanel>
-            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="#FCD34D" BorderThickness="1" CornerRadius="8">
+            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
               <DockPanel>
                 <Button x:Name="BtnSettingsMedia" DockPanel.Dock="Right" Content="Open the Media tab" Margin="12,0,0,0"/>
                 <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>

@@ -528,8 +528,9 @@ function Update-AdkStatus {
     if ($s.Warnings) { $text += ' ' + ($s.Warnings -join ' ') }
     $ui.TxtAdk.Text = $text
     $ok = $s.Ready -and -not $s.Warnings
-    $ui.BrdAdk.Background = if ($s.Ready) { if ($ok) { '#ECFDF3' } else { '#FFFBEB' } } else { '#FEF2F2' }
-    $ui.BrdAdk.BorderBrush = if ($s.Ready) { if ($ok) { '#A6F4C5' } else { '#FDE68A' } } else { '#FECACA' }
+    $tone = if ($s.Ready) { if ($ok) { 'Success' } else { 'Warning' } } else { 'Error' }
+    $ui.BrdAdk.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, "${tone}SoftBrush")
+    $ui.BrdAdk.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, "${tone}LineBrush")
     $ui.BtnAdkDownload.Visibility = if ($s.Ready) { 'Collapsed' } else { 'Visible' }
     $s
 }
@@ -988,7 +989,7 @@ function Update-AdAccount {
     if ($ui.ChkAdUseShare.IsChecked) {
         $ui.TxtAdUser.Text = if ($share) { $share.ShareUser } else { '' }
         $ui.TxtAdUser.IsReadOnly = $true
-        $ui.TxtAdUser.Background = '#F3F4F6'
+        $ui.TxtAdUser.SetResourceReference([Windows.Controls.Control]::BackgroundProperty, 'ControlHoverBrush')
     } else {
         $ui.TxtAdUser.Text = "$($script:adOwnUser)"
         $ui.TxtAdUser.IsReadOnly = $false
@@ -1031,7 +1032,7 @@ function Update-AdBootStatus {
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
     $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share)." }
-    $ui.TxtAdBoot.Foreground = if ($problems) { '#B45309' } else { '#15803D' }
+    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
 }
 
 function Show-AdRows {
@@ -1289,8 +1290,8 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
 #region Settings
 
-function Set-ShareTestText([string]$Text, [string]$Color) {
-    $ui.TxtShareTest.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($Color)
+function Set-ShareTestText([string]$Text, [string]$Brush) {
+    $ui.TxtShareTest.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Brush)
     $ui.TxtShareTest.Text = $Text
 }
 foreach ($rb in 'RbSettingsUsb', 'RbSettingsShare', 'RbReportDefault', 'RbReportShare') {
@@ -1303,17 +1304,17 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     $share = if ($ui.RbSettingsShare.IsChecked) { $ui.TxtSharePath.Text.Trim() } else { '' }
     $report = if ($ui.RbReportShare.IsChecked) { $ui.TxtReportPath.Text.Trim() } else { '' }
     $target = if ($share) { $share } elseif ($report) { $report } else { '' }
-    if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' '#B91C1C'; return }
+    if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' 'ErrorBrush'; return }
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
     if ($user -and -not $pw -and $script:sharePwSaved) { $pw = Get-SharePassword -ContentRoot $script:root }
-    Set-ShareTestText "Connecting to $target..." '#64748B'
+    Set-ShareTestText "Connecting to $target..." 'MutedBrush'
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
         $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks
         $r = Test-ShareConnection -SharePath $target -User $user -Password $pw -StatusPath $report -StatusOnly:(-not $share)
     } finally { $window.Cursor = $null; $pw = $null }
-    Set-ShareTestText $r.Message $(if ($r.Ok) { '#15803D' } else { '#B91C1C' })
+    Set-ShareTestText $r.Message $(if ($r.Ok) { 'SuccessBrush' } else { 'ErrorBrush' })
     Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
 } })
 

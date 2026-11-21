@@ -271,7 +271,7 @@ function Show-CaptureWizard {
         $w.Step2.Text = if ($isDisk) { '3. Check the disk' } else { '3. Check the disk (VM disk only)' }
         for ($i = 0; $i -le $state.Last; $i++) {
             $w["Page$i"].Visibility = if ($i -eq $state.Page) { 'Visible' } else { 'Collapsed' }
-            $w["Step$i"].Foreground = if ($i -eq $state.Page) { 'White' } elseif ($i -lt $state.Page) { '#94A3B8' } else { '#64748B' }
+            $w["Step$i"].SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($i -eq $state.Page) { 'SurfaceBrush' } elseif ($i -lt $state.Page) { 'FaintBrush' } else { 'MutedBrush' }))
             $w["Step$i"].FontWeight = if ($i -eq $state.Page) { 'SemiBold' } else { 'Normal' }
         }
         $w.BtnBack.IsEnabled = $state.Page -gt 0

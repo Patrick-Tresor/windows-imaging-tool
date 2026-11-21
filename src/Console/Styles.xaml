@@ -34,6 +34,10 @@
   <SolidColorBrush x:Key="WarningSoftBrush" Color="#FFFBEB"/>
   <SolidColorBrush x:Key="ErrorSoftBrush" Color="#FEF2F2"/>
   <SolidColorBrush x:Key="InfoSoftBrush" Color="#EFF6FF"/>
+  <SolidColorBrush x:Key="SuccessLineBrush" Color="#A6F4C5"/>
+  <SolidColorBrush x:Key="WarningLineBrush" Color="#FCD34D"/>
+  <SolidColorBrush x:Key="ErrorLineBrush" Color="#FECACA"/>
+  <SolidColorBrush x:Key="InfoLineBrush" Color="#93C5FD"/>
 
   <!-- Buttons: rounded, flat, a light hover. Primary is the filled accent button of a window. -->
   <Style TargetType="Button">
