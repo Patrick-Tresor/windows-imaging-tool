@@ -356,11 +356,9 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`. An
-application the console already knows (by its name or installer, for
-example an Office pack built from `OfficeSetup.exe`) can switch: select it
-on the Applications tab and tick **Download it from the internet when the PC
-installs it**. No link to paste: it uses the publisher's link from the
-catalog, and unticking brings back the pack's own installer. The **Download
+To make one, click **New...** on the Applications tab, pick the template,
+leave the installer empty and click **Apply**: the pack gets the publisher's
+link (and, for Office, `configuration.xml`). The **Download
 link** column shows which packs download, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.

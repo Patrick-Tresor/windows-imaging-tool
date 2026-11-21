@@ -29,7 +29,7 @@ function Show-AppPackEditor {
     $win = $form.Window
     $e = $form.Controls
     $win.Title = if ($isNew) { 'New application' } else { "Application: $Name" }
-    $state = @{ Saved = $null; AppFolder = if ($isNew) { $null } else { Join-Path $appRoot $Name } }
+    $state = @{ Saved = $null; Template = $null; AppFolder = if ($isNew) { $null } else { Join-Path $appRoot $Name } }
     $templates = @(Get-AppTemplates)
 
     # --- Choices -------------------------------------------------------------------------------------------
@@ -203,6 +203,7 @@ function Show-AppPackEditor {
         # No installer picked and the template has a download: the PC downloads it at first boot.
         $online = -not $e.TxtSource.Text.Trim() -and -not $e.CmbInstaller.Text.Trim() -and $t.PSObject.Properties['download'] -and $t.download.url
         $d = New-AppDefinitionFromTemplate -Template $t -Installer $e.CmbInstaller.Text.Trim() -Name $name -Online:$online
+        $state.Template = $t    # its extra files (Office's configuration.xml) are copied when the application is saved
         if (-not $d.version) { $d.version = $e.TxtVersion.Text.Trim() }
         if (-not $d.command -and $e.CmbInstaller.Text) {
             # Templates without known switches: use the inspected installer type.
@@ -247,8 +248,9 @@ function Show-AppPackEditor {
             if ($warnings -and [Windows.MessageBox]::Show($win, "$($warnings -join "`n")`n`nSave anyway?", 'Application', 'YesNo', 'Warning') -ne 'Yes') { return }
             $win.Cursor = 'Wait'
             try {
-                if ($isNew) { New-Application -ContentRoot $ContentRoot -Name $d.name -Source $src -Definition $d | Out-Null }
-                else { Save-Application -ContentRoot $ContentRoot -Definition $d -Source $src | Out-Null }
+                $dest = if ($isNew) { New-Application -ContentRoot $ContentRoot -Name $d.name -Source $src -Definition $d }
+                        else { Save-Application -ContentRoot $ContentRoot -Definition $d -Source $src }
+                if ($state.Template) { Copy-AppTemplateFiles -Template $state.Template -Destination "$(@($dest)[-1])" }
             } finally { $win.Cursor = $null }
             $state.Saved = $d.name
             $win.Close()

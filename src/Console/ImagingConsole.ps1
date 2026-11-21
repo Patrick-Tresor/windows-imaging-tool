@@ -714,18 +714,6 @@ function Edit-App([string]$Name) {
 $ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
 $ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
-# Click, not Checked: selecting a row sets the box too and must not change the application.
-$ui.ChkAppOnline.Add_Click({ Invoke-Safely {
-    $row = $ui.GridApps.SelectedItem
-    if (-not $row) { return }
-    $on = [bool]$ui.ChkAppOnline.IsChecked
-    try { Set-ApplicationOnline -ContentRoot $script:root -Name $row.Name -On $on | Out-Null }
-    finally {
-        Update-Apps
-        $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $row.Name)[0]
-    }
-    Set-Status $(if ($on) { "$($row.Name) downloads from the internet when the PC installs it" } else { "$($row.Name) uses the installer in its folder again" })
-} })
 # Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
 $script:appFound = @()
 function Find-AppOnline {
@@ -762,12 +750,6 @@ $ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.Selected
 
 $ui.GridApps.Add_SelectionChanged({
     $row = $ui.GridApps.SelectedItem
-    $ui.ChkAppOnline.IsChecked = [bool]($row -and $row.Download)
-    $ui.ChkAppOnline.IsEnabled = [bool]($row -and ($row.Download -or $row.KnownDownload))
-    $ui.TxtAppOnline.Text = if (-not $row) { '' }
-        elseif ($row.Download) { "Downloads from $($row.Download)" }
-        elseif ($row.KnownDownload) { "Can download from $($row.KnownDownload)" }
-        else { 'No known download for this application: it installs from the installer in its pack.' }
     $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
         $lines = @("Install: $($row.Command)")
         if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }

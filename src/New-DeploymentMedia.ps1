@@ -176,7 +176,7 @@ if ($UpdateOnly) {
 Complete-BuildStep 'check' -Detail $(if ($copyPlan) { '{0} files, {1} to copy' -f $copyPlan.FileCount, (Format-MediaSize $copyPlan.TotalBytes) } else { '' })
 
 if ($appDownloads -and $copyPlan) {
-    # Applications that download at first boot (Find an app online, the Download tick box): download them here
+    # Applications that download at first boot (Find an app online, or a template with no installer in New...): download them here
     # once, so an offline stick installs them without internet. Cached for the next build; a failure only warns.
     Start-BuildStep 'apps'
     $appCache = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'AppDownloads')

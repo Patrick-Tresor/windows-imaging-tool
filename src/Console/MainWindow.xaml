@@ -329,7 +329,7 @@
 
             <Label Grid.Row="14" Content="Online apps on USB"/>
             <CheckBox x:Name="ChkAppDownloads" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="True" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
-                      Content="Download the applications that install from the internet (Find an app online, Download tick box) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
+                      Content="Download the applications that install from the internet (Find an app online, or New... from a template) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
 
@@ -418,11 +418,6 @@
           </Grid>
           <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-            <CheckBox x:Name="ChkAppOnline" IsEnabled="False" Content="Download it from the internet when the PC installs it (no installer to keep in the pack)"
-                      ToolTip="Uses the publisher's link the console already knows for this application. Untick to use the installer in the pack again."/>
-            <TextBlock x:Name="TxtAppOnline" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="22,2,0,0"/>
-          </StackPanel>
           <DataGrid x:Name="GridApps" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>

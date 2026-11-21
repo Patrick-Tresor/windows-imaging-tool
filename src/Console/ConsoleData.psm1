@@ -542,9 +542,8 @@ function Get-ApplicationList {
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Applications'
     $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
-    $templates = @(Get-AppTemplates)
     Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'; Download = ''; KnownDownload = ''
+        $row = [ordered]@{ Name = $_.Name; DisplayName = ''; Version = ''; Type = ''; Command = $null; Detection = ''; For = 'All PCs'; Download = ''
                            UsedBy = if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' }
                            Status = 'Ready'; Issues = @(); Definition = $null; FullName = $_.FullName }
         try {
@@ -552,8 +551,6 @@ function Get-ApplicationList {
             $row.Definition = $d
             $row.DisplayName = $d.displayName; $row.Version = $d.version; $row.Type = $d.installerType; $row.Command = $d.command
             $row.Download = $d.downloadUrl
-            $known = Get-AppKnownDownload -Definition $d -Templates $templates
-            if ($known) { $row.KnownDownload = $known.download.url }
             $row.Detection = if ($d.detection.rules) { (@($d.detection.rules | ForEach-Object { "$($_.type) $($_.target)" }) -join " $($d.detection.match) ") } else { 'none' }
             $for = @($d.requirements.makers) + @($d.requirements.models)
             if ($for) { $row.For = $for -join ', ' }
@@ -563,35 +560,6 @@ function Get-ApplicationList {
         } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
         [pscustomobject]$row
     }
-}
-
-function Set-ApplicationOnline {
-    <#
-    .SYNOPSIS
-        The Applications tab's "Download it from the internet" tick box. On: the application becomes its catalog
-        version (download address, command and files from the template that knows it), so the PC downloads it when it
-        installs it. Off: the download address is removed and the installer in the folder is used again.
-    #>
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][bool]$On)
-    $root = Join-Path $ContentRoot 'Applications'
-    $dir = Join-Path $root $Name
-    # The settings from before the tick (installer in the pack) are kept here, and come back on untick.
-    $local = Join-Path $dir 'app-local.json'
-    $d = Read-AppPack -AppRoot $root -Name $Name
-    if ($On) {
-        if ($d.downloadUrl) { return $d }
-        $t = Get-AppKnownDownload -Definition $d
-        if (-not $t) { throw "There is no known download for $Name. Pick its installer, or find the application online on the Applications tab." }
-        Copy-Item -LiteralPath (Join-Path $dir 'app.json') -Destination $local -Force
-        New-AppFromCatalog -AppRoot $root -Template $t -Name $Name -Overwrite | Out-Null
-    } elseif (Test-Path -LiteralPath $local) {
-        Move-Item -LiteralPath $local -Destination (Join-Path $dir 'app.json') -Force
-    } else {
-        $d.downloadUrl = ''
-        try { Save-AppPack -AppRoot $root -Definition $d -Overwrite | Out-Null }
-        catch { throw "$Name has no installer in its folder, so it must keep downloading. Edit it to add the installer first." }
-    }
-    Read-AppPack -AppRoot $root -Name $Name
 }
 
 function New-Application {
@@ -1296,7 +1264,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploymentLogs, Get-LogTabRows,
     Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
-    Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application, Set-ApplicationOnline,
+    Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
