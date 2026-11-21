@@ -37,6 +37,7 @@ and click **Create folders** the first time. Then:
   **Update image...** adds Windows updates to the selected image (see
   [Updating an image](#updating-an-image)).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
+  **Delete** one (it asks first, and says when it is the default or the naming list still uses it),
   and **Import answer file XML...** to convert an existing deploy wizard answer file.
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order

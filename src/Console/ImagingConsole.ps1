@@ -658,6 +658,16 @@ $ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
     Set-Status "Default answer file is now $($row.Name)"
 } })
 
+$ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
+    $row = $ui.GridAnswers.SelectedItem
+    if (-not $row) { Show-Error 'Select an answer file first.'; return }
+    $check = Get-AnswerFileDeleteCheck -ContentRoot $script:root -Name $row.Name
+    if (-not (Confirm-Action $check.Text)) { return }
+    [void](Remove-AnswerFile -ContentRoot $script:root -Name $row.Name)
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Naming; Update-Settings
+    Set-Status $(if ($check.IsDefault) { "Deleted $($row.Name). No answer file is the default now." } else { "Deleted $($row.Name)" })
+} })
+
 #endregion
 
 #region Applications and tasks
