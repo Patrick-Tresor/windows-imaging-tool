@@ -268,16 +268,6 @@ function Get-AddDriverArgs {
     $dismArgs
 }
 
-function Format-DriverProgressLine {
-    # "[ 5/76] storage\iaStorVD.inf  (0:42)": the driver being added to boot.wim, its folder below Root, elapsed time.
-    param([int]$Index, [int]$Total, [Parameter(Mandatory)][string]$Path, [string]$Root, [TimeSpan]$Elapsed = [TimeSpan]::Zero)
-    $name = Split-Path $Path -Leaf
-    $folder = Split-Path (Split-Path $Path -Parent) -Leaf
-    $shown = if ($folder -and $Root -and (Split-Path $Path -Parent).TrimEnd('\', '/') -ne $Root.TrimEnd('\', '/')) { "$folder\$name" } else { $name }
-    $width = "$Total".Length
-    ('[{0}/{1}] {2}  ({3:m\:ss})' -f "$Index".PadLeft($width), $Total, $shown, $Elapsed)
-}
-
 # Bump when what goes into a cached WinPE build changes (components, how drivers are added), so old caches are not reused.
 $script:WinPEBuildCacheFormat = 1
 
@@ -894,6 +884,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Format-DriverProgressLine, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

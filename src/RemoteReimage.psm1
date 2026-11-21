@@ -289,15 +289,6 @@ function Get-OnlineSummaryText {
     $text
 }
 
-function Test-WinRMReachable {
-    # Which of these hosts answer on PowerShell remoting (WinRM): name -> $true/$false.
-    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985)
-    $result = @{}
-    $states = Get-RemoteOnlineState -ComputerName $ComputerName -TimeoutMs $TimeoutMs -Port $Port
-    foreach ($k in $states.Keys) { $result[$k] = $states[$k].Method -eq 'WinRM' }
-    $result
-}
-
 #endregion
 
 #region Running commands on a PC: PowerShell remoting, or the admin share and a one-time service
@@ -737,5 +728,5 @@ function Read-ReimageTargets {
 }
 
 Export-ModuleMember -Function Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
-    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Test-WinRMReachable, Get-RemoteComputerInfo,
+    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

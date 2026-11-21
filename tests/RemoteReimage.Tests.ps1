@@ -171,7 +171,6 @@ try {
     Assert-Equal $s['127.0.0.1'].State 'No answer' 'a PC that answers on no port says No answer'
     $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['localhost.pc-that-does-not-exist.invalid'].Address 'localhost' 'a full name that does not resolve is tried by its short name'
-    Assert-Equal (Test-WinRMReachable -ComputerName '127.0.0.1' -Port $wp)['127.0.0.1'] $true 'Test-WinRMReachable still answers true/false'
 } finally { $winrm.Stop(); $smb.Stop() }
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
 Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'

@@ -672,14 +672,6 @@ $(& $e $bl 'PinEncrypted' 'encryptedPin' '    ')
     ($text -split "`r?`n" | Where-Object { $_.Trim() }) -join "`r`n" | Set-Content -Path $Path -Encoding utf8
 }
 
-function Split-InputLocale([string]$Value) {
-    # The editor shows the main keyboard and the second keyboard in two boxes; the answer file keeps one
-    # inputLocale list ("fr-CA; en-US" or "0c0c:00001009; 0409:00000409"). Returns @(main, rest).
-    $parts = @("$Value" -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    if (-not $parts) { return @('', '') }
-    @($parts[0], (@($parts | Select-Object -Skip 1) -join '; '))
-}
-
 function Get-DefaultKeyboardId([string]$Language) {
     # language:keyboard ID for a language's own keyboard, as Windows Setup writes it (en-US -> 0409:00000409).
     # Used to give the fallback language its keyboard. $null for a tag .NET doesn't know.
@@ -912,4 +904,4 @@ function Get-AnswerFileUsage {
 Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile, ConvertFrom-DeployWizardAnswerFile,
-    Split-InputLocale, Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings
+    Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings
