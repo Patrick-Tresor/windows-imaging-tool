@@ -1016,6 +1016,10 @@ function Get-ScanExclusionFolders {
     param([string]$ContentRoot, [string]$WorkDir = 'C:\WinPE_Build')
     $local = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::Combine($HOME, '.cache') }
     $out = @($WorkDir, [IO.Path]::Combine($local, 'ImagingConsole', 'WinPEBuilds'))
+    # The folder a VM capture opens the VM's Windows partition at (Get-CaptureMountFolder in Capture-VMImage.ps1):
+    # DISM's scan reads every file there, and Defender checking each one was most of the capture time.
+    $programData = if ($env:ProgramData) { $env:ProgramData } else { [IO.Path]::GetTempPath() }
+    $out += [IO.Path]::Combine($programData, 'ImagingConsole', 'CaptureMount')
     if ("$ContentRoot".Trim() -and "$ContentRoot".Trim() -notmatch '^\\\\') {
         # A network share is scanned by its server, not by this PC.
         $out += [IO.Path]::Combine("$ContentRoot".Trim(), 'Images')
