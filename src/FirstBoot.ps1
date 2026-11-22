@@ -217,8 +217,9 @@ function Enable-DeployBitLocker($cfg) {
     Write-Log "BitLocker enabled on $mount ($($cfg.protector), $($cfg.encryptionMethod)); encryption continues in the background"
 }
 
-# FIRSTBOOT tasks in the answer file's order: plain commands with cmd /c, library tasks (Tasks tab) from
-# C:\Temp\Tasks\<name> with their timeout and success codes. Each library task logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
+# FIRSTBOOT tasks in the answer file's order, all through Invoke-TaskPack: library tasks (Tasks tab) from
+# C:\Temp\Tasks\<name>, plain commands with cmd /c, each with its timeout and success codes (0 for a plain command).
+# Each one logs to C:\Windows\Temp\Task-<name>.log, next to FirstBoot.log.
 if (@($plan.tasks).Count -and -not $giveUp) { Set-Progress 'Running first boot tasks' 98 }
 Import-Module (Join-Path $deployDir 'TaskPack.psm1') -Force
 $taskResults = @($progress.taskResults)
@@ -229,29 +230,25 @@ foreach ($t in @($plan.tasks)) {
     $state = Get-FirstBootStepState -Progress $progress -Step $step
     if ($state -eq 'Done' -or $giveUp) { continue }
     if ($t -is [string]) { $t = [pscustomobject]@{ name = $t; command = $t; task = $null; arguments = '' } }
-    $label = if ($t.task) { "$($t.name)" } else { "$($t.command)" }
+    # A plan from an older stick has no definition for a plain command.
+    $def = if ($t.task) { ConvertTo-TaskDefinition -Name $t.name -Json $t.task } else { New-CommandTaskDefinition "$($t.command)" }
+    $label = $def.name
     if ($state -eq 'Interrupted') {
         Write-Log "FIRSTBOOT task ${label}: the PC restarted while it ran; not run again"
         $r = Get-InterruptedTaskResult
         $taskResults += [pscustomobject]@{ name = $label; status = $r.Status; ok = $false; exitCode = $null; message = $r.Message }
-    } elseif (-not $t.task) {
-        Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
-        Write-Log "FIRSTBOOT task: $($t.command)"
-        $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($t.command)" -Wait -PassThru -WindowStyle Hidden
-        Write-Log "  exit $($p.ExitCode)"
-        $taskResults += [pscustomobject]@{ name = $t.command; status = 'Ran'; ok = $true; exitCode = $p.ExitCode; message = "exit $($p.ExitCode)" }
     } else {
         Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
-        $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
-        Write-Log "FIRSTBOOT task $($def.name)"
-        Set-Progress "Running task $($def.name)" 98
-        $r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $deployDir "Tasks\$($def.name)") -ExtraArguments $t.arguments `
-                       -LogPath "$env:WINDIR\Temp\Task-$($def.name).log" -Log { param($m) Write-Log $m } }
+        Write-Log "FIRSTBOOT task $label"
+        Set-Progress "Running task $label" 98
+        $folder = if ($def.type -ne 'command') { Join-Path $deployDir "Tasks\$label" }
+        $r = try { Invoke-TaskPack -Definition $def -Folder $folder -ExtraArguments $t.arguments `
+                       -LogPath "$env:WINDIR\Temp\$(Get-TaskLogName $label)" -Log { param($m) Write-Log $m } }
              catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
         $ok = $r.Status -eq 'Succeeded'
-        Write-Log "  $($def.name) $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
-        $taskResults += [pscustomobject]@{ name = $def.name; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
-        if (-not $ok) { Set-Progress "Ran task $($def.name)" 98 "Task $($def.name) failed ($($r.Status))" }
+        Write-Log "  $label $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+        $taskResults += [pscustomobject]@{ name = $label; status = $r.Status; ok = $ok; exitCode = $r.ExitCode; message = $r.Message }
+        if (-not $ok) { Set-Progress "Ran task $label" 98 "Task $label failed ($($r.Status))" }
     }
     $progress.taskResults = @($taskResults)
     Complete-FirstBootStep -Progress $progress -Step $step; Save-Progress

@@ -408,18 +408,18 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
 
 function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
     # POSTIMAGE tasks run here in WinPE with the new Windows at %OSDRIVE% (W:) and content at %DEPLOYROOT%.
-    # Plain commands stop the deployment when they fail; library tasks only when they are set to (stopOnFailure).
+    # A task stops the deployment when it fails only when it is set to (stopOnFailure); plain commands always are.
     $env:OSDRIVE = 'W:'
     $env:DEPLOYROOT = $Root.TrimEnd('\')
     foreach ($t in @($Tasks | Where-Object Phase -eq $Phase)) {
-        if (-not $t.Definition) { Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', $t.Command); continue }
         Write-DeployLog "Running task $($t.Name)"
         Set-DeployStatus -Step "Running task $($t.Name)"
         # The log stays on the new Windows, next to Deploy.log.
-        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\Task-$($t.Name).log" -Log { param($m) Write-DeployLog $m } }
+        $logName = Get-TaskLogName $t.Name
+        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\$logName" -Log { param($m) Write-DeployLog $m } }
              catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
         if ($r.Status -eq 'Succeeded') { Write-DeployLog "  task $($t.Name) OK ($($r.Message))"; continue }
-        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\Task-$($t.Name).log." }
+        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\$logName." }
         Write-DeployLog "  task $($t.Name) $($r.Status): $($r.Message)" -Level WARN
         Set-DeployStatus -Warning "Task $($t.Name) $($r.Status.ToLowerInvariant())"
     }
@@ -582,7 +582,7 @@ try {
     # So are the task library's scripts: a missing or broken one stops here, not halfway through.
     $taskRoot = Resolve-ContentPath $root $answer.TaskLocation
     $deployTasks = @(Resolve-DeployTasks -Answer $answer -TaskRoot $taskRoot -Identity $hw -OnSkip { param($m) Write-DeployLog $m })
-    $libraryTasks = @($deployTasks | Where-Object Definition)
+    $libraryTasks = @($deployTasks | Where-Object Folder)   # the ones with a folder to stage
     if ($libraryTasks) { Write-DeployLog "Tasks: $(($libraryTasks | ForEach-Object { "$($_.Name) ($($_.Phase))" }) -join ', ')" }
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Get-DeploySecret -Root $root -RelativePath $answer.JoinPasswordFile -Answer $answer -Label 'join account password' } else { $null }
@@ -597,12 +597,10 @@ try {
 
     # The unattend is built and checked now, before the disk is wiped: a setting Windows Setup rejects would only show
     # after the restart, as "could not parse or process the unattend answer file" at Getting ready.
-    # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
-    # first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
-    $logonIndex = 0
-    $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
-        if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
-    })
+    # FIRSTLOGON tasks (plain commands too) run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which
+    # stays after first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    $logonCount = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON').Count
+    $logonCommands = @(for ($i = 0; $i -lt $logonCount; $i++) { Get-LogonTaskCommand -Index $i })
     $unattendXml = New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands
     $unattendProblems = @(Test-UnattendXml -Xml $unattendXml)
     if ($unattendProblems) {

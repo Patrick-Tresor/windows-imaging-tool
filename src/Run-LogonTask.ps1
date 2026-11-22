@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Runs one FIRSTLOGON task from the task library when the first user logs on (unattend FirstLogonCommands).
+    Runs one FIRSTLOGON task (from the task library, or a plain command) when the first user logs on (unattend FirstLogonCommands).
 .DESCRIPTION
     Deploy-Image.ps1 copies this, TaskPack.psm1, logon-tasks.json and each task's folder to
     C:\ProgramData\ImagingTool\Tasks. Runs as the user who logs on, with the task's timeout and success codes,
@@ -14,9 +14,11 @@ Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 $all = Get-Content -Raw (Join-Path $PSScriptRoot 'logon-tasks.json') | ConvertFrom-Json
 $t = @($all)[$Index]
 $def = ConvertTo-TaskDefinition -Name $t.name -Json $t.task
-$log = "$env:WINDIR\Temp\Task-$($def.name)-$($env:USERNAME).log"
-try { [IO.File]::AppendAllText($log, '') } catch { $log = Join-Path $env:TEMP "Task-$($def.name).log" }
-$r = try { Invoke-TaskPack -Definition $def -Folder (Join-Path $PSScriptRoot $def.name) -ExtraArguments $t.arguments -LogPath $log -Log { param($m) } }
+$log = "$env:WINDIR\Temp\$(Get-TaskLogName $def.name -Suffix $env:USERNAME)"
+try { [IO.File]::AppendAllText($log, '') } catch { $log = Join-Path $env:TEMP (Get-TaskLogName $def.name) }
+# A plain command (type command) has no folder.
+$folder = if ($def.type -ne 'command') { Join-Path $PSScriptRoot $def.name }
+$r = try { Invoke-TaskPack -Definition $def -Folder $folder -ExtraArguments $t.arguments -LogPath $log -Log { param($m) } }
      catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
 Add-Content -Path $log -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}: {2}' -f (Get-Date), $r.Status, $r.Message) -Encoding UTF8 -ErrorAction SilentlyContinue
 exit $(if ($r.Status -eq 'Succeeded') { 0 } else { 1 })

@@ -399,7 +399,11 @@ the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
 and each FIRSTBOOT task is a post-deploy check on the Dashboard. FIRSTLOGON tasks
 are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `Run-LogonTask.ps1` with the same timeout and success codes, logged to
-`C:\Windows\Temp\Task-<name>-<user>.log`. **Export...** zips a task to copy it to
+`C:\Windows\Temp\Task-<name>-<user>.log`. A plain command in the list runs the
+same way in every phase (`cmd /c`, exit code 0 is success, 60 minute timeout,
+its own log named after the command); a POSTIMAGE command that fails stops the
+deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
+**Export...** zips a task to copy it to
 another content root; **Import...** adds it back.
 
 **Importing a deploy wizard answer file** keeps the mode, delay, image name, application

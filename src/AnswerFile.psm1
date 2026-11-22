@@ -523,7 +523,8 @@ function New-FirstBootPlan {
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
-    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Temp\Tasks\<name>.
+    # Each first boot task: a library task staged in C:\Temp\Tasks\<name>, or a plain command (FirstBoot.ps1 runs both
+    # through Invoke-TaskPack; a plain command without a definition gets one there).
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
