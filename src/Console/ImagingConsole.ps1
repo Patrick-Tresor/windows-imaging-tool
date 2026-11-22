@@ -1056,6 +1056,9 @@ function Show-AdRows {
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $_ | Add-Member -NotePropertyName Online -NotePropertyValue $(if ($check) { $check.State } else { '' }) -Force
+        # The address the online check reached; a PC found by IP shows that IP before any check.
+        $ip = if ($check -and $check.Ip) { $check.Ip } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
+        $_ | Add-Member -NotePropertyName IpAddress -NotePropertyValue $ip -Force
         $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $(if ($check) { "$($_.Name) $($check.Detail)" } else { $null }) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })

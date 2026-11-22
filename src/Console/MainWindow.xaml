@@ -641,6 +641,7 @@
             <DataGrid x:Name="GridAd" IsReadOnly="True" SelectionMode="Extended" MinHeight="180">
               <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120"/>
+                <DataGridTextColumn Header="IP address" Binding="{Binding IpAddress}" Width="120"/>
                 <DataGridTextColumn Header="OU" Binding="{Binding OUPath}" Width="*"/>
                 <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystem}" Width="*"/>
                 <DataGridTextColumn Header="Last logon" Binding="{Binding LastLogonText}" Width="110"/>

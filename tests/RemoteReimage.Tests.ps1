@@ -241,4 +241,10 @@ foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
     Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 "$f is ASCII"
 }
 
+# The Computers tab shows each PC's IP address: the one the online check reached, or the IP a PC was found by.
+$mainXaml = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/MainWindow.xaml')
+Assert-Equal ($mainXaml -match 'Header="IP address" Binding="\{Binding IpAddress\}"') $true 'the Computers grid has an IP address column'
+$consoleText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/ImagingConsole.ps1')
+Assert-Equal ($consoleText -match 'NotePropertyName IpAddress') $true 'each Computers row gets its IP address'
+
 Complete-Tests 'All remote reimage tests passed.'
