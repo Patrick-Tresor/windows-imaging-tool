@@ -262,8 +262,10 @@ tries or **Shut down**.
 
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
-right after the answer file, with one box for each missing password; an
-unattended answer file asks in one window before its countdown. Nothing under
+right after the answer file, with one box for each missing password. An
+unattended answer file that needs one opens the wizard instead of counting
+down, and a reimage from the console stops with the name of the missing
+password. That page is the only place a password is typed. Nothing under
 `config\secrets` is ever copied to the stick.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach

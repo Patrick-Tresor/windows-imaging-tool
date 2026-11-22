@@ -114,11 +114,11 @@ $bare = [pscustomobject]@{
 }
 Assert-Equal @(Get-AnswerSecrets -Answer $bare).Count 0 'answer secrets: nothing for settings that are off'
 
-# Wiring: the wizard gets the missing passwords up front, the plan asks for any left in one window, and
+# Wiring: the wizard gets the missing passwords up front (its Passwords page is the only place to type one), and
 # every password the deploy reads is one Get-AnswerSecrets knows about.
 Assert-Equal ($deploy -match '-MissingSecrets \$missingSecrets -SaveSecrets \$saveSecrets') $true 'wizard is given the missing passwords'
-$planAt = $deploy.IndexOf('function Get-DeployPlan(')
-Assert-Equal ($deploy.IndexOf('Request-DeploySecrets -Root $Root -Answer $Answer', $planAt) -lt $deploy.IndexOf('foreach ($share in $Answer.Shares)', $planAt)) $true 'plan asks for missing passwords before mapping shares'
+Assert-Equal ($deploy.Contains('Show-SecretsPrompt') -or $deploy.Contains('Request-DeploySecrets')) $false 'no second password window'
+Assert-Equal ($deploy.Contains('-and -not $unstarted -and -not $needsPasswords) -or $job')) $true 'an unattended answer file that needs passwords opens the wizard'
 foreach ($m in [regex]::Matches($deploy, 'Get-DeploySecret(?:Path)? -Root \$\w+ -RelativePath \$(\w+(?:\.\w+)+)')) {
     $field = ($m.Groups[1].Value -split '\.')[-1]
     Assert-Equal ((Get-Content -Raw (Join-Path $repo 'src/SecretVault.psm1')) -match [regex]::Escape(".$field")) $true "answer secrets cover $($m.Groups[1].Value)"

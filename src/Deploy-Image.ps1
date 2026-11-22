@@ -128,8 +128,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, no disk, a wrong join password) shows there.
     # No Windows 11 hardware check: Windows is installed on any PC (Patrick, 2026-11-22).
-    # Passwords not on the media are asked for here, all in one window, unless the wizard's Passwords page did it.
-    Request-DeploySecrets -Root $Root -Answer $Answer
+    # Passwords not on the media were typed on the wizard's Passwords page; Get-DeploySecret says which one is missing.
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
         $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Answer $Answer -Label "password for $($share.RemoteName)" } else { $null }
@@ -233,24 +232,16 @@ function Unlock-DeployMedia {
 }
 
 function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string]$Label) {
-    # A password the answer file needs (named by its passwordFile path): decrypted from the answer file, or typed.
-    # Throws when it is nowhere and nobody is there to type it, before anything is erased.
+    # A password the answer file needs (named by its passwordFile path): decrypted from the answer file, or typed on
+    # the wizard's Passwords page. Throws when it is neither, before anything is erased.
     if (-not $RelativePath) { throw "No password file is set for $Label in the answer file." }
     $key = ConvertTo-SecretKey $RelativePath
     if ($Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)) { return $Answer.Passwords[$key] }
     if ($script:Vault.ContainsKey($key)) { return $script:Vault[$key] }
     if ($script:TypedSecrets.ContainsKey($key)) { return $script:TypedSecrets[$key] }
-    if (-not $script:CanAskSecrets) {
-        throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
-    }
-    # Get-AnswerSecrets lists every password up front, so this is only reached for one it does not know about.
-    # Same window as for the others (Request-DeploySecrets).
-    Write-DeployLog "The $Label ($RelativePath) was not asked for with the other passwords" -Level WARN
-    $secret = [pscustomobject]@{ Key = $key; Label = $Label; RelativePath = $RelativePath }
-    $typed = Show-SecretsPrompt -Secrets @($secret)
-    if ($null -eq $typed -or -not $typed[$key]) { throw "The $Label was not typed." }
-    Save-TypedSecrets -Values $typed -Secrets @($secret)
-    $script:TypedSecrets[$key]
+    # The wizard's Passwords page asks for every password Get-AnswerSecrets lists, so this is a password nobody was
+    # asked for (no wizard: -NoPrompt or a reimage job), or one the answer file names in a way it does not know.
+    throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
 }
 
 function Test-DeploySecretKnown([string]$Root, [string]$RelativePath, $Answer) {
@@ -277,16 +268,6 @@ function Save-TypedSecrets([hashtable]$Values, [object[]]$Secrets) {
         $script:TypedSecrets[$s.Key] = $Values[$s.Key]
         Write-DeployLog "$($s.Label) typed by the operator ($($s.RelativePath) is not on the media)"
     }
-}
-
-function Request-DeploySecrets([string]$Root, $Answer) {
-    # Without the wizard (unattended answer file, -NoPrompt): every missing password in one window, before the
-    # countdown and before anything is erased. With the wizard its Passwords page has asked already: nothing to do.
-    $missing = @(Get-MissingDeploySecrets -Root $Root -Answer $Answer)
-    if (-not $missing) { return }
-    $typed = Show-SecretsPrompt -Secrets $missing
-    if ($null -eq $typed) { throw 'The passwords were not typed.' }
-    Save-TypedSecrets -Values $typed -Secrets $missing
 }
 
 function Protect-StagedItem([string]$Path, [switch]$Folder) {
@@ -548,8 +529,15 @@ try {
     }
     if ($AnswerFile) {
         $answer = & $readAnswer $AnswerFile
+        # Passwords are typed only on the wizard's Passwords page: an Unattended answer file that needs one opens the
+        # wizard instead of counting down.
+        $needsPasswords = $answer.Mode -eq 'Unattended' -and -not $NoPrompt -and -not $job -and @(& $missingSecrets $answer).Count
+        if ($needsPasswords) {
+            Write-DeployLog 'The answer file needs passwords that are not on this media: opening the wizard instead of the countdown' -Level WARN
+            if (-not $wizardNotice) { $wizardNotice = 'Some passwords are not on this USB stick: type them on the Passwords page.' }
+        }
         if ($NoPrompt) { $confirmed = $true }
-        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted) -or $job) {
+        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted -and -not $needsPasswords) -or $job) {
             $deployPlan = & $preparePlan $answer
             $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
             Write-Host ''
