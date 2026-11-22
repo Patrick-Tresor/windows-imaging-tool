@@ -149,6 +149,23 @@ try {
 }
 finally { $form.Close(); $form.Dispose() }
 
+# Full screen: the windows fill the screen with no title bar, and the layout fills the bigger window.
+$ui = New-DeployProgressForm
+try {
+    Set-FullScreen -Form $ui.Form
+    Update-DeployProgressLayout -Ui $ui
+    $screen = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    Assert-Equal "$($ui.Form.FormBorderStyle)|$($ui.Form.Bounds)" "None|$screen" 'full screen: no title bar, the whole screen'
+    Assert-Equal ($ui.Restart.Right -eq $ui.Form.ClientSize.Width - 24 -and $ui.Restart.Bottom -eq $ui.Form.ClientSize.Height - 12) $true 'full screen: Restart in the bottom right corner'
+    Assert-Equal ($ui.Log.Right -eq $ui.Restart.Right) $true 'full screen: the log box is as wide as the window'
+}
+finally { $ui.Form.Dispose() }
+$wizSrc = Get-Content -Raw (Join-Path $repo 'src/DeployWizard.psm1')
+$progSrc = Get-Content -Raw (Join-Path $repo 'src/DeployProgress.psm1')
+Assert-Equal ($wizSrc -match 'Set-FullScreen -Form \$form' -and $progSrc -match 'Set-FullScreen -Form \$ui\.Form') $true 'wizard and progress window are full screen'
+$wizForm = [regex]::Match($wizSrc, "(?s)Text = 'Deploy Windows'; ClientSize.*?\}").Value
+Assert-Equal ($wizForm -match 'TopMost = \$true') $false 'the full-screen wizard is not TopMost (Command prompt opens over it)'
+
 # Show-DeployWizard lays the wizard out on each page.
 $src = Get-Content -Raw (Join-Path $repo 'src/DeployWizard.psm1')
 Assert-Equal ($src -match '\$w\.Layout = \{ Update-DeployWizardLayout') $true 'Show-DeployWizard uses Update-DeployWizardLayout'

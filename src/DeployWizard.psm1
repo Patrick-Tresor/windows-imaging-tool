@@ -134,6 +134,16 @@ function New-DeploySidebar {
     $labels
 }
 
+function Set-FullScreen {
+    # Makes a WinPE window fill the screen with no title bar, as Windows Setup does. The layout functions size
+    # everything from the window's ClientSize, so they run after this.
+    param([Parameter(Mandatory)]$Form)
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $Form.FormBorderStyle = 'None'
+    $Form.StartPosition = 'Manual'
+    $Form.Bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+}
+
 function Set-FittingFont {
     # Shrinks a label's font until its text fits on one line. WinPE has fewer fonts and some PCs scale the
     # screen, so text measured for Segoe UI at 96 dpi was cut off ("Deploy Win", "Computer nam").
@@ -365,8 +375,11 @@ function Show-DeployWizard {
     $form = New-Object Windows.Forms.Form -Property @{
         Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
-        TopMost = $true; BackColor = [Drawing.Color]::White
+        BackColor = [Drawing.Color]::White
     }
+    # The whole screen, so WinPE shows the wizard and nothing else (the console behind is hidden, see
+    # Set-DeployConsoleWindow). Not TopMost: Command prompt and the log open over it.
+    Set-FullScreen -Form $form
     $title = New-Object Windows.Forms.Label -Property @{
         Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI Semibold', 15)
     }
@@ -583,7 +596,8 @@ function Show-DeployWizard {
     $w.List.SelectedIndex = if ($start -ge 0) { $start } else { 0 }
     & $w.Show
     if ($Notice) { $w.Error.Text = $Notice; Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2 }
-    $form.Add_Shown({ $script:wiz.Form.Activate() })
+    # TopMost for a moment brings it to the front; leaving it on would hide Command prompt and Notepad.
+    $form.Add_Shown({ $f = $script:wiz.Form; $f.TopMost = $true; $f.Activate(); $f.TopMost = $false })
     $null = $form.ShowDialog()
     $result = $w.Result
     $form.Dispose()
@@ -832,5 +846,5 @@ function Copy-DeployLogs {
     [pscustomobject]@{ Path = $folder; Count = $count }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
     Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs

@@ -268,6 +268,9 @@ function Show-DeployProgressWindow {
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
     $ui = New-DeployProgressForm
+    # The whole screen, like the wizard: the console behind is hidden, so this is all the operator sees.
+    Set-FullScreen -Form $ui.Form
+    Update-DeployProgressLayout -Ui $ui
     # Event handlers run outside this function's scope, so everything they share lives here.
     $script:progress = @{ Ui = $ui; Path = $ProgressPath; Log = $LogPath; Pid = $DeployProcessId; View = $null }
 
@@ -285,7 +288,7 @@ function Show-DeployProgressWindow {
             $wasHidden = -not $p.Ui.Form.Visible
             if ($wasHidden) { $p.Ui.Form.Show() }
             if ($wasHidden -or (Test-ProgressRaise -Previous $previous -Current $p.View)) {
-                # TopMost for a moment brings it over the console; leaving it on would hide Notepad and cmd.
+                # TopMost for a moment brings it to the front; leaving it on would hide Notepad and cmd.
                 $p.Ui.Form.WindowState = 'Normal'
                 $p.Ui.Form.TopMost = $true; $p.Ui.Form.Activate(); $p.Ui.Form.TopMost = $false
             }

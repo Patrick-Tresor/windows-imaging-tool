@@ -23,6 +23,15 @@ Assert-Equal (@($split | Where-Object { $_.Length -gt 50 }).Count) 0 'a word lon
 Assert-Equal (($split | ForEach-Object { $_.Trim() }) -join '') $path 'a broken word keeps every character'
 Assert-Equal (@(Format-ConsoleText -Text '' -Width 50).Count) 1 'an empty line stays one line'
 Set-DeployConsole   # no real console here: must not throw
+Assert-Equal (Set-DeployConsoleWindow) $false 'outside WinPE the console window is left alone'
+
+# In WinPE the console is hidden behind the full-screen windows, and comes back when the script stops early or ends.
+$deploySrc = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+$hide = $deploySrc.IndexOf('[void](Set-DeployConsoleWindow)'); $unlock = $deploySrc.IndexOf("`nUnlock-DeployMedia")
+Assert-Equal ($hide -gt 0 -and $hide -lt $unlock) $true 'deploy hides the console before the WinPE password prompt'
+Assert-Equal ($deploySrc -match 'trap \{ \[void\]\(Set-DeployConsoleWindow -Show\)') $true 'an error that stops the script shows the console again'
+$tail = $deploySrc.Substring($deploySrc.LastIndexOf('WaitForExit'))
+Assert-Equal ($tail -match 'Set-DeployConsoleWindow -Show' -and $tail.IndexOf('Set-DeployConsoleWindow -Show') -lt $tail.IndexOf('exit 1')) $true 'the console comes back before startnet.cmd opens its command prompt'
 
 # DISM progress.
 $apply = "Deployment Image Servicing and Management tool`r`nVersion: 10.0.26100.1`r`n`r`nApplying image`r`n" +
