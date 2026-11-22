@@ -447,7 +447,7 @@ applied (Windows first, then .NET, oldest KB first); move a standalone servicing
 stack update to the top if there is one. For Windows 11 24H2 checkpoint updates,
 keep the earlier checkpoint in the same folder: DISM picks it up from there.
 
-It runs `Update-OfflineImage.ps1` in its own window, on this PC. For each edition
+It runs `Update-OfflineImage.ps1` in the background on this PC, with each step in the Progress window. For each edition
 it mounts the image, adds the packages, optionally cleans up the replaced
 components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to

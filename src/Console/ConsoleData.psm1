@@ -707,8 +707,8 @@ function Get-ImageEditions {
 }
 
 function Get-ImageVersionArguments {
-    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console in its own window
-    # because copying an image can take minutes.
+    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console hidden, with a card in
+    # the Progress window (Start-ConsoleJob adds -ProgressFile and -LogPath), because copying an image takes minutes.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -719,7 +719,7 @@ function Get-ImageVersionArguments {
     )
     if ($Action -eq 'Rollback' -and -not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
     $q = { param($v) '"' + ($v -replace '"', "'") + '"' }
-    $cmd = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
+    $cmd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
         '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Action', $Action, '-NoPrompt')
     if ($Version) { $cmd += @('-Version', $Version) }
     if ($Note) { $cmd += @('-Note', (& $q $Note)) }
@@ -795,7 +795,7 @@ function Add-ImageServicingRecord {
 }
 
 function Get-ImageUpdateArguments {
-    # Command line for Update-OfflineImage.ps1, run by the console in its own window.
+    # Command line for Update-OfflineImage.ps1, run by the console hidden, with a card in the Progress window.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ImagePath,
@@ -803,7 +803,9 @@ function Get-ImageUpdateArguments {
         [int[]]$Index,
         [switch]$Cleanup,
         [switch]$ResetBase,
-        [switch]$NoBackup
+        [switch]$NoBackup,
+        [string]$ProgressFile,
+        [string]$LogPath
     )
     if (-not $Packages) { throw 'Add at least one update package (.msu or .cab).' }
     if ($ResetBase -and -not $Cleanup) { throw 'Reset base needs component cleanup turned on.' }
@@ -813,10 +815,12 @@ function Get-ImageUpdateArguments {
     if ($Cleanup) { $cmd += ' -Cleanup' }
     if ($ResetBase) { $cmd += ' -ResetBase' }
     if ($NoBackup) { $cmd += ' -NoBackup' }
+    if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
+    if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
     # -File cannot pass an array to a [string[]] parameter, and command-line quoting strips the quotes in -Command,
     # so the command goes in encoded.
-    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+    @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
 function Get-CaptureSaveFolderProblem {

@@ -2,8 +2,9 @@
 .SYNOPSIS
     Keeps a copy of a golden image as a version, or rolls the image back to an earlier version.
 .DESCRIPTION
-    Runs on the admin PC. The console's Images > Versions... dialog runs it in its own window, since copying
-    an image can take a while. Versions live in Images\Previous\<name>_<yyyyMMdd-HHmm>\ (see ImageVersions.psm1).
+    Runs on the admin PC. The console's Images > Versions... dialog runs it hidden, with its steps as a card in the
+    Progress window (-ProgressFile), since copying an image can take a while. Versions live in
+    Images\Previous\<name>_<yyyyMMdd-HHmm>\ (see ImageVersions.psm1).
 
     Keep:     copies the current image to a new version (a snapshot before you change something).
     Rollback: moves the current image to a new version, then copies the chosen version back as the current
@@ -20,22 +21,29 @@ param(
     [Parameter(Mandatory)][ValidateSet('Keep', 'Rollback')][string]$Action,
     [string]$Version,       # Rollback: the version to restore
     [string]$Note,          # Keep: shown next to the version in the console
-    [switch]$NoPrompt
+    [switch]$NoPrompt,
+    [string]$ProgressFile,  # step-by-step progress for the console's Progress window
+    [string]$LogPath        # default: Invoke-ImageVersion.log in TEMP
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 
 $name = [IO.Path]::GetFileNameWithoutExtension($ImagePath)
 $imagesDir = Split-Path $ImagePath -Parent
 $contentRoot = Split-Path $imagesDir -Parent
 $logDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images' -and (Test-Path (Join-Path $contentRoot 'Logs'))) { Join-Path $contentRoot 'Logs' } else { $env:TEMP }
-$logPath = Join-Path $env:TEMP 'Invoke-ImageVersion.log'
+$logPath = if ($LogPath) { $LogPath } else { Join-Path $env:TEMP 'Invoke-ImageVersion.log' }
 Set-DeployLogPath -Path $logPath -New
+$what = if ($Action -eq 'Keep') { 'Keeping a copy of the image' } else { "Rolling back to $Version" }
+Start-BuildProgress -Path $ProgressFile -Title $(if ($Action -eq 'Keep') { "Keeping a copy of $name" } else { "Rolling $name back" }) -LogPath $logPath `
+    -Steps @(@('run', $what), @('prune', 'Deleting versions beyond the keep limit'))
 
 $status = 'FAILED'
 try {
+    Start-BuildStep 'run'
     if ($Action -eq 'Keep') {
         Write-DeployLog "Keeping a copy of $(Split-Path $ImagePath -Leaf)"
         $v = Save-ImageVersion -ImagePath $ImagePath -Reason 'Kept a copy' -Note $Note
@@ -50,12 +58,17 @@ try {
         if ($old) { Write-DeployLog "The image that was current is kept as version $($old.Version)" }
         Write-DeployLog "Rolled back. Answer files without a version deploy $Version from now on."
     }
+    Complete-BuildStep 'run'
+    Start-BuildStep 'prune'
     $pruned = @(Invoke-ImageVersionRetention -ContentRoot $contentRoot -ImagePath $ImagePath -Protect @($Version | Where-Object { $_ }))
     if ($pruned) { Write-DeployLog "Deleted older versions beyond the keep limit: $(($pruned.Version) -join ', ')" }
+    Complete-BuildStep 'prune' -State $(if ($pruned) { 'done' } else { 'skipped' }) -Detail $(if ($pruned) { ($pruned.Version) -join ', ' } else { '' })
+    Stop-BuildProgress
     $status = 'OK'
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
+    Stop-BuildProgress -Message $_.Exception.Message
     Write-DeployLog 'Nothing was changed: the current image is as it was.' -Level WARN
 }
 finally {

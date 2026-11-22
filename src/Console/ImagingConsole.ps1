@@ -557,7 +557,7 @@ $ui.BtnImageVersions.Add_Click({ Invoke-Safely {
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-ImageVersionsDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
         Update-Images; Update-Answers
-        Set-Status "Versions of $($image.Name) changed. A copy or rollback runs in its own window; click Refresh when it finishes."
+        Set-Status "Versions of $($image.Name) changed. A copy or rollback shows in the Progress window; the list refreshes when it ends."
     }
 } })
 $ui.GridImages.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridImages.SelectedItem) { $ui.BtnImageVersions.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) } } })
@@ -566,7 +566,7 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name) in a separate window. Its log appears on the Logs tab when it finishes."
+        Set-Status "Updating $($image.Name). The Progress window shows each step; its log appears on the Logs tab when it finishes."
     }
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
