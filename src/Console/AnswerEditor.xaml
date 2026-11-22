@@ -84,13 +84,6 @@
             </ComboBox>
             <Label Grid.Row="5" Content="Driver library folder"/>
             <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
-            <Label Grid.Row="6" Content="Windows 11 check"/>
-            <ComboBox x:Name="CmbWin11Check" Grid.Row="6" Grid.Column="1" Width="420" HorizontalAlignment="Left" SelectedIndex="0"
-                      ToolTip="Windows 11 images only. Checks TPM 2.0, UEFI, Secure Boot, processor, memory and disk before the disk is erased.">
-              <ComboBoxItem Content="Block: stop on a PC that does not meet the requirements"/>
-              <ComboBoxItem Content="Warn: show the problems and deploy anyway"/>
-              <ComboBoxItem Content="Off: do not check"/>
-            </ComboBox>
           </Grid>
         </StackPanel>
       </ScrollViewer>

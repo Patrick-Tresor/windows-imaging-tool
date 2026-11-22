@@ -126,15 +126,13 @@ foreach ($f in Get-ChildItem (Join-Path $repo 'src') -Recurse -Include *.ps1, *.
     Assert-Equal (@($errors).Count) 0 "$($f.Name) parses"
 }
 
-# Windows 11 check in Block mode: the wizard says how to go on (Install anyway), other errors stay as they are.
-$blocked = New-Object System.InvalidOperationException 'Not ready for Windows 11 (Processor). Nothing was erased; see the log.'
-$blocked.Data['Windows11Block'] = 'Processor'
-Assert-Equal (Get-WizardErrorText -Exception $blocked) 'Not ready for Windows 11 (Processor). Nothing was erased. Tick Install anyway to continue, or see the log.' 'Windows 11 block offers Install anyway'
+# Errors are shown as they are.
 Assert-Equal (Get-WizardErrorText -Exception (New-Object System.Exception 'Pick the disk to install Windows on.')) 'Pick the disk to install Windows on.' 'other errors are shown as they are'
+# No Windows 11 hardware check: any PC gets Windows (Patrick, 2026-11-22).
 $wizSrc = Get-Content -Raw (Join-Path $repo 'src/DeployWizard.psm1')
-Assert-Equal ($wizSrc -match '\$w\.PreparePlan \$w\.Answer \$w\.Win11Anyway\.Checked') $true 'wizard passes Install anyway to the plan'
 $deploySrc = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
-Assert-Equal ($deploySrc -match "Data\['Windows11Block'\]") $true 'Deploy-Image marks the Windows 11 block for the wizard'
-Assert-Equal ($deploySrc -match '-IgnoreWin11 \(\$IgnoreWindows11Check\.IsPresent -or \$IgnoreWin11\)') $true 'Install anyway from the wizard skips the block'
+Assert-Equal ($wizSrc -match 'Win11|Install Windows 11 anyway') $false 'the wizard has no Windows 11 Install anyway box'
+Assert-Equal ($deploySrc -match 'Win11Readiness|Invoke-Windows11Check|IgnoreWindows11Check') $false 'Deploy-Image does not check Windows 11 requirements'
+Assert-Equal (Test-Path (Join-Path $repo 'src/Win11Readiness.psm1')) $false 'the Windows 11 readiness module is gone'
 
 Complete-Tests 'All tests passed'

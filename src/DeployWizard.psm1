@@ -379,7 +379,7 @@ function Get-DeploySummary {
     }
     "Name:         $ComputerName"
     "Joins:        $join"
-    # Deploy-Image adds its own lines (Windows 11 check, firmware, BitLocker) to the plan.
+    # Deploy-Image adds its own lines (BitLocker) to the plan.
     if ($Plan.PSObject.Properties['Details']) { @($Plan.Details) }
     "ERASE disk:   $(Format-DiskChoice $Disk)"
 }
@@ -397,7 +397,7 @@ function Show-DeployWizard {
         [string]$Default,
         [string]$ComputerName,                              # from the command line; replaces the suggested name
         [Parameter(Mandatory)][scriptblock]$ReadAnswer,     # { param($Name) } -> answer object, throws when invalid
-        [Parameter(Mandatory)][scriptblock]$PreparePlan,    # { param($Answer, $IgnoreWin11) } -> ImagePath, DriverPack, AvailableApps, DefaultName
+        [Parameter(Mandatory)][scriptblock]$PreparePlan,    # { param($Answer) } -> ImagePath, DriverPack, AvailableApps, DefaultName
         [scriptblock]$MissingSecrets = { @() },             # { param($Answer) } -> Key, Label of each password to type now
         [scriptblock]$SaveSecrets = { },                    # { param($Values, $Secrets) } keeps the typed passwords (Key -> text)
         [object[]]$Disks = (Get-TargetDisks),
@@ -411,7 +411,6 @@ function Show-DeployWizard {
         Page = 0; Answer = $null; Plan = $null; Disks = $Disks; Result = $null
         ReadAnswer = $ReadAnswer; PreparePlan = $PreparePlan; ComputerName = $ComputerName
         MissingSecrets = $MissingSecrets; SaveSecrets = $SaveSecrets; Secrets = @(); SecretRows = @()
-        Win11Blocked = $false
     }
     $w = $script:wiz
     $font = New-Object Drawing.Font('Segoe UI', 10)
@@ -443,11 +442,8 @@ function Show-DeployWizard {
         $r = try { Copy-DeployLogs -Serial $script:wiz.Serial } catch { $null }
         $script:wiz.Error.Text = if ($r) { "Logs copied to $($r.Path) ($($r.Count) file(s))." } else { 'No USB stick or share to copy the logs to.' }
     })
-    # Shown above the error line only after the answer file's Windows 11 check stopped on this PC (Block mode):
-    # an older PC (unsupported processor, TPM 1.2) can still get Windows 11 when the operator ticks it.
-    $anyway = New-Object Windows.Forms.CheckBox -Property @{ Text = 'Install Windows 11 anyway on this PC (it does not meet the requirements)'; Visible = $false }
     $form.CancelButton = $cancel
-    $form.Controls.AddRange(@($title, $hwLabel, $err, $anyway, $back, $next, $cancel, $cmdBtn, $logsBtn))
+    $form.Controls.AddRange(@($title, $hwLabel, $err, $back, $next, $cancel, $cmdBtn, $logsBtn))
     $w.Sidebar = New-DeploySidebar -Form $form
 
     $pages = foreach ($i in 0..4) {
@@ -497,7 +493,7 @@ function Show-DeployWizard {
     $pages[4].Controls.AddRange(@($w.Summary, $w.Confirm))
 
     $w.Pages = $pages; $w.Title = $title; $w.Error = $err; $w.Back = $back; $w.Next = $next; $w.Cancel = $cancel; $w.Form = $form
-    $w.HwLabel = $hwLabel; $w.IsDomain = $true; $w.Win11Anyway = $anyway; $w.Cmd = $cmdBtn; $w.CopyLogs = $logsBtn; $w.Serial = $Hardware.Serial
+    $w.HwLabel = $hwLabel; $w.IsDomain = $true; $w.Cmd = $cmdBtn; $w.CopyLogs = $logsBtn; $w.Serial = $Hardware.Serial
     $w.Layout = { Update-DeployWizardLayout -Wiz $script:wiz }
     Set-ModernLook -Root $form -Primary $next
 
@@ -510,7 +506,6 @@ function Show-DeployWizard {
         $w.Next.Text = if ($w.Page -eq 4) { 'Deploy' } else { 'Next >' }
         $w.Next.Enabled = if ($w.Page -eq 4) { $w.Confirm.Checked } else { $true }
         $w.Error.Text = ''
-        $w.Win11Anyway.Visible = $w.Win11Blocked -and $w.Page -le 1
         & $w.Layout
         if ($w.Page -eq 1) {
             $first = @($w.SecretRows | Where-Object { -not $_.Box.Text } | Select-Object -First 1)
@@ -521,7 +516,7 @@ function Show-DeployWizard {
     # After the answer file (and its passwords): map its shares, check the image, fill in the next pages.
     $w.Prepare = {
         $w = $script:wiz
-        $w.Plan = & $w.PreparePlan $w.Answer $w.Win11Anyway.Checked
+        $w.Plan = & $w.PreparePlan $w.Answer
         $a = $w.Answer
         $w.NameBox.Text = if ($w.ComputerName) { $w.ComputerName } else { $w.Plan.DefaultName }
         $w.NameHint.Text = switch ($a.NamingMode) {
@@ -545,8 +540,6 @@ function Show-DeployWizard {
     $w.List.add_SelectedIndexChanged({
         $w = $script:wiz
         $w.Answer = $null; $w.Plan = $null
-        # Install anyway is for the answer file it was ticked for.
-        $w.Win11Blocked = $false; $w.Win11Anyway.Checked = $false; $w.Win11Anyway.Visible = $false
         try {
             $a = & $w.ReadAnswer $w.List.SelectedItem
             $w.Answer = $a
@@ -630,7 +623,6 @@ function Show-DeployWizard {
         }
         catch {
             $w.Error.Text = Get-WizardErrorText -Exception $_.Exception
-            if ($_.Exception.Data -and $_.Exception.Data['Windows11Block']) { $w.Win11Blocked = $true; $w.Win11Anyway.Visible = $true }
             & $w.Layout
         }
         finally { $w.Form.Cursor = [Windows.Forms.Cursors]::Default }
@@ -670,11 +662,9 @@ function Set-SecretRows {
 function Get-WizardErrorText {
     <#
     .SYNOPSIS
-        The short line the wizard shows for an error. The Windows 11 check says how to go on from the wizard.
+        The short line the wizard shows for an error.
     #>
     param([Parameter(Mandatory)][Exception]$Exception)
-    $failed = if ($Exception.Data) { $Exception.Data['Windows11Block'] }
-    if ($failed) { return "Not ready for Windows 11 ($failed). Nothing was erased. Tick Install anyway to continue, or see the log." }
     $Exception.Message
 }
 
@@ -698,12 +688,6 @@ function Update-DeployWizardLayout {
     Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2
     $w.Error.Top = $buttonsTop - 6 - $w.Error.Height
     $pagesBottom = $w.Error.Top
-    # Install anyway (Windows 11 check), only while it is shown: between the page and the error line.
-    if ($w.Win11Anyway -and $w.Win11Anyway.Visible) {
-        $w.Win11Anyway.Left = $left; $w.Win11Anyway.Width = $width; Set-FittedHeight -Control $w.Win11Anyway -MaxLines 2
-        $w.Win11Anyway.Top = $w.Error.Top - 2 - $w.Win11Anyway.Height
-        $pagesBottom = $w.Win11Anyway.Top
-    }
 
     $pageTop = $headerBottom + 10
     $pageHeight = [Math]::Max(120, $pagesBottom - 6 - $pageTop)

@@ -21,15 +21,13 @@ param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
     [string]$ComputerName,      # overrides the naming list and the answer file's naming (the wizard still lets the operator change it)
-    [switch]$NoPrompt,          # no wizard, countdown or confirmation, whatever the answer file's mode
-    [switch]$IgnoreWindows11Check   # deploy even when a Windows 11 requirement fails in Block mode
+    [switch]$NoPrompt           # no wizard, countdown or confirmation, whatever the answer file's mode
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Win11Readiness.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
@@ -102,7 +100,6 @@ $script:Mounted = @{}
 $script:DiskNotes = @{}
 $script:PeDriversLoaded = $false
 $script:NoDiskLogged = $false
-$script:Win11Results = @{}
 
 function Get-ContentDiskNumber([string]$Root) {
     # The disk the content root is on (the USB stick's DEPLOY partition), or nothing for a network share.
@@ -130,9 +127,10 @@ function Assert-JoinAccount($Root, $Answer) {
         throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
 }
 
-function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) {
+function Get-DeployPlan($Root, $Answer, $Hardware, $Listed) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
-    # so a problem (missing image, a PC that fails the Windows 11 check in Block mode) shows there.
+    # so a problem (missing image, no disk, a wrong join password) shows there.
+    # No Windows 11 hardware check: Windows is installed on any PC (Patrick, 2026-11-22).
     # Passwords not on the media are asked for here, all in one window, unless the wizard's Passwords page did it.
     Request-DeploySecrets -Root $Root -Answer $Answer
     foreach ($share in $Answer.Shares) {
@@ -178,10 +176,8 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) 
     } elseif ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $(Format-DiskChoice $target.Disk), $($target.Reason)" }
     $script:DiskNotes[$Answer.Name] = $target.Reason
 
-    # Windows 11 hardware requirements are checked now, before the disk is wiped.
-    $win11 = Invoke-Windows11Check -Answer $Answer -ImagePath $imagePath -Hardware $Hardware -Override $IgnoreWin11 -Disk $target.Disk
-
-    # So is the domain join account: a wrong password would otherwise only show after the restart.
+    # The domain join account is checked now, before the disk is wiped: a wrong password would otherwise only show
+    # after the restart.
     Assert-JoinAccount -Root $Root -Answer $Answer
 
     $driverRoot = Resolve-ContentPath $Root $Answer.DriverRoot
@@ -199,7 +195,6 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) 
     # Extra summary lines, shown before ERASE in the wizard and on the console.
     $bl = $Answer.BitLocker
     $details = @(
-        "Windows 11:   $win11"
         "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
     )
 
@@ -213,41 +208,8 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed, [bool]$IgnoreWin11) 
         WmiValue      = $wmiValue
         DefaultName   = if ($fromList) { $Listed.ComputerName.ToUpperInvariant() } else { Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial }
         NameSource    = if ($fromList) { 'naming list' } else { "answer file, $($Answer.NamingMode)" }
-        Win11         = $win11
         Details       = $details
     }
-}
-
-function Invoke-Windows11Check($Answer, [string]$ImagePath, $Hardware, [bool]$Override, $Disk) {
-    # Logs each requirement and throws when the answer file blocks unsupported PCs. Returns the summary line.
-    # The hardware does not change while WinPE runs, so each disk is checked and logged once, however often
-    # the wizard's Next is pressed.
-    if ($Answer.Windows11Check -eq 'Off') { return 'not checked (off in the answer file)' }
-    $isWin11 = Test-Win11Image -ImagePath $ImagePath -Index $Answer.ImageIndex
-    if ($isWin11 -eq $false) { return 'not needed (Windows 10 image)' }
-    $key = "$($Disk.Number)"
-    $results = $script:Win11Results[$key]
-    if (-not $results) {
-        $results = @(Test-Win11Readiness -Facts (Get-Win11ReadinessFacts -Disk $Disk -DiskNumber $Answer.DiskNumber -IsUefi $Hardware.IsUefi))
-        foreach ($r in $results) {
-            $level = @{ Pass = 'INFO'; Warn = 'WARN'; Fail = 'ERROR' }[$r.Result]
-            Write-DeployLog ("Windows 11 {0}: {1} ({2})" -f $r.Check, $r.Result.ToUpperInvariant(), $r.Detail) -Level $level
-        }
-        $script:Win11Results[$key] = $results
-    }
-    $decision = Get-Win11ReadinessDecision -Mode $Answer.Windows11Check -IsWin11 $isWin11 -Results $results -Override:$Override
-    if ($null -eq $isWin11) { Write-DeployLog 'Could not tell whether the image is Windows 11; requirements are shown but never block.' -Level WARN }
-    if ($decision.Action -eq 'Block') {
-        # Each failed requirement and how to fix it is already in the log (above); the wizard gets one short line.
-        Write-DeployLog 'Fix the failed Windows 11 requirement, deploy a Windows 10 answer file, set the Windows 11 check to Warn, or tick Install anyway in the wizard.' -Level ERROR
-        # Data tells the wizard this is the Windows 11 check, so it can offer Install anyway on this PC.
-        $failedChecks = $decision.Summary -replace '^NOT READY: '
-        $ex = New-Object System.InvalidOperationException "Not ready for Windows 11 ($failedChecks). Nothing was erased; see the log."
-        $ex.Data['Windows11Block'] = $failedChecks
-        throw $ex
-    }
-    if ($decision.Failed -and $Override) { Write-DeployLog "Deploying Windows 11 anyway on hardware that does not meet: $($decision.Summary -replace '^NOT READY: ')" -Level WARN }
-    $decision.Summary
 }
 
 function Unlock-DeployMedia {
@@ -583,8 +545,7 @@ try {
     $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
     $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }
     $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
-    # The wizard passes $true as IgnoreWin11 when the operator ticks Install anyway after the Windows 11 check blocked.
-    $preparePlan = { param($Answer, [bool]$IgnoreWin11) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed -IgnoreWin11 ($IgnoreWindows11Check.IsPresent -or $IgnoreWin11) }
+    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed }
 
     # -NoPrompt and Unattended answer files start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.

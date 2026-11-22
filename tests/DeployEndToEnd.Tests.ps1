@@ -56,7 +56,6 @@ try {
     Copy-Item (Join-Path $root 'config\deploy-settings.json') 'X:\Deploy\config\deploy-settings.json'
     $xml = Get-Content -Raw (Join-Path $repo 'config\answer-files\Default.xml')
     $xml = $xml -replace '<file>Images\\Win11-Enterprise\.wim</file>', '<file>Images\E2E.wim</file>' `
-                -replace '<windows11Check>Block</windows11Check>', '<windows11Check>Off</windows11Check>' `
                 -replace '<!-- <application order="1">Dell-Command-Update</application> -->', '<application order="1">E2E-App</application>' `
                 -replace '<disableSystemRestore>true</disableSystemRestore>', '<disableSystemRestore>false</disableSystemRestore>' `
                 -replace '<reboot>true</reboot>', '<reboot>false</reboot>'

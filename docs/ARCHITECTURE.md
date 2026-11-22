@@ -38,11 +38,10 @@ answer file's ticked, the rest of the library unticked), and a summary with an
 erase confirmation. It holds no deploy logic: `Deploy-Image.ps1` passes it two
 script blocks, one that reads an answer file and one (`Get-DeployPlan`) that
 maps the answer file's shares and finds the image, driver pack, application
-library and suggested name (the naming list's, when the PC is listed), and
-runs the Windows 11 check. So a missing image, or a PC that a Block-mode Windows
-11 check refuses, is reported when the answer file is picked, before anything is
-erased. The plan also carries extra summary lines (Windows 11,
-BitLocker) that the wizard shows before the ERASE line. The choices come back as a copy of the
+library and suggested name (the naming list's, when the PC is listed). So a
+missing image is reported when the answer file is picked, before anything is
+erased. There is no Windows 11 hardware check. The plan also carries extra
+summary lines (BitLocker) that the wizard shows before the ERASE line. The choices come back as a copy of the
 answer object with `DiskNumber`, `OrganizationalUnit` and `Applications`
 replaced, and the deploy continues exactly as for a command-line run.
 `-NoPrompt` and an `Unattended` countdown skip the window;
@@ -199,9 +198,7 @@ no longer create `fwfiles`).
    A naming list entry's computer name and OU replace the answer file's naming
    and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
 2. Check everything before touching the disk: image, driver pack, applications,
-   passwords, computer name, and for a Windows 11 image the hardware
-   requirements (`Win11Readiness.psm1`: TPM 2.0, UEFI, Secure Boot, processor,
-   memory, disk), which stop the deploy in Block mode. The unattend is built here too and checked
+   passwords, computer name (no Windows 11 hardware check: any PC gets Windows). The unattend is built here too and checked
    by `Test-UnattendXml` (each setting in a pass and component that takes it; computer name,
    product key and time zone values Setup accepts), so a setting Windows would reject at
    "Getting ready" stops the deploy before the erase. Show a summary, then either a countdown
