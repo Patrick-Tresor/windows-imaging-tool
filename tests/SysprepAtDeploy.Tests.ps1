@@ -112,6 +112,14 @@ Assert-Equal ($script.IndexOf('Set-Notice', $hookAt) -lt 0) $true 'the hook stag
 Assert-Equal (Test-SysprepHookDone -State 'running') $false 'hook keeps waiting while the checks run'
 Assert-Equal (Test-SysprepHookDone -State 'sysprep') $false 'hook keeps waiting while sysprep runs'
 foreach ($st in 'done', 'failed', 'restart') { Assert-Equal (Test-SysprepHookDone -State $st) $true "hook stops waiting: $st" }
+
+# Reserved storage in use stops sysprep (hr 0x800F0975): the Run stage turns it off first.
+Assert-Equal (Test-ReservedStorageInUse -Values $null) $false 'reserved storage: no ReserveManager key'
+Assert-Equal (Test-ReservedStorageInUse -Values ([pscustomobject]@{ ActiveScenario = 0; ShippedWithReserves = 0 })) $false 'reserved storage: off'
+Assert-Equal (Test-ReservedStorageInUse -Values ([pscustomobject]@{ ActiveScenario = 1; ShippedWithReserves = 0 })) $true 'reserved storage: an active scenario'
+Assert-Equal (Test-ReservedStorageInUse -Values ([pscustomobject]@{ ShippedWithReserves = 1 })) $true 'reserved storage: shipped with reserves'
+$runText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1')
+Assert-Equal ($runText -match '(?s)Disable-ReservedStorage\s+\$unattend') $true 'reserved storage is turned off right before sysprep'
 $hookPart = $script.Substring($hookAt)
 Assert-Equal ($hookPart.Contains('Clear-StartupHook') -or $hookPart.Contains("-Name SetupType")) $false 'the hook does not turn the startup command off before sysprep'
 Assert-Equal ($hookPart.Contains('while ($clock.Elapsed.TotalMinutes -lt (Get-SysprepWaitMinutes -State $state))')) $true 'the hook waits for the task'
