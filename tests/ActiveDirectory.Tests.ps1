@@ -97,4 +97,15 @@ $nbt = @('', 'Ethernet:', 'Node IpAddress: [10.1.2.5] Scope Id: []', '', '      
 Assert-Equal (ConvertFrom-NbtstatOutput -Lines $nbt) 'GWHZLG3' 'nbtstat: the first <00> name is the PC'
 Assert-Equal (ConvertFrom-NbtstatOutput -Lines @('Host not found.')) '' 'nbtstat: no answer gives no name'
 
+# A PC found by IP that is not in Active Directory
+$row = New-LocalComputerRow -Ip '10.1.2.40' -Name 'desktop-ab12'
+Assert-Equal $row.Name 'DESKTOP-AB12' 'local row: the name it answered with'
+Assert-Equal $row.Address '10.1.2.40' 'local row: reached at its IP'
+Assert-Equal $row.NotInDomain $true 'local row: not in the domain'
+Assert-Equal $row.JoinOU '' 'local row: no OU'
+Assert-Equal (New-LocalComputerRow -Ip '10.1.2.40').Name '10.1.2.40' 'local row: no name answered shows the IP'
+Assert-Equal (ConvertTo-LocalAccountName -User 'Administrator' -Computer '10.1.2.40') '10.1.2.40\Administrator' 'local account: bare name gets the PC'
+Assert-Equal (ConvertTo-LocalAccountName -User '.\Pat' -Computer 'PC1') 'PC1\Pat' 'local account: .\ becomes the PC'
+Assert-Equal (ConvertTo-LocalAccountName -User 'PC1\Pat' -Computer '10.1.2.40') 'PC1\Pat' 'local account: PC\user kept'
+
 Complete-Tests 'All Active Directory tests passed.'
