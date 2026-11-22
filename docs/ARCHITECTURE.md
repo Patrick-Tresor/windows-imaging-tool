@@ -352,7 +352,7 @@ once (`Find-VendorDriverPackOnline`): type the model ("Latitude 5521",
 "EliteBook 840 G9", "T14 Gen 4"), a Dell/HP SKU or a Lenovo machine type, pick
 the pack and click **Download**. Every word must match (a number as a whole
 word); a maker name in the query reads only that catalog. The download runs hidden
-through `Get-DriverPacks.ps1 -JobFile`, with its progress on the Driver Library page.
+through `Get-DriverPacks.ps1 -JobFile`, with its progress as a card in the Progress window.
 
 Catalogs are cached for a day in `%LOCALAPPDATA%\ImagingConsole\VendorCatalogs`.
 For each model and OS only the newest x64 pack is offered (highest Windows

@@ -805,7 +805,7 @@ $ui.BtnTaskDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Task (Get-Select
 
 $ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
 $ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
-# Find a model online: type the PC model, pick the pack, download it (the progress shows on the Driver Library page).
+# Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
 $script:driverFound = @()
 function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
@@ -835,7 +835,7 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     $p = $script:driverFound[$i]
     if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
     Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window
-    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). Its progress is under the library, which refreshes when it is done."
+    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The Progress window shows it; the library refreshes when it is done."
 } })
 
 $ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {

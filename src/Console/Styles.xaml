@@ -478,8 +478,8 @@
               IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
   </DataTemplate>
 
-  <!-- One step row with its bar (Name, Time, Percent, Indeterminate, Status, Detail, State): the Build progress
-       window and the driver downloads on the Driver Library page. -->
+  <!-- One step row with its bar (Name, Time, Percent, Indeterminate, Status, Detail, State): the cards of the
+       Progress window. -->
   <DataTemplate x:Key="StepRowTemplate">
     <Grid Margin="0,6">
       <Grid.ColumnDefinitions>

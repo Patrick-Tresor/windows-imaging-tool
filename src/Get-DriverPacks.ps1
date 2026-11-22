@@ -5,7 +5,7 @@
     The console (Find a model online, Unknown models...) picks the packs from the vendors' catalogs and writes them
     to a job file; this script runs hidden, downloads each pack, checks its hash and signature, extracts it to
     <ContentRoot>\Drivers\<Maker>\<Model> and adds catalog entries for its SKUs or machine types and model name.
-    Progress goes to ProgressFile, shown on the console's Driver Library page.
+    Progress goes to ProgressFile, shown as a card in the console's Progress window.
 #>
 param(
     [Parameter(Mandatory)][string]$ContentRoot,

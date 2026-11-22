@@ -1,6 +1,6 @@
-# Progress window: one window for everything that runs (media builds, captures, driver downloads, reimages), one
-# card each, with one row per step (name, elapsed time, bar, Complete), read twice a second from the progress file
-# the job writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
+# Progress window: one window for everything that runs (media builds, captures, driver downloads, reimages, image
+# updates and versions), one card each, with one row per step (name, elapsed time, bar, Complete), read twice a
+# second from the progress file the job writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
 # Not modal: the console stays usable, and closing the window leaves the work running.
 # Closing the window while work runs only hides it: Show progress in the console header brings it back
 # (Patrick, 2026-11-22: a closed progress window could not be opened again; then: one window, not one per reimage).
@@ -141,7 +141,10 @@ function Show-BuildProgress {
         # The process runs hidden (driver pack downloads): no Show build window button.
         [switch]$Hidden,
         # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
-        [scriptblock]$OnFinished
+        [scriptblock]$OnFinished,
+        # A job that worked takes its card off after this many seconds (driver downloads, Patrick 2026-11-11: gone
+        # by itself when done). A failed one stays, for its log. 0: stays until Remove.
+        [int]$RemoveWhenDoneSeconds = 0
     )
     $hub = Get-ProgressHub -Owner $Owner
     $view = New-Object ImagingTool.BuildJobView
@@ -157,7 +160,7 @@ function Show-BuildProgress {
     # Show() returns at once, so the handlers can't see this function's variables: everything they need rides on
     # the timer's Tag, and each job keeps its own.
     $ctx = @{ View = $view; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
-        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $hub.Window }
+        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $hub.Window; RemoveWhenDoneSeconds = $RemoveWhenDoneSeconds; RemoveTimer = $null }
     $timer.Tag = $ctx
     $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
     [void]$script:ProgressWindows.Add($ctx)
@@ -194,7 +197,8 @@ function Invoke-ProgressJobButton {
 function Remove-ProgressJob {
     # Takes a finished job off the window; the window closes when nothing is left.
     param([Parameter(Mandatory)]$Ctx)
-    if ($Ctx.Timer.IsEnabled) { return }
+    if ($Ctx.Timer.IsEnabled -or -not $script:ProgressWindows.Contains($Ctx)) { return }
+    if ($Ctx.RemoveTimer) { $Ctx.RemoveTimer.Stop() }
     $script:ProgressWindows.Remove($Ctx)
     $hub = $script:ProgressHub
     if ($hub) {
@@ -252,11 +256,20 @@ function Invoke-BuildFinished {
 }
 
 function Stop-ProgressJob {
-    # The job is over (done, failed or its process gone): stop reading, offer Remove, run OnFinished.
+    # The job is over (done, failed or its process gone): stop reading, offer Remove, run OnFinished. A job that
+    # worked and has RemoveWhenDoneSeconds takes its card off after that long.
     param([Parameter(Mandatory)]$Ctx)
     $Ctx.Timer.Stop()
     $Ctx.View.Finished = $true
     Update-ProgressHubCount
+    if ($Ctx.RemoveWhenDoneSeconds -gt 0 -and $Ctx.View.SummaryState -eq 'success' -and -not $Ctx.RemoveTimer) {
+        $t = New-Object Windows.Threading.DispatcherTimer
+        $t.Interval = [TimeSpan]::FromSeconds($Ctx.RemoveWhenDoneSeconds)
+        $t.Tag = $Ctx
+        $t.Add_Tick({ param($sender) $sender.Stop(); Remove-ProgressJob -Ctx $sender.Tag })
+        $Ctx.RemoveTimer = $t
+        $t.Start()
+    }
     Invoke-BuildFinished $Ctx
 }
 
