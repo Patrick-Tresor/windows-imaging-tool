@@ -180,31 +180,51 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         $dlg = @($owner.OwnedWindows)[0]
         $dlg.Left = -10000; $dlg.Top = -10000
         $dlg.Dispatcher.Invoke([action]{}, 'Background')
-        $find = { param($n) $dlg.FindName($n) }
-        $rows = @((& $find 'LstSteps').ItemsSource)
+        $ctx = $script:ProgressWindows[0]
+        $v = $ctx.View
+        $rows = @($v.Rows)
         Assert-Equal $rows.Count 2 'window: a row per step'
         Assert-Equal $rows[0].Status "$([char]0x2713) Complete" 'window: done step has a tick and Complete'
         Assert-Equal $rows[1].Percent 30 'window: running step bar at its percent'
-        Assert-Equal (& $find 'TxtTitle').Text 'Building USB stick' 'window: title'
-        Assert-Equal (& $find 'TxtSummary').Text 'Copying images and content...' 'window: summary'
+        Assert-Equal $v.Title 'Building USB stick' 'window: title'
+        Assert-Equal $v.Summary 'Copying images and content...' 'window: summary'
+        Assert-Equal @($dlg.FindName('LstJobs').ItemsSource).Count 1 'window: one card'
 
-        # Closing while the build runs only hides it; Show progress brings it back.
-        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $true 'window: listed for Show progress'
+        # A second job goes into the same window as a second card (Patrick: one window, not one per reimage).
+        $file2 = Join-Path $dir 'reimage.json'
+        Copy-Item -LiteralPath $file -Destination $file2   # a second job's progress file, still running
+        Show-BuildProgress -Owner $owner -ProgressFile $file2 -Title 'Reimaging 1 PC(s) with Win11-Staff' -Noun 'reimage' -Hidden
+        $dlg.Dispatcher.Invoke([action]{}, 'Background')
+        Assert-Equal @($owner.OwnedWindows).Count 1 'window: still one window for two jobs'
+        Assert-Equal @($dlg.FindName('LstJobs').ItemsSource).Count 2 'window: two cards'
+        Assert-Equal $script:ProgressWindows.Count 2 'window: both jobs listed for Show progress'
+        Assert-Equal $script:ProgressWindows[1].View.CanShowWindow $false 'window: a hidden job has no Show build window'
+        Assert-Equal $dlg.FindName('TxtCount').Text '2 running' 'window: count'
+
+        # Closing while work runs only hides it; Show progress brings it back.
         $dlg.Close()
         $dlg.Dispatcher.Invoke([action]{}, 'Background')
         Assert-Equal $dlg.IsVisible $false 'window: closing while running hides it'
-        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $true 'window: a hidden window stays listed'
+        Assert-Equal $script:ProgressWindows.Count 2 'window: hidden jobs stay listed'
         Show-ProgressWindows
         Assert-Equal $dlg.IsVisible $true 'window: Show progress shows it again'
 
         Complete-BuildStep 'b'
         Stop-BuildProgress
-        Update-BuildProgressWindow $dlg.Tag
-        Assert-Equal ((& $find 'TxtSummary').Text -like 'Done in *') $true 'window: done'
-        Assert-Equal (& $find 'BtnClose').Content 'Done' 'window: Close becomes Done'
-        Assert-Equal $dlg.Tag.Timer.IsEnabled $false 'window: stops reading when the build is done'
+        Update-BuildProgressWindow $ctx
+        Assert-Equal ($v.Summary -like 'Done in *') $true 'window: done'
+        Assert-Equal "$($v.SummaryState)|$($v.Finished)" 'success|True' 'window: a finished card is green and can be removed'
+        Assert-Equal $ctx.Timer.IsEnabled $false 'window: stops reading when the build is done'
+        Assert-Equal $dlg.FindName('TxtCount').Text '1 running, 1 finished' 'window: count after one finished'
+        Remove-ProgressJob -Ctx $ctx
+        Assert-Equal "$($script:ProgressWindows.Count)|$(@($dlg.FindName('LstJobs').ItemsSource).Count)" '1|1' 'window: Remove takes the finished card off'
+        Remove-ProgressJob -Ctx $script:ProgressWindows[0]
+        Assert-Equal $script:ProgressWindows.Count 1 'window: a running job cannot be removed'
+
+        Copy-Item -LiteralPath $file -Destination $file2 -Force   # the second job finishes too
+        Update-BuildProgressWindow $script:ProgressWindows[0]
         $dlg.Close()
-        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $false 'window: closing after the end really closes it'
+        Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: closing after the end really closes it'
     } finally {
         $owner.Close()
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

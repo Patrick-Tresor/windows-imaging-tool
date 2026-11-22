@@ -1,30 +1,57 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Build progress" Width="820" Height="600" MinWidth="560" MinHeight="360"
+        Title="Progress" Width="820" Height="640" MinWidth="560" MinHeight="360"
         WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
 
+  <!-- One window for everything that runs: each build, capture, download or reimage is one card (JobTemplate),
+       newest at the bottom (Patrick, 2026-11-22: one window instead of one per reimage). -->
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+    <DataTemplate x:Key="JobTemplate">
+      <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="16,10" Margin="0,0,0,12">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" FontSize="16" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+            <TextBlock x:Name="JobSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+          <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" LastChildFill="False">
+            <Button Tag="remove" DockPanel.Dock="Right" Content="Remove" ToolTip="Take this finished item off the list"
+                    Visibility="{Binding Finished, Converter={StaticResource BoolToVisibility}}"/>
+            <Button Tag="log" DockPanel.Dock="Right" Content="Open log" IsEnabled="{Binding HasLog}"/>
+            <Button Tag="window" DockPanel.Dock="Right" Content="Show build window" ToolTip="The build's own window, with every line DISM and the copy print"
+                    Visibility="{Binding CanShowWindow, Converter={StaticResource BoolToVisibility}}"/>
+          </DockPanel>
+          <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{DynamicResource StepRowTemplate}" Margin="0,6,0,0"/>
+        </DockPanel>
+      </Border>
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding SummaryState}" Value="error">
+          <Setter TargetName="JobSummary" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding SummaryState}" Value="success">
+          <Setter TargetName="JobSummary" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+  </Window.Resources>
+
   <DockPanel Margin="16">
-    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-      <DockPanel>
-        <TextBlock x:Name="TxtElapsed" DockPanel.Dock="Right" FontSize="18" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
-        <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Text="Building media" TextTrimming="CharacterEllipsis"/>
-      </DockPanel>
-      <TextBlock x:Name="TxtSummary" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" Text="Starting..."/>
-    </StackPanel>
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+      <TextBlock x:Name="TxtCount" DockPanel.Dock="Right" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+      <TextBlock x:Name="TxtHeader" FontSize="18" FontWeight="SemiBold" Text="Progress"/>
+    </DockPanel>
 
     <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
       <Button x:Name="BtnClose" DockPanel.Dock="Right" Content="Close"/>
-      <Button x:Name="BtnLog" DockPanel.Dock="Right" Content="Open log" IsEnabled="False"/>
-      <Button x:Name="BtnWindow" DockPanel.Dock="Right" Content="Show build window"
-              ToolTip="The build's own window, with every line DISM and the copy print"/>
       <TextBlock x:Name="TxtNote" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"
-                 Text="Closing this window does not stop the build."/>
+                 Text="Closing this window does not stop what runs. Show progress brings it back."/>
     </DockPanel>
 
-    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="16,10">
-      <ScrollViewer x:Name="ScrollSteps" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <ItemsControl x:Name="LstSteps" ItemTemplate="{DynamicResource StepRowTemplate}"/>
-      </ScrollViewer>
-    </Border>
+    <ScrollViewer x:Name="ScrollJobs" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <ItemsControl x:Name="LstJobs" ItemTemplate="{StaticResource JobTemplate}"/>
+    </ScrollViewer>
   </DockPanel>
 </Window>
