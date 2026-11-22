@@ -224,8 +224,10 @@ function Get-LogonTaskFolder([string]$Name) { "$script:LogonTaskDir\$Name" }
 function Get-LogonTaskCommand {
     # The FirstLogonCommands line for the FIRSTLOGON library task at $Index in logon-tasks.json. Run-LogonTask.ps1
     # runs it with its timeout and success codes and logs it, like FirstBoot.ps1 does for FIRSTBOOT tasks.
+    # conhost --headless gives PowerShell a console with no window: -WindowStyle Hidden alone still flashes an empty
+    # "Windows PowerShell" window on the user's desktop until PowerShell has started (Patrick, 2026-11-22).
     param([Parameter(Mandatory)][int]$Index)
-    "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script:LogonTaskDir\Run-LogonTask.ps1`" -Index $Index"
+    "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script:LogonTaskDir\Run-LogonTask.ps1`" -Index $Index"
 }
 
 function New-LogonTaskPlan {
