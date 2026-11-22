@@ -6,8 +6,6 @@
     deploy-settings.json (ISO or network boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
     domain join, tasks, extra shares and BitLocker.
-    If config\naming-list.csv on the content root lists this PC's BIOS serial, its computer name, OU and
-    answer file win over the answer file's naming, the answer file's OU and the default answer file.
     A reimage started from the console's Computers tab left a job for this PC's BIOS serial in Reimage\ on the
     share (RemoteReimage.psm1): its answer file, computer name and OU are used without asking, after a countdown.
     Unless -NoPrompt, an Unattended answer file or such a job starts it, a graphical wizard
@@ -20,7 +18,7 @@
 param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
     [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
-    [string]$ComputerName,      # overrides the naming list and the answer file's naming (the wizard still lets the operator change it)
+    [string]$ComputerName,      # overrides the answer file's naming (the wizard still lets the operator change it)
     [switch]$NoPrompt           # no wizard, countdown or confirmation, whatever the answer file's mode
 )
 
@@ -33,7 +31,6 @@ Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'NamingList.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
@@ -82,16 +79,16 @@ function Add-AnswerPasswords([string]$Root, $Answer) {
     if ($map.Count) { Write-DeployLog "Answer file $($Answer.Name): $($map.Count) encrypted password(s) decrypted" }
 }
 
-function Read-DeployAnswer([string]$Root, [string]$Name, $Listed) {
-    # Reads an answer file; a naming list entry's OU replaces the answer file's (domain joins only).
+function Read-DeployAnswer([string]$Root, [string]$Name, [string]$JobOU) {
+    # Reads an answer file; a reimage job's OU (the OU the PC was in) replaces the answer file's (domain joins only).
     $dir = [IO.Path]::Combine($Root, 'AnswerFiles')
     $path = [IO.Path]::Combine($dir, "$Name.xml")
     if (-not [IO.File]::Exists($path)) { throw "Answer file $Name not found in $dir." }
     $a = Read-AnswerFile -Path $path
     Add-AnswerPasswords -Root $Root -Answer $a
-    if ($Listed -and $Listed.OU) {
-        if ($a.Membership -eq 'Domain') { $a.OrganizationalUnit = $Listed.OU }
-        else { Write-DeployLog "Naming list OU $($Listed.OU) ignored: answer file $($a.Name) joins a workgroup" -Level WARN }
+    if ($JobOU) {
+        if ($a.Membership -eq 'Domain') { $a.OrganizationalUnit = $JobOU }
+        else { Write-DeployLog "Reimage OU $JobOU ignored: answer file $($a.Name) joins a workgroup" -Level WARN }
     }
     $a
 }
@@ -127,7 +124,7 @@ function Assert-JoinAccount($Root, $Answer) {
         throw "The domain refused the join account $account ($($check.Reason)). Fix it in the answer file." }
 }
 
-function Get-DeployPlan($Root, $Answer, $Hardware, $Listed) {
+function Get-DeployPlan($Root, $Answer, $Hardware) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, no disk, a wrong join password) shows there.
     # No Windows 11 hardware check: Windows is installed on any PC (Patrick, 2026-11-22).
@@ -190,7 +187,6 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed) {
 
     $wmiValue = try { Get-WmiNamingValue -Query $Answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $Hardware.Serial }
     if (-not $wmiValue) { $wmiValue = $Hardware.Serial }
-    $fromList = $Listed -and $Listed.ComputerName
 
     # Extra summary lines, shown before ERASE in the wizard and on the console.
     $bl = $Answer.BitLocker
@@ -206,8 +202,8 @@ function Get-DeployPlan($Root, $Answer, $Hardware, $Listed) {
         AppRoot       = $appRoot
         AvailableApps = $available
         WmiValue      = $wmiValue
-        DefaultName   = if ($fromList) { $Listed.ComputerName.ToUpperInvariant() } else { Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial }
-        NameSource    = if ($fromList) { 'naming list' } else { "answer file, $($Answer.NamingMode)" }
+        DefaultName   = Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial
+        NameSource    = "answer file, $($Answer.NamingMode)"
         Details       = $details
     }
 }
@@ -514,7 +510,7 @@ try {
         $AnswerFile = $job.answerFile
         if ($job.computerName -and -not $ComputerName) {
             if (Test-GenericComputerName $job.computerName) {
-                Write-DeployLog "Not keeping the name $($job.computerName): Windows made it up; the PC is named by the naming list or the answer file"
+                Write-DeployLog "Not keeping the name $($job.computerName): Windows made it up; the PC is named by the answer file"
             } else { $ComputerName = $job.computerName }
         }
     }
@@ -522,30 +518,18 @@ try {
     # Someone is at this PC to type a password that is not on the media, unless -NoPrompt or a reimage job started it.
     $script:CanAskSecrets = -not $NoPrompt -and -not $job
 
-    # Naming list: this PC's own name, OU and answer file, by BIOS serial. Checked before anything is wiped.
-    $listed = Find-NamingEntry -Entries @(Read-NamingList -Path (Join-Path $root 'config\naming-list.csv')) -Serial $hw.Serial
-    if ($listed) {
-        $problems = @(Test-NamingEntry -Entry $listed)
-        if ($problems) { throw "Naming list entry for serial $($hw.Serial) has problems: $($problems -join ' ')" }
-        Write-DeployLog ("Naming list entry for serial {0}: name '{1}', OU '{2}', answer file '{3}'" -f $hw.Serial, $listed.ComputerName, $listed.OU, $listed.AnswerFile)
-        if (-not $AnswerFile -and $listed.AnswerFile) { $AnswerFile = $listed.AnswerFile }
-    } elseif (-not $job) {
-        Write-DeployLog "Serial $($hw.Serial) is not in the naming list; using the answer file's naming"
-    }
-    if ($job -and $job.ou) {
-        # The PC goes back into the OU it was in, whatever the naming list or the answer file say.
-        $listed = [pscustomobject]@{ Serial = "$($hw.Serial)"; ComputerName = $(if ($listed) { $listed.ComputerName } else { '' }); OU = $job.ou; AnswerFile = $job.answerFile }
-    }
+    # A reimage puts the PC back into the OU it was in, whatever the answer file says.
+    $jobOU = if ($job) { "$($job.ou)" } else { '' }
 
     $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     if (-not $AnswerFile) {
         if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
         elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
     }
-    $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -Listed $listed }
+    $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -JobOU $jobOU }
     $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }
     $saveSecrets = { param($Values, $Secrets) Save-TypedSecrets -Values $Values -Secrets $Secrets }
-    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw -Listed $listed }
+    $preparePlan = { param($Answer) Get-DeployPlan -Root $root -Answer $Answer -Hardware $hw }
 
     # -NoPrompt and Unattended answer files start without the wizard. A key pressed during
     # the countdown opens the wizard instead, so the operator can change anything.

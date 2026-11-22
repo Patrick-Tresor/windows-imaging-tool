@@ -16,7 +16,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for the Computers tab's network boot. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, naming list, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
 ## Admin console
 
@@ -38,7 +38,7 @@ answer file's ticked, the rest of the library unticked), and a summary with an
 erase confirmation. It holds no deploy logic: `Deploy-Image.ps1` passes it two
 script blocks, one that reads an answer file and one (`Get-DeployPlan`) that
 maps the answer file's shares and finds the image, driver pack, application
-library and suggested name (the naming list's, when the PC is listed). So a
+library and suggested name (from the answer file's naming). So a
 missing image is reported when the answer file is picked, before anything is
 erased. There is no Windows 11 hardware check. The plan also carries extra
 summary lines (BitLocker) that the wizard shows before the ERASE line. The choices come back as a copy of the
@@ -192,11 +192,11 @@ no longer create `fwfiles`).
 
 ## Deploy sequence
 
-1. Detect hardware and content root; look the BIOS serial up in
-   `config\naming-list.csv`; choose the answer file (the naming list's, else the
-   default, or a menu in interactive mode); map its extra shares.
-   A naming list entry's computer name and OU replace the answer file's naming
-   and OU. A `-ComputerName` or `-AnswerFile` parameter still wins over both.
+1. Detect hardware and content root; take a reimage job for this PC's serial if
+   the console left one (its answer file, name and OU win); else choose the
+   answer file (the default, or a menu in interactive mode); map its extra shares.
+   The PC is named by the answer file's naming. A `-ComputerName` or
+   `-AnswerFile` parameter wins over it.
 2. Check everything before touching the disk: image, driver pack, applications,
    passwords, computer name (no Windows 11 hardware check: any PC gets Windows). The unattend is built here too and checked
    by `Test-UnattendXml` (each setting in a pass and component that takes it; computer name,
@@ -330,14 +330,6 @@ not read anywhere. The media build puts the key in `boot.wim` (in the WinPE
 password vault when there is one). In WinPE, `Read-DeployAnswer` decrypts them (`Find-AnswerKey`,
 `Unprotect-AnswerPassword`) and `Get-DeploySecret` uses them before the vault
 or the Passwords page.
-
-`NamingList.psm1` reads and writes the naming list CSV (comma or semicolon,
-UTF-8 or ANSI, as Excel saves it; header spellings such as `Serial Number` or
-`Hostname` are accepted), looks a serial up and validates rows. The console's
-Naming List tab edits it through `Get-NamingListRows`, `Merge-NamingList` and
-`Save-NamingListFromConsole`, which refuses to save names over 15 characters,
-duplicate serials or names, OUs that are not distinguished names, and answer
-files that do not exist.
 
 `AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
 deploy wizard answer file import. It has no WinPE dependencies, so it is unit tested and shared
