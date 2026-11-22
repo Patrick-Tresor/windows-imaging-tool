@@ -915,7 +915,7 @@ function Get-OfflineImageState {
 
 function Test-GenericComputerName {
     # Whether a name is one Windows made up by itself (DESKTOP-XXXXXXX, WIN-XXXXXXXXXXX, LAPTOP-XXXXXXXX): a reimage
-    # does not keep such a name, it names the PC by the answer file (or naming list) instead. A PC that kept the reference
+    # does not keep such a name, it names the PC by the answer file instead. A PC that kept the reference
     # VM's name (DESKTOP-FF7OSR7 on the 5521, 2026-11-22) has one.
     param([string]$Name)
     "$Name".Trim() -match '^(DESKTOP|LAPTOP|WIN)-[A-Z0-9]{7,11}$'

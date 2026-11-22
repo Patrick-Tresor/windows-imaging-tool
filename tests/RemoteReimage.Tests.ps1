@@ -148,14 +148,14 @@ Assert-Equal ($start -match 'Get-StartedJob -ContentRoot \$ContentRoot -Serial \
 $media = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($media -match '/Set-TimeZone:\$tz') $true 'the build sets the WinPE time zone'
 
-# Deploy-Image takes the job before the naming list and the wizard, and keeps the name and OU.
+# Deploy-Image takes the job before the wizard, and keeps the name and OU.
 $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploy -match "Import-Module \(Join-Path \`$PSScriptRoot 'RemoteReimage.psm1'\)") $true 'Deploy-Image loads RemoteReimage.psm1'
-$find = $deploy.IndexOf('$root = Find-ContentRoot'); $take = $deploy.IndexOf('Receive-ReimageJob'); $naming = $deploy.IndexOf('$listed = Find-NamingEntry'); $wizard = $deploy.IndexOf('Show-DeployWizard -Hardware')
-Assert-Equal ($find -lt $take -and $take -lt $naming -and $naming -lt $wizard) $true 'the job is taken once the share is mapped, before the naming list and the wizard'
+$find = $deploy.IndexOf('$root = Find-ContentRoot'); $take = $deploy.IndexOf('Receive-ReimageJob'); $naming = $deploy.IndexOf('$jobOU = '); $wizard = $deploy.IndexOf('Show-DeployWizard -Hardware')
+Assert-Equal ($find -lt $take -and $take -lt $naming -and $naming -lt $wizard) $true 'the job is taken once the share is mapped, before the wizard'
 Assert-Equal ($deploy -match '\$script:CanAskSecrets = -not \$NoPrompt -and -not \$job') $true 'a reimaged PC never waits for a typed password'
 Assert-Equal ($deploy -match "-or \`$job\) \{") $true 'a job starts without the wizard'
-Assert-Equal ($deploy -match 'OU = \$job\.ou') $true 'the job OU replaces the answer file OU'
+Assert-Equal ($deploy -match '\$jobOU = if \(\$job\) \{ "\$\(\$job\.ou\)" \}' -and $deploy -match '-JobOU \$jobOU') $true 'the job OU replaces the answer file OU'
 Assert-Equal ($deploy -match '\$job -and -not \$answer\.Shutdown -and -not \$answer\.Reboot\) \{ \$answer\.Reboot = \$true') $true 'a reimaged PC restarts into Windows by itself'
 
 # Check online: says why a PC can't be reached, with local listeners standing in for the PC's ports.
@@ -240,5 +240,11 @@ foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repo $f))
     Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 "$f is ASCII"
 }
+
+# The Computers tab shows each PC's IP address: the one the online check reached, or the IP a PC was found by.
+$mainXaml = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/MainWindow.xaml')
+Assert-Equal ($mainXaml -match 'Header="IP address" Binding="\{Binding IpAddress\}"') $true 'the Computers grid has an IP address column'
+$consoleText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/ImagingConsole.ps1')
+Assert-Equal ($consoleText -match 'NotePropertyName IpAddress') $true 'each Computers row gets its IP address'
 
 Complete-Tests 'All remote reimage tests passed.'

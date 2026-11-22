@@ -1,6 +1,6 @@
 # End-to-end test of a whole deployment: Deploy-Image.ps1 from start to finish, then FirstBoot.ps1, as on a PC.
 #
-# Everything runs for real (answer file, naming list, driver matching, unattend, first boot plan, staging, status,
+# Everything runs for real (answer file, driver matching, unattend, first boot plan, staging, status,
 # logs, applications, post-deploy checks, the result) except what needs WinPE and a disk to erase: the hardware,
 # diskpart, DISM, bcdboot and BootNext are replaced by stand-ins that record what they were asked to do.
 # X:, W: and S: are folders under TEMP (subst), so the scripts' fixed WinPE paths work.
@@ -48,7 +48,7 @@ try {
     New-Item -ItemType Directory -Path 'X:\Deploy\config' -Force | Out-Null
     '{ "commit": "e2e1234", "date": "2026-11-20T10:00:00Z", "built": "2026-11-20 10:05", "target": "Usb" }' | Set-Content 'X:\Deploy\config\tool-version.json'
 
-    # The content: settings, answer file, image, driver pack, application, naming list.
+    # The content: settings, answer file, image, driver pack, application.
     foreach ($d in 'config', 'AnswerFiles', 'Images', 'Drivers\Dell\Latitude 5521', 'Applications\E2E-App', 'Logs') { New-Item -ItemType Directory -Path (Join-Path $root $d) -Force | Out-Null }
     $settings = Get-Content -Raw (Join-Path $repo 'config\deploy-settings.json') | ConvertFrom-Json
     $settings.share.path = ''; $settings.share.user = ''; $settings.defaultAnswerFile = 'E2E'
@@ -56,7 +56,6 @@ try {
     Copy-Item (Join-Path $root 'config\deploy-settings.json') 'X:\Deploy\config\deploy-settings.json'
     $xml = Get-Content -Raw (Join-Path $repo 'config\answer-files\Default.xml')
     $xml = $xml -replace '<file>Images\\Win11-Enterprise\.wim</file>', '<file>Images\E2E.wim</file>' `
-                -replace '<windows11Check>Block</windows11Check>', '<windows11Check>Off</windows11Check>' `
                 -replace '<!-- <application order="1">Dell-Command-Update</application> -->', '<application order="1">E2E-App</application>' `
                 -replace '<disableSystemRestore>true</disableSystemRestore>', '<disableSystemRestore>false</disableSystemRestore>' `
                 -replace '<reboot>true</reboot>', '<reboot>false</reboot>'
@@ -66,7 +65,6 @@ try {
         Set-Content (Join-Path $root 'config\driver-catalog.json')
     Set-Content -Path (Join-Path $root 'Drivers\Dell\Latitude 5521\e2e.inf') -Value '[Version]'
     @{ command = "echo installed> `"$appMarker`"" } | ConvertTo-Json | Set-Content (Join-Path $root 'Applications\E2E-App\app.json')
-    "`"Serial`",`"ComputerName`",`"OU`",`"AnswerFile`",`"Notes`"`r`n`"$serial`",`"E2E-PC01`",`"`",`"E2E`",`"`"" | Set-Content (Join-Path $root 'config\naming-list.csv')
 
     # Stand-ins for the hardware and the native tools, dot-sourced into Deploy-Image.ps1 after its own functions.
     $hooks = Join-Path $base 'hooks.ps1'
@@ -103,13 +101,12 @@ function Set-WindowsBootNext { param([string]$SystemDrive) Add-E2ECall "bootnext
 
     # 1. WinPE: the deploy.
     $env:E2E_ROOT = $root; $env:E2E_SERIAL = $serial; $env:E2E_CALLS = $calls
-    $out = & $shell -NoProfile -ExecutionPolicy Bypass -File $deployScript -SettingsPath 'X:\Deploy\config\deploy-settings.json' -NoPrompt 2>&1
+    $out = & $shell -NoProfile -ExecutionPolicy Bypass -File $deployScript -SettingsPath 'X:\Deploy\config\deploy-settings.json' -ComputerName E2E-PC01 -NoPrompt 2>&1
     $exit = $LASTEXITCODE
     $deployLog = if (Test-Path 'X:\Windows\Temp\Deploy.log') { Get-Content -Raw 'X:\Windows\Temp\Deploy.log' } else { '' }
     if ($exit -ne 0) { Write-Host ($out | Out-String); Write-Host $deployLog }
     Assert-Equal $exit 0 'Deploy-Image.ps1 finishes with exit code 0'
     Assert-Equal ($deployLog -match 'Imaging tool version e2e1234') $true 'Deploy.log starts with the tool version'
-    Assert-Equal ($deployLog -match "Naming list entry for serial $serial") $true 'the naming list entry is used'
     Assert-Equal ($deployLog -match 'Deployment finished') $true 'Deploy.log ends with Deployment finished'
 
     $native = if (Test-Path $calls) { @(Get-Content $calls) } else { @() }
@@ -121,7 +118,7 @@ function Set-WindowsBootNext { param([string]$SystemDrive) Add-E2ECall "bootnext
     Assert-Equal ($order -join ', ') 'diskpart.exe, dism.exe Apply-Image, dism.exe Add-Driver, bcdboot.exe, bootnext' 'partition, apply, drivers, boot files, BootNext, in that order'
 
     $unattend = Get-Content -Raw 'W:\Windows\Panther\unattend.xml'
-    Assert-Equal ($unattend -match '<ComputerName>E2E-PC01</ComputerName>') $true 'unattend.xml names the PC from the naming list'
+    Assert-Equal ($unattend -match '<ComputerName>E2E-PC01</ComputerName>') $true 'unattend.xml names the PC as given'
     Assert-Equal ($unattend -match '<JoinWorkgroup>WORKGROUP</JoinWorkgroup>') $true 'unattend.xml joins the workgroup'
     $fb = Get-Content -Raw 'W:\Temp\firstboot.json' | ConvertFrom-Json
     Assert-Equal (@($fb.applications | ForEach-Object name) -join ',') 'E2E-App' 'first boot installs the answer file''s application'

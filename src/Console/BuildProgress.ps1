@@ -1,8 +1,9 @@
-# Build progress window: one row per media build step (name, elapsed time, bar, Complete), read twice a second
-# from the progress file New-DeploymentMedia.ps1 writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
-# Not modal: the console stays usable, and closing the window leaves the build running in its own window.
-# Closing a window while its work runs only hides it: Show progress in the console header brings it back
-# (Patrick, 2026-11-22: a closed progress window could not be opened again).
+# Progress window: one window for everything that runs (media builds, captures, driver downloads, reimages), one
+# card each, with one row per step (name, elapsed time, bar, Complete), read twice a second from the progress file
+# the job writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
+# Not modal: the console stays usable, and closing the window leaves the work running.
+# Closing the window while work runs only hides it: Show progress in the console header brings it back
+# (Patrick, 2026-11-22: a closed progress window could not be opened again; then: one window, not one per reimage).
 
 if (-not $script:ProgressWindows) { $script:ProgressWindows = New-Object Collections.ArrayList }
 
@@ -22,6 +23,20 @@ namespace ImagingTool {
         public string Detail { get { return detail; } set { if (detail != value) { detail = value; Changed("Detail"); } } }
         public double Percent { get { return percent; } set { if (percent != value) { percent = value; Changed("Percent"); } } }
         public bool Indeterminate { get { return indeterminate; } set { if (indeterminate != value) { indeterminate = value; Changed("Indeterminate"); } } }
+    }
+    // One card in the Progress window: a build, capture, download or reimage.
+    public class BuildJobView : INotifyPropertyChanged {
+        public event PropertyChangedEventHandler PropertyChanged;
+        string title, elapsed, summary, summaryState; bool hasLog, canShowWindow, finished; object rows;
+        void Changed(string p) { var h = PropertyChanged; if (h != null) h(this, new PropertyChangedEventArgs(p)); }
+        public string Title { get { return title; } set { if (title != value) { title = value; Changed("Title"); } } }
+        public string Elapsed { get { return elapsed; } set { if (elapsed != value) { elapsed = value; Changed("Elapsed"); } } }
+        public string Summary { get { return summary; } set { if (summary != value) { summary = value; Changed("Summary"); } } }
+        public string SummaryState { get { return summaryState; } set { if (summaryState != value) { summaryState = value; Changed("SummaryState"); } } }
+        public bool HasLog { get { return hasLog; } set { if (hasLog != value) { hasLog = value; Changed("HasLog"); } } }
+        public bool CanShowWindow { get { return canShowWindow; } set { if (canShowWindow != value) { canShowWindow = value; Changed("CanShowWindow"); } } }
+        public bool Finished { get { return finished; } set { if (finished != value) { finished = value; Changed("Finished"); } } }
+        public object Rows { get { return rows; } set { rows = value; Changed("Rows"); } }
     }
 }
 '@
@@ -74,91 +89,141 @@ function Start-ConsoleJob {
     [pscustomobject]@{ Process = $proc; ProgressFile = $progressFile; LogPath = $logPath }
 }
 
-function Show-BuildProgress {
-    param(
-        [Parameter(Mandatory)]$Owner,
-        [Parameter(Mandatory)][string]$ProgressFile,
-        [string]$LogPath,
-        # The build's powershell.exe (Start-Process -PassThru), to bring its window up and notice it closing.
-        $Process,
-        [string]$Title = 'Building media',
-        # What runs, for the window's wording: 'build' (media) or 'download' (driver packs).
-        [string]$Noun = 'build',
-        # The process runs hidden (driver pack downloads): no Show build window button.
-        [switch]$Hidden,
-        # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
-        [scriptblock]$OnFinished
-    )
-
+function Get-ProgressHub {
+    # The one Progress window, made the first time something runs and again after it was really closed.
+    param([Parameter(Mandatory)]$Owner)
+    if ($script:ProgressHub) { return $script:ProgressHub }
     $form = New-ConsoleWindow 'BuildProgress.xaml' -Owner $Owner
     $dlg = $form.Window
     $b = $form.Controls
-    $b.TxtTitle.Text = $Title
-    $dlg.Title = if ($Noun -eq 'build') { 'Build progress' } else { "$((Get-Culture).TextInfo.ToTitleCase($Noun)) progress" }
-    $b.TxtNote.Text = "Closing this window does not stop the $Noun."
-    if ($Hidden) { $b.BtnWindow.Visibility = 'Collapsed' }
-    $b.BtnLog.IsEnabled = [bool]$LogPath
-    $timer = New-Object Windows.Threading.DispatcherTimer
-    $timer.Interval = [TimeSpan]::FromMilliseconds(500)
-    # Show() returns at once, so the handlers can't see this function's variables: everything they need rides on
-    # the timer's and the window's Tag, and each build window keeps its own.
-    $rows = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildStepRow]'
-    $b.LstSteps.ItemsSource = $rows
-    $ctx = @{ B = $b; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
-        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished }
-    $timer.Tag = $ctx
-    $dlg.Tag = $ctx
-    $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
-    $b.BtnLog.Add_Click({
-        param($sender)
-        $c = [Windows.Window]::GetWindow($sender).Tag
-        if ($c.LogPath -and (Test-Path -LiteralPath $c.LogPath)) { Start-Process notepad.exe -ArgumentList "`"$($c.LogPath)`"" }
-    })
-    $b.BtnWindow.Add_Click({
-        param($sender)
-        try {
-            $p = ([Windows.Window]::GetWindow($sender).Tag).Process
-            if (-not $p -or $p.HasExited) { return }
-            if (-not ('ImagingTool.BuildWindow' -as [type])) { Add-Type -TypeDefinition $script:BuildWindowNative }
-            $p.Refresh()
-            $h = $p.MainWindowHandle
-            if ($h -ne [IntPtr]::Zero) { [void][ImagingTool.BuildWindow]::ShowWindow($h, 9); [void][ImagingTool.BuildWindow]::SetForegroundWindow($h) }   # 9 = SW_RESTORE
-        } catch { }
+    $jobs = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildJobView]'
+    $b.LstJobs.ItemsSource = $jobs
+    $hub = @{ Window = $dlg; B = $b; Jobs = $jobs }
+    $dlg.Tag = $hub
+    # The buttons on each card (Tag log, window or remove) find their job by the card's view.
+    $dlg.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{
+        param($sender, $e)
+        $btn = $e.OriginalSource
+        if (-not ($btn -is [Windows.Controls.Button]) -or "$($btn.Tag)" -notin 'log', 'window', 'remove') { return }
+        $c = @($script:ProgressWindows | Where-Object { $_.View -eq $btn.DataContext })[0]
+        if ($c) { Invoke-ProgressJobButton -Ctx $c -Action "$($btn.Tag)" }
     })
     $b.BtnClose.Add_Click({ param($sender) [Windows.Window]::GetWindow($sender).Close() })
     $dlg.Add_Closing({
         param($sender, $e)
         # WPF refuses Hide() inside Closing, so it is queued just after.
-        if (Test-ProgressWindowKeep -Ctx $sender.Tag) {
+        if (Test-ProgressWindowKeep) {
             $e.Cancel = $true
             $w = $sender
             [void]$w.Dispatcher.BeginInvoke([action]{ $w.Hide() }.GetNewClosure())
         }
     })
     $dlg.Add_Closed({
-        param($sender)
-        $sender.Tag.Timer.Stop()
-        $script:ProgressWindows.Remove($sender.Tag)
+        foreach ($c in @($script:ProgressWindows)) { $c.Timer.Stop() }
+        $script:ProgressWindows.Clear()
+        $script:ProgressHub = $null
         Update-ShowProgressButton
     })
-    $ctx.Window = $dlg
+    $script:ProgressHub = $hub
+    $hub
+}
+
+function Show-BuildProgress {
+    param(
+        [Parameter(Mandatory)]$Owner,
+        [Parameter(Mandatory)][string]$ProgressFile,
+        [string]$LogPath,
+        # The job's powershell.exe (Start-Process -PassThru), to bring its window up and notice it closing.
+        $Process,
+        [string]$Title = 'Building media',
+        # What runs, for the card's wording: 'build' (media), 'download' (driver packs), 'reimage'.
+        [string]$Noun = 'build',
+        # The process runs hidden (driver pack downloads): no Show build window button.
+        [switch]$Hidden,
+        # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
+        [scriptblock]$OnFinished
+    )
+    $hub = Get-ProgressHub -Owner $Owner
+    $view = New-Object ImagingTool.BuildJobView
+    $view.Title = $Title
+    $view.Summary = 'Starting...'
+    $view.SummaryState = 'muted'
+    $view.HasLog = [bool]$LogPath
+    $view.CanShowWindow = -not $Hidden
+    $rows = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildStepRow]'
+    $view.Rows = $rows
+    $timer = New-Object Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(500)
+    # Show() returns at once, so the handlers can't see this function's variables: everything they need rides on
+    # the timer's Tag, and each job keeps its own.
+    $ctx = @{ View = $view; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
+        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $hub.Window }
+    $timer.Tag = $ctx
+    $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
     [void]$script:ProgressWindows.Add($ctx)
+    $hub.Jobs.Add($view)
     Update-ShowProgressButton
 
-    Update-BuildProgressWindow $ctx
+    # Started before the first read, so the count sees it running (a first read that finds it done stops it again).
     $timer.Start()
-    $dlg.Show()
+    Update-ProgressHubCount
+    Update-BuildProgressWindow $ctx
+    Show-ProgressWindows
+    try { $hub.B.ScrollJobs.ScrollToEnd() } catch { }
+}
+
+function Invoke-ProgressJobButton {
+    # A card's button: Open log, Show build window, or Remove (a finished job only).
+    param([Parameter(Mandatory)]$Ctx, [Parameter(Mandatory)][string]$Action)
+    switch ($Action) {
+        'log' { if ($Ctx.LogPath -and (Test-Path -LiteralPath $Ctx.LogPath)) { Start-Process notepad.exe -ArgumentList "`"$($Ctx.LogPath)`"" } }
+        'window' {
+            try {
+                $p = $Ctx.Process
+                if (-not $p -or $p.HasExited) { return }
+                if (-not ('ImagingTool.BuildWindow' -as [type])) { Add-Type -TypeDefinition $script:BuildWindowNative }
+                $p.Refresh()
+                $h = $p.MainWindowHandle
+                if ($h -ne [IntPtr]::Zero) { [void][ImagingTool.BuildWindow]::ShowWindow($h, 9); [void][ImagingTool.BuildWindow]::SetForegroundWindow($h) }   # 9 = SW_RESTORE
+            } catch { }
+        }
+        'remove' { Remove-ProgressJob -Ctx $Ctx }
+    }
+}
+
+function Remove-ProgressJob {
+    # Takes a finished job off the window; the window closes when nothing is left.
+    param([Parameter(Mandatory)]$Ctx)
+    if ($Ctx.Timer.IsEnabled) { return }
+    $script:ProgressWindows.Remove($Ctx)
+    $hub = $script:ProgressHub
+    if ($hub) {
+        [void]$hub.Jobs.Remove($Ctx.View)
+        if (-not $hub.Jobs.Count) { $hub.Window.Close() } else { Update-ProgressHubCount }
+    }
+    Update-ShowProgressButton
 }
 
 function Test-ProgressWindowKeep {
-    # True when closing this progress window should only hide it: its work still runs and the console stays open.
-    param([Parameter(Mandatory)]$Ctx)
+    # True when closing the Progress window should only hide it: some work still runs and the console stays open.
     if ($script:ConsoleClosing) { return $false }
-    [bool]($Ctx.Timer -and $Ctx.Timer.IsEnabled)
+    [bool](@($script:ProgressWindows | Where-Object { $_.Timer -and $_.Timer.IsEnabled }).Count)
+}
+
+function Update-ProgressHubCount {
+    # "2 running, 1 finished" next to the window's title.
+    $hub = $script:ProgressHub
+    if (-not $hub) { return }
+    $running = @($script:ProgressWindows | Where-Object { $_.Timer.IsEnabled }).Count
+    $done = $script:ProgressWindows.Count - $running
+    $parts = @()
+    if ($running) { $parts += "$running running" }
+    if ($done) { $parts += "$done finished" }
+    $hub.B.TxtCount.Text = $parts -join ', '
 }
 
 function Update-ShowProgressButton {
-    # The header's Show progress button: shown while any progress window exists, open or hidden.
+    # The header's Show progress button: shown while the Progress window has anything on it, open or hidden.
     $btn = if ($script:ui) { $script:ui.BtnShowProgress } else { $null }
     if (-not $btn) { return }
     $n = $script:ProgressWindows.Count
@@ -167,15 +232,15 @@ function Update-ShowProgressButton {
 }
 
 function Show-ProgressWindows {
-    # Brings back every progress window, hidden or behind the console, oldest first so the newest ends on top.
-    foreach ($c in @($script:ProgressWindows)) {
-        try {
-            $w = $c.Window
-            if (-not $w.IsVisible) { $w.Show() }
-            if ($w.WindowState -eq 'Minimized') { $w.WindowState = 'Normal' }
-            [void]$w.Activate()
-        } catch { }
-    }
+    # Brings back the Progress window, hidden or behind the console.
+    $hub = $script:ProgressHub
+    if (-not $hub) { return }
+    try {
+        $w = $hub.Window
+        if (-not $w.IsVisible) { $w.Show() }
+        if ($w.WindowState -eq 'Minimized') { $w.WindowState = 'Normal' }
+        [void]$w.Activate()
+    } catch { }
 }
 
 function Invoke-BuildFinished {
@@ -186,37 +251,43 @@ function Invoke-BuildFinished {
     try { & $Ctx.OnFinished } catch { }
 }
 
-function Update-BuildProgressWindow {
-    # One timer tick: read the progress file and redraw what changed.
+function Stop-ProgressJob {
+    # The job is over (done, failed or its process gone): stop reading, offer Remove, run OnFinished.
     param([Parameter(Mandatory)]$Ctx)
-    $b = $Ctx.B
+    $Ctx.Timer.Stop()
+    $Ctx.View.Finished = $true
+    Update-ProgressHubCount
+    Invoke-BuildFinished $Ctx
+}
+
+function Update-BuildProgressWindow {
+    # One timer tick for one job: read its progress file and redraw what changed on its card.
+    param([Parameter(Mandatory)]$Ctx)
+    $v = $Ctx.View
     $proc = $Ctx.Process
     try {
         $data = Read-BuildProgress -Path $Ctx.ProgressFile
         if (-not $data) {
-            # Nothing yet: the build is still starting, or it stopped before its first line (a bad parameter).
+            # Nothing yet: the job is still starting, or it stopped before its first line (a bad parameter).
             $gone = $proc -and $proc.HasExited
             $n = $Ctx.Noun
-            $b.TxtSummary.Text = if ($gone) { $(if ($Ctx.Hidden) { "The $n stopped before it started. Click Open log to see why." } else { "The $n window closed before the $n started." }) }
+            $v.Summary = if ($gone) { $(if ($Ctx.Hidden) { "The $n stopped before it started. Click Open log to see why." } else { "The $n window closed before the $n started." }) }
                 elseif (([DateTime]::UtcNow - $Ctx.Started).TotalSeconds -gt 60) { $(if ($Ctx.Hidden) { "The $n has not started. Click Open log to see why." } else { "The $n has not started. Click Show build window to see why." }) }
                 else { 'Starting...' }
-            if ($gone) { $Ctx.Timer.Stop(); Invoke-BuildFinished $Ctx }
+            if ($gone) { $v.SummaryState = 'error'; Stop-ProgressJob $Ctx }
             return
         }
         $view = Get-BuildStepView -Data $data
-        $b.TxtElapsed.Text = $view.Elapsed
-        $b.TxtSummary.Text = $view.Summary
-        $b.TxtSummary.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($view.Failed) { 'ErrorBrush' } elseif ($view.Finished) { 'SuccessBrush' } else { 'MutedBrush' }))
+        $v.Elapsed = $view.Elapsed
+        $v.Summary = $view.Summary
+        $v.SummaryState = if ($view.Failed) { 'error' } elseif ($view.Finished) { 'success' } else { 'muted' }
         Update-BuildStepRows -Target $Ctx.Rows -Rows @($view.Rows)
         if ($view.Finished) {
-            $Ctx.Timer.Stop()
-            if (-not $view.Failed) { $b.BtnClose.Content = 'Done' }
-            Invoke-BuildFinished $Ctx
+            Stop-ProgressJob $Ctx
         } elseif ($proc -and $proc.HasExited) {
-            $Ctx.Timer.Stop()
-            Invoke-BuildFinished $Ctx
-            $b.TxtSummary.Text = if ($Ctx.Hidden) { "The $($Ctx.Noun) stopped before the end. Click Open log to see why." } else { "The $($Ctx.Noun) window was closed before the $($Ctx.Noun) finished." }
-            $b.TxtSummary.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrorBrush')
+            $v.Summary = if ($Ctx.Hidden) { "The $($Ctx.Noun) stopped before the end. Click Open log to see why." } else { "The $($Ctx.Noun) window was closed before the $($Ctx.Noun) finished." }
+            $v.SummaryState = 'error'
+            Stop-ProgressJob $Ctx
         }
-    } catch { $b.TxtSummary.Text = "Can't read the build progress: $($_.Exception.Message)" }
+    } catch { $v.Summary = "Can't read the progress: $($_.Exception.Message)" }
 }

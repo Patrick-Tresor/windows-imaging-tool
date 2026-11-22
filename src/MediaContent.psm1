@@ -82,7 +82,7 @@ function Get-MediaContent {
     if (-not $all) { $problems += "There are no answer files in $ContentRoot\AnswerFiles. Create one on the Answer Files tab: it says which image the stick deploys." }
     elseif (-not $names) { $problems += 'Choose at least one answer file to put on the USB stick.' }
 
-    # Always: settings, driver catalog, naming list and the tools (never the password files).
+    # Always: settings, driver catalog and the tools (never the password files).
     # Drivers\_WinPE: drivers WinPE itself loads at start (drvload), whichever driver packs are picked.
     foreach ($dir in 'config', 'Tools', 'Drivers\_WinPE') { if (Test-Path (Join-ContentPath $ContentRoot $dir)) { $folders += $dir } }
 

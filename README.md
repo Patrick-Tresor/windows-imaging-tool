@@ -12,11 +12,11 @@ ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
                      Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
-                     PostDeployChecks.psm1, NamingList.psm1, Win11Readiness.psm1, DeployWizard.psm1,
+                     PostDeployChecks.psm1, DeployWizard.psm1,
                      DeployProgress.psm1, DeployProgressWindow.ps1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
                      UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
-config/              default deploy-settings.json, driver-catalog.json, naming-list.csv (header only),
+config/              default deploy-settings.json, driver-catalog.json,
                      answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
@@ -37,7 +37,7 @@ and click **Create folders** the first time. Then:
   **Update image...** adds Windows updates to the selected image (see
   [Updating an image](#updating-an-image)).
 - **Answer Files**: create, edit and check deployment profiles, pick the default,
-  **Delete** one (it asks first, and says when it is the default or the naming list still uses it),
+  **Delete** one (it asks first, and says when it is the default),
   and **Import answer file XML...** to convert an existing deploy wizard answer file.
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
@@ -48,10 +48,6 @@ and click **Create folders** the first time. Then:
   import packs (see Applications below).
 - **Tasks**: the task library, scripts to run during or after a deployment
   (see Tasks below).
-- **Naming List**: one row per PC by BIOS serial, with its computer name, OU
-  and answer file (see below). Edit cells, **Import CSV...** to merge a list
-  from Excel or an inventory export, **Export CSV...**, then **Save**. Each row
-  shows its problems and the result of that PC's last deploy.
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
   driver pack catalogs for a model, SKU or machine type; pick the pack and it
   downloads, checks, extracts and registers it. You can also import a pack you already have
@@ -99,7 +95,7 @@ Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad 
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
 Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 Tasks\         Set-Wallpaper\task.json + script.ps1, ... (scripts answer files run)
-config\        deploy-settings.json, driver-catalog.json, naming-list.csv, secrets\ (answer-key.txt)
+config\        deploy-settings.json, driver-catalog.json, secrets\ (answer-key.txt)
 Logs\          one log per deployed PC or capture
 Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
 Status\        <serial>.json + <serial>.log per PC, for the Dashboard
@@ -181,8 +177,6 @@ the console; the format is documented in the commented
   (start after `unattendDelay` seconds; a key pressed during the countdown opens
   the wizard instead).
 - **image** and index, **disk** number, **drivers** root.
-- **Windows 11 check** (`image/windows11Check`): `Block` (default), `Warn` or
-  `Off`. See below.
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
@@ -207,14 +201,13 @@ needs write access for Domain Computers and tight read access. With **leave
 BitLocker off if no backup worked** (the default), no PC is encrypted without a
 saved key. A startup PIN is the same for every PC deployed with that answer file.
 
-### Windows 11 readiness check
+### Windows on any PC, and the target disk
 
-When the answer file's image is Windows 11 (build 22000 or later, read from
-the WIM), WinPE checks the PC before the disk is erased: TPM 2.0 present and
-on, UEFI boot, Secure Boot, a processor on Microsoft's supported list (Intel
-8th gen Core and later, AMD Ryzen 2000 desktop and later), 2 cores at 1 GHz,
-4 GB of memory and a 64 GB target disk. Each result goes to the deploy log and
-the summary shows `Windows 11: ready` or `NOT READY: TPM 2.0, Processor`.
+There is no Windows 11 hardware check: Windows is installed on any PC, whatever
+its processor, TPM or Secure Boot state (DISM does not enforce the
+requirements). Microsoft does not support Windows 11 on older PCs (Intel 7th
+gen and earlier, such as a ThinkPad X1 Yoga 1st gen) and may not offer them
+feature updates through Windows Update.
 
 The target disk is the internal disk Windows will go on, never the USB stick
 or the disk holding the content: WinPE often numbers the stick disk 0, so when
@@ -244,23 +237,6 @@ Drivers in `<content root>\Drivers\_WinPE` are also added to boot.wim and, from
 the stick or share, loaded with drvload when WinPE starts, so a new storage
 driver can be added without rebuilding WinPE.
 
-- **Block**: a failed requirement stops the deploy with nothing erased. Fix it
-  in the firmware (often TPM or PTT/fTPM is just turned off), use a Windows 10
-  answer file, or deploy anyway: the wizard then shows **Install Windows 11
-  anyway on this PC**; tick it and press Next (or run
-  `Deploy-Image.ps1 -IgnoreWindows11Check`). The log and the Ready to deploy
-  summary record which requirement was not met.
-- Older PCs (Intel 7th gen and earlier, such as a ThinkPad X1 Yoga 1st gen)
-  install and run Windows 11 from the image, because DISM does not enforce the
-  requirements. Microsoft does not support them and may not offer them feature
-  updates through Windows Update. Use **Warn** on an answer file meant for
-  older PCs so the wizard never stops on them.
-- **Warn**: the problems are logged and shown, and the deploy carries on.
-- **Off**: no check.
-
-Secure Boot turned off, a processor the check cannot match (some Celeron,
-Pentium and Xeon models) and an image whose version cannot be read only warn;
-they never block.
 
 **Passwords are kept in the answer file, encrypted.** The join account, share,
 local Administrator and BitLocker PIN passwords typed in the answer file editor
@@ -565,24 +541,6 @@ succeeded, warning and cancelled PCs; their final logs move to the Logs tab. A P
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
-## Naming list
-
-`config\naming-list.csv` on the content root names PCs you know in advance,
-by BIOS serial number (Dell service tag, HP or Lenovo serial):
-
-```csv
-Serial,ComputerName,OU,AnswerFile,Notes
-5CG0000ABC,MTL-ACC-014,"OU=Accounting,OU=Workstations,DC=corp,DC=example",W11-Office-FR,Front desk
-PF0XXXXX,MTL-LAB-002,,,
-```
-
-When a PC's serial is listed, the deploy uses its computer name instead of the
-answer file's naming, joins its OU instead of the answer file's OU (domain
-answer files only), and deploys its answer file without asking which one. Empty
-cells fall back to the answer file, and an unlisted PC is named by the answer
-file as before. Edit it in the console or in Excel; comma and semicolon files
-are both read. The deploy log says which entry was used.
-
 ## Workflow
 
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
@@ -661,8 +619,7 @@ are both read. The deploy log says which entry was used.
 5. **Deploy**: boot the target PC from USB or ISO. The deploy wizard opens
    and shows the detected maker, model and serial. Pick the answer file, check
    or change the computer name, OU and target disk, tick the applications, then
-   review the summary, tick the erase confirmation and click **Deploy**. A PC in
-   the naming list starts with its own answer file, name and OU filled in. The
+   review the summary, tick the erase confirmation and click **Deploy**. The
    tool wipes the disk, applies the image, injects the
    drivers, and reboots. BitLocker, if set, starts at first boot.
    While it works, a progress window shows the current step, a progress bar,
