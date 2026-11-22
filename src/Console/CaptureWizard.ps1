@@ -18,10 +18,6 @@ function Show-CaptureWizard {
     $checkPage = 2
     $settings = Get-DeploySettings -ContentRoot $ContentRoot
 
-    function Show-WizardError([string]$Text) {
-        [Windows.MessageBox]::Show($wiz, $Text, 'Capture Wizard', 'OK', 'Warning') | Out-Null
-    }
-
     # Page 2: the sysprep command to run on the reference machine, from the share when there is one.
     Update-ContentTools -ContentRoot $ContentRoot
     $toolsDir = if ($settings.share.path) { Join-Path $settings.share.path 'Tools' } else { Join-Path $ContentRoot 'Tools' }
@@ -35,7 +31,7 @@ function Show-CaptureWizard {
         } catch {
             $box.Focus() | Out-Null
             $box.SelectAll()
-            Show-WizardError "Could not copy: another program is using the clipboard. The command is selected; press Ctrl+C to copy it."
+            Show-WindowMessage $wiz 'Capture Wizard' "Could not copy: another program is using the clipboard. The command is selected; press Ctrl+C to copy it."
         }
     }
     $w.BtnCopyCmd.Add_Click({ & $copyCommand $w.TxtPrepCmd })
@@ -52,7 +48,7 @@ function Show-CaptureWizard {
         $w.TxtPrepHint.Visibility = if ($atDeploy) { 'Collapsed' } else { 'Visible' }
         $w.ChkPrepared.Content = if ($atDeploy) { 'The VM is shut down' } else { $prepDone }
     }
-    $w.ChkSysprepAtDeploy.Add_Click({ try { & $updatePrepPage } catch { Show-WizardError $_.Exception.Message } })
+    $w.ChkSysprepAtDeploy.Add_Click({ try { & $updatePrepPage } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message } })
 
     # Page 3 defaults.
     $w.TxtName.Text = 'Win11-{0:yyyyMMdd}' -f (Get-Date)
@@ -212,7 +208,7 @@ function Show-CaptureWizard {
     }
 
     $checkTimer.Add_Tick({ try { & $refreshCheck } catch { $checkTimer.Stop() } })
-    $w.BtnCheckAgain.Add_Click({ try { & $startCheck } catch { Show-WizardError $_.Exception.Message } })
+    $w.BtnCheckAgain.Add_Click({ try { & $startCheck } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message } })
     $w.BtnCheckLog.Add_Click({
         if ($state.CheckLog -and (Test-Path -LiteralPath $state.CheckLog)) { Start-Process notepad.exe -ArgumentList (ConvertTo-Arg $state.CheckLog) }
     })
@@ -345,19 +341,19 @@ function Show-CaptureWizard {
             if ($state.Page -gt 0) { $state.Page-- }
             if (& $skipCheck) { $state.Page-- }
             & $showPage
-        } catch { Show-WizardError $_.Exception.Message }
+        } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message }
     })
     $w.BtnNext.Add_Click({
         try {
             $problem = & $validate
-            if ($problem) { Show-WizardError $problem; return }
+            if ($problem) { Show-WindowMessage $wiz 'Capture Wizard' $problem; return }
             if ($state.Page -lt $state.Last) {
                 $state.Page++
                 if (& $skipCheck) { $state.Page++ }
                 & $showPage; return
             }
             if (& $finish) { $wiz.DialogResult = $true; $wiz.Close() }
-        } catch { Show-WizardError $_.Exception.Message }
+        } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message }
     })
     $w.BtnCancel.Add_Click({ $wiz.Close() })
 

@@ -4,13 +4,7 @@
 
 Import-Module (Join-Path $PSScriptRoot 'Format.psm1')
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')
-
-function Join-CopyPath {
-    # Content paths use backslashes; normalize so the module also runs in tests off Windows.
-    param([string]$Root, [string]$Child)
-    if (-not $Child) { return $Root }
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
-}
+Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')   # Join-ContentPath
 
 function Get-MediaCopyPlan {
     <#
@@ -37,7 +31,7 @@ function Get-MediaCopyPlan {
     $missing = @()
     $rootFull = (Get-Item -LiteralPath $ContentRoot).FullName.TrimEnd([IO.Path]::DirectorySeparatorChar)
     foreach ($folder in @($Folders | Where-Object { $_ })) {
-        $full = Join-CopyPath $ContentRoot $folder
+        $full = Join-ContentPath $ContentRoot $folder
         if (-not (Test-Path -LiteralPath $full -PathType Container)) { $missing += $folder; continue }
         [void]$dirs.Add($folder)
         # Sorted so the copy order (and the tests) are the same on every run; -Force includes hidden files like robocopy.
@@ -54,7 +48,7 @@ function Get-MediaCopyPlan {
     }
     foreach ($file in @($Files | Where-Object { $_ })) {
         if (& $isSkipped ($file -replace '/', '\')) { continue }
-        $full = Join-CopyPath $ContentRoot $file
+        $full = Join-ContentPath $ContentRoot $file
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $missing += $file; continue }
         $f = Get-Item -LiteralPath $full -Force
         $row = [pscustomobject]@{ Relative = ($file -replace '/', '\'); Source = $f.FullName; Length = [int64]$f.Length }
@@ -202,7 +196,7 @@ function Copy-MediaContent {
     $index = 0
     $count = @($Plan.Items).Count
 
-    foreach ($d in @($Plan.Directories)) { New-Item -ItemType Directory -Path (Join-CopyPath $Destination $d) -Force | Out-Null }
+    foreach ($d in @($Plan.Directories)) { New-Item -ItemType Directory -Path (Join-ContentPath $Destination $d) -Force | Out-Null }
 
     $show = {
         param($item, [int64]$fileDone, [bool]$force)
@@ -268,7 +262,7 @@ function Copy-MediaContent {
                 while ($end -lt $count -and $items[$end].Length -lt $LineEvery10PercentFrom) { $items[$end]; $end++ }
             })
             $sources = [string[]]@($batch | ForEach-Object { $_.Source })
-            $targets = [string[]]@($batch | ForEach-Object { Join-CopyPath $Destination $_.Relative })
+            $targets = [string[]]@($batch | ForEach-Object { Join-ContentPath $Destination $_.Relative })
             $lengths = [int64[]]@($batch | ForEach-Object { [int64]$_.Length })
             $batchBytes = [int64]0
             foreach ($l in $lengths) { $batchBytes += $l }
@@ -346,7 +340,7 @@ function Get-MediaUpdatePlan {
     $same = 0; $sameBytes = [int64]0; $replacedBytes = [int64]0
     foreach ($i in @($Plan.Items)) {
         $wanted[$i.Relative.ToLowerInvariant()] = $true
-        $target = Join-CopyPath $Destination $i.Relative
+        $target = Join-ContentPath $Destination $i.Relative
         $existing = if (Test-Path -LiteralPath $target -PathType Leaf) { Get-Item -LiteralPath $target -Force } else { $null }
         if ($existing -and $existing.Length -eq $i.Length -and
             [Math]::Abs(($existing.LastWriteTimeUtc - [IO.File]::GetLastWriteTimeUtc($i.Source)).TotalSeconds) -le 2) {
@@ -360,7 +354,7 @@ function Get-MediaUpdatePlan {
     $staleBytes = [int64]0
     $keepAll = @($Keep | Where-Object { $_ } | ForEach-Object { ($_ -replace '/', '\').Trim('\').ToLowerInvariant() })
     foreach ($folder in $script:ManagedFolders) {
-        $full = Join-CopyPath $Destination $folder
+        $full = Join-ContentPath $Destination $folder
         if (-not (Test-Path -LiteralPath $full -PathType Container)) { continue }
         foreach ($f in Get-ChildItem -LiteralPath $full -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName) {
             $rel = $f.FullName.Substring($destFull.Length + 1) -replace '/', '\'
@@ -388,9 +382,9 @@ function Get-MediaUpdatePlan {
 function Remove-StaleMediaFiles {
     # Deletes Get-MediaUpdatePlan's Stale files, then the folders they leave empty.
     param([Parameter(Mandatory)]$UpdatePlan, [Parameter(Mandatory)][string]$Destination)
-    foreach ($f in @($UpdatePlan.Stale)) { Remove-Item -LiteralPath (Join-CopyPath $Destination $f.Relative) -Force -ErrorAction SilentlyContinue }
+    foreach ($f in @($UpdatePlan.Stale)) { Remove-Item -LiteralPath (Join-ContentPath $Destination $f.Relative) -Force -ErrorAction SilentlyContinue }
     foreach ($folder in $script:ManagedFolders) {
-        $full = Join-CopyPath $Destination $folder
+        $full = Join-ContentPath $Destination $folder
         if (-not (Test-Path -LiteralPath $full)) { continue }
         Get-ChildItem -LiteralPath $full -Recurse -Directory -Force -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending |
             Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue) } |

@@ -201,7 +201,8 @@ function Resolve-ComputerName {
 }
 
 function Test-UnattendComputerName {
-    # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid.
+    # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid. Also the
+    # WinPE wizard's check of the name the operator types, so both use the same rules.
     param([string]$Name)
     if (-not $Name) { return 'The computer name is empty.' }
     if ($Name.Length -gt 15) { return "Computer name '$Name' is longer than 15 characters." }
@@ -855,9 +856,12 @@ function ConvertFrom-DeployWizardAnswerFile {
 }
 
 function Join-ContentPath {
-    # Content root paths use backslashes (they are read in WinPE); normalize so the modules also run in tests off Windows.
+    # The one path join for content root paths (console, media build, reimage jobs, WinPE). They use backslashes;
+    # normalized so the modules also run in tests off Windows. [IO.Path]::Combine, not Join-Path: in WinPE a volume
+    # with no PowerShell drive makes Join-Path fail ("drive does not exist"). No child: the root itself.
     param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+    if (-not $Child) { return $Root }
+    [IO.Path]::Combine($Root, ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar))
 }
 
 function Get-AnswerFileNames {

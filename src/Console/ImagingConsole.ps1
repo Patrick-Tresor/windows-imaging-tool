@@ -142,6 +142,15 @@ function ConvertTo-Arg([string]$Value) {
     '"' + ($Value -replace '\\$', '\\') + '"'
 }
 
+function Get-WinPEDriverArgs {
+    # The Media tab's WinPE driver choices as build arguments: the USB/ISO build and the network boot image use the same.
+    $a = @()
+    if ($ui.TxtPeDrivers.Text) { $a += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
+    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
+    if ($peVendors) { $a += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $a += '-NoVendorWinPEDrivers' }
+    $a
+}
+
 function Invoke-Safely([scriptblock]$Action) {
     # Every button runs through here so one failure shows a message instead of closing the console.
     try { & $Action } catch { Show-Error $_.Exception.Message }
@@ -1106,9 +1115,7 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
     $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
-    if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
-    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
-    if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
+    $buildArgs += Get-WinPEDriverArgs
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
     Set-Status 'Network boot image build started.'
@@ -1214,7 +1221,6 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
             # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
             $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
             if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names -DefaultAnswerFile (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile
             # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
             $packArgs = @{}
             $allPacks = @($ui.LstMediaPacks.Items)
@@ -1242,9 +1248,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
         $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
     }
-    if ($ui.TxtPeDrivers.Text) { $buildArgs += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
-    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
-    if ($peVendors) { $buildArgs += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $buildArgs += '-NoVendorWinPEDrivers' }
+    $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
     # (a command line argument would show in the process list).
     $pePw = $ui.PwdWinPE.Password

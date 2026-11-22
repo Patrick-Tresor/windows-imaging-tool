@@ -149,6 +149,7 @@ if ($WinPEPasswordFile) {
     if ([IO.Path]::GetFullPath($WinPEPasswordFile).StartsWith($tempFull, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $WinPEPasswordFile -Force }
     if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
 }
+if ($winPEPassword -and $Target -eq 'Wim') { throw '-WinPEPasswordFile is for USB and ISO media: the network boot image starts on PCs nobody is at to type it.' }
 if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
 if ($CaptureConfig -and $Target -ne 'Iso') { throw '-CaptureConfig needs -Target Iso: capture runs on a VM booted from the capture ISO.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
@@ -437,10 +438,9 @@ switch ($Target) {
         $outWim = Join-Path $OutputPath 'boot.wim'
         Start-BuildStep 'wim' -Detail $outWim
         Copy-Item $bootWim $outWim -Force
-        # What the console's Computers tab checks before it starts this image on PCs over the network: a WinPE
-        # password would leave each PC waiting for someone to type it.
+        # What the console's Computers tab checks before it starts this image on PCs over the network: which share it maps.
         Save-JsonFile -Path (Join-Path $OutputPath 'boot.json') -InputObject ([ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm')
-            locked = [bool]$WinPEPasswordFile; share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"; toolVersion = $toolVersion.Text })
+            share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"; toolVersion = $toolVersion.Text })
         Complete-BuildStep 'wim'
         Write-Host "boot.wim written to $OutputPath."
     }

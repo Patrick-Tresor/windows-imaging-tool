@@ -85,7 +85,7 @@ try {
 
     # Vendor packs from the sample catalogs.
     $paths = @{ Dell = Join-Path $fixtures 'DriverPackCatalog.xml'; HP = Join-Path $fixtures 'HPClientDriverPackCatalog.xml' }
-    $withPacks = @(Add-UnknownModelPacks -Models $unknown -Os 'Windows 11' -CatalogPaths $paths)
+    $withPacks = @(Add-UnknownModelPacks -Models $unknown -CatalogPaths $paths)
     $d = $withPacks | Where-Object Maker -eq Dell
     $dellPack = $d.Pack
     Assert-Equal "$($d.Pack.Model)|$($d.PackText)" 'Latitude 5540|Latitude 5540 A07, 1536 MB' 'packs: Dell found by SKU'

@@ -28,10 +28,6 @@ function Show-UnknownModels {
     $u = $form.Controls
     $state = @{ Rows = @(); Changed = $false }
 
-    function Show-ReportError([string]$Text) {
-        [Windows.MessageBox]::Show($dlg, $Text, 'Unknown Models', 'OK', 'Warning') | Out-Null
-    }
-
     $updateSelection = {
         $sel = @($state.Rows | Where-Object Selected)
         $mb = ($sel | ForEach-Object { [double]"0$($_.Source.Pack.SizeMB)" } | Measure-Object -Sum).Sum
@@ -57,7 +53,7 @@ function Show-UnknownModels {
             })
         } catch {
             $state.Rows = @()
-            Show-ReportError "Could not build the report: $($_.Exception.Message)"
+            Show-WindowMessage $dlg 'Unknown Models' "Could not build the report: $($_.Exception.Message)"
         } finally { $dlg.Cursor = $null }
         $u.GridModels.ItemsSource = $state.Rows
         & $updateSelection
@@ -75,24 +71,24 @@ function Show-UnknownModels {
     $u.BtnInbox.Add_Click({
         try {
             $rows = @($u.GridModels.SelectedItems)
-            if (-not $rows) { Show-ReportError 'Highlight the rows (click, Ctrl+click) that need no driver pack.'; return }
+            if (-not $rows) { Show-WindowMessage $dlg 'Unknown Models' 'Highlight the rows (click, Ctrl+click) that need no driver pack.'; return }
             $names = ($rows | ForEach-Object { "$($_.Maker) $($_.Model)" }) -join "`n"
             $ok = [Windows.MessageBox]::Show($dlg, "Deploy these with Windows inbox drivers only, without a warning?`n`n$names", 'Unknown Models', 'YesNo', 'Question')
             if ($ok -ne 'Yes') { return }
             foreach ($r in $rows) { Set-UnknownModelInbox -ContentRoot $ContentRoot -Model $r.Source }
             $state.Changed = $true
             & $load $false
-        } catch { Show-ReportError $_.Exception.Message }
+        } catch { Show-WindowMessage $dlg 'Unknown Models' $_.Exception.Message }
     })
 
     $u.BtnDownload.Add_Click({
         try {
             $packs = @($state.Rows | Where-Object Selected | ForEach-Object { $_.Source.Pack } | Sort-Object Maker, Model -Unique)   # two SKUs of one model share a pack
-            if (-not $packs) { Show-ReportError 'No model with a vendor pack is ticked.'; return }
+            if (-not $packs) { Show-WindowMessage $dlg 'Unknown Models' 'No model with a vendor pack is ticked.'; return }
             Start-DriverPackDownload -Packs $packs -ContentRoot $ContentRoot -SrcDir $SrcDir -Owner $Owner -KeepDownload:$u.ChkKeep.IsChecked
             $state.Changed = $true
             $dlg.Close()
-        } catch { Show-ReportError $_.Exception.Message }
+        } catch { Show-WindowMessage $dlg 'Unknown Models' $_.Exception.Message }
     })
     $u.BtnClose.Add_Click({ $dlg.Close() })
 

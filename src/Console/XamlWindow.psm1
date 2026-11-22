@@ -71,4 +71,10 @@ function New-ConsoleWindow {
     [pscustomobject]@{ Window = $window; Controls = $controls }
 }
 
-Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, Set-ConsoleLogo, New-ConsoleWindow
+function Show-WindowMessage {
+    # A message box over a console window: Show-WindowMessage $dlg 'Update Image' 'Add at least one update package.'
+    param([Parameter(Mandatory)]$Owner, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][string]$Text, [string]$Icon = 'Warning')
+    [void][Windows.MessageBox]::Show($Owner, $Text, $Title, 'OK', $Icon)
+}
+
+Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, Set-ConsoleLogo, New-ConsoleWindow, Show-WindowMessage

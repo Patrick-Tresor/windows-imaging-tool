@@ -277,16 +277,6 @@ function Set-DeploySidebarStep {
     }
 }
 
-function Test-ComputerNameValue {
-    # Returns why a computer name can't be used, or nothing when it is valid.
-    param([string]$Name)
-    if (-not $Name) { return 'Type a computer name.' }
-    if ($Name.Length -gt 15) { return 'A computer name can have at most 15 characters.' }
-    if ($Name -notmatch '^[A-Za-z0-9-]+$') { return 'Use only letters, digits and dashes.' }
-    if ($Name -match '^[0-9]+$') { return 'A computer name cannot be only digits.' }
-    if ($Name.StartsWith('-') -or $Name.EndsWith('-')) { return 'A computer name cannot start or end with a dash.' }
-}
-
 function Format-DiskChoice {
     # One line per disk in the wizard's disk list.
     param([Parameter(Mandatory)]$Disk)
@@ -597,7 +587,7 @@ function Show-DeployWizard {
                     & $w.Prepare
                 }
                 2 {
-                    $problem = Test-ComputerNameValue $w.NameBox.Text.Trim()
+                    $problem = Test-UnattendComputerName $w.NameBox.Text.Trim()   # AnswerFile.psm1: the same rules as the unattend
                     if ($problem) { [void]$w.NameBox.Focus(); throw $problem }
                     if ($w.DiskBox.SelectedIndex -lt 0) { throw 'Pick the disk to install Windows on.' }
                 }
@@ -874,5 +864,5 @@ function Copy-DeployLogs {
     [pscustomobject]@{ Path = $folder; Count = $count }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
     Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, New-WinPEWallpaper, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs

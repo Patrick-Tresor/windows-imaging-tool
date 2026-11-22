@@ -51,12 +51,6 @@ function Get-MediaSecretExcludes {
     $out
 }
 
-function Get-MediaAnswerFileNames {
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    @(Get-ChildItem -Path (Join-ContentPath $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object BaseName)
-}
-
 function Get-MediaContent {
     <#
     .SYNOPSIS
@@ -74,7 +68,7 @@ function Get-MediaContent {
     $pickPacks = $PSBoundParameters.ContainsKey('DriverPacks')
     $packsCopied = @()
     $packs = @($DriverPacks | ForEach-Object { ConvertTo-MediaRelative $_ } | Where-Object { $_ } | Select-Object -Unique)
-    $all = Get-MediaAnswerFileNames -ContentRoot $ContentRoot
+    $all = @(Get-AnswerFileNames -ContentRoot $ContentRoot)
     $names = @(if ($AnswerFiles) { $AnswerFiles } else { $all })
     # Plain arrays: everything is added with +=, and paths are deduplicated at the end.
     $folders = @(); $files = @(); $problems = @(); $notes = @(); $rows = @(); $driverRoots = @()
@@ -178,7 +172,7 @@ function Get-MediaContent {
 function Get-MediaAnswerChoices {
     # One row per answer file for the Media tab's list: name, the image it deploys, and that image's size.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    foreach ($name in Get-MediaAnswerFileNames -ContentRoot $ContentRoot) {
+    foreach ($name in Get-AnswerFileNames -ContentRoot $ContentRoot) {
         $c = Get-MediaContent -ContentRoot $ContentRoot -AnswerFiles $name
         $r = $c.AnswerFiles | Select-Object -First 1
         $image = if (-not $r) { '(unreadable)' } elseif (-not $r.Image) { '(no image)' } elseif ($r.Version) { "$($r.Image) version $($r.Version)" } else { $r.Image }
@@ -251,4 +245,4 @@ function Get-MediaDriverPacks {
     }
 }
 
-Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaAnswerFileNames, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks
+Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks

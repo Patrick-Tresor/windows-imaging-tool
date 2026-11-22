@@ -13,10 +13,6 @@ function Show-UpdateImageDialog {
     $dlg = $form.Window
     $d = $form.Controls
 
-    function Show-DialogError([string]$Text) {
-        [Windows.MessageBox]::Show($dlg, $Text, 'Update Image', 'OK', 'Warning') | Out-Null
-    }
-
     $d.TxtTitle.Text = "Update $($Image.Name)"
     $last = @(Get-ImageServicingHistory -ImagePath $Image.FullName) | Select-Object -Last 1
     $d.TxtCurrent.Text = @(
@@ -67,7 +63,7 @@ function Show-UpdateImageDialog {
 
     $d.BtnStart.Add_Click({
         try {
-            if (-not $packages.Count) { Show-DialogError 'Add at least one update package (.msu or .cab).'; return }
+            if (-not $packages.Count) { Show-WindowMessage $dlg 'Update Image' 'Add at least one update package (.msu or .cab).'; return }
             $updateArgs = Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
                 -Packages @($packages | ForEach-Object FullName) -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
                 -ResetBase:([bool]$d.ChkResetBase.IsChecked) -NoBackup:(-not $d.ChkBackup.IsChecked)
@@ -78,7 +74,7 @@ function Show-UpdateImageDialog {
             Start-Process powershell.exe -ArgumentList $updateArgs
             $dlg.DialogResult = $true
             $dlg.Close()
-        } catch { Show-DialogError $_.Exception.Message }
+        } catch { Show-WindowMessage $dlg 'Update Image' $_.Exception.Message }
     })
     $d.BtnCancel.Add_Click({ $dlg.Close() })
 

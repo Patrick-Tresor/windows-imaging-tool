@@ -472,6 +472,12 @@
     <Setter Property="Padding" Value="14,10"/>
   </Style>
 
+  <!-- A ListBox item as a check box ticked while the item is selected (SelectionMode Multiple): click a line to tick it. -->
+  <DataTemplate x:Key="CheckItemTemplate">
+    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
+              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
+  </DataTemplate>
+
   <!-- One step row with its bar (Name, Time, Percent, Indeterminate, Status, Detail, State): the Build progress
        window and the driver downloads on the Driver Library page. -->
   <DataTemplate x:Key="StepRowTemplate">

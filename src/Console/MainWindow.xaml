@@ -231,14 +231,7 @@
                         Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
                          Text="An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
-              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
-                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
@@ -250,14 +243,7 @@
                 <Button x:Name="BtnMediaPacksNone" DockPanel.Dock="Left" Content="Uncheck all" Margin="8,0,0,0"/>
                 <TextBlock x:Name="TxtMediaPacks" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
               </DockPanel>
-              <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
-                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+              <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="6" Content="Output folder (ISO)"/>
