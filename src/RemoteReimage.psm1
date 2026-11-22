@@ -688,8 +688,13 @@ function Get-RemotingProblemText {
         One short line for the progress window from a PowerShell remoting error, saying what to do. The whole error
         goes to the log. WinRM's messages are long and the same in every language only by their error names.
     #>
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Message, [string]$Account)
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Message, [string]$Account,
+        # A PC outside the domain, signed in to with its own local account.
+        [switch]$Local)
     $who = if ($Account) { $Account } else { 'this account' }
+    if ($Local -and $Message -match '(?i)Access is denied|Acc.s refus|0x80070005|AccessDenied') {
+        return "$who can't get admin rights on it over the network: use its built-in Administrator, or allow remote admin for local accounts there (see the log)"
+    }
     if ($Message -match '(?i)TrustedHosts|cannot be authenticated|workgroup|0x8009030e|0x80090311') {
         return "This console PC can't sign in to it over WinRM (the console PC is not in the domain?): run the console on a domain PC, or add the PCs to WinRM TrustedHosts on this one (see the log)"
     }
@@ -723,7 +728,10 @@ function Read-ReimageTargets {
         if (-not $name) { return }
         $address = if ($_.PSObject.Properties['address'] -and "$($_.address)".Trim()) { "$($_.address)".Trim() } else { $name }
         $ou = if ($_.PSObject.Properties['ou']) { "$($_.ou)".Trim() } else { '' }
-        [pscustomobject]@{ name = $name.ToUpperInvariant(); address = $address; ou = $ou }
+        # local: not in Active Directory (found by IP); credentialFile: its own local admin account (Export-Clixml).
+        $local = [bool]($_.PSObject.Properties['local'] -and $_.local)
+        $credFile = if ($_.PSObject.Properties['credentialFile']) { "$($_.credentialFile)".Trim() } else { '' }
+        [pscustomobject]@{ name = $name.ToUpperInvariant(); address = $address; ou = $(if ($local) { '' } else { $ou }); local = $local; credentialFile = $credFile }
     })
 }
 

@@ -1085,9 +1085,9 @@ function Update-Computers {
 }
 
 function Search-AdComputers {
-    $cred = Get-AdCredential
     $base = if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' }
     $window.Cursor = 'Wait'
+    $localNote = ''
     try {
         # The Name box takes a name or pattern, an IP address, or both (GWHZLG3 10.1.2.34). With an IP, the PC is
         # reached at that address, so an old DNS record doesn't matter.
@@ -1095,22 +1095,37 @@ function Search-AdComputers {
         if ($find.Ip -and -not $find.Name) {
             Set-Status "Asking $($find.Ip) for its name..."
             $find.Name = Resolve-AdComputerNameFromIp -Ip $find.Ip
-            if (-not $find.Name) { throw "No PC at $($find.Ip) said its name (it is off, or its firewall blocks it). Type its name and IP, like GWHZLG3 $($find.Ip)." }
         }
-        Set-Status 'Searching Active Directory...'
-        $script:adRows = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
-            -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+        $found = @()
+        if ($find.Name -or -not $find.Ip) {
+            Set-Status 'Searching Active Directory...'
+            try {
+                $cred = Get-AdCredential
+                $found = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
+                    -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+            } catch {
+                # A PC typed by IP can still be reimaged without Active Directory (a laptop outside the domain).
+                if (-not $find.Ip) { throw }
+                $found = @()
+            }
+        }
         if ($find.Ip) {
-            $script:adRows = @($script:adRows | Where-Object { $_.Name -eq $find.Name.ToUpperInvariant() })
-            if (-not $script:adRows) { throw "$($find.Ip) is $($find.Name), but there is no computer named $($find.Name) in Active Directory$(if ($base) { ' under this OU' })." }
-            foreach ($r in $script:adRows) { $r.Address = $find.Ip }
+            $found = @($found | Where-Object { $find.Name -and $_.Name -eq $find.Name.ToUpperInvariant() })
+            if (-not $found) {
+                # Not in Active Directory (or no name answered): a PC outside the domain, reimaged with its own local
+                # administrator account, asked for at Reimage (Patrick, 2026-11-22).
+                $found = @(New-LocalComputerRow -Ip $find.Ip -Name $find.Name)
+                $localNote = " $($find.Ip) is not in Active Directory: Reimage asks for its local administrator account."
+            }
+            foreach ($r in $found) { $r.Address = $find.Ip }
         }
+        $script:adRows = $found
         Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
         Update-AdOnline
     } finally { $window.Cursor = $null }
     Save-AdSettings
     Show-AdRows
-    Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)"
+    Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)$localNote"
 }
 
 function Update-AdOnline {
@@ -1194,11 +1209,27 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
     if (-not (Confirm-Action $text)) { return }
 
-    $cred = Get-AdCredential
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    # PCs outside the domain sign in with their own local administrator account, asked for each one. For the hidden
+    # process each goes in a file protected with this Windows account (DPAPI), deleted as soon as it is read.
+    $localCreds = @{}
+    $n = 0
+    foreach ($r in @($rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })) {
+        $c = Get-Credential -UserName 'Administrator' -Message ("Local administrator account on $($r.Name) ($($r.Address)), which is not in the domain. " +
+            'Its built-in Administrator works; another local admin account needs remote admin allowed on that PC.')
+        if (-not $c) { Set-Status 'Reimage cancelled: no account given.'; return }
+        $c = [pscredential]::new((ConvertTo-LocalAccountName -User $c.UserName -Computer $r.Address), $c.Password)
+        $f = Join-Path $env:TEMP "reimage-$stamp-$tag-local$n.xml"; $n++
+        $c | Export-Clixml -Path $f
+        $localCreds[$r.Address] = $f
+    }
+    $cred = if (@($rows | Where-Object { -not $localCreds.ContainsKey($_.Address) })) { Get-AdCredential } else { $null }
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
-    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object {
+        $local = $localCreds.ContainsKey($_.Address)
+        [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU; local = $local; credentialFile = $(if ($local) { $localCreds[$_.Address] } else { '' }) }
+    })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))

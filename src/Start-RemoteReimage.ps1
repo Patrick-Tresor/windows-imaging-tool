@@ -24,7 +24,7 @@ param(
     [Parameter(Mandatory)][string]$ContentRoot,     # the deployment share WinPE maps (jobs go there)
     [Parameter(Mandatory)][string]$BootWim,         # the network boot image to start on each PC
     [Parameter(Mandatory)][string]$AnswerFile,
-    [string]$TargetsFile,           # JSON from the console: [{ name, address, ou }]; deleted once read
+    [string]$TargetsFile,           # JSON from the console: [{ name, address, ou, local, credentialFile }]; deleted once read
     [string[]]$Computers,           # or names/addresses (the answer file's OU and the PC's own name are kept)
     [switch]$KeepNames,             # each PC keeps its name
     [switch]$KeepOU,                # each PC joins back into the OU it is in now (from TargetsFile)
@@ -63,6 +63,11 @@ $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
     [pscustomobject]@{
         Id = "pc$i"; Name = "$($t.name)".ToUpperInvariant(); Address = $(if ($t.address) { "$($t.address)" } else { "$($t.name)" }); OU = "$($t.ou)"
         State = 'Pending'; Method = 'WinRM'; Serial = $null; RequestedAt = $null; RestartAt = $null; BootEntry = $null
+        # A PC outside the domain (found by IP) signs in with its own local admin account, read here and deleted.
+        Local = [bool]($t.PSObject.Properties['local'] -and $t.local)
+        Credential = $(if ($t.PSObject.Properties['credentialFile'] -and $t.credentialFile) {
+            try { Import-Clixml -LiteralPath $t.credentialFile } catch { $null } finally { Remove-Item -LiteralPath $t.credentialFile -Force -ErrorAction SilentlyContinue }
+        } else { $credential })
     }
 })
 Start-BuildProgress -Path $ProgressFile -Title "Reimaging $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' }) with $AnswerFile" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
@@ -104,20 +109,22 @@ try {
         elseif ($p.Method -eq 'Smb') { Write-Host "$($p.Name): PowerShell remoting is off, going through its admin share and a one-time service" }
         try {
             try {
-                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
+                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $p.Credential -Method $p.Method
             } catch {
                 # This console PC is outside the domain and WinRM won't sign in: file sharing takes domain accounts.
                 if ($p.Method -ne 'WinRM' -or -not $check.Smb -or -not (Test-WinRMSignInError $_.Exception.Message)) { throw }
                 Write-Host "$($p.Name): WinRM would not sign in from this PC ($($_.Exception.Message -replace '\s+', ' ')); going through its admin share and a one-time service instead"
                 $p.Method = 'Smb'
-                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
+                $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $p.Credential -Method $p.Method
             }
             Write-Host "$($p.Name): $($info.Model), serial $($info.Serial), $($info.Firmware), BitLocker $($info.BitLocker)"
-            $problems = @(Test-RemoteTarget -Info $info -ExpectedName $p.Name)
+            # Outside the domain there is no name in Active Directory to compare with; it keeps the name it has now.
+            $problems = @(Test-RemoteTarget -Info $info -ExpectedName $(if ($p.Local) { '' } else { $p.Name }))
             if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
+            if ($p.Local -and "$($info.ComputerName)") { $p.Name = "$($info.ComputerName)".ToUpperInvariant() }
             $p.Serial = $info.Serial
             $queued = (New-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial -Uuid $info.Uuid -AnswerFile $AnswerFile `
-                -ComputerName $(if ($KeepNames) { $p.Name } else { '' }) -OU $(if ($KeepOU) { $p.OU } else { '' }) -ExpiresHours ([Math]::Max(2, [Math]::Ceiling($TimeoutMinutes / 60) + 1)))
+                -ComputerName $(if ($KeepNames) { $p.Name } else { '' }) -OU $(if ($KeepOU -and -not $p.Local) { $p.OU } else { '' }) -ExpiresHours ([Math]::Max(2, [Math]::Ceiling($TimeoutMinutes / 60) + 1)))
             # The console's own time stamp: the started job is matched by it, not by WinPE's clock.
             $p.RequestedAt = "$($queued.requestedAt)"
             Write-Host "$($p.Name): job queued$(if ($KeepNames) { ", keeps its name" })$(if ($KeepOU -and $p.OU) { ", joins $($p.OU)" })"
@@ -130,7 +137,7 @@ try {
                 }
             }
             try {
-                $r = Invoke-LocalDiskBoot -ComputerName $p.Address -BootWim $BootWim -Credential $credential -Method $p.Method -DelaySeconds $RestartDelay -OnStage $onStage
+                $r = Invoke-LocalDiskBoot -ComputerName $p.Address -BootWim $BootWim -Credential $p.Credential -Method $p.Method -DelaySeconds $RestartDelay -OnStage $onStage
             } catch {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $info.Serial
                 throw
@@ -145,7 +152,10 @@ try {
             if ($_.Exception.Message -match '(?i)TrustedHosts') {
                 Write-Host "On this console PC, as administrator: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*.<your domain>' -Concatenate -Force, and sign in with DOMAIN\user."
             }
-            Stop-Pc $p (Get-RemotingProblemText -Message $_.Exception.Message -Account $(if ($credential) { $credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
+            if ($p.Local -and $_.Exception.Message -match '(?i)Access is denied|Acc.s refus|0x80070005') {
+                Write-Host 'Windows gives a local account other than the built-in Administrator no admin rights over the network. Sign in with the built-in Administrator (enabled, with a password), or on that PC, as administrator: reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f'
+            }
+            Stop-Pc $p (Get-RemotingProblemText -Message $_.Exception.Message -Local:$p.Local -Account $(if ($p.Credential) { $p.Credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
         }
     }
 
@@ -162,7 +172,7 @@ try {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial
                 # Back in Windows (WinPE could not start, or nobody took the job)? Take WinPE off its disk now. If the
                 # PC does not answer, its startup task does it at the next Windows start.
-                $cleaned = try { Remove-LocalDiskBoot -ComputerName $p.Address -BootEntry $p.BootEntry -Credential $credential -Method $p.Method; $true } catch { $false }
+                $cleaned = try { Remove-LocalDiskBoot -ComputerName $p.Address -BootEntry $p.BootEntry -Credential $p.Credential -Method $p.Method; $true } catch { $false }
                 Stop-Pc $p ("WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)" + $(if ($cleaned) { '. WinPE was removed from its disk.' } else { '' }))
             } elseif ((Get-Date) -gt $p.RestartAt) {
                 Set-BuildStepProgress $p.Id -Percent 85 -Detail 'Waiting for WinPE to start the deploy'

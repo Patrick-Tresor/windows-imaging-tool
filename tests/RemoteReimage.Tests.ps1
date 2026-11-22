@@ -97,9 +97,17 @@ try {
     $two = @(Read-ReimageTargets -Path $tf)
     Assert-Equal $two.Count 2 'two PCs are two targets'
     Assert-Equal $two[1].address 'PC2' 'a PC with no DNS name is reached by its name'
+    Assert-Equal $two[0].local $false 'a PC from Active Directory is not local'
+    # A PC outside the domain, found by IP: its own account file, and no OU to join back into.
+    ConvertTo-Json -InputObject @([ordered]@{ name = '10.1.2.40'; address = '10.1.2.40'; ou = 'OU=X,DC=corp,DC=local'; local = $true; credentialFile = 'C:\Temp\c.xml' }) | Set-Content -Path $tf
+    $loc = @(Read-ReimageTargets -Path $tf)
+    Assert-Equal $loc[0].local $true 'a PC outside the domain is local'
+    Assert-Equal $loc[0].credentialFile 'C:\Temp\c.xml' 'it keeps its own account file'
+    Assert-Equal $loc[0].ou '' 'it has no OU to join back into'
 } finally { Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue }
 
 # Remoting errors become one line saying what to do
+Assert-Equal ((Get-RemotingProblemText -Message 'Access is denied to \\10.1.2.40\ADMIN$' -Account '10.1.2.40\Pat' -Local) -like '*built-in Administrator*') $true 'a local account refused admin rights points to the built-in Administrator'
 Assert-Equal ((Get-RemotingProblemText -Message 'Connecting to remote server PC1 failed: The WinRM client cannot process the request. ... add the destination computer to the TrustedHosts configuration setting.' -Account 'CORP\svc') -like '*not in the domain*') $true 'a TrustedHosts error says the console PC is not in the domain'
 Assert-Equal ((Get-RemotingProblemText -Message 'Connecting to remote server PC1 failed with the following error message : Access is denied.' -Account 'CORP\svc') -like 'CORP\svc is not an administrator*') $true 'access denied names the account'
 Assert-Equal ((Get-RemotingProblemText -Message "first line`nsecond line" -Account 'x')) 'first line' 'another error keeps its first line'

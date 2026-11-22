@@ -129,7 +129,40 @@ function ConvertFrom-AdComputerProperties {
         Enabled           = -not ($uac -and (([int64]$uac -band 2) -ne 0))
         Description       = "$(Get-AdValue $Properties 'description')"
         DistinguishedName = $dn
+        NotInDomain       = $false
     }
+}
+
+function New-LocalComputerRow {
+    # A grid row for a PC found by IP that is not in Active Directory (a workgroup laptop on the same network). It is
+    # reimaged with its own local administrator account; it has no OU to join back into.
+    param([Parameter(Mandatory)][string]$Ip, [string]$Name)
+    $shown = if ("$Name".Trim()) { "$Name".Trim().ToUpperInvariant() } else { $Ip }
+    [pscustomobject]@{
+        Name              = $shown
+        DnsName           = ''
+        Address           = $Ip
+        OperatingSystem   = ''
+        OSVersion         = ''
+        LastLogon         = $null
+        LastLogonText     = ''
+        OUPath            = '(not in the domain)'
+        JoinOU            = ''
+        Enabled           = $true
+        Description       = 'Not in Active Directory: reimaged with its local administrator account'
+        DistinguishedName = ''
+        NotInDomain       = $true
+    }
+}
+
+function ConvertTo-LocalAccountName {
+    # A local account typed for a PC outside the domain, as Windows file sharing signs in with it: Administrator ->
+    # <PC>\Administrator. PC\user, .\user and user@domain are kept (.\ becomes the PC).
+    param([Parameter(Mandatory)][string]$User, [Parameter(Mandatory)][string]$Computer)
+    $u = $User.Trim()
+    if ($u -match '^\.\\(.+)$') { return "$Computer\$($Matches[1])" }
+    if ($u -match '[\\@]') { return $u }
+    "$Computer\$u"
 }
 
 function Get-AdDomainFromAccount {
@@ -251,4 +284,4 @@ function Get-AdOrganizationalUnits {
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
     Get-AdDomainFromAccount, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits,
-    ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp
+    ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp, New-LocalComputerRow, ConvertTo-LocalAccountName
