@@ -581,7 +581,7 @@
                   <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
                   <ColumnDefinition Width="140"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Domain" VerticalAlignment="Center"/>
                 <TextBox x:Name="TxtAdDomain" Grid.Column="1" ToolTip="For example corp.local. Empty = the domain this PC is joined to."/>
                 <Label Grid.Column="3" Content="Domain controller" VerticalAlignment="Center"/>
@@ -590,7 +590,7 @@
                 <TextBox x:Name="TxtAdUser" Grid.Row="2" Grid.Column="1" ToolTip="CORP\admin, or empty for the account you are signed in with. Its password is asked once and not saved."/>
                 <CheckBox x:Name="ChkAdUseShare" Grid.Row="2" Grid.Column="3" Grid.ColumnSpan="3" VerticalAlignment="Center" Content="Use the Deploy Settings account"
                           ToolTip="The account and saved password from the Deploy Settings tab, so nothing is typed twice. Untick it to use another account (an administrator on the PCs)."/>
-                <Button x:Name="BtnAdConnect" Grid.Row="4" Grid.Column="1" HorizontalAlignment="Left" MinWidth="120" Content="Connect" Style="{StaticResource Primary}"/>
+                <Button x:Name="BtnAdConnect" Grid.Column="5" HorizontalAlignment="Left" Margin="16,0,0,0" MinWidth="120" Content="Connect" Style="{StaticResource Primary}"/>
               </Grid>
             </GroupBox>
             <GroupBox DockPanel.Dock="Top" Header="2. Find computers" Padding="12,10" Margin="0,0,0,12">
@@ -599,7 +599,7 @@
                   <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
                   <ColumnDefinition Width="140"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="OU" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdOu" Grid.Column="1" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
                 <Label Grid.Column="3" Content="Name or IP" VerticalAlignment="Center"/>
@@ -609,7 +609,7 @@
                   <CheckBox x:Name="ChkAdServers" Content="Servers" Margin="0,0,24,0"/>
                   <CheckBox x:Name="ChkAdDisabled" Content="Disabled accounts"/>
                 </StackPanel>
-                <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="4" Orientation="Horizontal">
+                <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
                 </StackPanel>
@@ -626,14 +626,12 @@
                   <CheckBox x:Name="ChkAdKeepOu" IsChecked="True" Content="Join it back into its OU"/>
                 </StackPanel>
                 <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
-                <DockPanel Grid.Row="4" Grid.Column="1">
-                  <Button x:Name="BtnAdBuildBoot" DockPanel.Dock="Right" Content="Build network boot image" Margin="12,0,0,0"
-                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
-                  <TextBlock x:Name="TxtAdBoot" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                </DockPanel>
+                <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,0"/>
-                  <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
+                  <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,0" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
+                  <Button x:Name="BtnAdBuildBoot" Content="Build network boot image"
+                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
                 </StackPanel>
               </Grid>
             </GroupBox>
