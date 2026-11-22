@@ -151,6 +151,13 @@ function Test-SysprepHookDone {
     $State -in 'done', 'failed', 'restart'
 }
 
-Export-ModuleMember -Function Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
+function Test-SysprepTaskNeverStarted {
+    # Whether the hook should stop waiting for the SYSTEM task and run the Run stage itself: the task has written no
+    # state at all after $Limit minutes (it normally starts within seconds).
+    param([string]$State, [double]$Minutes, [double]$Limit = 3)
+    -not $State -and $Minutes -ge $Limit
+}
+
+Export-ModuleMember -Function Test-SysprepTaskNeverStarted, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
     Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone, Test-ReservedStorageInUse

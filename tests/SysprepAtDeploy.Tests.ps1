@@ -137,4 +137,13 @@ $setPart = $deploy.Substring($deploy.IndexOf('function Set-SysprepAtDeploy'), $d
 Assert-Equal ($setPart.Contains('Write-DeployLog ''Sysprep') -or $setPart.Contains("Invoke-Native -FilePath 'reg.exe'")) $false 'setting up sysprep prints nothing on the deploy screen'
 Assert-Equal ($deploy.Contains("Set-DeployStatus -Step 'Setting up sysprep")) $false 'no sysprep step in the deploy progress'
 
+# A task that never starts (on battery: 2J14HL3 waited 35 minutes, 2026-11-22): allowed on battery, and the hook runs
+# the Run stage itself after 3 minutes with no state.
+Assert-Equal (Test-SysprepTaskNeverStarted -State '' -Minutes 3.1) $true 'no state after 3 minutes: the hook takes over'
+Assert-Equal (Test-SysprepTaskNeverStarted -State '' -Minutes 1) $false 'no state yet after 1 minute: keep waiting'
+Assert-Equal (Test-SysprepTaskNeverStarted -State 'running' -Minutes 30) $false 'a running task is waited for'
+$hookText = [IO.File]::ReadAllText((Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1'))
+Assert-Equal ($hookText.Contains('-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries')) $true 'the sysprep task may start on battery'
+Assert-Equal ($hookText.Contains('Test-SysprepTaskNeverStarted -State $state')) $true 'the hook checks that the task started'
+
 Complete-Tests 'All sysprep at deploy tests passed.'
