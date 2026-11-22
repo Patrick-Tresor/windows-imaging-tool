@@ -96,12 +96,6 @@ function Show-CaptureWizard {
         if ($dlg.ShowDialog() -eq 'OK') { $w.TxtDiskFile.Text = $dlg.FileName }
     })
     & $prefillDiskFile
-    $w.RbDiskFile.IsChecked = $true
-    $w.TxtIsoFolder.Text = [Environment]::GetFolderPath('Desktop')
-    $w.BtnIsoFolder.Add_Click({
-        $dlg = [Windows.Forms.FolderBrowserDialog]::new()
-        if ($dlg.ShowDialog() -eq 'OK') { $w.TxtIsoFolder.Text = $dlg.SelectedPath }
-    })
 
     # Smallest makes an .esd, which DISM cannot split: no FAT32 split with it.
     $w.CmbCompression.Add_SelectionChanged({
@@ -116,18 +110,14 @@ function Show-CaptureWizard {
             Description = $w.TxtDescription.Text.Trim()
             Compression = $w.CmbCompression.SelectedItem.Tag
             Split       = [bool]$w.ChkSplit.IsChecked
-            Unattended  = [bool]$w.ChkUnattended.IsChecked
             NewVersion  = [bool]$w.ChkNewVersion.IsChecked
-            SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked -and $w.RbDiskFile.IsChecked
-            Mode        = if ($w.RbDiskFile.IsChecked) { 'DiskFile' } else { 'Iso' }
+            SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
-            IsoFolder   = $w.TxtIsoFolder.Text.Trim()
             SaveTo      = $w.TxtSaveTo.Text.Trim().Trim('"').TrimEnd('\')
         }
     }
 
-    # The disk file capture reads the VM's disk with DISM on this PC and saves to the content root: no share, no ADK, no media.
-    $onThisPC = @('DiskFile')
+    # The capture reads the VM's disk with DISM on this PC and saves to the content root: no share, no ADK, no media.
 
     # Page 3: check the disk. The quick checks run here; reading Windows on the disk (and copying a VMDK to a VHD
     # first, which takes minutes) runs in a hidden elevated PowerShell, Capture-VMImage.ps1 -CheckOnly, that writes
@@ -219,25 +209,21 @@ function Show-CaptureWizard {
         $c = & $getChoice
         switch ($state.Page) {
             0 {
-                if ($c.Mode -eq 'DiskFile' -and -not ($c.DiskFile -and (Test-Path -LiteralPath $c.DiskFile -PathType Leaf))) { 'Choose the VM''s disk file.' }
-                elseif ($c.Mode -eq 'DiskFile' -and [IO.Path]::GetExtension($c.DiskFile) -notin '.vhd', '.vhdx' -and -not (Find-QemuImg)) { 'Reading this disk file needs qemu-img.exe: install QEMU for Windows and add its folder to PATH.' }
-                elseif ($c.Mode -eq 'Iso' -and -not (Test-Path $c.IsoFolder)) { 'Choose a folder for the ISO.' }
+                if (-not ($c.DiskFile -and (Test-Path -LiteralPath $c.DiskFile -PathType Leaf))) { 'Choose the VM''s disk file.' }
+                elseif ([IO.Path]::GetExtension($c.DiskFile) -notin '.vhd', '.vhdx' -and -not (Find-QemuImg)) { 'Reading this disk file needs qemu-img.exe: install QEMU for Windows and add its folder to PATH.' }
             }
             1 {
                 if (-not $w.ChkPrepared.IsChecked) { $(if ($c.SysprepAtDeploy) { 'Shut the VM down first, then tick the box.' } else { 'Run the prepare command on the reference machine first, then tick the box.' }) }
-                elseif ($c.Mode -eq 'DiskFile' -and (Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { $(if ($c.SysprepAtDeploy) { 'VMware still has this VM open. Shut it down, then click Next.' } else { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }) }
+                elseif ((Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { $(if ($c.SysprepAtDeploy) { 'VMware still has this VM open. Shut it down, then click Next.' } else { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }) }
             }
             2 {
                 if (-not $state.CheckPassed) { 'The disk check has not passed yet. Fix the lines with a cross, then click Check again.' }
             }
             3 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
-                elseif ($c.Mode -eq 'DiskFile' -and ($saveProblem = Get-CaptureSaveFolderProblem -Path $c.SaveTo)) { $saveProblem }
-                elseif ($c.Mode -eq 'DiskFile' -and -not $c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
+                elseif ($saveProblem = Get-CaptureSaveFolderProblem -Path $c.SaveTo) { $saveProblem }
+                elseif (-not $c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
                     "An image named $($c.Name) already exists in $($c.SaveTo). Pick another name, or tick the box to capture it as a new version."
-                }
-                elseif ($c.Mode -ne 'DiskFile' -and -not $c.NewVersion -and @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count) {
-                    "An image named $($c.Name) already exists. Pick another name, or tick the box to capture it as a new version."
                 }
             }
         }
@@ -245,57 +231,26 @@ function Show-CaptureWizard {
 
     $showSummary = {
         $c = & $getChoice
-        $target = switch ($c.Mode) {
-            'DiskFile' {
-                $current = try { Resolve-VmdkCurrentDisk -Path $c.DiskFile } catch { $c.DiskFile }
-                "Disk file $current, captured on this PC" +
-                $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" }) +
-                $(if ($state.Result -and "$($state.Result.state)" -eq 'done') {
-                    "`r`nWindows:       $($state.Result.windowsName), $(Format-ByteSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
-                $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
-            }
-            'Iso' { "Capture ISO in $($c.IsoFolder)\Capture-WinPE.iso" }
-        }
-        $saveTo = switch ($c.Mode) {
-            { $_ -in $onThisPC } { $c.SaveTo }
-            default  { "$($settings.share.path)\Images" }
-        }
+        $current = try { Resolve-VmdkCurrentDisk -Path $c.DiskFile } catch { $c.DiskFile }
+        $target = "Disk file $current, captured on this PC" +
+            $(if ($current -ne $c.DiskFile) { "`r`n               (the newest snapshot of $(Split-Path -Leaf $c.DiskFile))" }) +
+            $(if ($state.Result -and "$($state.Result.state)" -eq 'done') {
+                "`r`nWindows:       $($state.Result.windowsName), $(Format-ByteSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
+            $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
         $w.TxtSummary.Text = @(
             "Image name:    $($c.Name).$(if ($c.Split) { 'swm (split)' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
-            $(if ($c.Mode -notin $onThisPC) { "Unattended:    $(if ($c.Unattended) { 'yes, shuts down when done' } else { 'no, asks for YES on the machine' })" })
-            $(if ($c.NewVersion -and $(if ($c.Mode -eq 'DiskFile') { @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count }
-                    else { @(Get-ImageList -ContentRoot $ContentRoot | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq $c.Name }).Count })) {
+            $(if ($c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
                 "Existing image: replaced after the capture succeeds; the old one is kept in Previous next to it" })
             ''
             "Media:         $target"
-            "Saved to:      $saveTo"
+            "Saved to:      $($c.SaveTo)"
         ) -join "`r`n"
-        $issues = @()
-        if ($c.Mode -notin $onThisPC) {
-            $issues += @(Get-CaptureReadiness -ContentRoot $ContentRoot)
-            # Capture media is built with the ADK on this PC, so check it before Build and start.
-            $issues += @((Get-AdkStatus).Problems)
-        }
-        $w.TxtSummaryIntro.Text = if ($c.Mode -eq 'DiskFile') {
-            'Clicking Start opens a progress window with each step and the time left. The copy of the disk made by the check is reused, so the capture starts right away. The new image appears on the Images tab when it finishes.'
-        } else {
-            'Clicking Build and start opens a window that builds the capture media (a few minutes). Boot the reference machine from it to capture. The new image appears on the Images tab when it finishes.'
-        }
-        $w.TxtIssues.Text = if ($issues) { "Fix before you start:`n" + ($issues -join "`n") } else { '' }
-        $w.BtnNext.IsEnabled = -not $issues
     }
 
     $showPage = {
-        $isDisk = (& $getChoice).Mode -eq 'DiskFile'
-        # Sysprep on each PC needs the disk check, so only for a VM's disk file.
-        $w.ChkSysprepAtDeploy.Visibility = if ($isDisk) { 'Visible' } else { 'Collapsed' }
-        # The ISO capture saves from WinPE to the network share, so only the disk file capture has a Save to folder.
-        foreach ($n in 'LblSaveTo', 'PnlSaveTo', 'TxtSaveToHint') { $w[$n].Visibility = if ($isDisk) { 'Visible' } else { 'Collapsed' } }
-        $w.TxtDetailsIntro.Text = if ($isDisk) { 'Name the image and choose where to save it.' } else { 'The image is saved to the Images folder of the network share.' }
         & $updatePrepPage
-        $w.Step2.Text = if ($isDisk) { '3. Check the disk' } else { '3. Check the disk (VM disk only)' }
         for ($i = 0; $i -le $state.Last; $i++) {
             $w["Page$i"].Visibility = if ($i -eq $state.Page) { 'Visible' } else { 'Collapsed' }
             $w["Step$i"].SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($i -eq $state.Page) { 'SurfaceBrush' } elseif ($i -lt $state.Page) { 'FaintBrush' } else { 'MutedBrush' }))
@@ -303,43 +258,29 @@ function Show-CaptureWizard {
         }
         $w.BtnBack.IsEnabled = $state.Page -gt 0
         $w.BtnNext.IsEnabled = $true
-        $w.BtnNext.Content = if ($state.Page -ne $state.Last) { 'Next' } elseif ((& $getChoice).Mode -in $onThisPC) { 'Start' } else { 'Build and start' }
+        $w.BtnNext.Content = if ($state.Page -ne $state.Last) { 'Next' } else { 'Start' }
         if ($state.Page -eq $checkPage) { & $enterCheck }
         if ($state.Page -eq $state.Last) { & $showSummary }
     }
 
     $finish = {
         $c = & $getChoice
-        if ($c.Mode -eq 'DiskFile') {
-            # Its own minimized window, followed in the progress window (steps, bars, time left), like a media build.
-            $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
-            $job = Start-ConsoleJob -Name "capture-$($c.Name)" -ArgumentList {
-                param($progressFile, $logPath)
-                Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
-                    -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                    -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
-            }
-            $state.HandedOver = $true
-            Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"
-            return $true
+        # Its own process, followed in the Progress window (steps, bars, time left), like a media build.
+        $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
+        $job = Start-ConsoleJob -Name "capture-$($c.Name)" -ArgumentList {
+            param($progressFile, $logPath)
+            Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
+                -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
+                -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
         }
-        $cfg = New-CaptureConfig -ContentRoot $ContentRoot -Name $c.Name -Description $c.Description `
-            -Compression $c.Compression -SplitForFat32:$c.Split -Unattended:$c.Unattended -NewVersion:$c.NewVersion
-        $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-File', (ConvertTo-Arg (Join-Path $SrcDir 'New-DeploymentMedia.ps1')),
-            '-SettingsPath', (ConvertTo-Arg (Join-Path $ContentRoot 'config\deploy-settings.json')),
-            '-CaptureConfig', (ConvertTo-Arg $cfg))
-        $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $c.IsoFolder))
-        Start-Process powershell.exe -ArgumentList $buildArgs
+        $state.HandedOver = $true
+        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"
         $true
     }
 
-    # The disk check page is only for a VM's disk file; the ISO capture checks the disk in WinPE.
-    $skipCheck = { $state.Page -eq $checkPage -and (& $getChoice).Mode -ne 'DiskFile' }
     $w.BtnBack.Add_Click({
         try {
             if ($state.Page -gt 0) { $state.Page-- }
-            if (& $skipCheck) { $state.Page-- }
             & $showPage
         } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message }
     })
@@ -349,7 +290,6 @@ function Show-CaptureWizard {
             if ($problem) { Show-WindowMessage $wiz 'Capture Wizard' $problem; return }
             if ($state.Page -lt $state.Last) {
                 $state.Page++
-                if (& $skipCheck) { $state.Page++ }
                 & $showPage; return
             }
             if (& $finish) { $wiz.DialogResult = $true; $wiz.Close() }

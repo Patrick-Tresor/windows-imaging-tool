@@ -135,11 +135,6 @@ try {
     Assert-Equal ($cmd -contains '-Version' -and $cmd -contains '20261015-1430' -and $cmd -contains 'Rollback') $true 'rollback command names the version'
     Assert-Throws { Get-ImageVersionArguments -ScriptPath 'x' -ContentRoot $root -ImageName 'Win11.wim' -Action Rollback } 'rollback needs a version'
 
-    # Capture config: an existing name is allowed only as a new version.
-    Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Win11' } 'capturing over an existing image needs -NewVersion'
-    $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Win11' -NewVersion) | ConvertFrom-Json
-    Assert-Equal $cfg.newVersion $true 'capture config asks for a new version'
-
     # A new capture replaces the image: the old one becomes a version and the new one moves in from staging.
     function global:Write-DeployLog { param($Message, $Level) }
     $pubDir = Join-Path $root 'PubImages'
@@ -157,11 +152,8 @@ try {
     Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 3800) '.swm' 'a split makes .swm parts'
     Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 0) '.wim' 'Maximum makes a .wim'
     Assert-Throws { Assert-CaptureCompression -Compression recovery -SplitSizeMB 3800 } '*cannot be split*' 'Smallest with a FAT32 split is refused'
-    Assert-Equal ((Get-CaptureImageArgs -WimPath 'D:\S\W.wim' -CaptureDir 'C:\' -Name 'W' -Compression recovery -Description 'Ref' -Verify) -join ' ') '/Capture-Image /ImageFile:D:\S\W.wim /CaptureDir:C:\ /Name:W /Compress:max /CheckIntegrity /Verify /Description:Ref' 'Smallest captures with max first, both capture scripts build the same DISM line'
+    Assert-Equal ((Get-CaptureImageArgs -WimPath 'D:\S\W.wim' -CaptureDir 'C:\' -Name 'W' -Compression recovery -Description 'Ref') -join ' ') '/Capture-Image /ImageFile:D:\S\W.wim /CaptureDir:C:\ /Name:W /Compress:max /CheckIntegrity /Description:Ref' 'Smallest captures with max first'
     Assert-Equal ((Get-CaptureImageArgs -WimPath 'W.wim' -CaptureDir 'V:\' -Name 'W' -Compression fast) -join ' ') '/Capture-Image /ImageFile:W.wim /CaptureDir:V:\ /Name:W /Compress:fast /CheckIntegrity' 'VM capture: no /Verify'
-    Assert-Throws { New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery -SplitForFat32 } '*cannot be split*' 'the capture wizard refuses Smallest with a split'
-    $cfg = Get-Content -Raw (New-CaptureConfig -ContentRoot $root -Name 'Tiny' -Compression recovery) | ConvertFrom-Json
-    Assert-Equal $cfg.compression 'recovery' 'capture config keeps Smallest'
     Set-Content (Join-Path $pubDir 'Small.esd') 'old esd'
     Assert-Equal ((Get-ExistingImageFiles -ImagesDir $pubDir -Name 'Small' | ForEach-Object { Split-Path $_ -Leaf }) -join ',') 'Small.esd' 'an existing .esd counts as the image of that name'
     $esdStage = Join-Path $pubDir '.capture-Small'

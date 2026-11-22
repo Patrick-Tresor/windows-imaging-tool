@@ -1,6 +1,6 @@
 # Image versions: earlier copies of a golden image kept in Images\Previous\<name>_<yyyyMMdd-HHmm>\, so a bad
 # capture or update can be rolled back and an answer file can stay on a known-good version.
-# Used by Capture-GoldenImage.ps1 and Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
+# Used by Capture-VMImage.ps1, by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 #
 # A version folder holds the image's parts with their original names, the image's <name>.updates.json when it
 # had one, and version.json (archived date, reason, note). Update-OfflineImage.ps1 (offline updates) moves the
@@ -43,19 +43,17 @@ function Assert-CaptureCompression {
 }
 
 function Get-CaptureImageArgs {
-    # DISM's /Capture-Image arguments for both capture scripts. Smallest (recovery) captures with max first:
+    # DISM's /Capture-Image arguments for Capture-VMImage.ps1. Smallest (recovery) captures with max first:
     # DISM cannot capture to recovery directly, Convert-ImageToEsd recompresses it after.
     param(
         [Parameter(Mandatory)][string]$WimPath,
         [Parameter(Mandatory)][string]$CaptureDir,
         [Parameter(Mandatory)][string]$Name,
         [string]$Compression = 'max',
-        [string]$Description,
-        [switch]$Verify
+        [string]$Description
     )
     $a = @('/Capture-Image', "/ImageFile:$WimPath", "/CaptureDir:$CaptureDir", "/Name:$Name",
         "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
-    if ($Verify) { $a += '/Verify' }
     if ($Description) { $a += "/Description:$Description" }
     $a
 }
@@ -351,7 +349,7 @@ function Publish-CapturedImage {
         After a capture into -Staging: keeps the image it replaces (-Existing) as a version, moves the new files into
         -ImagesDir and applies the image's keep limit. Returns the new file name (Name.wim, Name.esd or Name.swm).
     .DESCRIPTION
-        Used by Capture-GoldenImage.ps1 and Capture-VMImage.ps1, which import DeployCommon.psm1 for Write-DeployLog.
+        Used by Capture-VMImage.ps1, which imports DeployCommon.psm1 for Write-DeployLog.
         $State.Swapping turns true once the old image starts moving: from then on the staging folder may hold the
         only copy of the new capture, so the caller must not delete it.
     #>

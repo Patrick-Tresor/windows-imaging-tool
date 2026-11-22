@@ -17,7 +17,7 @@
     deployed to then runs sysprep at its first start (src\SysprepAtDeploy.psm1). A VM that was hibernated by
     Fast Startup is refused, since its disk is not a clean copy.
 
-    The image goes to the Images folder of the content root, as Capture-GoldenImage.ps1 does. With -NewVersion
+    The image goes to the Images folder of the content root (or -ImagesDir). With -NewVersion
     an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
     as a version in Images\Previous\ (see ImageVersions.psm1).
 .EXAMPLE

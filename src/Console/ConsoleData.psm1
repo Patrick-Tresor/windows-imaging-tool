@@ -223,49 +223,9 @@ function Import-DriverPack {
 #region Capture
 
 function Test-ImageName {
-    # Same rule Capture-GoldenImage.ps1 enforces in WinPE, checked early so the wizard fails before building media.
+    # The name rule for images (the file name): the capture wizard and Get-VMCaptureArguments check it.
     param([string]$Name)
     $Name -match '^[A-Za-z0-9._-]+$'
-}
-
-function New-CaptureConfig {
-    # Writes config\capture.json. Media built with it boots straight into Capture-GoldenImage.ps1.
-    param(
-        [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory)][string]$Name,
-        [string]$Description,
-        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
-        [switch]$SplitForFat32,
-        [switch]$Unattended,
-        [switch]$NewVersion   # replace an existing image of this name; the old one is kept as a version
-    )
-    if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $images = Join-Path $ContentRoot 'Images'
-    if ($Compression -eq 'recovery' -and $SplitForFat32) { throw 'The Smallest compression makes an .esd file, which cannot be split for FAT32. Pick Maximum to split.' }
-    if (-not $NewVersion -and (Get-ExistingImageFiles -ImagesDir $images -Name $Name)) {
-        throw "An image named $Name already exists. Pick another name, or capture it as a new version."
-    }
-    $cfg = [ordered]@{
-        name             = $Name
-        description      = $Description
-        compression      = $Compression
-        splitSizeMB      = if ($SplitForFat32) { 3800 } else { 0 }
-        noPrompt         = [bool]$Unattended
-        shutdownWhenDone = [bool]$Unattended
-        newVersion       = [bool]$NewVersion
-    }
-    $path = Join-ContentPath $ContentRoot 'config\capture.json'
-    Save-JsonFile -Path $path -InputObject ([pscustomobject]$cfg)
-    $path
-}
-
-function Get-CaptureReadiness {
-    # Problems that would make a capture fail in WinPE, for the wizard's summary page.
-    # The capture ISO saves the image to the network share.
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    $share = (Get-DeploySettings -ContentRoot $ContentRoot).share.path
-    if (-not $share) { 'No network share is set in Deploy Settings, so WinPE has nowhere to save the image.' }
-    elseif ($share -notmatch '^\\\\[^\\]+\\.+') { "The share '$share' is not a \\server\share path." }
 }
 
 #endregion
@@ -1192,7 +1152,7 @@ function Test-ShareConnection {
 #endregion
 
 function Get-DeploymentLogs {
-    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
+    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-VM-<name>_... (Capture-VMImage.ps1)
     # or SERVICE-<name>_... (Update-OfflineImage.ps1).
     param([Parameter(Mandatory)][string]$ContentRoot)
     Get-ChildItem -Path (Join-Path $ContentRoot 'Logs') -Filter *.log -File -ErrorAction SilentlyContinue |
@@ -1234,7 +1194,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs, Get-LogTabRows,
-    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
+    Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,

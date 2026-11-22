@@ -64,7 +64,6 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.1d | Sysprep on each PC: capture a VM shut down with `shutdown /s /t 0`, not sysprepped | Check the disk passes with "Not sysprepped: each PC runs sysprep"; a VM shut down from the Start menu with Fast Startup gets a cross |
 | 4.1e | Deploy that image to the Dell 5521, then an HP and a Lenovo | First start shows only the spinner (no logon screen, no message), restarts by itself, then setup, name, domain join, apps and tasks as usual; `C:\Windows\Temp\SysprepAtDeploy.log` ends with "Sysprep finished" |
 | 4.1f | Same, with a Store app installed for one user only in the VM | The app is removed and sysprep still runs; with a missing Store the logon screen says sysprep failed |
-| 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
 | 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
 | 4.4 | Roll back a version | Answer files deploy the older image |
 | 4.5 | Capture with compression **Smallest (.esd)** | The capture shows a "Compressing to the smallest size" step and logs the .esd size (about 70-80 % of Maximum); the Images tab lists `Name.esd`; a stick with it deploys normally; Update image works on it |

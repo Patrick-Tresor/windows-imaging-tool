@@ -9,7 +9,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
+src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-VMImage.ps1,
                      Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, DeployWizard.psm1,
@@ -570,35 +570,31 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    apps and updates, no OEM drivers. Step by step, including audit mode and keeping the Microsoft Store
    in the image: [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md).
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
-   1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
-      below) or a **capture ISO** for a VM that boots from it.
+   1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
       Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
-      Or, for a disk file, tick **Skip sysprep here: each PC runs sysprep at its first start** and only
+      Or tick **Skip sysprep here: each PC runs sysprep at its first start** and only
       run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
       (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
-   3. **Check the disk** (disk file only): each line gets a tick or a cross. The quick checks (the
+   3. **Check the disk**: each line gets a tick or a cross. The quick checks (the
       disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
       free space for the temporary copy) come first, then the wizard reads the Windows on the disk
       and shows its edition, version, size and whether sysprep has run. Next stays off until every
       line has a tick, so a disk that was not generalized is caught here, not after the capture
       started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
-   4. Name the image, choose compression and, for a disk file, **Save to**: the content root's
+   4. Name the image, choose compression and **Save to**: the content root's
       `Images` folder by default (**Default** puts it back), or **Browse...** to any folder on this PC
       or a server share (`\\server\share\Images`). An image saved outside the open content root
       shows on the Images tab when the console opens that folder's content root.
-   5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
-      window with each step (copy, read, capture, save), its bar and the time left.
-   The image is saved to the Save to folder (disk file) or the share's
-   `Images` folder (ISO), and a
-   `CAPTURE-<name>` log appears on the Logs tab.
-   Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
-   `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
+   5. Review and click Start. The capture is a card in the Progress window with each step (copy,
+      read, capture, save), its bar and the time left.
+   The image is saved to the Save to folder, and a `CAPTURE-VM-<name>` log appears on the Logs tab.
+   Without the console: run `Prepare-Reference.ps1` in the VM, then
+   `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot <content root>` on this PC.
 
    **A VM's disk file (VMware, VirtualBox, Proxmox, ESXi and others).** The simplest way
-   to capture a VM. In the wizard pick
-   **A VM's disk file on this PC** and the VM's disk. On the next page the wizard shows the
+   to capture a VM. In the wizard pick the VM's disk. On the next page the wizard shows the
    prepare command: run it in the VM as administrator (turn BitLocker off first, and don't
    capture while updates are installing), and sysprep shuts the VM down. Then the tool runs
    `src\Capture-VMImage.ps1 -DiskPath <disk file>` on the admin PC. VHD and VHDX files are

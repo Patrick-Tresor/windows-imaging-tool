@@ -41,7 +41,6 @@ param(
     [switch]$NoVendorWinPEDrivers,   # don't add any vendor WinPE driver pack (Intel RST/VMD storage, network) to boot.wim
     [string[]]$WinPEDriverVendors = @('Dell', 'HP'),   # whose WinPE driver packs go into boot.wim: Dell, HP (comma list from the console)
     [string]$SettingsPath,           # deploy-settings.json to bake in; defaults to the repo copy
-    [string]$CaptureConfig,          # capture.json to bake in: the media then captures instead of deploying
     [string]$WinPEPasswordFile,      # file holding the WinPE password (read, then deleted when it is in %TEMP%): WinPE asks for it at start
     [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
     [switch]$LooseDriverFiles,       # with -ContentSource: copy driver packs as plain files, not one .wim each (much slower to copy to a stick)
@@ -119,7 +118,7 @@ Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
 # The version of the tool this build puts on the media: shown in the WinPE wizard, written in every Deploy.log, and
 # read back by the console to say a stick is older than the console.
 $toolVersion = Get-ToolVersion
-$versionRecord = ConvertTo-ToolVersionRecord -Version $toolVersion -Target $(if ($CaptureConfig) { 'Capture' } else { $Target })
+$versionRecord = ConvertTo-ToolVersionRecord -Version $toolVersion -Target $Target
 Write-Host "Imaging tool version $($toolVersion.Text)"
 
 # Check the ADK first: without it nothing below can work, and copype's own errors are cryptic.
@@ -150,8 +149,6 @@ if ($WinPEPasswordFile) {
     if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
 }
 if ($winPEPassword -and $Target -eq 'Wim') { throw '-WinPEPasswordFile is for USB and ISO media: the network boot image starts on PCs nobody is at to type it.' }
-if ($winPEPassword -and $CaptureConfig) { throw '-WinPEPasswordFile is for deploy media, not capture media.' }
-if ($CaptureConfig -and $Target -ne 'Iso') { throw '-CaptureConfig needs -Target Iso: capture runs on a VM booted from the capture ISO.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
 $packArgs = @{}
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
@@ -390,7 +387,6 @@ try {
     } catch { Write-Warning "WinPE keeps its plain blue background: $($_.Exception.Message)" }
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     Save-JsonFile -Path "$deployDir\config\tool-version.json" -InputObject $versionRecord
-    if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
     $answerKey = Get-AnswerKey -ContentRoot $secretRoot
@@ -445,14 +441,11 @@ switch ($Target) {
         Write-Host "boot.wim written to $OutputPath."
     }
     'Iso' {
-        $iso = Join-Path $OutputPath $(if ($CaptureConfig) { 'Capture-WinPE.iso' } else { 'Deploy-WinPE.iso' })
+        $iso = Join-Path $OutputPath 'Deploy-WinPE.iso'
         Start-BuildStep 'iso' -Detail $iso
         if (Test-Path $iso) { Remove-Item $iso }
-        # Capture ISOs boot without the "Press any key to boot from CD" prompt so an unattended VM starts WinPE.
-        # UEFI: the no-prompt EFI boot image. BIOS: etfsboot.com only prompts when boot\bootfix.bin exists.
         # The boot files come from the ADK's Oscdimg folder: newer copype versions no longer create fwfiles.
-        $bootFiles = Get-IsoBootFiles -AdkRoot $adk -NoPrompt:([bool]$CaptureConfig)
-        if ($CaptureConfig) { Remove-Item "$WorkDir\media\boot\bootfix.bin" -ErrorAction SilentlyContinue }
+        $bootFiles = Get-IsoBootFiles -AdkRoot $adk
         $bootData = "2#p0,e,b`"$($bootFiles.BiosBoot)`"#pEF,e,b`"$($bootFiles.UefiBoot)`""
         & cmd /c "oscdimg -m -o -u2 -udfver102 -bootdata:$bootData `"$WorkDir\media`" `"$iso`""
         if ($LASTEXITCODE -ne 0) {
