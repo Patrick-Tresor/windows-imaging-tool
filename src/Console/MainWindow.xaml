@@ -602,8 +602,8 @@
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="OU" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdOu" Grid.Column="1" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
-                <Label Grid.Column="3" Content="Name" VerticalAlignment="Center"/>
-                <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB) or a pattern (LAB-*). Empty = all."/>
+                <Label Grid.Column="3" Content="Name or IP" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
                 <Label Grid.Row="2" Content="Also show" VerticalAlignment="Center"/>
                 <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" Orientation="Horizontal" VerticalAlignment="Center">
                   <CheckBox x:Name="ChkAdServers" Content="Servers" Margin="0,0,24,0"/>

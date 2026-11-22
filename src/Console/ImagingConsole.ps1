@@ -1087,9 +1087,22 @@ function Search-AdComputers {
     $base = if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' }
     $window.Cursor = 'Wait'
     try {
+        # The Name box takes a name or pattern, an IP address, or both (GWHZLG3 10.1.2.34). With an IP, the PC is
+        # reached at that address, so an old DNS record doesn't matter.
+        $find = ConvertFrom-AdSearchText $ui.TxtAdName.Text
+        if ($find.Ip -and -not $find.Name) {
+            Set-Status "Asking $($find.Ip) for its name..."
+            $find.Name = Resolve-AdComputerNameFromIp -Ip $find.Ip
+            if (-not $find.Name) { throw "No PC at $($find.Ip) said its name (it is off, or its firewall blocks it). Type its name and IP, like GWHZLG3 $($find.Ip)." }
+        }
         Set-Status 'Searching Active Directory...'
-        $script:adRows = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $ui.TxtAdName.Text `
+        $script:adRows = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
             -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+        if ($find.Ip) {
+            $script:adRows = @($script:adRows | Where-Object { $_.Name -eq $find.Name.ToUpperInvariant() })
+            if (-not $script:adRows) { throw "$($find.Ip) is $($find.Name), but there is no computer named $($find.Name) in Active Directory$(if ($base) { ' under this OU' })." }
+            foreach ($r in $script:adRows) { $r.Address = $find.Ip }
+        }
         Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
         Update-AdOnline
     } finally { $window.Cursor = $null }

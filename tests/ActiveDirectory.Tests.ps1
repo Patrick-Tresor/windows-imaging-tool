@@ -80,4 +80,21 @@ Assert-Equal $bare.JoinOU '' 'a PC in the Computers container'
 $bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'src/ActiveDirectory.psm1'))
 Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 'ActiveDirectory.psm1 is ASCII'
 
+# The Name box: a name, an IP address, or both
+$q = ConvertFrom-AdSearchText '10.1.2.34'
+Assert-Equal "$($q.Name)|$($q.Ip)" '|10.1.2.34' 'search: an IP address alone'
+$q = ConvertFrom-AdSearchText ' GWHZLG3  10.1.2.34 '
+Assert-Equal "$($q.Name)|$($q.Ip)" 'GWHZLG3|10.1.2.34' 'search: a name and its IP'
+$q = ConvertFrom-AdSearchText '10.1.2.34, GWHZLG3'
+Assert-Equal "$($q.Name)|$($q.Ip)" 'GWHZLG3|10.1.2.34' 'search: IP first, comma between'
+$q = ConvertFrom-AdSearchText 'LAB-*'
+Assert-Equal "$($q.Name)|$($q.Ip)" 'LAB-*|' 'search: a pattern stays a name'
+$q = ConvertFrom-AdSearchText '10.1.2.999'
+Assert-Equal "$($q.Name)|$($q.Ip)" '10.1.2.999|' 'search: a number that is not an IP is a name'
+$nbt = @('', 'Ethernet:', 'Node IpAddress: [10.1.2.5] Scope Id: []', '', '           NetBIOS Remote Machine Name Table', '',
+    '       Name               Type         Status', '    ---------------------------------------------',
+    '    GWHZLG3        <00>  UNIQUE      Registered', '    BOREALC        <00>  GROUP       Registered', '    GWHZLG3        <20>  UNIQUE      Registered')
+Assert-Equal (ConvertFrom-NbtstatOutput -Lines $nbt) 'GWHZLG3' 'nbtstat: the first <00> name is the PC'
+Assert-Equal (ConvertFrom-NbtstatOutput -Lines @('Host not found.')) '' 'nbtstat: no answer gives no name'
+
 Complete-Tests 'All Active Directory tests passed.'

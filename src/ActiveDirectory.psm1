@@ -199,6 +199,44 @@ function Get-AdComputers {
         ForEach-Object { ConvertFrom-AdComputerProperties $_ } | Sort-Object OUPath, Name)
 }
 
+function ConvertFrom-AdSearchText {
+    <#
+    .SYNOPSIS
+        What the Computers tab's Name box asks for: a name or pattern (LAB, LAB-*), an IP address (10.1.2.34), or a
+        name and an IP together (GWHZLG3 10.1.2.34). Returns Name (may be empty) and Ip (empty unless one was typed).
+    #>
+    param([string]$Text)
+    $name = ''; $ip = ''
+    foreach ($part in @("$Text".Trim() -split '[\s,;]+' | Where-Object { $_ })) {
+        $a = $null
+        if (-not $ip -and $part -match '^\d{1,3}(\.\d{1,3}){3}$' -and [Net.IPAddress]::TryParse($part, [ref]$a)) { $ip = $a.ToString() }
+        elseif (-not $name) { $name = $part }
+    }
+    [pscustomobject]@{ Name = $name; Ip = $ip }
+}
+
+function ConvertFrom-NbtstatOutput {
+    # The computer name in `nbtstat -A <ip>` output: the first <00> entry (the workstation name; a <00> GROUP entry
+    # for the domain comes after it). Empty when the PC did not answer.
+    param([string[]]$Lines)
+    foreach ($l in @($Lines)) {
+        if ("$l" -match '^\s*([^\s<]{1,15})\s*<00>') { return $Matches[1].ToUpperInvariant() }
+    }
+    ''
+}
+
+function Resolve-AdComputerNameFromIp {
+    # The name of the PC at an IP address, asked from the PC itself (NetBIOS), else from reverse DNS. A reverse DNS
+    # record can be as old as the forward one, so the reimage still checks that the PC answers with that name.
+    param([Parameter(Mandatory)][string]$Ip)
+    try {
+        $name = ConvertFrom-NbtstatOutput -Lines @(& nbtstat.exe -A $Ip 2>$null)
+        if ($name) { return $name }
+    } catch { }
+    try { return ([Net.Dns]::GetHostEntry($Ip).HostName -split '\.')[0].ToUpperInvariant() } catch { }
+    ''
+}
+
 function Get-AdOrganizationalUnits {
     # Every OU in the domain, plus the default Computers container, for the OU list: Path (Sales/Laptops) and DN.
     param([string]$Domain, [string]$Server, [pscredential]$Credential)
@@ -212,4 +250,5 @@ function Get-AdOrganizationalUnits {
 
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
-    Get-AdDomainFromAccount, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits
+    Get-AdDomainFromAccount, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits,
+    ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp

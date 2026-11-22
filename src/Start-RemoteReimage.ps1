@@ -95,7 +95,13 @@ try {
         # The short name, when only that resolves from this PC.
         $p.Address = $check.Address
         $p.Method = $check.Method
-        if ($p.Method -eq 'Smb') { Write-Host "$($p.Name): PowerShell remoting is off, going through its admin share and a one-time service" }
+        # Typed as an IP address: Windows sign-in over WinRM needs a name (Kerberos) or TrustedHosts, but file sharing
+        # signs in to an IP address, so use it when it answers.
+        if ($p.Method -eq 'WinRM' -and $check.Smb -and $p.Address -match '^\d{1,3}(\.\d{1,3}){3}$') {
+            $p.Method = 'Smb'
+            Write-Host "$($p.Name): reached by IP address $($p.Address), going through its admin share and a one-time service"
+        }
+        elseif ($p.Method -eq 'Smb') { Write-Host "$($p.Name): PowerShell remoting is off, going through its admin share and a one-time service" }
         try {
             try {
                 $info = Get-RemoteComputerInfo -ComputerName $p.Address -Credential $credential -Method $p.Method
