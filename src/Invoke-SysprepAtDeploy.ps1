@@ -199,6 +199,12 @@ try {
         $created = & schtasks.exe /Create /TN $taskName /TR $run /SC ONSTART /DELAY 0000:30 /RU SYSTEM /RL HIGHEST /F 2>&1
         $ok = $LASTEXITCODE -eq 0
         if ($ok) {
+            # schtasks makes a task that only starts on AC power: a laptop on battery never ran it (2J14HL3 waited
+            # 35 minutes on the Dell logo, 2026-11-22). Allow it on battery, with no time limit.
+            try {
+                $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+                Set-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'SysprepAtDeploy' -Settings $settings -ErrorAction Stop | Out-Null
+            } catch { Write-Log "Could not let the task run on battery: $($_.Exception.Message)" 'WARN' }
             $started = & schtasks.exe /Run /TN $taskName 2>&1
             $ok = $LASTEXITCODE -eq 0
             if (-not $ok) { Write-Log "Could not start the task $taskName ($started)." 'WARN' }
@@ -218,6 +224,17 @@ try {
             Start-Sleep -Seconds 5
             $state = Get-RunState
             if (Test-SysprepHookDone -State $state) { break }
+            if (Test-SysprepTaskNeverStarted -State $state -Minutes $clock.Elapsed.TotalMinutes) {
+                # The task has not started at all: stop it from starting later, and run the Run stage here instead.
+                & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
+                Start-Sleep -Seconds 2
+                if (-not (Get-RunState)) {
+                    Write-Log "Task $taskName did not start within $([int]$clock.Elapsed.TotalMinutes) minutes; running sysprep here instead." 'WARN'
+                    $script:InHook = $true
+                    $Stage = 'Run'
+                    Invoke-RunStage
+                }
+            }
         }
         if ($state -in 'done', 'restart') {
             # Windows is restarting. Returning now would let Windows carry on with the startup command sysprep has
