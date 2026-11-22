@@ -110,6 +110,7 @@ Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DriverPackFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Function New-WinPEWallpaper -Force
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
@@ -374,6 +375,18 @@ try {
     Copy-Item "$repo\src\*.ps1", "$repo\src\*.psm1" $deployDir
     # The logo shown in the WinPE wizard and progress window.
     Copy-Item "$repo\src\Assets" "$deployDir\Assets" -Recurse -Force
+    # WinPE's desktop background, seen while it starts: the logo on the deploy windows' dark blue instead of plain blue.
+    # winpe.jpg belongs to TrustedInstaller, so Administrators (by SID: the group has another name on a French PC)
+    # take it first. A failure keeps the plain blue.
+    try {
+        $wallpaper = Join-Path $mount 'Windows\System32\winpe.jpg'
+        $newWallpaper = New-WinPEWallpaper -Path (Join-Path $WorkDir 'winpe.jpg') -LogoPath "$repo\src\Assets\logo.png"
+        if (Test-Path -LiteralPath $wallpaper) {
+            & takeown.exe /f $wallpaper /a 2>&1 | Out-Null
+            & icacls.exe $wallpaper /grant '*S-1-5-32-544:F' 2>&1 | Out-Null
+        }
+        Copy-Item -LiteralPath $newWallpaper -Destination $wallpaper -Force
+    } catch { Write-Warning "WinPE keeps its plain blue background: $($_.Exception.Message)" }
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
     Save-JsonFile -Path "$deployDir\config\tool-version.json" -InputObject $versionRecord
     if ($CaptureConfig) { Copy-Item $CaptureConfig "$deployDir\config\capture.json" }

@@ -53,6 +53,35 @@ function Set-DeployConsole {
     } catch { }   # a host without a resizable console (ISE, CI): keep what it has
 }
 
+function Test-WinPE {
+    # WinPE has this key; a normal Windows (the console PC, CI) does not.
+    try { $null -ne [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\MiniNT') } catch { $false }
+}
+
+function Set-DeployConsoleWindow {
+    <#
+    .SYNOPSIS
+        Hides or shows the black console window that startnet.cmd and Deploy-Image.ps1 run in. In WinPE the deploy
+        windows are full screen and the log is in their log box and View log, so the console only got in the way.
+        It comes back when a deployment fails with no progress window to show it, so the command prompt that
+        startnet.cmd then opens can be seen. Does nothing outside WinPE unless -Force.
+    #>
+    param([switch]$Show, [switch]$Force)
+    if (-not $Force -and -not (Test-WinPE)) { return $false }
+    try {
+        if (-not ('ImagingTool.DeployConsoleWindow' -as [type])) {
+            Add-Type -Namespace ImagingTool -Name DeployConsoleWindow -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+'@
+        }
+        $h = [ImagingTool.DeployConsoleWindow]::GetConsoleWindow()
+        if ($h -eq [IntPtr]::Zero) { return $false }
+        [void][ImagingTool.DeployConsoleWindow]::ShowWindow($h, $(if ($Show) { 5 } else { 0 }))   # 5 = SW_SHOW, 0 = SW_HIDE
+        $true
+    } catch { $false }
+}
+
 function Set-DeployLogPath {
     # Write-DeployLog writes to X:\Windows\Temp\Deploy.log (WinPE) unless a script points it somewhere else.
     # -New starts the file empty.
@@ -884,6 +913,6 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

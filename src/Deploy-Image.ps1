@@ -375,10 +375,10 @@ function Start-ProgressWindow([string]$ProgressPath) {
     # The window on this PC's screen (DeployProgressWindow.ps1), in its own process so it keeps redrawing while DISM runs.
     try {
         $script = Join-Path $PSScriptRoot 'DeployProgressWindow.ps1'
-        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+        # The process, so the end of this script can tell whether the window is still there to show a failure.
+        Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ArgumentList @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', "`"$script`"",
-            '-ProgressPath', "`"$ProgressPath`"", '-DeployProcessId', $PID) | Out-Null
-        $true
+            '-ProgressPath', "`"$ProgressPath`"", '-DeployProcessId', $PID)
     } catch {
         Write-DeployLog "Progress window not started: $($_.Exception.Message)" -Level WARN
         $false
@@ -487,6 +487,12 @@ function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
 }
 
 # Locked media: the WinPE password first, before the content, the wizard or anything else.
+# The deploy windows fill the screen and show the log, so the console window behind them is hidden in WinPE.
+# Whatever stops this script before its own end (the trap) or makes it fail with no progress window brings the
+# console back, so startnet.cmd's command prompt and the error can be seen.
+[void](Set-DeployConsoleWindow)
+trap { [void](Set-DeployConsoleWindow -Show); break }
+
 Unlock-DeployMedia
 
 $root = $null; $hw = $null; $answer = $null; $driverMatch = $null; $plan = $null; $statusTarget = $null; $logName = $null
@@ -884,4 +890,9 @@ if ($status -eq 'OK' -and ($answer.Shutdown -or $answer.Reboot)) {
 }
 if ($status -eq 'OK' -and $answer.Shutdown) { & wpeutil.exe shutdown }
 elseif ($status -eq 'OK' -and $answer.Reboot) { & wpeutil.exe reboot }
+# The progress window shows the result with View log, Command prompt, Restart and Shut down. Once it is closed (or
+# when there is none), the console comes back: startnet.cmd leaves a command prompt there, and an empty screen
+# would look like the PC hung.
+if ($progressWindow -is [Diagnostics.Process]) { try { $progressWindow.WaitForExit() } catch { } }
+[void](Set-DeployConsoleWindow -Show)
 if ($status -ne 'OK') { exit 1 }

@@ -30,6 +30,50 @@ function Get-LogoImage {
     $null
 }
 
+function New-WinPEWallpaper {
+    <#
+    .SYNOPSIS
+        Draws WinPE's desktop background (Windows\System32\winpe.jpg in boot.wim): the logo and "Deploy Windows"
+        in the middle of the dark blue of the deploy windows, seen while WinPE starts and before the full-screen
+        wizard opens. The stick build puts it in place of WinPE's plain blue.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$LogoPath = [IO.Path]::Combine($PSScriptRoot, 'Assets', 'logo.png'),
+        [int]$Width = 1920, [int]$Height = 1080,   # most laptop screens; WinPE stretches it to the screen
+        [string]$Caption = 'Deploy Windows'
+    )
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object Drawing.Bitmap($Width, $Height)
+    $g = [Drawing.Graphics]::FromImage($bmp)
+    try {
+        $g.SmoothingMode = 'AntiAlias'; $g.InterpolationMode = 'HighQualityBicubic'; $g.TextRenderingHint = 'AntiAliasGridFit'
+        $rect = New-Object Drawing.Rectangle(0, 0, $Width, $Height)
+        $back = New-Object Drawing.Drawing2D.LinearGradientBrush($rect, (Get-ThemeColor 'Sidebar'), (Get-ThemeColor 'SidebarSelected'), [single]90)
+        $g.FillRectangle($back, $rect); $back.Dispose()
+
+        $size = [int]($Height * 0.22)
+        $top = [int]($Height / 2 - $size * 0.8)
+        if ($LogoPath -and [IO.File]::Exists($LogoPath)) {
+            $logo = [Drawing.Image]::FromFile($LogoPath)
+            try { $g.DrawImage($logo, [int](($Width - $size) / 2), $top, $size, $size) } finally { $logo.Dispose() }
+        }
+        $font = New-Object Drawing.Font('Segoe UI Semibold', [single]($Height / 30), [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
+        $format = New-Object Drawing.StringFormat -Property @{ Alignment = 'Center' }
+        $white = New-Object Drawing.SolidBrush([Drawing.Color]::White)
+        $g.DrawString($Caption, $font, $white, (New-Object Drawing.RectangleF(0, ($top + $size + $Height * 0.03), $Width, ($Height * 0.1))), $format)
+        $white.Dispose(); $font.Dispose(); $format.Dispose()
+
+        $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+        $params = New-Object Drawing.Imaging.EncoderParameters(1)
+        $params.Param[0] = New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality, [long]92)
+        $bmp.Save($Path, $codec, $params)
+        $params.Dispose()
+    }
+    finally { $g.Dispose(); $bmp.Dispose() }
+    $Path
+}
+
 function Set-ThemeButton {
     # Flat button with a thin border and a hover colour. Primary: filled with the accent colour (lighter while disabled).
     param([Parameter(Mandatory)]$Button, [switch]$Primary)
@@ -132,6 +176,16 @@ function New-DeploySidebar {
     }
     $Form.Controls.Add($panel)
     $labels
+}
+
+function Set-FullScreen {
+    # Makes a WinPE window fill the screen with no title bar, as Windows Setup does. The layout functions size
+    # everything from the window's ClientSize, so they run after this.
+    param([Parameter(Mandatory)]$Form)
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $Form.FormBorderStyle = 'None'
+    $Form.StartPosition = 'Manual'
+    $Form.Bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
 }
 
 function Set-FittingFont {
@@ -365,8 +419,11 @@ function Show-DeployWizard {
     $form = New-Object Windows.Forms.Form -Property @{
         Text = 'Deploy Windows'; ClientSize = New-Object Drawing.Size(920, 540); Font = $font
         StartPosition = 'CenterScreen'; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false
-        TopMost = $true; BackColor = [Drawing.Color]::White
+        BackColor = [Drawing.Color]::White
     }
+    # The whole screen, so WinPE shows the wizard and nothing else (the console behind is hidden, see
+    # Set-DeployConsoleWindow). Not TopMost: Command prompt and the log open over it.
+    Set-FullScreen -Form $form
     $title = New-Object Windows.Forms.Label -Property @{
         Location = (New-Object Drawing.Point(224, 16)); Size = (New-Object Drawing.Size(672, 32)); Font = New-Object Drawing.Font('Segoe UI Semibold', 15)
     }
@@ -583,7 +640,8 @@ function Show-DeployWizard {
     $w.List.SelectedIndex = if ($start -ge 0) { $start } else { 0 }
     & $w.Show
     if ($Notice) { $w.Error.Text = $Notice; Set-FittedHeight -Control $w.Error -MinLines 2 -MaxLines 2 }
-    $form.Add_Shown({ $script:wiz.Form.Activate() })
+    # TopMost for a moment brings it to the front; leaving it on would hide Command prompt and Notepad.
+    $form.Add_Shown({ $f = $script:wiz.Form; $f.TopMost = $true; $f.Activate(); $f.TopMost = $false })
     $null = $form.ShowDialog()
     $result = $w.Result
     $form.Dispose()
@@ -832,5 +890,5 @@ function Copy-DeployLogs {
     [pscustomobject]@{ Path = $folder; Count = $count }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, New-WinPEWallpaper, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs
