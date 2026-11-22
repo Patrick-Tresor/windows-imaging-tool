@@ -913,6 +913,14 @@ function Get-OfflineImageState {
     }
 }
 
-Export-ModuleMember -Function Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
+function Test-GenericComputerName {
+    # Whether a name is one Windows made up by itself (DESKTOP-XXXXXXX, WIN-XXXXXXXXXXX, LAPTOP-XXXXXXXX): a reimage
+    # does not keep such a name, it names the PC by the answer file (or naming list) instead. A PC that kept the reference
+    # VM's name (DESKTOP-FF7OSR7 on the 5521, 2026-11-22) has one.
+    param([string]$Name)
+    "$Name".Trim() -match '^(DESKTOP|LAPTOP|WIN)-[A-Z0-9]{7,11}$'
+}
+
+Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment
