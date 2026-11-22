@@ -132,6 +132,19 @@ function Get-SysprepWaitMinutes {
     if ($State -eq 'sysprep') { 180 } else { 45 }
 }
 
+function Test-ReservedStorageInUse {
+    # Whether reserved storage (ReserveManager ActiveScenario / ShippedWithReserves) would stop sysprep: it refuses
+    # with "Audit mode cannot be turned on if reserved storage is in use" (hr 0x800F0975), which Patrick's 5521 hit
+    # on 2026-11-21 after three restarts had not cleared it. $Values: the key's values (Get-ItemProperty), or $null.
+    param($Values)
+    if (-not $Values) { return $false }
+    foreach ($n in 'ActiveScenario', 'ShippedWithReserves') {
+        $p = $Values.PSObject.Properties[$n]
+        if ($p -and $p.Value -and [int]$p.Value -ne 0) { return $true }
+    }
+    $false
+}
+
 function Test-SysprepHookDone {
     # Whether the hook can stop waiting for the Run stage: it finished, failed, or Windows is restarting.
     param([string]$State)
@@ -140,4 +153,4 @@ function Test-SysprepHookDone {
 
 Export-ModuleMember -Function Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
-    Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone
+    Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone, Test-ReservedStorageInUse

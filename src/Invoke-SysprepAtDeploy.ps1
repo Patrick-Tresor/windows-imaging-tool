@@ -98,6 +98,23 @@ function Stop-WithFailure([string]$Reason) {
     exit 1
 }
 
+function Disable-ReservedStorage {
+    # Sysprep refuses to generalize while reserved storage is in use (hr 0x800F0975), and restarts do not clear it on
+    # a copied Windows. Turning it off only gives back the space Windows keeps for updates.
+    $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager'
+    $values = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+    if (-not (Test-ReservedStorageInUse -Values $values)) { return }
+    Write-Log "Reserved storage is in use (ActiveScenario $($values.ActiveScenario), ShippedWithReserves $($values.ShippedWithReserves)); turning it off so sysprep can run"
+    foreach ($n in 'ActiveScenario', 'ShippedWithReserves') {
+        try { Set-ItemProperty -Path $key -Name $n -Value 0 -Type DWord -ErrorAction Stop } catch { Write-Log "Can't set ${n}: $($_.Exception.Message)" 'WARN' }
+    }
+    $out = & dism.exe /Online /Set-ReservedStorageState /State:Disabled /English 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $last = @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) | Select-Object -Last 1
+        Write-Log "DISM could not turn reserved storage off (exit $LASTEXITCODE): $last" 'WARN'
+    }
+}
+
 function Invoke-RunStage {
     $plan = Read-Plan
     $attemptFile = [IO.Path]::Combine($folder, 'attempts.txt')
@@ -146,6 +163,8 @@ function Invoke-RunStage {
         Remove-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\BitLocker' -Name PreventDeviceEncryption -ErrorAction SilentlyContinue
         Write-Log 'Device encryption allowed again'
     }
+
+    Disable-ReservedStorage
 
     $unattend = [IO.Path]::Combine($folder, 'unattend.xml')
     $sysprepArgs = Get-SysprepArguments -UnattendPath $unattend

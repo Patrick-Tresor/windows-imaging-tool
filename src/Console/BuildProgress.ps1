@@ -1,6 +1,10 @@
 # Build progress window: one row per media build step (name, elapsed time, bar, Complete), read twice a second
 # from the progress file New-DeploymentMedia.ps1 writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
 # Not modal: the console stays usable, and closing the window leaves the build running in its own window.
+# Closing a window while its work runs only hides it: Show progress in the console header brings it back
+# (Patrick, 2026-11-22: a closed progress window could not be opened again).
+
+if (-not $script:ProgressWindows) { $script:ProgressWindows = New-Object Collections.ArrayList }
 
 # A C# row so each property change redraws only that bit: a busy bar keeps running while its time counts up.
 if (-not ('ImagingTool.BuildStepRow' -as [type])) {
@@ -122,11 +126,56 @@ function Show-BuildProgress {
         } catch { }
     })
     $b.BtnClose.Add_Click({ param($sender) [Windows.Window]::GetWindow($sender).Close() })
-    $dlg.Add_Closed({ param($sender) $sender.Tag.Timer.Stop() })
+    $dlg.Add_Closing({
+        param($sender, $e)
+        # WPF refuses Hide() inside Closing, so it is queued just after.
+        if (Test-ProgressWindowKeep -Ctx $sender.Tag) {
+            $e.Cancel = $true
+            $w = $sender
+            [void]$w.Dispatcher.BeginInvoke([action]{ $w.Hide() }.GetNewClosure())
+        }
+    })
+    $dlg.Add_Closed({
+        param($sender)
+        $sender.Tag.Timer.Stop()
+        $script:ProgressWindows.Remove($sender.Tag)
+        Update-ShowProgressButton
+    })
+    $ctx.Window = $dlg
+    [void]$script:ProgressWindows.Add($ctx)
+    Update-ShowProgressButton
 
     Update-BuildProgressWindow $ctx
     $timer.Start()
     $dlg.Show()
+}
+
+function Test-ProgressWindowKeep {
+    # True when closing this progress window should only hide it: its work still runs and the console stays open.
+    param([Parameter(Mandatory)]$Ctx)
+    if ($script:ConsoleClosing) { return $false }
+    [bool]($Ctx.Timer -and $Ctx.Timer.IsEnabled)
+}
+
+function Update-ShowProgressButton {
+    # The header's Show progress button: shown while any progress window exists, open or hidden.
+    $btn = if ($script:ui) { $script:ui.BtnShowProgress } else { $null }
+    if (-not $btn) { return }
+    $n = $script:ProgressWindows.Count
+    $btn.Visibility = if ($n) { 'Visible' } else { 'Collapsed' }
+    $btn.Content = if ($n -gt 1) { "Show progress ($n)" } else { 'Show progress' }
+}
+
+function Show-ProgressWindows {
+    # Brings back every progress window, hidden or behind the console, oldest first so the newest ends on top.
+    foreach ($c in @($script:ProgressWindows)) {
+        try {
+            $w = $c.Window
+            if (-not $w.IsVisible) { $w.Show() }
+            if ($w.WindowState -eq 'Minimized') { $w.WindowState = 'Normal' }
+            [void]$w.Activate()
+        } catch { }
+    }
 }
 
 function Invoke-BuildFinished {

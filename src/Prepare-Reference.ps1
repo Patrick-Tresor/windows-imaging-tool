@@ -163,6 +163,16 @@ if ($problems.Count) { Write-Host "`nFix the problems above, then run this again
 Write-Host 'Reference machine is ready for capture.' -ForegroundColor Green
 if ($CheckOnly) { return }
 
+# Sysprep refuses to generalize while reserved storage is in use ("Audit mode cannot be turned on if reserved storage
+# is in use", hr 0x800F0975). Turning it off only gives back the space Windows keeps for updates.
+$reserve = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager'
+$rv = Get-ItemProperty -Path $reserve -ErrorAction SilentlyContinue
+if ($rv -and (@('ActiveScenario', 'ShippedWithReserves') | Where-Object { $rv.PSObject.Properties[$_] -and [int]$rv.$_ -ne 0 })) {
+    Write-Host 'Turning reserved storage off so sysprep can run.'
+    foreach ($n in 'ActiveScenario', 'ShippedWithReserves') { Set-ItemProperty -Path $reserve -Name $n -Value 0 -Type DWord -ErrorAction SilentlyContinue }
+    & dism.exe /Online /Set-ReservedStorageState /State:Disabled /English | Out-Null
+}
+
 $sysprepArgs = @('/generalize', '/oobe', '/shutdown')
 if ($Unattend) { $sysprepArgs += "/unattend:$Unattend" }
 Write-Host 'Running sysprep. The machine shuts down when it finishes; then boot it from the capture media.'

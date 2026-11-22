@@ -152,6 +152,8 @@ $progressText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/Buil
 Assert-Equal ($consoleText -match "Start-ConsoleJob -Name 'media-build'") $true 'the console starts the build with Start-ConsoleJob'
 Assert-Equal ($progressText -match "'-ProgressFile'") $true 'Start-ConsoleJob passes -ProgressFile'
 Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console opens the Build progress window'
+Assert-Equal ($consoleText -match 'BtnShowProgress\.Add_Click\(\{ Invoke-Safely \{ Show-ProgressWindows') $true 'Show progress button reopens the windows'
+Assert-Equal ($consoleText -match '\$window\.Add_Closing\(\{ \$script:ConsoleClosing = \$true') $true 'closing the console closes the hidden progress windows'
 
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
@@ -186,6 +188,15 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal (& $find 'TxtTitle').Text 'Building USB stick' 'window: title'
         Assert-Equal (& $find 'TxtSummary').Text 'Copying images and content...' 'window: summary'
 
+        # Closing while the build runs only hides it; Show progress brings it back.
+        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $true 'window: listed for Show progress'
+        $dlg.Close()
+        $dlg.Dispatcher.Invoke([action]{}, 'Background')
+        Assert-Equal $dlg.IsVisible $false 'window: closing while running hides it'
+        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $true 'window: a hidden window stays listed'
+        Show-ProgressWindows
+        Assert-Equal $dlg.IsVisible $true 'window: Show progress shows it again'
+
         Complete-BuildStep 'b'
         Stop-BuildProgress
         Update-BuildProgressWindow $dlg.Tag
@@ -193,6 +204,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal (& $find 'BtnClose').Content 'Done' 'window: Close becomes Done'
         Assert-Equal $dlg.Tag.Timer.IsEnabled $false 'window: stops reading when the build is done'
         $dlg.Close()
+        Assert-Equal ($script:ProgressWindows -contains $dlg.Tag) $false 'window: closing after the end really closes it'
     } finally {
         $owner.Close()
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

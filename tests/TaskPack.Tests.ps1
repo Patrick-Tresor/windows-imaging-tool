@@ -133,7 +133,7 @@ try {
     # FIRSTLOGON library tasks go through Run-LogonTask.ps1 with their own entry in logon-tasks.json.
     $logonPlan = @(New-LogonTaskPlan -Tasks $plan)
     Assert-Equal (($logonPlan | ForEach-Object name) -join ',') 'Rename' 'logon-tasks.json holds the FIRSTLOGON library tasks only'
-    Assert-Equal (Get-LogonTaskCommand -Index 0) 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\ImagingTool\Tasks\Run-LogonTask.ps1" -Index 0' 'a logon task runs through Run-LogonTask.ps1'
+    Assert-Equal (Get-LogonTaskCommand -Index 0) 'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\ImagingTool\Tasks\Run-LogonTask.ps1" -Index 0' 'a logon task runs through Run-LogonTask.ps1'
     $runner = Get-Content -Raw (Join-Path $repo 'src/Run-LogonTask.ps1')
     Assert-Equal ($runner -match '\$all = Get-Content' -and $runner -match 'Temp\\Task-\$\(\$def\.name\)-\$\(\$env:USERNAME\)\.log') $true 'the logon runner reads the plan safely in 5.1 and logs per user'
     $runnerErrors = $null
