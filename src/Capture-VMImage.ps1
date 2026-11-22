@@ -56,24 +56,62 @@ $logParent = Split-Path -Parent $logPath
 if ($logParent -and -not (Test-Path -LiteralPath $logParent)) { New-Item -ItemType Directory -Path $logParent -Force | Out-Null }
 Set-DeployLogPath -Path $logPath -New
 
+function Get-CaptureMountFolder {
+    # The one folder the VM's Windows partition is opened at, instead of a drive letter. The console adds this exact
+    # folder to Microsoft Defender's folder exclusions (Get-ScanExclusionFolders), so Defender doesn't check each of
+    # the hundreds of thousands of files DISM reads while it scans. Keep the two paths the same.
+    $base = if ($env:ProgramData) { $env:ProgramData } else { [IO.Path]::GetTempPath() }
+    [IO.Path]::Combine($base, 'ImagingConsole', 'CaptureMount')
+}
+
+function Get-FolderVolumeSpace {
+    # Size and free space of the volume at Path, also when it is opened at a folder (DriveInfo only reads the drive
+    # letter's volume, here C:). GetDiskFreeSpaceEx follows the mount folder.
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not ('ImagingTool.VolumeSpace' -as [type])) {
+        Add-Type -Namespace ImagingTool -Name VolumeSpace -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern bool GetDiskFreeSpaceEx(string dir, out ulong freeToCaller, out ulong total, out ulong free);
+'@
+    }
+    $freeToCaller = [uint64]0; $total = [uint64]0; $free = [uint64]0
+    if (-not [ImagingTool.VolumeSpace]::GetDiskFreeSpaceEx($Path.TrimEnd('\') + '\', [ref]$freeToCaller, [ref]$total, [ref]$free)) {
+        throw "Could not read the size of the volume at $Path."
+    }
+    [pscustomobject]@{ Total = $total; Free = $free }
+}
+
+function Clear-CaptureMountFolder {
+    # An earlier run that stopped halfway can leave a partition opened at the folder: take it off (mountvol /D).
+    param([Parameter(Mandatory)][string]$Folder)
+    if (-not [IO.Directory]::Exists($Folder)) { [void][IO.Directory]::CreateDirectory($Folder); return }
+    if (([IO.File]::GetAttributes($Folder) -band [IO.FileAttributes]::ReparsePoint) -or @([IO.Directory]::EnumerateFileSystemEntries($Folder)).Count) {
+        Write-DeployLog "Taking an old partition off $Folder (left by an earlier capture)."
+        & mountvol.exe ($Folder.TrimEnd('\') + '\') /D 2>&1 | Out-Null
+        if (@([IO.Directory]::EnumerateFileSystemEntries($Folder)).Count) { throw "$Folder is still in use by an earlier capture. Restart the PC and try again." }
+    }
+}
+
 function Mount-VMDisks {
-    # Mounts the virtual disks and gives their partitions drive letters until the Windows one is found.
-    # Returns the Windows root (e.g. E:\, or nothing) and what Dismount-VMDisks must undo.
+    # Mounts the virtual disks and opens their partitions, one at a time, at the capture folder until the Windows one
+    # is found. Returns the Windows root (the folder, or nothing) and what Dismount-VMDisks must undo.
     param([Parameter(Mandatory)][string[]]$Paths)
     $mount = [pscustomobject]@{ Root = $null; Mounted = @(); Assigned = @() }
+    $folder = Get-CaptureMountFolder
+    $access = $folder.TrimEnd('\') + '\'
     try {
+        Clear-CaptureMountFolder -Folder $folder
         foreach ($path in $Paths) {
             # Mount-DiskImage is in every Windows 10/11 and mounts a VHD or VHDX read-only.
             $diskNumber = (Mount-DiskImage -ImagePath $path -Access ReadOnly -NoDriveLetter -PassThru -ErrorAction Stop | Get-Disk).Number
             $mount.Mounted += $path
             # GPT data partitions are Basic; MBR ones (BIOS VMs) are IFS.
             foreach ($part in @(Get-Partition -DiskNumber $diskNumber | Where-Object { $_.Type -in 'Basic', 'IFS' })) {
-                Add-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber -AssignDriveLetter
-                $letter = (Get-Partition -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber).DriveLetter
-                if (-not $letter) { continue }
-                $root = "$($letter):\"
-                $mount.Assigned += [pscustomobject]@{ Disk = $diskNumber; Partition = $part.PartitionNumber; Path = $root }
-                if (Test-Path (Join-Path $root 'Windows\System32\config\SYSTEM')) { $mount.Root = $root; break }
+                try { Add-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber -AccessPath $access -ErrorAction Stop }
+                catch { Write-DeployLog "Partition $($part.PartitionNumber) could not be opened: $($_.Exception.Message)" -Level WARN; continue }
+                $opened = [pscustomobject]@{ Disk = $diskNumber; Partition = $part.PartitionNumber; Path = $access }
+                if (Test-Path -LiteralPath (Join-Path $access 'Windows\System32\config\SYSTEM')) { $mount.Assigned += $opened; $mount.Root = $access; break }
+                Remove-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $part.PartitionNumber -AccessPath $access -ErrorAction SilentlyContinue
             }
             if ($mount.Root) { break }
         }
@@ -86,7 +124,7 @@ function Mount-VMDisks {
 }
 
 function Dismount-VMDisks {
-    # Removes the drive letters Mount-VMDisks gave out first, since a disk with letters in use cannot be dismounted.
+    # Takes the partition off the capture folder first, since a disk with a partition in use cannot be dismounted.
     param([Parameter(Mandatory)]$Mount)
     foreach ($a in $Mount.Assigned) { Remove-PartitionAccessPath -DiskNumber $a.Disk -PartitionNumber $a.Partition -AccessPath $a.Path -ErrorAction SilentlyContinue }
     foreach ($m in $Mount.Mounted) { Dismount-DiskImage -ImagePath $m -ErrorAction SilentlyContinue | Out-Null }
@@ -146,12 +184,12 @@ function Get-OfflineWindowsInfo {
         Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($values.CurrentBuild -match '^\d+$') { $build = [int]$values.CurrentBuild }
-    $drive = New-Object IO.DriveInfo($Root)
+    $space = Get-FolderVolumeSpace -Path $Root
     [pscustomobject]@{
         Name       = Get-WindowsDisplayName -ProductName $values.ProductName -DisplayVersion $values.DisplayVersion -Build $build
         Build      = $build
-        TotalBytes = [double]$drive.TotalSize
-        UsedBytes  = [double]($drive.TotalSize - $drive.TotalFreeSpace)
+        TotalBytes = [double]$space.Total
+        UsedBytes  = [double]($space.Total - $space.Free)
     }
 }
 

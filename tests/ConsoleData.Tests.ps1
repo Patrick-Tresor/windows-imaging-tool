@@ -302,20 +302,21 @@ try {
 $folders = @(Get-ScanExclusionFolders -ContentRoot 'D:\Deploy' -WorkDir 'C:\WinPE_Build')
 Assert-Equal $folders[0] 'C:\WinPE_Build' 'scan tip: the WinPE work folder first'
 Assert-Equal ($folders[1] -like '*ImagingConsole*WinPEBuilds') $true 'scan tip: the WinPE build cache'
-Assert-Equal ($folders[2] -like 'D:\Deploy*Images') $true 'scan tip: the content root''s Images folder'
-Assert-Equal @(Get-ScanExclusionFolders -ContentRoot '\\server\Deploy').Count 2 'scan tip: a network share is not listed (its server scans it)'
+Assert-Equal ($folders[2] -like '*ImagingConsole*CaptureMount') $true 'scan tip: the VM capture''s mount folder'
+Assert-Equal ($folders[3] -like 'D:\Deploy*Images') $true 'scan tip: the content root''s Images folder'
+Assert-Equal @(Get-ScanExclusionFolders -ContentRoot '\\server\Deploy').Count 3 'scan tip: a network share is not listed (its server scans it)'
 Assert-Equal (@($folders | Where-Object { $_ -match '^[A-Za-z]:\\?$' -or $_ -match '\.exe$' }).Count) 0 'scan tip: never a drive root or a program'
 $cfg = [pscustomobject]@{ contentRoot = 'D:\Deploy' }
-Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg).Count 3 'scan exclusions: all three to add at first start'
-$cfg = Add-ScanExclusionsDone -Config $cfg -Folders $folders[0], $folders[1]
-Assert-Equal (@(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg) -join ',') $folders[2] 'scan exclusions: only the folders not added yet (a new content root adds its Images)'
-$cfg = Add-ScanExclusionsDone -Config $cfg -Folders ($folders[2] + '\')
+Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg).Count 4 'scan exclusions: all four to add at first start'
+$cfg = Add-ScanExclusionsDone -Config $cfg -Folders $folders[0], $folders[1], $folders[2]
+Assert-Equal (@(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg) -join ',') $folders[3] 'scan exclusions: only the folders not added yet (a new content root adds its Images)'
+$cfg = Add-ScanExclusionsDone -Config $cfg -Folders ($folders[3] + '\')
 Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config $cfg).Count 0 'scan exclusions: nothing left once all were added (trailing backslash ignored)'
-Assert-Equal @($cfg.scanExclusionsDone).Count 3 'scan exclusions: remembered once each'
+Assert-Equal @($cfg.scanExclusionsDone).Count 4 'scan exclusions: remembered once each'
 Assert-Equal $(Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config $cfg) $null 'scan tip: hidden once every folder was added'
 $tip = Get-ScanExclusionTip -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ contentRoot = 'D:\Deploy' }) -Reason 'Windows refused the change (Tamper Protection or a policy)'
 Assert-Equal ($tip.Text -like '*could not add*(Windows refused the change (Tamper Protection or a policy))*Windows Security*C:\WinPE_Build*') $true 'scan tip: says why in one line, where to add them, and lists them'
-Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })).Count 3 'scan exclusions: the old Done flag does not stop the automatic add'
+Assert-Equal @(Get-ScanExclusionTodo -ContentRoot 'D:\Deploy' -Config ([pscustomobject]@{ scanTipDone = $true })).Count 4 'scan exclusions: the old Done flag does not stop the automatic add'
 $cfg = [pscustomobject]@{ scanExclusionsDone = $folders; scanTipDismissed = $folders }
 Assert-Equal (@(Get-ScanExclusionTodo -ContentRoot 'E:\Moved' -Config $cfg) -join ',') ([IO.Path]::Combine('E:\Moved', 'Images')) 'scan exclusions: a moved content root gets its new Images folder added'
 Assert-Equal ((Get-ScanExclusionTip -ContentRoot 'E:\Moved' -Config $cfg -Reason 'x').Folders -join ',') ([IO.Path]::Combine('E:\Moved', 'Images')) 'scan tip: Done hid the old folders only, a refused new location shows again'
