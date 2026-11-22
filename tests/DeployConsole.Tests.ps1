@@ -77,4 +77,9 @@ Assert-Equal ($deploy -match 'Set-DeployConsole') $true 'deploy sets up the cons
 $common = Get-Content -Raw (Join-Path $repo 'src/DeployCommon.psm1')
 Assert-Equal ($common -match 'ReadAllText\(\$out\)') $false 'DISM output is read with FileShare.ReadWrite'
 
+# A reimage does not keep a name Windows made up (the reference VM's DESKTOP-XXXXXXX on the 5521).
+foreach ($n in 'DESKTOP-FF7OSR7', 'WIN-8K2J4L1M9QZ', 'LAPTOP-AB12CD34', ' desktop-ff7osr7 ') { Assert-Equal (Test-GenericComputerName $n) $true "generic name: $n" }
+foreach ($n in '5CG1234XYZ', 'LAB-PC-014', 'DESKTOP-ADMIN', 'DESKTOP-12', '') { Assert-Equal (Test-GenericComputerName $n) $false "real name kept: '$n'" }
+Assert-Equal ($deploy -match 'Test-GenericComputerName \$job\.computerName') $true 'deploy checks the reimage job name'
+
 Complete-Tests 'All deploy console tests passed.'

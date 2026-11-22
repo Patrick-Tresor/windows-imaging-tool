@@ -550,7 +550,11 @@ try {
     if ($job) {
         Write-DeployLog ("Reimage requested by {0} at {1}: answer file {2}, name '{3}', OU '{4}'" -f $job.requestedBy, $job.requestedAt, $job.answerFile, $job.computerName, $job.ou)
         $AnswerFile = $job.answerFile
-        if ($job.computerName -and -not $ComputerName) { $ComputerName = $job.computerName }
+        if ($job.computerName -and -not $ComputerName) {
+            if (Test-GenericComputerName $job.computerName) {
+                Write-DeployLog "Not keeping the name $($job.computerName): Windows made it up; the PC is named by the naming list or the answer file"
+            } else { $ComputerName = $job.computerName }
+        }
     }
     $givenName = $ComputerName
     # Someone is at this PC to type a password that is not on the media, unless -NoPrompt or a reimage job started it.
