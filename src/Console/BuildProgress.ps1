@@ -162,11 +162,12 @@ function Show-BuildProgress {
     $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
     [void]$script:ProgressWindows.Add($ctx)
     $hub.Jobs.Add($view)
-    Update-ProgressHubCount
     Update-ShowProgressButton
 
-    Update-BuildProgressWindow $ctx
+    # Started before the first read, so the count sees it running (a first read that finds it done stops it again).
     $timer.Start()
+    Update-ProgressHubCount
+    Update-BuildProgressWindow $ctx
     Show-ProgressWindows
     try { $hub.B.ScrollJobs.ScrollToEnd() } catch { }
 }
