@@ -26,7 +26,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.12 | Boot the stick in legacy BIOS (CSM) mode | The deploy stops with "Boot it in UEFI mode" before the disk is erased |
 | 1.13 | Stick built with **Online apps on USB** ticked, deployed with the network cable out | The build's Downloading online applications step lists the apps; `FirstBoot.log` says the installer "is already in the folder; not downloaded" and the apps install |
 | 1.14 | Tool version on the stick | The console header shows the version; the WinPE wizard shows the same one at the bottom of its left band and `Deploy.log` starts with "Imaging tool version"; a stick built before an update gets the yellow "built with version ..." banner in the console, and **Update the stick** opens the Media tab with that stick and Update ticked |
-| 1.15 | Full screen, no console | After the WinPE password, the wizard and the progress window fill the screen with no black console behind them; Command prompt and View log open over them; after a deploy that stays in WinPE (or fails), closing the progress window shows the console with a command prompt |
+| 1.15 | Full screen, no console, logo background | While WinPE starts, the background is dark blue with the logo and "Deploy Windows" (not plain blue); after the WinPE password, the wizard and the progress window fill the screen with no black console behind them; Command prompt and View log open over them; after a deploy that stays in WinPE (or fails), closing the progress window shows the console with a command prompt |
 
 ## 2. Network (LAN share)
 

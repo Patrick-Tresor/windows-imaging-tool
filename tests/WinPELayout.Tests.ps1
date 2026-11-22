@@ -166,6 +166,28 @@ Assert-Equal ($wizSrc -match 'Set-FullScreen -Form \$form' -and $progSrc -match 
 $wizForm = [regex]::Match($wizSrc, "(?s)Text = 'Deploy Windows'; ClientSize.*?\}").Value
 Assert-Equal ($wizForm -match 'TopMost = \$true') $false 'the full-screen wizard is not TopMost (Command prompt opens over it)'
 
+# WinPE's desktop background: the logo and the caption on dark blue, put in boot.wim by the stick build.
+$jpg = [IO.Path]::Combine([IO.Path]::GetTempPath(), "winpe-wallpaper-$PID.jpg")
+try {
+    [void](New-WinPEWallpaper -Path $jpg)
+    $img = New-Object Drawing.Bitmap($jpg)
+    try {
+        Assert-Equal "$($img.Width)x$($img.Height)" '1920x1080' 'wallpaper: full HD'
+        $corner = $img.GetPixel(10, 10)
+        Assert-Equal ($corner.B -gt $corner.R -and $corner.R -lt 60) $true 'wallpaper: dark blue background'
+        $changed = 0
+        foreach ($dx in -60, -30, 0, 30, 60) { foreach ($dy in -120, -90, -60, -30) {
+            $p = $img.GetPixel(960 + $dx, 540 + $dy)
+            if ([Math]::Abs($p.R - $corner.R) + [Math]::Abs($p.G - $corner.G) + [Math]::Abs($p.B - $corner.B) -gt 60) { $changed++ }
+        } }
+        Assert-Equal ($changed -gt 0) $true 'wallpaper: the logo is drawn in the middle'
+    }
+    finally { $img.Dispose() }
+}
+finally { Remove-Item -LiteralPath $jpg -ErrorAction SilentlyContinue }
+$mediaSrc = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
+Assert-Equal ($mediaSrc -match "New-WinPEWallpaper" -and $mediaSrc -match "Windows\\System32\\winpe\.jpg") $true 'the stick build replaces winpe.jpg'
+
 # Show-DeployWizard lays the wizard out on each page.
 $src = Get-Content -Raw (Join-Path $repo 'src/DeployWizard.psm1')
 Assert-Equal ($src -match '\$w\.Layout = \{ Update-DeployWizardLayout') $true 'Show-DeployWizard uses Update-DeployWizardLayout'

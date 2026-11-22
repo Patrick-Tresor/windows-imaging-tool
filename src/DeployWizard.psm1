@@ -30,6 +30,50 @@ function Get-LogoImage {
     $null
 }
 
+function New-WinPEWallpaper {
+    <#
+    .SYNOPSIS
+        Draws WinPE's desktop background (Windows\System32\winpe.jpg in boot.wim): the logo and "Deploy Windows"
+        in the middle of the dark blue of the deploy windows, seen while WinPE starts and before the full-screen
+        wizard opens. The stick build puts it in place of WinPE's plain blue.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$LogoPath = [IO.Path]::Combine($PSScriptRoot, 'Assets', 'logo.png'),
+        [int]$Width = 1920, [int]$Height = 1080,   # most laptop screens; WinPE stretches it to the screen
+        [string]$Caption = 'Deploy Windows'
+    )
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object Drawing.Bitmap($Width, $Height)
+    $g = [Drawing.Graphics]::FromImage($bmp)
+    try {
+        $g.SmoothingMode = 'AntiAlias'; $g.InterpolationMode = 'HighQualityBicubic'; $g.TextRenderingHint = 'AntiAliasGridFit'
+        $rect = New-Object Drawing.Rectangle(0, 0, $Width, $Height)
+        $back = New-Object Drawing.Drawing2D.LinearGradientBrush($rect, (Get-ThemeColor 'Sidebar'), (Get-ThemeColor 'SidebarSelected'), [single]90)
+        $g.FillRectangle($back, $rect); $back.Dispose()
+
+        $size = [int]($Height * 0.22)
+        $top = [int]($Height / 2 - $size * 0.8)
+        if ($LogoPath -and [IO.File]::Exists($LogoPath)) {
+            $logo = [Drawing.Image]::FromFile($LogoPath)
+            try { $g.DrawImage($logo, [int](($Width - $size) / 2), $top, $size, $size) } finally { $logo.Dispose() }
+        }
+        $font = New-Object Drawing.Font('Segoe UI Semibold', [single]($Height / 30), [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
+        $format = New-Object Drawing.StringFormat -Property @{ Alignment = 'Center' }
+        $white = New-Object Drawing.SolidBrush([Drawing.Color]::White)
+        $g.DrawString($Caption, $font, $white, (New-Object Drawing.RectangleF(0, ($top + $size + $Height * 0.03), $Width, ($Height * 0.1))), $format)
+        $white.Dispose(); $font.Dispose(); $format.Dispose()
+
+        $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+        $params = New-Object Drawing.Imaging.EncoderParameters(1)
+        $params.Param[0] = New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality, [long]92)
+        $bmp.Save($Path, $codec, $params)
+        $params.Dispose()
+    }
+    finally { $g.Dispose(); $bmp.Dispose() }
+    $Path
+}
+
 function Set-ThemeButton {
     # Flat button with a thin border and a hover colour. Primary: filled with the accent colour (lighter while disabled).
     param([Parameter(Mandatory)]$Button, [switch]$Primary)
@@ -847,4 +891,4 @@ function Copy-DeployLogs {
 }
 
 Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, New-WinPEWallpaper, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs
