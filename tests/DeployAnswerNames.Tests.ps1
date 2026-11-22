@@ -23,8 +23,8 @@ try {
     Set-Content -LiteralPath (Join-Path $dir 'W11-Staff.xml') -Value '<x/>'
 
     # One answer file.
-    $one = Get-AnswerFileNames -ContentRoot $root -Required
-    Assert-Equal ($one -is [array]) $true 'one answer file still comes back as an array'
+    $one = @(Get-AnswerFileNames -ContentRoot $root -Required)
+    Assert-Equal ($one -is [array]) $true 'one answer file, wrapped in @(), is an array'
     Assert-Equal $one.Count 1 'one answer file: one name'
     Assert-Equal $one[0] 'W11-Staff' 'one answer file: [0] is the whole name, not its first letter'
 
@@ -36,8 +36,11 @@ try {
 
     # Several answer files, sorted.
     Set-Content -LiteralPath (Join-Path $dir 'A-Lab.xml') -Value '<x/>'
-    $two = Get-AnswerFileNames -ContentRoot $root
+    $two = @(Get-AnswerFileNames -ContentRoot $root)
     Assert-Equal ($two -join ',') 'A-Lab,W11-Staff' 'several answer files come back sorted'
+    Assert-Equal "$($two.Count)|$($two[1])" '2|W11-Staff' 'several answer files: one item each (the deploy picks the default among them)'
+    $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
+    Assert-Equal ('W11-Staff' -in $names) $true 'the default answer file is found among several'
 
     # A content root at the top of a drive (E:\) must not give E:\\AnswerFiles in the message.
     $driveRoot = [IO.Path]::GetPathRoot($root)

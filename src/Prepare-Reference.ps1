@@ -175,5 +175,5 @@ if ($rv -and (@('ActiveScenario', 'ShippedWithReserves') | Where-Object { $rv.PS
 
 $sysprepArgs = @('/generalize', '/oobe', '/shutdown')
 if ($Unattend) { $sysprepArgs += "/unattend:$Unattend" }
-Write-Host 'Running sysprep. The machine shuts down when it finishes; then boot it from the capture media.'
+Write-Host 'Running sysprep. The machine shuts down when it finishes; then capture its disk with the capture wizard in the console.'
 & "$env:WINDIR\System32\Sysprep\sysprep.exe" @sysprepArgs

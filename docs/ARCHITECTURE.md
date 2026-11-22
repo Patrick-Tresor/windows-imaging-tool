@@ -8,7 +8,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | Piece | Runs on | What it does |
 |---|---|---|
 | **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
-| **Capture** (`src/Capture-GoldenImage.ps1`) | WinPE, booted on the reference VM | Captures the sysprepped Windows partition to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
+| **Capture** (`src/Capture-VMImage.ps1`) | The admin PC, reading the shut-down reference VM's disk file | Captures the sysprepped Windows on the disk to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
 | **Sysprep at deploy** (`src/SysprepAtDeploy.psm1`, `src/Invoke-SysprepAtDeploy.ps1`) | WinPE, then the deployed PC's first start | Optional, for an image captured without sysprep (`Capture-VMImage.ps1 -SysprepAtDeploy`). After applying the image, WinPE sees it is not generalized and sets `HKLM\SYSTEM\Setup` SetupType 2 + CmdLine offline. At the first start that hook starts a SYSTEM task and waits for it, so no logon screen appears; the task runs `Prepare-Reference.ps1 -CheckOnly -RemoveUserApps` and `sysprep /generalize /oobe /reboot /unattend`, and removes the task and its PreventDeviceEncryption value before sysprep. The deploy screen and the PC show nothing about sysprep; only a failure turns the hook off and is shown on the logon screen and logged to `C:\Windows\Temp\SysprepAtDeploy.log`. |
 | **Image versions** (`src/ImageVersions.psm1`, `src/Invoke-ImageVersion.ps1`) | WinPE and the admin workstation | Keeps earlier images, rolls back, and resolves the version an answer file is pinned to. |
 | **Reimage from Active Directory** (`src/ActiveDirectory.psm1`, `src/RemoteReimage.psm1`, `src/Start-RemoteReimage.ps1`) | Admin workstation, then WinPE | The console's Computers tab lists computer accounts over LDAP (ADSI, no RSAT). A reimage reads each PC over WinRM (name, serial, UUID, UEFI), writes `Reimage\<serial>.json` on the share, copies `Boot\boot.wim` to `C:\_ImagingBoot` with a one-time RAM disk boot entry (`bcdedit /bootsequence`), suspends BitLocker for one restart and restarts. `Deploy-Image.ps1` takes the job by serial (UUID checked) right after mapping the share, moves it to `Reimage\Started`, and deploys its answer file with the kept name and OU, no wizard and no password prompts. |
@@ -71,23 +71,15 @@ file. `DeployProgress.psm1` turns a record into what the window shows
 
 ## Capture wizard
 
-`CaptureWizard.ps1` writes `config\capture.json` (name, description,
-compression, split, unattended) and calls `New-DeploymentMedia.ps1
--CaptureConfig`, which bakes it into WinPE. `startnet.cmd` runs
-`Capture-GoldenImage.ps1 -ConfigPath` when that file exists, and runs the deploy
-otherwise, so capture media and deploy media share one build path.
-
-Capture ISOs are built with `efisys_noprompt.bin` and without `boot\bootfix.bin`,
-so an unattended VM boots them without a key press.
-
-For a VM's disk file, the wizard runs `Capture-VMImage.ps1 -DiskPath` on the admin
-PC instead: no media is built. A VHD or VHDX is mounted read-only; a VMDK, VDI,
+The wizard captures a VM's disk file: it runs `Capture-VMImage.ps1 -DiskPath` on the
+admin PC, and no media is built (the capture ISO that booted the VM into WinPE was
+removed on 2026-11-22). A VHD or VHDX is mounted read-only; a VMDK, VDI,
 qcow2 or raw disk is first converted to a temporary VHD with qemu-img or
 VirtualBox (`Get-DiskConversionCommand`). A VMware disk with snapshots is read at
 the newest delta (`Resolve-VmdkCurrentDisk` in `VMwareVM.psm1`). The VM, its
 disk and its snapshots are not changed.
 
-Before that, the wizard's Check the disk page (disk file only) runs the quick checks of
+Before that, the wizard's Check the disk page runs the quick checks of
 `Get-CaptureDiskChecklist` (`CaptureCheck.psm1`), then `Capture-VMImage.ps1 -CheckOnly
 -ResultPath` in a hidden PowerShell. It mounts the disk read-only, reads the edition
 from a copy of the SOFTWARE hive and the sysprep state, and writes a JSON result the
@@ -122,10 +114,10 @@ as kept by an offline update.
   pinned to, plus anything passed as `-Protect`. N is the image's own limit in
   `Images\<name>.versions.json` if it has one, else `versionsToKeep` in
   deploy-settings.json, else 0 (keep all). It runs after a copy, a rollback, and a
-  replacing capture (`Capture-GoldenImage.ps1`, when the content root is known).
+  replacing capture (`Capture-VMImage.ps1`).
 - `Test-ImageHardLinks` tells the rollback whether it can link; the console and
   `Invoke-ImageVersion.ps1` warn when it can't and the rollback will copy.
-- `Capture-GoldenImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
+- `Capture-VMImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
   then archives the old image and moves the new one in, so a failed capture
   leaves the current image alone.
 - `Deploy-Image.ps1` reads `<image><version>`; when it is set it deploys
@@ -184,9 +176,9 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
    `\\server\Deploy` using `config/deploy-settings.json`.
 
-Every medium boots both UEFI and legacy BIOS, so capture media start on BIOS VMs;
+Every medium boots both UEFI and legacy BIOS;
 the deploy itself stops on a PC that started WinPE in legacy BIOS mode. The ISO carries both
-`etfsboot.com` and `efisys.bin` (`efisys_noprompt.bin` for capture media), taken
+`etfsboot.com` and `efisys.bin`, taken
 from the ADK's `Deployment Tools\amd64\Oscdimg` folder (newer copype versions
 no longer create `fwfiles`).
 
@@ -221,9 +213,9 @@ no longer create `fwfiles`).
    first run claims `C:\Temp\firstboot.started`, deletes the task and runs;
    a second one stops.
 8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
-9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
-   `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
-   matched), then reboot or shut down.
+9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then
+   reboot or shut down. The status record (`Status\<id>.json`) already holds
+   which driver pack the PC got and how it was matched.
 
 ### UEFI only
 
@@ -352,7 +344,7 @@ once (`Find-VendorDriverPackOnline`): type the model ("Latitude 5521",
 "EliteBook 840 G9", "T14 Gen 4"), a Dell/HP SKU or a Lenovo machine type, pick
 the pack and click **Download**. Every word must match (a number as a whole
 word); a maker name in the query reads only that catalog. The download runs hidden
-through `Get-DriverPacks.ps1 -JobFile`, with its progress on the Driver Library page.
+through `Get-DriverPacks.ps1 -JobFile`, with its progress as a card in the Progress window.
 
 Catalogs are cached for a day in `%LOCALAPPDATA%\ImagingConsole\VendorCatalogs`.
 For each model and OS only the newest x64 pack is offered (highest Windows
@@ -378,14 +370,16 @@ and import it from the Driver Library tab.
 
 ### Unknown models report
 
-Every deployment writes `Reports\Drivers\<serial>.json` on the content root:
-the PC's maker, model, SKU / machine type, computer name, and the driver
-result from `Find-DriverCatalogMatch` (the same matching as the deploy):
-`Matched`, `InboxOnly` (a catalog entry with no folder), `Fallback` (maker
-fallback), `None`, or `MissingFolder`. One file per PC, so a reimage
-replaces it. Writing it never fails a deployment.
+Every deployment's dashboard status record (`Status\<id>.json`, the same
+file the Dashboard reads) holds the PC's maker, model, SKU / machine type,
+computer name, and `driverStatus`, the result from `Find-DriverCatalogMatch`
+(the same matching as the deploy): `Matched`, `InboxOnly` (a catalog entry
+with no folder), `Fallback` (maker fallback), `None`, or `MissingFolder`.
+One record per PC, so a reimage replaces it. Cancelled deployments are left
+out. Older versions wrote `Reports\Drivers\<serial>.json`; those files are
+still read, and a newer status record of the same PC wins.
 
-`src/Console/DriverReport.psm1` reads these files and re-checks each PC against
+`src/Console/DriverReport.psm1` reads these records and re-checks each PC against
 the current catalog and `Drivers\` folder, so a model leaves the report as soon
 as the library covers it. The rest are grouped by maker, model and SKU / machine
 type, most PCs first. For Dell, HP and Lenovo it looks the model up in the

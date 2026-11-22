@@ -9,14 +9,6 @@ Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
 
-# Computer names.
-Assert-Equal (Test-ComputerNameValue 'LAB-PC-042') '' 'valid name passes'
-Assert-Equal (Test-ComputerNameValue '') 'Type a computer name.' 'empty name is rejected'
-Assert-Equal (Test-ComputerNameValue 'ABCDEFGHIJKLMNOP') 'A computer name can have at most 15 characters.' '16 characters is too long'
-Assert-Equal (Test-ComputerNameValue 'PC_01') 'Use only letters, digits and dashes.' 'underscore is rejected'
-Assert-Equal (Test-ComputerNameValue '12345') 'A computer name cannot be only digits.' 'all digits is rejected'
-Assert-Equal (Test-ComputerNameValue '-PC') 'A computer name cannot start or end with a dash.' 'leading dash is rejected'
-
 # Disks.
 $disk = [pscustomobject]@{ Number = 0; FriendlyName = 'NVMe SSD '; Size = 512GB; BusType = 'NVMe' }
 Assert-Equal (Format-DiskChoice $disk) '0: NVMe SSD (512 GB, NVMe)' 'disk line shows number, name, size and bus'

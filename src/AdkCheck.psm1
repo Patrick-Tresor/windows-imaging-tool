@@ -63,7 +63,6 @@ function Get-AdkStatus {
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\oscdimg.exe'; Ok = & $has $deploy 'amd64\Oscdimg\oscdimg.exe' }
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\etfsboot.com'; Ok = & $has $deploy 'amd64\Oscdimg\etfsboot.com' }
         [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\efisys.bin'; Ok = & $has $deploy 'amd64\Oscdimg\efisys.bin' }
-        [pscustomobject]@{ Part = 'ADK Deployment Tools'; Path = 'amd64\Oscdimg\efisys_noprompt.bin'; Ok = & $has $deploy 'amd64\Oscdimg\efisys_noprompt.bin' }
         [pscustomobject]@{ Part = 'WinPE add-on'; Path = 'copype.cmd'; Ok = & $has $pe 'copype.cmd' }
         [pscustomobject]@{ Part = 'WinPE add-on'; Path = 'MakeWinPEMedia.cmd'; Ok = & $has $pe 'MakeWinPEMedia.cmd' }
         [pscustomobject]@{ Part = 'WinPE add-on'; Path = 'amd64\en-us\winpe.wim'; Ok = & $has $pe 'amd64\en-us\winpe.wim' }
@@ -116,12 +115,10 @@ function Get-IsoBootFiles {
     .DESCRIPTION
         Looks in the ADK's Deployment Tools\<arch>\Oscdimg folder, which every ADK version installs them to (newer
         copype versions no longer copy them to a fwfiles folder). Throws a message naming the folder when a file is missing.
-    .PARAMETER NoPrompt
-        Use efisys_noprompt.bin, which boots UEFI without "Press any key to boot from CD".
     #>
-    param([Parameter(Mandatory)][string]$AdkRoot, [switch]$NoPrompt, [string]$Arch = 'amd64')
+    param([Parameter(Mandatory)][string]$AdkRoot, [string]$Arch = 'amd64')
     $folder = Join-Path (Join-Path (Join-Path $AdkRoot 'Deployment Tools') $Arch) 'Oscdimg'
-    $efiName = if ($NoPrompt) { 'efisys_noprompt.bin' } else { 'efisys.bin' }
+    $efiName = 'efisys.bin'
 
     $found = [ordered]@{}
     $missing = @()

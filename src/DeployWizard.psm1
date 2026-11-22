@@ -277,16 +277,6 @@ function Set-DeploySidebarStep {
     }
 }
 
-function Test-ComputerNameValue {
-    # Returns why a computer name can't be used, or nothing when it is valid.
-    param([string]$Name)
-    if (-not $Name) { return 'Type a computer name.' }
-    if ($Name.Length -gt 15) { return 'A computer name can have at most 15 characters.' }
-    if ($Name -notmatch '^[A-Za-z0-9-]+$') { return 'Use only letters, digits and dashes.' }
-    if ($Name -match '^[0-9]+$') { return 'A computer name cannot be only digits.' }
-    if ($Name.StartsWith('-') -or $Name.EndsWith('-')) { return 'A computer name cannot start or end with a dash.' }
-}
-
 function Format-DiskChoice {
     # One line per disk in the wizard's disk list.
     param([Parameter(Mandatory)]$Disk)
@@ -597,7 +587,7 @@ function Show-DeployWizard {
                     & $w.Prepare
                 }
                 2 {
-                    $problem = Test-ComputerNameValue $w.NameBox.Text.Trim()
+                    $problem = Test-UnattendComputerName $w.NameBox.Text.Trim()   # AnswerFile.psm1: the same rules as the unattend
                     if ($problem) { [void]$w.NameBox.Focus(); throw $problem }
                     if ($w.DiskBox.SelectedIndex -lt 0) { throw 'Pick the disk to install Windows on.' }
                 }
@@ -768,62 +758,6 @@ function Show-PasswordPrompt {
     if ($result -eq 'OK' -and $text) { $text } else { $null }
 }
 
-function Show-SecretsPrompt {
-    <#
-    .SYNOPSIS
-        Asks for several passwords in one window (WinForms).
-        Secrets: Key and Label of each. Returns a hashtable Key -> text, or $null when the operator cancels.
-        Used when the deploy starts without the wizard (unattended answer file); the wizard has its Passwords page.
-    #>
-    param([Parameter(Mandatory)][object[]]$Secrets, [string]$Title = 'Deploy Windows')
-    $intro = 'These passwords are not on this USB stick. Type them once here: they are kept in memory for this deployment only, and nothing else is asked once Windows starts installing.'
-    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-    $font = New-Object Drawing.Font('Segoe UI', 10)
-    $form = New-Object Windows.Forms.Form -Property @{
-        Text = $Title; ClientSize = New-Object Drawing.Size(560, 300); Font = $font; StartPosition = 'CenterScreen'
-        FormBorderStyle = 'FixedDialog'; MaximizeBox = $false; MinimizeBox = $false; TopMost = $true; BackColor = [Drawing.Color]::White
-    }
-    $width = 560 - 40
-    $msg = New-Object Windows.Forms.Label -Property @{ Text = $intro; Left = 20; Width = $width; Font = $font }
-    $err = New-Object Windows.Forms.Label -Property @{ Text = 'Type every password.'; Left = 20; Width = $width; Font = $font; ForeColor = (Get-ThemeColor 'Bad'); Visible = $false }
-    $form.Controls.AddRange(@($msg, $err))
-    Set-FittedHeight -Control $msg -MaxLines 4
-    Set-FittedHeight -Control $err -MaxLines 1
-    $shown = @($msg); $gaps = @{ $msg = 12 }
-    $boxes = @{}
-    foreach ($s in $Secrets) {
-        $l = New-Object Windows.Forms.Label -Property @{ Text = $s.Label; Left = 20; Width = $width; Font = $font }
-        $b = New-Object Windows.Forms.TextBox -Property @{ Left = 20; Width = $width; UseSystemPasswordChar = $true; Font = $font }
-        $form.Controls.AddRange(@($l, $b))
-        Set-FittedHeight -Control $l -MaxLines 2
-        $shown += $l, $b; $gaps[$b] = 10
-        $boxes[$s.Key] = $b
-    }
-    $shown += $err
-    $ok = New-Object Windows.Forms.Button -Property @{ Text = 'OK' }
-    $cancel = New-Object Windows.Forms.Button -Property @{ Text = 'Cancel'; DialogResult = 'Cancel' }
-    $form.Controls.AddRange(@($ok, $cancel))
-    $form.AcceptButton = $ok; $form.CancelButton = $cancel
-    Set-ModernLook -Root $form -Primary $ok
-    # Heights from the text, never fixed: WinPE's fallback font is taller than Segoe UI.
-    $bottom = Set-StackLayout -Controls $shown -Top 16 -Gap 2 -GapAfter $gaps
-    [void](Set-ButtonRow -Buttons @($ok, $cancel) -Right ($width + 20) -Bottom ($bottom + 52))
-    $form.ClientSize = New-Object Drawing.Size(560, ($bottom + 64))
-    $state = @{ Form = $form; Boxes = $boxes; Error = $err }
-    $ok.add_Click({
-        $empty = @($state.Boxes.Values | Where-Object { -not $_.Text })
-        if ($empty) { $state.Error.Visible = $true; [void]$empty[0].Focus(); return }
-        $state.Form.DialogResult = 'OK'
-    }.GetNewClosure())
-    $first = $boxes[$Secrets[0].Key]
-    $form.Add_Shown({ $form.Activate(); [void]$first.Focus() }.GetNewClosure())
-    $result = $form.ShowDialog()
-    $values = @{}
-    foreach ($k in $boxes.Keys) { $values[$k] = $boxes[$k].Text }
-    $form.Dispose()
-    if ($result -eq 'OK') { $values } else { $null }
-}
-
 # What Copy logs saves: WinPE's own logs and, once Windows is on the disk (W:), its setup and join logs.
 $script:DeployLogSources = @(
     'X:\Windows\Temp\*.log', 'X:\Windows\Temp\*.json', 'X:\Windows\Logs\DISM\dism.log',
@@ -874,5 +808,5 @@ function Copy-DeployLogs {
     [pscustomobject]@{ Path = $folder; Count = $count }
 }
 
-Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Test-ComputerNameValue, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
-    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, New-WinPEWallpaper, Set-ThemeButton, Set-ModernLook, Show-SecretsPrompt, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs
+Export-ModuleMember -Function Get-DeploySteps, New-DeploySidebar, Set-FullScreen, Set-FittingFont, Get-TextHeight, Set-FittedHeight, Set-FittedButton, Set-StackLayout, Set-ButtonRow, Update-DeployWizardLayout, Get-WizardErrorText, Set-DeploySidebarStep, Format-DiskChoice, Select-TargetDisks, Get-TargetDisks, Resolve-TargetDisk, Get-AppChoices, Get-DeploySummary,
+    Show-DeployWizard, Show-PasswordPrompt, Get-ThemeColor, Get-LogoImage, New-WinPEWallpaper, Set-ThemeButton, Set-ModernLook, Set-SecretRows, Get-LogCopyTarget, Copy-DeployLogs

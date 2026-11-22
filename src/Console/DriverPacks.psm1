@@ -707,7 +707,6 @@ function Find-VendorDriverPackOnline {
     #>
     param(
         [Parameter(Mandatory)][string]$Query,
-        [ValidateSet('Any', 'Windows 10', 'Windows 11')][string]$Os = 'Any',
         [string]$ContentRoot,
         [hashtable]$CatalogPaths = @{},
         [switch]$Refresh
@@ -718,7 +717,7 @@ function Find-VendorDriverPackOnline {
     $errors = @()
     foreach ($m in $makers) {
         try {
-            foreach ($p in @(Get-VendorDriverPacks -Maker $m -Os $Os -CatalogPath $CatalogPaths[$m] -Refresh:$Refresh)) { $all.Add($p) }
+            foreach ($p in @(Get-VendorDriverPacks -Maker $m -CatalogPath $CatalogPaths[$m] -Refresh:$Refresh)) { $all.Add($p) }
         } catch { $errors += "Could not read the $m catalog: $($_.Exception.Message)" }
     }
     $found = @(Find-VendorDriverPack -Query $Query -Packs $all)

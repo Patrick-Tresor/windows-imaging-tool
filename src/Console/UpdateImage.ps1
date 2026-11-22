@@ -13,10 +13,6 @@ function Show-UpdateImageDialog {
     $dlg = $form.Window
     $d = $form.Controls
 
-    function Show-DialogError([string]$Text) {
-        [Windows.MessageBox]::Show($dlg, $Text, 'Update Image', 'OK', 'Warning') | Out-Null
-    }
-
     $d.TxtTitle.Text = "Update $($Image.Name)"
     $last = @(Get-ImageServicingHistory -ImagePath $Image.FullName) | Select-Object -Last 1
     $d.TxtCurrent.Text = @(
@@ -67,18 +63,26 @@ function Show-UpdateImageDialog {
 
     $d.BtnStart.Add_Click({
         try {
-            if (-not $packages.Count) { Show-DialogError 'Add at least one update package (.msu or .cab).'; return }
-            $updateArgs = Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
-                -Packages @($packages | ForEach-Object FullName) -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
-                -ResetBase:([bool]$d.ChkResetBase.IsChecked) -NoBackup:(-not $d.ChkBackup.IsChecked)
+            if (-not $packages.Count) { Show-WindowMessage $dlg 'Update Image' 'Add at least one update package (.msu or .cab).'; return }
+            # Checked now, so a mistake shows here; the job builds the same command with its progress file and log.
+            $getArgs = {
+                param($ProgressFile, $LogPath)
+                Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
+                    -Packages @($packages | ForEach-Object FullName) -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
+                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -NoBackup:(-not $d.ChkBackup.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
+            }
+            [void](& $getArgs '' '')
             $text = "Apply $($packages.Count) update(s) to $($Image.Name)?`n`n" + (($packages | ForEach-Object { "- $($_.Name)" }) -join "`n") +
-                "`n`nDo not deploy this image until the update window says it is done."
+                "`n`nDo not deploy this image until the Progress window says it is done."
             if ([Windows.MessageBox]::Show($dlg, $text, 'Update Image', 'YesNo', 'Question') -ne 'Yes') { return }
-            # Its own window: servicing takes 20 minutes or more per edition and must not freeze the console.
-            Start-Process powershell.exe -ArgumentList $updateArgs
+            # Hidden, in its own process: servicing takes 20 minutes or more per edition and must not freeze the
+            # console. Its steps are a card in the Progress window.
+            $job = Start-ConsoleJob -Name 'image-update' -ArgumentList $getArgs -Hidden
+            Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Noun 'update' -Hidden `
+                -Title "Updating $($Image.Name)" -OnFinished { try { Update-Images } catch { } }
             $dlg.DialogResult = $true
             $dlg.Close()
-        } catch { Show-DialogError $_.Exception.Message }
+        } catch { Show-WindowMessage $dlg 'Update Image' $_.Exception.Message }
     })
     $d.BtnCancel.Add_Click({ $dlg.Close() })
 

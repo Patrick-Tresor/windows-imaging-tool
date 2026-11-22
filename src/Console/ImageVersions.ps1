@@ -26,8 +26,14 @@ function Show-ImageVersionsDialog {
         param($Action, $Version, $Note)
         $args2 = Get-ImageVersionArguments -ScriptPath (Join-Path $SrcDir 'Invoke-ImageVersion.ps1') -ContentRoot $ContentRoot `
             -ImageName $Image.Name -Action $Action -Version $Version -Note $Note
-        Start-Process powershell.exe -ArgumentList $args2
+        # Hidden, with its steps as a card in the Progress window; the Images tab refreshes when it ends. This window
+        # closes so the Progress window can be used (a dialog blocks the others while it is open).
+        $job = Start-ConsoleJob -Name 'image-version' -ArgumentList $args2 -Hidden
+        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Noun 'copy' -Hidden `
+            -Title $(if ($Action -eq 'Keep') { "Keeping a copy of $($Image.Name)" } else { "Rolling $($Image.Name) back to $Version" }) `
+            -OnFinished { try { Update-Images; Update-Answers } catch { } }
         $state.Changed = $true
+        $win.Close()
     }
 
     $v.GridVersions.Add_SelectionChanged({
@@ -39,7 +45,6 @@ function Show-ImageVersionsDialog {
         $note = $v.TxtNote.Text.Trim()
         if (-not (& $ask "Copy $($Image.Name) ($($Image.SizeGB) GB) to Images\Previous as a new version?")) { return }
         & $run 'Keep' $null $note
-        & $say 'Copying in a separate window. Click Refresh when it finishes.'
     } })
 
     $v.BtnRollback.Add_Click({ & $safely {
@@ -51,7 +56,6 @@ function Show-ImageVersionsDialog {
         if (-not (Test-ImageHardLinks -Path (Split-Path $imagePath -Parent))) { $text += "`n`nThis folder can't make hard links, so the rollback copies $($r.SizeGB) GB." }
         if (-not (& $ask $text)) { return }
         & $run 'Rollback' $r.Version $null
-        & $say 'Rolling back in a separate window. Click Refresh when it finishes.'
     } })
 
     $v.BtnNote.Add_Click({ & $safely {

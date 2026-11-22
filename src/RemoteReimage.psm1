@@ -17,12 +17,7 @@
 # PowerShell 5.1 compatible. The job and boot entry functions work off Windows, for the tests.
 
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
-
-function Join-RootPath {
-    # Paths use backslashes (they are read in WinPE); normalize so the module also runs in tests off Windows.
-    param([string]$Root, [string]$Child)
-    [IO.Path]::Combine($Root, ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar))
-}
+Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1')   # Join-ContentPath
 
 #region Serial numbers
 
@@ -50,7 +45,7 @@ function ConvertTo-SerialKey {
 
 #region Reimage jobs
 
-function Get-JobFolder { param([string]$ContentRoot) Join-RootPath $ContentRoot 'Reimage' }
+function Get-JobFolder { param([string]$ContentRoot) Join-ContentPath $ContentRoot 'Reimage' }
 
 function ConvertFrom-JobTime([string]$Value) {
     [datetime]::Parse($Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
@@ -69,7 +64,7 @@ function New-ReimageJob {
         [int]$ExpiresHours = 4,
         [datetime]$Now = (Get-Date)
     )
-    if (-not (Test-Path -LiteralPath (Join-RootPath $ContentRoot "AnswerFiles\$AnswerFile.xml"))) { throw "No answer file named $AnswerFile on $ContentRoot." }
+    if (-not (Test-Path -LiteralPath (Join-ContentPath $ContentRoot "AnswerFiles\$AnswerFile.xml"))) { throw "No answer file named $AnswerFile on $ContentRoot." }
     $key = ConvertTo-SerialKey $Serial
     $dir = Get-JobFolder $ContentRoot
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -83,7 +78,7 @@ function New-ReimageJob {
         requestedAt  = $Now.ToString('o')
         expiresAt    = $Now.AddHours($ExpiresHours).ToString('o')
     }
-    Save-JsonFile -Path (Join-RootPath $dir "$key.json") -InputObject $job
+    Save-JsonFile -Path (Join-ContentPath $dir "$key.json") -InputObject $job
     $job
 }
 
@@ -95,13 +90,13 @@ function Test-JobExpired {
 function Get-ReimageJob {
     # The pending job for a PC, or $null.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Serial)
-    $path = Join-RootPath (Get-JobFolder $ContentRoot) "$(ConvertTo-SerialKey $Serial).json"
+    $path = Join-ContentPath (Get-JobFolder $ContentRoot) "$(ConvertTo-SerialKey $Serial).json"
     if (Test-Path -LiteralPath $path) { Get-Content -Raw -LiteralPath $path | ConvertFrom-Json }
 }
 
 function Remove-ReimageJob {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Serial)
-    Remove-Item -LiteralPath (Join-RootPath (Get-JobFolder $ContentRoot) "$(ConvertTo-SerialKey $Serial).json") -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-ContentPath (Get-JobFolder $ContentRoot) "$(ConvertTo-SerialKey $Serial).json") -ErrorAction SilentlyContinue
 }
 
 function Receive-ReimageJob {
@@ -124,7 +119,7 @@ function Receive-ReimageJob {
     if (-not (Test-UsableSerial $Serial)) { return $null }
     $key = ConvertTo-SerialKey $Serial
     $dir = Get-JobFolder $ContentRoot
-    $path = Join-RootPath $dir "$key.json"
+    $path = Join-ContentPath $dir "$key.json"
     # .NET, not Test-Path: WinPE maps the share as Z: through net use, which PowerShell may have no drive for.
     if (-not [IO.File]::Exists($path)) { return $null }
     $job = [IO.File]::ReadAllText($path) | ConvertFrom-Json
@@ -134,9 +129,9 @@ function Receive-ReimageJob {
         return $null
     }
     $job | Add-Member -NotePropertyName startedAt -NotePropertyValue $Now.ToString('o') -Force
-    $started = Join-RootPath $dir 'Started'
+    $started = Join-ContentPath $dir 'Started'
     [void][IO.Directory]::CreateDirectory($started)
-    Save-JsonFile -Path (Join-RootPath $started ("{0}_{1:yyyyMMdd-HHmmss}.json" -f $key, $Now)) -InputObject $job
+    Save-JsonFile -Path (Join-ContentPath $started ("{0}_{1:yyyyMMdd-HHmmss}.json" -f $key, $Now)) -InputObject $job
     [IO.File]::Delete($path)
     $job
 }
@@ -149,7 +144,7 @@ function Get-StartedJob {
     #>
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Serial, [datetime]$Since = [datetime]::MinValue, [string]$RequestedAt)
     $key = ConvertTo-SerialKey $Serial
-    $files = @(Get-ChildItem -LiteralPath (Join-RootPath (Get-JobFolder $ContentRoot) 'Started') -Filter "${key}_*.json" -File -ErrorAction SilentlyContinue |
+    $files = @(Get-ChildItem -LiteralPath (Join-ContentPath (Get-JobFolder $ContentRoot) 'Started') -Filter "${key}_*.json" -File -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending)
     foreach ($f in $files) {
         try { $job = Get-Content -Raw -LiteralPath $f.FullName | ConvertFrom-Json } catch { continue }
@@ -171,7 +166,7 @@ function Get-ReimageStates {
     param([Parameter(Mandatory)][string]$ContentRoot, [datetime]$Now = (Get-Date))
     $states = @{}
     $dir = Get-JobFolder $ContentRoot
-    foreach ($f in @(Get-ChildItem -LiteralPath (Join-RootPath $dir 'Started') -Filter *.json -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-ContentPath $dir 'Started') -Filter *.json -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
         try { $j = Get-Content -Raw -LiteralPath $f.FullName | ConvertFrom-Json } catch { continue }
         if (-not $j.computerName -or -not $j.startedAt) { continue }
         $at = (ConvertFrom-JobTime $j.startedAt).ToLocalTime()
@@ -642,21 +637,22 @@ function Invoke-LocalDiskBoot {
     } finally { Close-RemoteChannel $ch }
 }
 
+#endregion
+
 #region Console checks
 
 function Get-NetworkBootImage {
     # The network boot image the Computers tab starts on PCs: <content root>\Boot\boot.wim, and what its build wrote
-    # next to it (boot.json: when, WinPE password or not, which share it maps).
+    # next to it (boot.json: when, and which share it maps).
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $wim = Join-RootPath $ContentRoot 'Boot\boot.wim'
+    $wim = Join-ContentPath $ContentRoot 'Boot\boot.wim'
     $info = $null
-    try { $info = Get-Content -Raw -LiteralPath (Join-RootPath $ContentRoot 'Boot\boot.json') -ErrorAction Stop | ConvertFrom-Json } catch { }
+    try { $info = Get-Content -Raw -LiteralPath (Join-ContentPath $ContentRoot 'Boot\boot.json') -ErrorAction Stop | ConvertFrom-Json } catch { }
     $exists = Test-Path -LiteralPath $wim
     [pscustomobject]@{
         Path   = $wim
         Exists = $exists
         Built  = if ($info -and $info.built) { "$($info.built)" } elseif ($exists) { (Get-Item -LiteralPath $wim).LastWriteTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
-        Locked = [bool]($info -and $info.locked)
         Share  = if ($info) { "$($info.share)" } else { '' }
     }
 }
@@ -668,11 +664,8 @@ function Get-RemoteReimageProblems {
     $share = "$($Settings.share.path)".Trim()
     if (-not $share) { 'No deployment share: set Network share on the Deploy Settings tab (the PCs load the image from there), then build the network boot image.' }
     if (-not $Boot.Exists) { 'No network boot image yet: click Build network boot image.' }
-    elseif ($Boot.Locked) { 'The network boot image has a WinPE password, so each PC would wait for someone to type it: click Build network boot image (it builds one without).' }
     elseif ($share -and $Boot.Share -and $Boot.Share -ne $share) { "The network boot image maps $($Boot.Share), but the share is now $share`: click Build network boot image." }
 }
-
-#endregion
 
 #endregion
 

@@ -141,37 +141,6 @@
               </Grid>
             </GroupBox>
 
-            <!-- Driver pack downloads run in the background; their progress stays here, under the library, until removed. -->
-            <GroupBox x:Name="GrpDriverDownloads" DockPanel.Dock="Bottom" Header="Downloads" Margin="0,12,0,0" Padding="10,6" Visibility="Collapsed">
-              <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl x:Name="LstDriverDownloads">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                      <StackPanel Margin="0,4,0,8">
-                        <DockPanel>
-                          <Button DockPanel.Dock="Right" Tag="remove" Content="Remove" Margin="6,0,0,0" Padding="10,2" MinWidth="70"
-                                  IsEnabled="{Binding Finished}" ToolTip="Takes this finished download off the list"/>
-                          <Button DockPanel.Dock="Right" Tag="log" Content="Open log" Margin="6,0,0,0" Padding="10,2" MinWidth="70"/>
-                          <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        </DockPanel>
-                        <TextBlock x:Name="DlSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,2"/>
-                        <ItemsControl ItemsSource="{Binding Steps}" ItemTemplate="{DynamicResource StepRowTemplate}"/>
-                      </StackPanel>
-                      <DataTemplate.Triggers>
-                        <DataTrigger Binding="{Binding Outcome}" Value="ok">
-                          <Setter TargetName="DlSummary" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding Outcome}" Value="failed">
-                          <Setter TargetName="DlSummary" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-                        </DataTrigger>
-                      </DataTemplate.Triggers>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </ScrollViewer>
-            </GroupBox>
-
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
@@ -231,14 +200,7 @@
                         Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
                          Text="An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
-              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
-                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
@@ -250,14 +212,7 @@
                 <Button x:Name="BtnMediaPacksNone" DockPanel.Dock="Left" Content="Uncheck all" Margin="8,0,0,0"/>
                 <TextBlock x:Name="TxtMediaPacks" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
               </DockPanel>
-              <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <CheckBox Content="{Binding Label}" IsHitTestVisible="False" Focusable="False"
-                              IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+              <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="6" Content="Output folder (ISO)"/>

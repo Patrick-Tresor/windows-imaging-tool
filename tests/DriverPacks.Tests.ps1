@@ -263,10 +263,10 @@ Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'Lenovo'; Model 
 Assert-Equal (Format-DriverPackName ([pscustomobject]@{ Maker = 'HP'; Model = 'HP EliteBook 840 G9' })) 'HP EliteBook 840 G9' 'name: HP not twice'
 $dl = Get-Content -Raw (Join-Path $repo 'src/Console/DriverDownloader.ps1')
 $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
-$start = $start.Substring(0, $start.IndexOf("`nfunction ", 10))
+if ($start.IndexOf("`nfunction ", 10) -gt 0) { $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10)) }
 Assert-Equal ($start -match "Start-ConsoleJob [^\n]*-Hidden") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
-Assert-Equal ($start -match 'Add-DriverDownloadJob -Panel \$script:ui.GrpDriverDownloads -List \$script:ui.LstDriverDownloads') $true 'download: progress shown on the Driver Library page'
+Assert-Equal ($start -match 'Show-BuildProgress ' -and $start -match '-Hidden -RemoveWhenDoneSeconds 5') $true 'download: a card in the Progress window that goes away 5 s after it worked'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
 Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
 

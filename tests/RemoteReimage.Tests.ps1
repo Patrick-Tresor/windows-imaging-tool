@@ -67,14 +67,12 @@ try {
     Assert-Equal (@(Get-RemoteReimageProblems -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '' } }) -Boot $boot)[0] -like 'No deployment share*') $true 'no share stops the reimage'
     New-Item -ItemType Directory -Path (Join-Path $root 'Boot') -Force | Out-Null
     Set-Content -Path (Join-Path $root 'Boot/boot.wim') -Value 'x'
-    '{ "built": "2026-11-11 10:00", "locked": true, "share": "\\\\srv\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
+    '{ "built": "2026-11-11 10:00", "share": "\\\\old\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
     $boot = Get-NetworkBootImage -ContentRoot $root
     Assert-Equal $boot.Built '2026-11-11 10:00' 'the boot image build time is read'
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like '*WinPE password*') $true 'a boot image with a WinPE password stops the reimage'
-    '{ "built": "2026-11-11 10:00", "locked": false, "share": "\\\\old\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root))[0] -like '*maps \\old\Deploy*') $true 'a boot image for another share stops the reimage'
-    '{ "built": "2026-11-11 10:00", "locked": false, "share": "\\\\srv\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
-    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)).Count 0 'a matching unlocked boot image is ready'
+    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like '*maps \\old\Deploy*') $true 'a boot image for another share stops the reimage'
+    '{ "built": "2026-11-11 10:00", "share": "\\\\srv\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
+    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)).Count 0 'a boot image for the current share is ready'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

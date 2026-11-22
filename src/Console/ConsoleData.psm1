@@ -223,49 +223,9 @@ function Import-DriverPack {
 #region Capture
 
 function Test-ImageName {
-    # Same rule Capture-GoldenImage.ps1 enforces in WinPE, checked early so the wizard fails before building media.
+    # The name rule for images (the file name): the capture wizard and Get-VMCaptureArguments check it.
     param([string]$Name)
     $Name -match '^[A-Za-z0-9._-]+$'
-}
-
-function New-CaptureConfig {
-    # Writes config\capture.json. Media built with it boots straight into Capture-GoldenImage.ps1.
-    param(
-        [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory)][string]$Name,
-        [string]$Description,
-        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
-        [switch]$SplitForFat32,
-        [switch]$Unattended,
-        [switch]$NewVersion   # replace an existing image of this name; the old one is kept as a version
-    )
-    if (-not (Test-ImageName $Name)) { throw "Image name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $images = Join-Path $ContentRoot 'Images'
-    if ($Compression -eq 'recovery' -and $SplitForFat32) { throw 'The Smallest compression makes an .esd file, which cannot be split for FAT32. Pick Maximum to split.' }
-    if (-not $NewVersion -and (Get-ExistingImageFiles -ImagesDir $images -Name $Name)) {
-        throw "An image named $Name already exists. Pick another name, or capture it as a new version."
-    }
-    $cfg = [ordered]@{
-        name             = $Name
-        description      = $Description
-        compression      = $Compression
-        splitSizeMB      = if ($SplitForFat32) { 3800 } else { 0 }
-        noPrompt         = [bool]$Unattended
-        shutdownWhenDone = [bool]$Unattended
-        newVersion       = [bool]$NewVersion
-    }
-    $path = Join-ContentPath $ContentRoot 'config\capture.json'
-    Save-JsonFile -Path $path -InputObject ([pscustomobject]$cfg)
-    $path
-}
-
-function Get-CaptureReadiness {
-    # Problems that would make a capture fail in WinPE, for the wizard's summary page.
-    # The capture ISO saves the image to the network share.
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    $share = (Get-DeploySettings -ContentRoot $ContentRoot).share.path
-    if (-not $share) { 'No network share is set in Deploy Settings, so WinPE has nowhere to save the image.' }
-    elseif ($share -notmatch '^\\\\[^\\]+\\.+') { "The share '$share' is not a \\server\share path." }
 }
 
 #endregion
@@ -707,8 +667,8 @@ function Get-ImageEditions {
 }
 
 function Get-ImageVersionArguments {
-    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console in its own window
-    # because copying an image can take minutes.
+    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console hidden, with a card in
+    # the Progress window (Start-ConsoleJob adds -ProgressFile and -LogPath), because copying an image takes minutes.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
@@ -719,7 +679,7 @@ function Get-ImageVersionArguments {
     )
     if ($Action -eq 'Rollback' -and -not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
     $q = { param($v) '"' + ($v -replace '"', "'") + '"' }
-    $cmd = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
+    $cmd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
         '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Action', $Action, '-NoPrompt')
     if ($Version) { $cmd += @('-Version', $Version) }
     if ($Note) { $cmd += @('-Note', (& $q $Note)) }
@@ -795,7 +755,7 @@ function Add-ImageServicingRecord {
 }
 
 function Get-ImageUpdateArguments {
-    # Command line for Update-OfflineImage.ps1, run by the console in its own window.
+    # Command line for Update-OfflineImage.ps1, run by the console hidden, with a card in the Progress window.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ImagePath,
@@ -803,7 +763,9 @@ function Get-ImageUpdateArguments {
         [int[]]$Index,
         [switch]$Cleanup,
         [switch]$ResetBase,
-        [switch]$NoBackup
+        [switch]$NoBackup,
+        [string]$ProgressFile,
+        [string]$LogPath
     )
     if (-not $Packages) { throw 'Add at least one update package (.msu or .cab).' }
     if ($ResetBase -and -not $Cleanup) { throw 'Reset base needs component cleanup turned on.' }
@@ -813,10 +775,12 @@ function Get-ImageUpdateArguments {
     if ($Cleanup) { $cmd += ' -Cleanup' }
     if ($ResetBase) { $cmd += ' -ResetBase' }
     if ($NoBackup) { $cmd += ' -NoBackup' }
+    if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
+    if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
     # -File cannot pass an array to a [string[]] parameter, and command-line quoting strips the quotes in -Command,
     # so the command goes in encoded.
-    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+    @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
 function Get-CaptureSaveFolderProblem {
@@ -1188,7 +1152,7 @@ function Test-ShareConnection {
 #endregion
 
 function Get-DeploymentLogs {
-    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-<name>_... (Capture-GoldenImage.ps1)
+    # Log names are <serial>_<yyyyMMdd-HHmm>_<OK|FAILED>.log (Deploy-Image.ps1), CAPTURE-VM-<name>_... (Capture-VMImage.ps1)
     # or SERVICE-<name>_... (Update-OfflineImage.ps1).
     param([Parameter(Mandatory)][string]$ContentRoot)
     Get-ChildItem -Path (Join-Path $ContentRoot 'Logs') -Filter *.log -File -ErrorAction SilentlyContinue |
@@ -1230,7 +1194,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs, Get-LogTabRows,
-    Update-ContentTools, Test-ImageName, New-CaptureConfig, Get-CaptureReadiness,
+    Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
     Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,

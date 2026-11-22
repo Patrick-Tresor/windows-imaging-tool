@@ -50,6 +50,36 @@ function Resolve-StatusTarget {
     [pscustomobject]@{ Local = 'R:\'; Map = $report; Unc = $report }
 }
 
+function New-StatusRecord {
+    # The fields the dashboard record and the local progress file share, so they are typed once. -First goes in
+    # front (the id), -Extra after the shared ones.
+    param($Identity, $First = [ordered]@{}, $Extra = [ordered]@{})
+    $now = (Get-Date).ToString('o')
+    $r = [ordered]@{}
+    foreach ($k in $First.Keys) { $r[$k] = $First[$k] }
+    $r.computerName = ''
+    $r.serial       = "$($Identity.Serial)"
+    $r.maker        = "$($Identity.Maker)"
+    $r.model        = "$($Identity.Model)"
+    $r.sku          = "$($Identity.Sku)"
+    $r.machineType  = "$($Identity.MachineType)"
+    $r.answerFile   = ''
+    $r.image        = ''
+    $r.driverPack   = ''
+    $r.driverStatus = ''
+    $r.state        = 'Running'
+    $r.phase        = 'WinPE'
+    $r.step         = 'Starting'
+    $r.percent      = 0
+    $r.message      = ''
+    foreach ($k in $Extra.Keys) { $r[$k] = $Extra[$k] }
+    $r.started      = $now
+    $r.updated      = $now
+    $r.finished     = $null
+    $r.warnings     = @()
+    $r
+}
+
 function Start-DeployStatus {
     # Begins reporting for this PC. Returns the status id.
     param(
@@ -61,29 +91,8 @@ function Start-DeployStatus {
     )
     $script:Folder = $Folder
     $script:LogPaths = $LogPath
-    $now = (Get-Date).ToString('o')
-    $script:Record = [ordered]@{
-        id           = Get-StatusId -Serial $Identity.Serial -MacAddress $MacAddress
-        computerName = ''
-        serial       = $Identity.Serial
-        maker        = $Identity.Maker
-        model        = $Identity.Model
-        macAddress   = $MacAddress
-        ipAddress    = $IpAddress
-        answerFile   = ''
-        image        = ''
-        driverPack   = ''
-        state        = 'Running'
-        phase        = 'WinPE'
-        step         = 'Starting'
-        percent      = 0
-        message      = ''
-        started      = $now
-        updated      = $now
-        finished     = $null
-        logFile      = ''
-        warnings     = @()
-    }
+    $script:Record = New-StatusRecord -Identity $Identity -First ([ordered]@{ id = Get-StatusId -Serial $Identity.Serial -MacAddress $MacAddress }) `
+        -Extra ([ordered]@{ macAddress = $MacAddress; ipAddress = $IpAddress; logFile = '' })
     try { New-Item -ItemType Directory -Path $Folder -Force -ErrorAction Stop | Out-Null } catch { Write-StatusWarning $_ }
     Save-DeployStatus
     $script:Record.id
@@ -161,29 +170,8 @@ function Start-LocalProgress {
         $Identity
     )
     $script:LocalPath = $Path
-    $now = (Get-Date).ToString('o')
-    $script:Local = [ordered]@{
-        computerName = ''
-        serial       = "$($Identity.Serial)"
-        maker        = "$($Identity.Maker)"
-        model        = "$($Identity.Model)"
-        answerFile   = ''
-        image        = ''
-        driverPack   = ''
-        state        = 'Running'
-        phase        = 'WinPE'
-        step         = 'Starting'
-        percent      = 0
-        message      = ''
-        countdown    = 0
-        whenDone     = ''
-        removeMedia  = 0
-        removableMedia = $false
-        started      = $now
-        updated      = $now
-        finished     = $null
-        warnings     = @()
-    }
+    $script:Local = New-StatusRecord -Identity $Identity `
+        -Extra ([ordered]@{ countdown = 0; whenDone = ''; removeMedia = 0; removableMedia = $false })
     Remove-Item -Path (Get-ProgressCancelPath $Path) -Force -ErrorAction SilentlyContinue
     Save-LocalProgress
 }

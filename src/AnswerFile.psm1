@@ -201,7 +201,8 @@ function Resolve-ComputerName {
 }
 
 function Test-UnattendComputerName {
-    # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid.
+    # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid. Also the
+    # WinPE wizard's check of the name the operator types, so both use the same rules.
     param([string]$Name)
     if (-not $Name) { return 'The computer name is empty.' }
     if ($Name.Length -gt 15) { return "Computer name '$Name' is longer than 15 characters." }
@@ -522,7 +523,8 @@ function New-FirstBootPlan {
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
-    # Each first boot task: a plain command (run with cmd /c), or a library task staged in C:\Temp\Tasks\<name>.
+    # Each first boot task: a library task staged in C:\Temp\Tasks\<name>, or a plain command (FirstBoot.ps1 runs both
+    # through Invoke-TaskPack; a plain command without a definition gets one there).
     [pscustomobject]@{
         answerFile           = $Answer.Name
         disableSystemRestore = $Answer.DisableSystemRestore
@@ -855,15 +857,19 @@ function ConvertFrom-DeployWizardAnswerFile {
 }
 
 function Join-ContentPath {
-    # Content root paths use backslashes (they are read in WinPE); normalize so the modules also run in tests off Windows.
+    # The one path join for content root paths (console, media build, reimage jobs, WinPE). They use backslashes;
+    # normalized so the modules also run in tests off Windows. [IO.Path]::Combine, not Join-Path: in WinPE a volume
+    # with no PowerShell drive makes Join-Path fail ("drive does not exist"). No child: the root itself.
     param([string]$Root, [string]$Child)
-    Join-Path $Root ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+    if (-not $Child) { return $Root }
+    [IO.Path]::Combine($Root, ($Child -replace '[\\/]', [IO.Path]::DirectorySeparatorChar))
 }
 
 function Get-AnswerFileNames {
-    # The answer files in <content root>\AnswerFiles, by name without .xml, sorted: the console's lists and the
-    # deploy in WinPE. Always an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
-    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20); callers still wrap it in @().
+    # The answer files in <content root>\AnswerFiles, by name without .xml, sorted: the console's lists, the media
+    # build and the deploy in WinPE. Callers wrap the call in @(): a lone name then stays a one-item array, and its
+    # [0] is the whole name, not its first letter ("Answer file W not found", 2026-11-20). Not ,$names: @() around
+    # that gives ONE item holding every name, so with two answer files the deploy took both as one name.
     # -Required (the deploy): none is an error that says how to fix it, instead of PowerShell's "Cannot find path"
     # (old USB sticks were built without the AnswerFiles folder).
     param([Parameter(Mandatory)][string]$ContentRoot, [switch]$Required)
@@ -874,9 +880,7 @@ function Get-AnswerFileNames {
             'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
             'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
     }
-    # An empty list returns nothing (@() around the call gives an empty array; ,@() would give one empty item).
-    if (-not $names) { return }
-    ,$names
+    $names
 }
 
 function Get-AnswerFileUsage {

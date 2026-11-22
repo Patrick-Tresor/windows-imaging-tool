@@ -155,6 +155,17 @@ Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console open
 Assert-Equal ($consoleText -match 'BtnShowProgress\.Add_Click\(\{ Invoke-Safely \{ Show-ProgressWindows') $true 'Show progress button reopens the windows'
 Assert-Equal ($consoleText -match '\$window\.Add_Closing\(\{ \$script:ConsoleClosing = \$true') $true 'closing the console closes the hidden progress windows'
 
+# Image updates and versions are cards in the same Progress window, not windows of their own.
+foreach ($pair in @(@('Update-OfflineImage.ps1', 'Console/UpdateImage.ps1'), @('Invoke-ImageVersion.ps1', 'Console/ImageVersions.ps1'))) {
+    $script = Get-Content -Raw -LiteralPath (Join-Path $repo "src/$($pair[0])")
+    $dialog = Get-Content -Raw -LiteralPath (Join-Path $repo "src/$($pair[1])")
+    $stepIds = @([regex]::Matches($script, "@\('(\w+)', ") | ForEach-Object { $_.Groups[1].Value })
+    $reported = @([regex]::Matches($script, "(?:Start-BuildStep|Complete-BuildStep)\s+'(\w+)'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+    Assert-Equal ($script -match 'Start-BuildProgress -Path \$ProgressFile' -and $script -match 'Stop-BuildProgress -Message') $true "$($pair[0]) writes its progress"
+    Assert-Equal (@($reported | Where-Object { $_ -notin $stepIds }) -join ',') '' "$($pair[0]): every reported step is listed"
+    Assert-Equal ($dialog -match 'Start-ConsoleJob ' -and $dialog -match 'Show-BuildProgress ' -and $dialog -notmatch 'Start-Process powershell') $true "$($pair[1]) runs it as a Progress window card"
+}
+
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     Write-Host 'SKIP Build progress window: WPF needs Windows' -ForegroundColor Yellow
@@ -193,7 +204,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         # A second job goes into the same window as a second card (Patrick: one window, not one per reimage).
         $file2 = Join-Path $dir 'reimage.json'
         Copy-Item -LiteralPath $file -Destination $file2   # a second job's progress file, still running
-        Show-BuildProgress -Owner $owner -ProgressFile $file2 -Title 'Reimaging 1 PC(s) with Win11-Staff' -Noun 'reimage' -Hidden
+        Show-BuildProgress -Owner $owner -ProgressFile $file2 -Title 'Downloading the Dell Latitude 5531 driver pack' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5
         $dlg.Dispatcher.Invoke([action]{}, 'Background')
         Assert-Equal @($owner.OwnedWindows).Count 1 'window: still one window for two jobs'
         Assert-Equal @($dlg.FindName('LstJobs').ItemsSource).Count 2 'window: two cards'
@@ -222,9 +233,22 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal $script:ProgressWindows.Count 1 'window: a running job cannot be removed'
 
         Copy-Item -LiteralPath $file -Destination $file2 -Force   # the second job finishes too
-        Update-BuildProgressWindow $script:ProgressWindows[0]
-        $dlg.Close()
-        Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: closing after the end really closes it'
+        $ctx2 = $script:ProgressWindows[0]
+        Update-BuildProgressWindow $ctx2
+        Assert-Equal "$($ctx2.RemoveTimer.IsEnabled)|$($ctx2.RemoveTimer.Interval.TotalSeconds)" 'True|5' 'window: a download that worked takes its card off after 5 seconds'
+        $ctx2.RemoveTimer.Stop(); Remove-ProgressJob -Ctx $ctx2.RemoveTimer.Tag   # what the timer does
+        Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: the last card gone closes the window'
+
+        # A failed download keeps its card, for its log.
+        $file3 = Join-Path $dir 'download.json'
+        Start-BuildProgress -Path $file3 -Title 'x' -Steps @(, @('pack1', 'HP EliteBook 840 G9'))
+        Start-BuildStep 'pack1'; Complete-BuildStep 'pack1' -State failed -Detail 'hash check failed'
+        Stop-BuildProgress -Message '1 of 1 packs failed.'
+        Show-BuildProgress -Owner $owner -ProgressFile $file3 -Title 'Downloading the HP driver pack' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5
+        $ctx3 = $script:ProgressWindows[0]
+        Assert-Equal "$($ctx3.View.SummaryState)|$($null -eq $ctx3.RemoveTimer)" 'error|True' 'window: a failed download stays listed'
+        Remove-ProgressJob -Ctx $ctx3
+        Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: Remove on the last card closes the window'
     } finally {
         $owner.Close()
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

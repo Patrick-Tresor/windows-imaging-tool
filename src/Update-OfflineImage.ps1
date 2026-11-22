@@ -3,7 +3,7 @@
     Applies Windows updates (.msu or .cab) to a captured golden image, offline, without a recapture.
 .DESCRIPTION
     Runs on the admin PC (elevated, Windows 10/11 or Server with DISM). The console's
-    Images > Update image... button runs it in its own window.
+    Images > Update image... button runs it hidden, with its steps as a card in the Progress window (-ProgressFile).
 
     For each edition (index) in the image it mounts the image, adds the packages in the
     order given, optionally cleans up the component store, and commits. The serviced image
@@ -31,13 +31,16 @@ param(
     [switch]$NoBackup,
     [int]$SplitSizeMB = 3800,                         # part size when the image is split (.swm)
     [string]$WorkDir = (Join-Path $env:ProgramData 'ImagingConsole\Servicing'),
-    [switch]$NoPrompt
+    [switch]$NoPrompt,
+    [string]$ProgressFile,                            # step-by-step progress for the console's Progress window
+    [string]$LogPath                                  # default: Update-OfflineImage.log in -WorkDir
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -59,8 +62,11 @@ $parts = if ($isSplit) { @(Get-ChildItem -LiteralPath $imagesDir -Filter "$name*
 $contentRoot = Split-Path $imagesDir -Parent
 $logDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images' -and (Test-Path (Join-Path $contentRoot 'Logs'))) { Join-Path $contentRoot 'Logs' } else { $WorkDir }
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
-$logPath = Join-Path $WorkDir 'Update-OfflineImage.log'
+$logPath = if ($LogPath) { $LogPath } else { Join-Path $WorkDir 'Update-OfflineImage.log' }
 Set-DeployLogPath -Path $logPath -New
+Start-BuildProgress -Path $ProgressFile -Title "Updating $($image.Name)" -LogPath $logPath -Steps @(
+    @('copy', 'Copying the image to the work folder'), @('update', 'Adding the updates'),
+    @('export', 'Exporting the updated image'), @('save', 'Saving it in Images'))
 
 $mountDir = Join-Path $WorkDir 'Mount'
 $scratchDir = Join-Path $WorkDir 'Scratch'
@@ -99,6 +105,7 @@ try {
 
     # Work on a local single-file copy. Split images are joined back into one .wim first.
     Write-DeployLog "Copying $($image.Name) to $WorkDir"
+    Start-BuildStep 'copy' -Detail $WorkDir
     if ($isSplit) {
         $swmPattern = Join-Path $imagesDir "$name*.swm"
         foreach ($i in (Get-WindowsImage -ImagePath $image.FullName).ImageIndex) {
@@ -114,6 +121,7 @@ try {
         Copy-Item -LiteralPath $image.FullName -Destination $sourceWim
     }
     Set-ItemProperty -LiteralPath $sourceWim -Name IsReadOnly -Value $false
+    Complete-BuildStep 'copy'
 
     $editions = @(Get-WindowsImage -ImagePath $sourceWim)
     $targets = if ($Index) { @($editions | Where-Object ImageIndex -in $Index) } else { $editions }
@@ -122,7 +130,10 @@ try {
     Write-DeployLog ("Updating {0} ({1}) with: {2}" -f $image.Name, (($targets | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" }) -join '; '), ($packages.Name -join ', '))
     if (-not $NoPrompt -and (Read-Host 'Type YES to start') -ne 'YES') { Write-DeployLog 'Cancelled by operator' -Level WARN; $status = 'CANCELLED'; return }
 
+    Start-BuildStep 'update'
+    $done = 0
     foreach ($t in $targets) {
+        Set-BuildStepProgress 'update' -Percent (100 * $done / $targets.Count) -Detail "Edition $($t.ImageIndex): $($t.ImageName)"
         $before = (Get-WindowsImage -ImagePath $sourceWim -Index $t.ImageIndex).Version
         Write-DeployLog "Mounting index $($t.ImageIndex) ($($t.ImageName), build $before)"
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Mount-Image', "/ImageFile:$sourceWim", "/Index:$($t.ImageIndex)", "/MountDir:$mountDir")
@@ -148,9 +159,12 @@ try {
         $mounted = $false
         $after = (Get-WindowsImage -ImagePath $sourceWim -Index $t.ImageIndex).Version
         Write-DeployLog "Index $($t.ImageIndex): build $before -> $after"
+        $done++
     }
+    Complete-BuildStep 'update' -Detail ('{0} installed, {1} not applicable' -f @($results | Where-Object result -eq 'Installed').Count, @($results | Where-Object result -ne 'Installed').Count)
 
     # Exporting every edition to a fresh file drops the replaced components still stored in the old one.
+    Start-BuildStep 'export'
     foreach ($e in $editions) {
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Export-Image', "/SourceImageFile:$sourceWim", "/SourceIndex:$($e.ImageIndex)",
             "/DestinationImageFile:$outWim", '/Compress:max', '/CheckIntegrity')
@@ -163,6 +177,8 @@ try {
         $outFile = Convert-ImageToEsd -WimPath $outWim
     }
 
+    Complete-BuildStep 'export' -Detail "build $($builds -join ', ')"
+    Start-BuildStep 'save' -Detail $imagesDir
     $swapping = $true
     if (-not $NoBackup) {
         # Archived as a version (with version.json), so the Versions dialog shows why and with what.
@@ -184,10 +200,13 @@ try {
         -Builds $builds `
         -Cleanup:$Cleanup -ResetBase:$ResetBase
     Write-DeployLog "Updated $($image.Name). Answer files that use it get the updates on the next deploy."
+    Complete-BuildStep 'save' -Detail $(if ($backup) { 'Previous version kept' } else { '' })
+    Stop-BuildProgress
     $status = 'OK'
 }
 catch {
     Write-DeployLog $_.Exception.Message -Level ERROR
+    Stop-BuildProgress -Message $_.Exception.Message
     if ($mounted) { Invoke-Native dism.exe -NoThrow -ArgumentList @('/Unmount-Image', "/MountDir:$mountDir", '/Discard') | Out-Null }
     if (-not $swapping) { Write-DeployLog 'The original image was not changed.' -Level WARN }
     elseif ($backup) { Write-DeployLog "Failed while replacing the image. The previous version is in $backup; move it back to $imagesDir." -Level WARN }

@@ -19,7 +19,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 1.6 | Copy logs and Command prompt in the wizard | A `Logs\<serial>-<date>` folder appears on the stick; cmd opens |
 | 1.7 | Full deploy | Progress window shows percent for apply and drivers; no clipped text; PC restarts into Windows, not WinPE |
 | 1.8 | First boot | PC is in the domain, apps and tasks ran (`C:\Windows\Temp\Task-*.log`), clock right |
-| 1.9 | Stick built **without** a WinPE password, answer file passwords typed in the editor | No Passwords page and no password window; `Deploy.log` says "encrypted password(s) decrypted"; the PC joins the domain; the answer file on the DEPLOY partition shows only `aes256:...` |
+| 1.9 | Stick built **without** a WinPE password, answer file passwords typed in the editor | No Passwords page; `Deploy.log` says "encrypted password(s) decrypted"; the PC joins the domain; the answer file on the DEPLOY partition shows only `aes256:...` |
 | 1.10 | Update the stick in place (Media tab) after changing one answer file | Only the changed files are copied, it is much faster than a full build, and the stick still deploys |
 | 1.11 | USB copy speed | Note the MB/s the build prints for the image |
 | 1.11b | Driver packs as one file each | The build's "Packing each driver pack into one file" step lists the packs (a second build says "packed before"); `Drivers\<maker>\<model>.wim` is on the DEPLOY partition, not the folder; the build prints a `Small files` MB/s line; a deploy shows "Unpacking drivers" then "Injecting drivers", and `W:\_ImagingDrivers` is gone afterwards |
@@ -64,7 +64,6 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.1d | Sysprep on each PC: capture a VM shut down with `shutdown /s /t 0`, not sysprepped | Check the disk passes with "Not sysprepped: each PC runs sysprep"; a VM shut down from the Start menu with Fast Startup gets a cross |
 | 4.1e | Deploy that image to the Dell 5521, then an HP and a Lenovo | First start shows only the spinner (no logon screen, no message), restarts by itself, then setup, name, domain join, apps and tasks as usual; `C:\Windows\Temp\SysprepAtDeploy.log` ends with "Sysprep finished" |
 | 4.1f | Same, with a Store app installed for one user only in the VM | The app is removed and sysprep still runs; with a missing Store the logon screen says sysprep failed |
-| 4.2 | Capture ISO booted in a VM | Image on the share's `Images` folder, VM shuts down |
 | 4.3 | Update image with a month's .msu | New version in the Images tab, old one under Versions |
 | 4.4 | Roll back a version | Answer files deploy the older image |
 | 4.5 | Capture with compression **Smallest (.esd)** | The capture shows a "Compressing to the smallest size" step and logs the .esd size (about 70-80 % of Maximum); the Images tab lists `Name.esd`; a stick with it deploys normally; Update image works on it |

@@ -133,7 +133,8 @@ function Get-NetSetupJoinError {
 function Invoke-PostDeployCheck {
     # Compares the facts with the plan. One result per check: Passed, Failed, Warning (a Report-only check that
     # did not pass, or something worth a look) or Skipped. AppResults are FirstBoot.ps1's install exit codes.
-    # TaskResults are its FIRSTBOOT task results; library tasks (Tasks tab) get a check each, plain commands don't.
+    # TaskResults are its FIRSTBOOT task results, each a check (plain commands too; a 'Ran' result from an older
+    # stick, which did not check a plain command's exit code, is left out).
     param(
         [Parameter(Mandatory)]$Plan,
         [Parameter(Mandatory)]$Facts,

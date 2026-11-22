@@ -152,14 +152,15 @@ function Get-TaskLaunch {
     <#
     .SYNOPSIS
         The program and arguments that run a task from $Folder: powershell.exe -File for .ps1, cmd.exe /c for
-        .cmd/.bat, the .exe itself otherwise. $ExtraArguments (from the answer file) go after the task's own.
+        .cmd/.bat and for a plain command (New-CommandTaskDefinition), the .exe itself otherwise. $ExtraArguments (from the answer file) go after the task's own.
     #>
-    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$Folder, [string]$ExtraArguments)
+    param([Parameter(Mandatory)]$Definition, [string]$Folder, [string]$ExtraArguments)
     $d = $Definition
     $file = $Folder.TrimEnd('\', '/') + '\' + $d.script
     $all = (@($d.arguments, $ExtraArguments) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' '
     $tail = if ($all) { " $all" } else { '' }
     switch ($d.type) {
+        'command'    { [pscustomobject]@{ FilePath = 'cmd.exe'; Arguments = "/c $all" } }
         'powershell' { [pscustomobject]@{ FilePath = 'powershell.exe'; Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$file`"$tail" } }
         'cmd'        { [pscustomobject]@{ FilePath = 'cmd.exe'; Arguments = "/c `"`"$file`"$tail`"" } }
         default      { [pscustomobject]@{ FilePath = $file; Arguments = $all } }
@@ -168,7 +169,7 @@ function Get-TaskLaunch {
 
 function Get-TaskCommandLine {
     # One command line for a task, for places that take a single string (unattend FirstLogonCommands).
-    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$Folder, [string]$ExtraArguments)
+    param([Parameter(Mandatory)]$Definition, [string]$Folder, [string]$ExtraArguments)
     $l = Get-TaskLaunch -Definition $Definition -Folder $Folder -ExtraArguments $ExtraArguments
     $exe = if ($l.FilePath -match '\s') { "`"$($l.FilePath)`"" } else { $l.FilePath }
     if ($l.Arguments) { "$exe $($l.Arguments)" } else { $exe }
@@ -189,7 +190,9 @@ function Resolve-DeployTasks {
         The answer file's tasks in order, with each library task read from $TaskRoot. Library tasks limited to other
         makers or models are left out (reported through -OnSkip). Throws when a library task is missing or broken,
         so Deploy-Image.ps1 stops before the disk is erased.
-        Each row: Phase, Name (task name or the command), Command (plain command or $null), Definition, Folder, Arguments.
+        Each row: Phase, Name (task name or the command), Command (plain command or $null), Definition (a plain
+        command gets one too, New-CommandTaskDefinition, so every task runs the same way), Folder ($null for a plain
+        command), Arguments.
     #>
     param(
         [Parameter(Mandatory)]$Answer,
@@ -201,7 +204,7 @@ function Resolve-DeployTasks {
     $rows = foreach ($t in @($Answer.Tasks)) {
         $scriptName = if ($t.PSObject.Properties['Script']) { "$($t.Script)" } else { '' }
         if (-not $scriptName) {
-            [pscustomobject]@{ Phase = $t.Phase; Name = $t.Command; Command = $t.Command; Definition = $null; Folder = $null; Arguments = '' }
+            [pscustomobject]@{ Phase = $t.Phase; Name = $t.Command; Command = $t.Command; Definition = (New-CommandTaskDefinition $t.Command); Folder = $null; Arguments = '' }
             continue
         }
         $folder = Join-Path $TaskRoot $scriptName
@@ -219,10 +222,25 @@ function Resolve-DeployTasks {
     @($rows)
 }
 
+function New-CommandTaskDefinition {
+    # A plain command from the answer file (no script in the library) as a task definition: cmd /c, exit 0 is
+    # success, and a POSTIMAGE one that fails stops the deployment, as before.
+    param([Parameter(Mandatory)][string]$Command)
+    ConvertTo-TaskDefinition -Name $Command -Json @{ type = 'command'; arguments = $Command; timeoutMinutes = 60; stopOnFailure = $true }
+}
+
+function Get-TaskLogName {
+    # Task-<name>.log, with the characters a file name can't hold (a plain command's \ : " and so on) replaced.
+    param([Parameter(Mandatory)][string]$Name, [string]$Suffix)
+    $n = ($Name -replace '[\\/:*?"<>|%]+', '_').Trim()
+    if ($n.Length -gt 60) { $n = $n.Substring(0, 60).Trim() }
+    "Task-$n$(if ($Suffix) { "-$Suffix" }).log"
+}
+
 function Get-LogonTaskFolder([string]$Name) { "$script:LogonTaskDir\$Name" }
 
 function Get-LogonTaskCommand {
-    # The FirstLogonCommands line for the FIRSTLOGON library task at $Index in logon-tasks.json. Run-LogonTask.ps1
+    # The FirstLogonCommands line for the FIRSTLOGON task at $Index in logon-tasks.json. Run-LogonTask.ps1
     # runs it with its timeout and success codes and logs it, like FirstBoot.ps1 does for FIRSTBOOT tasks.
     # conhost --headless gives PowerShell a console with no window: -WindowStyle Hidden alone still flashes an empty
     # "Windows PowerShell" window on the user's desktop until PowerShell has started (Patrick, 2026-11-22).
@@ -231,7 +249,7 @@ function Get-LogonTaskCommand {
 }
 
 function New-LogonTaskPlan {
-    # What logon-tasks.json holds: the FIRSTLOGON library tasks in order, each with its definition and arguments.
+    # What logon-tasks.json holds: the FIRSTLOGON tasks in order (plain commands too), each with its definition and arguments.
     param([object[]]$Tasks = @())
     @($Tasks | Where-Object { $_.Phase -eq 'FIRSTLOGON' -and $_.Definition } | ForEach-Object {
         [pscustomobject]@{ name = $_.Name; task = $_.Definition; arguments = $_.Arguments }
@@ -241,12 +259,14 @@ function New-LogonTaskPlan {
 function Invoke-TaskPack {
     <#
     .SYNOPSIS
-        Runs one library task from $Folder with a timeout, its output going to $LogPath.
+        Runs one task (a library task from $Folder, or a plain command) with a timeout, its output going to $LogPath.
+        Every phase runs its tasks through this: POSTIMAGE (Deploy-Image.ps1), FIRSTBOOT (FirstBoot.ps1) and
+        FIRSTLOGON (Run-LogonTask.ps1).
         Returns @{ Status = Succeeded | Failed | TimedOut; ExitCode; Message; LogPath }.
     #>
     param(
         [Parameter(Mandatory)]$Definition,
-        [Parameter(Mandatory)][string]$Folder,
+        [string]$Folder,             # the task's folder; a plain command has none
         [string]$ExtraArguments,
         [Parameter(Mandatory)][string]$LogPath,
         [scriptblock]$Log = { param($m) Write-Host $m }
@@ -262,7 +282,7 @@ function Invoke-TaskPack {
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $l.FilePath
     $psi.Arguments = "$($l.Arguments)"
-    $psi.WorkingDirectory = $Folder
+    if ($Folder -and [IO.Directory]::Exists($Folder)) { $psi.WorkingDirectory = $Folder }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
@@ -318,7 +338,7 @@ function New-TaskFromTemplate {
 
 #endregion
 
-Export-ModuleMember -Function Get-TaskTypeFromFile, ConvertTo-TaskDefinition, ConvertTo-TaskJson, Read-TaskPack, Test-TaskPack,
+Export-ModuleMember -Function Get-TaskTypeFromFile, ConvertTo-TaskDefinition, ConvertTo-TaskJson, Read-TaskPack, Test-TaskPack, New-CommandTaskDefinition, Get-TaskLogName,
     Write-TaskScriptText, Save-TaskPack, Get-TaskScriptText, Get-TaskLaunch, Get-TaskCommandLine, Test-TaskRequirement,
     Resolve-DeployTasks, Get-LogonTaskFolder, Get-LogonTaskCommand, New-LogonTaskPlan, Invoke-TaskPack,
     Get-TaskTemplates, New-TaskFromTemplate

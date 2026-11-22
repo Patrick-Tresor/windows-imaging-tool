@@ -128,8 +128,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     # Everything that must be found before the disk is wiped. The wizard calls this each time an answer file is picked,
     # so a problem (missing image, no disk, a wrong join password) shows there.
     # No Windows 11 hardware check: Windows is installed on any PC (Patrick, 2026-11-22).
-    # Passwords not on the media are asked for here, all in one window, unless the wizard's Passwords page did it.
-    Request-DeploySecrets -Root $Root -Answer $Answer
+    # Passwords not on the media were typed on the wizard's Passwords page; Get-DeploySecret says which one is missing.
     foreach ($share in $Answer.Shares) {
         if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
         $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Answer $Answer -Label "password for $($share.RemoteName)" } else { $null }
@@ -233,24 +232,16 @@ function Unlock-DeployMedia {
 }
 
 function Get-DeploySecret([string]$Root, [string]$RelativePath, $Answer, [string]$Label) {
-    # A password the answer file needs (named by its passwordFile path): decrypted from the answer file, or typed.
-    # Throws when it is nowhere and nobody is there to type it, before anything is erased.
+    # A password the answer file needs (named by its passwordFile path): decrypted from the answer file, or typed on
+    # the wizard's Passwords page. Throws when it is neither, before anything is erased.
     if (-not $RelativePath) { throw "No password file is set for $Label in the answer file." }
     $key = ConvertTo-SecretKey $RelativePath
     if ($Answer -and $Answer.PSObject.Properties['Passwords'] -and $Answer.Passwords.ContainsKey($key)) { return $Answer.Passwords[$key] }
     if ($script:Vault.ContainsKey($key)) { return $script:Vault[$key] }
     if ($script:TypedSecrets.ContainsKey($key)) { return $script:TypedSecrets[$key] }
-    if (-not $script:CanAskSecrets) {
-        throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
-    }
-    # Get-AnswerSecrets lists every password up front, so this is only reached for one it does not know about.
-    # Same window as for the others (Request-DeploySecrets).
-    Write-DeployLog "The $Label ($RelativePath) was not asked for with the other passwords" -Level WARN
-    $secret = [pscustomobject]@{ Key = $key; Label = $Label; RelativePath = $RelativePath }
-    $typed = Show-SecretsPrompt -Secrets @($secret)
-    if ($null -eq $typed -or -not $typed[$key]) { throw "The $Label was not typed." }
-    Save-TypedSecrets -Values $typed -Secrets @($secret)
-    $script:TypedSecrets[$key]
+    # The wizard's Passwords page asks for every password Get-AnswerSecrets lists, so this is a password nobody was
+    # asked for (no wizard: -NoPrompt or a reimage job), or one the answer file names in a way it does not know.
+    throw "The $Label ($RelativePath) is not on this media. Type it in the answer file editor and rebuild the stick (it is saved encrypted in the answer file)."
 }
 
 function Test-DeploySecretKnown([string]$Root, [string]$RelativePath, $Answer) {
@@ -277,16 +268,6 @@ function Save-TypedSecrets([hashtable]$Values, [object[]]$Secrets) {
         $script:TypedSecrets[$s.Key] = $Values[$s.Key]
         Write-DeployLog "$($s.Label) typed by the operator ($($s.RelativePath) is not on the media)"
     }
-}
-
-function Request-DeploySecrets([string]$Root, $Answer) {
-    # Without the wizard (unattended answer file, -NoPrompt): every missing password in one window, before the
-    # countdown and before anything is erased. With the wizard its Passwords page has asked already: nothing to do.
-    $missing = @(Get-MissingDeploySecrets -Root $Root -Answer $Answer)
-    if (-not $missing) { return }
-    $typed = Show-SecretsPrompt -Secrets $missing
-    if ($null -eq $typed) { throw 'The passwords were not typed.' }
-    Save-TypedSecrets -Values $typed -Secrets $missing
 }
 
 function Protect-StagedItem([string]$Path, [switch]$Folder) {
@@ -427,18 +408,18 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
 
 function Invoke-Phase([string]$Phase, [object[]]$Tasks, [string]$Root) {
     # POSTIMAGE tasks run here in WinPE with the new Windows at %OSDRIVE% (W:) and content at %DEPLOYROOT%.
-    # Plain commands stop the deployment when they fail; library tasks only when they are set to (stopOnFailure).
+    # A task stops the deployment when it fails only when it is set to (stopOnFailure); plain commands always are.
     $env:OSDRIVE = 'W:'
     $env:DEPLOYROOT = $Root.TrimEnd('\')
     foreach ($t in @($Tasks | Where-Object Phase -eq $Phase)) {
-        if (-not $t.Definition) { Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', $t.Command); continue }
         Write-DeployLog "Running task $($t.Name)"
         Set-DeployStatus -Step "Running task $($t.Name)"
         # The log stays on the new Windows, next to Deploy.log.
-        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\Task-$($t.Name).log" -Log { param($m) Write-DeployLog $m } }
+        $logName = Get-TaskLogName $t.Name
+        $r = try { Invoke-TaskPack -Definition $t.Definition -Folder $t.Folder -ExtraArguments $t.Arguments -LogPath "W:\Windows\Temp\$logName" -Log { param($m) Write-DeployLog $m } }
              catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; Message = $_.Exception.Message } }
         if ($r.Status -eq 'Succeeded') { Write-DeployLog "  task $($t.Name) OK ($($r.Message))"; continue }
-        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\Task-$($t.Name).log." }
+        if ($t.Definition.stopOnFailure) { throw "Task $($t.Name) $($r.Status.ToLowerInvariant()): $($r.Message). See C:\Windows\Temp\$logName." }
         Write-DeployLog "  task $($t.Name) $($r.Status): $($r.Message)" -Level WARN
         Set-DeployStatus -Warning "Task $($t.Name) $($r.Status.ToLowerInvariant())"
     }
@@ -548,8 +529,15 @@ try {
     }
     if ($AnswerFile) {
         $answer = & $readAnswer $AnswerFile
+        # Passwords are typed only on the wizard's Passwords page: an Unattended answer file that needs one opens the
+        # wizard instead of counting down.
+        $needsPasswords = $answer.Mode -eq 'Unattended' -and -not $NoPrompt -and -not $job -and @(& $missingSecrets $answer).Count
+        if ($needsPasswords) {
+            Write-DeployLog 'The answer file needs passwords that are not on this media: opening the wizard instead of the countdown' -Level WARN
+            if (-not $wizardNotice) { $wizardNotice = 'Some passwords are not on this USB stick: type them on the Passwords page.' }
+        }
         if ($NoPrompt) { $confirmed = $true }
-        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted) -or $job) {
+        elseif (($answer.Mode -eq 'Unattended' -and -not $unstarted -and -not $needsPasswords) -or $job) {
             $deployPlan = & $preparePlan $answer
             $name = if ($ComputerName) { $ComputerName } else { $deployPlan.DefaultName }
             Write-Host ''
@@ -581,7 +569,7 @@ try {
     $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
     $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot
     $driverPackName = if (-not $driverPack) { 'inbox only' } elseif ($driverPack.StartsWith($driverRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { $driverPack }
-    Set-DeployStatus -Fields @{ driverPack = $driverPackName }
+    Set-DeployStatus -Fields @{ driverPack = $driverPackName; driverStatus = "$($driverMatch.Status)" }   # driverStatus: the Unknown Models report
     if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.
@@ -594,7 +582,7 @@ try {
     # So are the task library's scripts: a missing or broken one stops here, not halfway through.
     $taskRoot = Resolve-ContentPath $root $answer.TaskLocation
     $deployTasks = @(Resolve-DeployTasks -Answer $answer -TaskRoot $taskRoot -Identity $hw -OnSkip { param($m) Write-DeployLog $m })
-    $libraryTasks = @($deployTasks | Where-Object Definition)
+    $libraryTasks = @($deployTasks | Where-Object Folder)   # the ones with a folder to stage
     if ($libraryTasks) { Write-DeployLog "Tasks: $(($libraryTasks | ForEach-Object { "$($_.Name) ($($_.Phase))" }) -join ', ')" }
 
     $joinPassword  = if ($answer.Membership -eq 'Domain') { Get-DeploySecret -Root $root -RelativePath $answer.JoinPasswordFile -Answer $answer -Label 'join account password' } else { $null }
@@ -609,12 +597,10 @@ try {
 
     # The unattend is built and checked now, before the disk is wiped: a setting Windows Setup rejects would only show
     # after the restart, as "could not parse or process the unattend answer file" at Getting ready.
-    # FIRSTLOGON library tasks run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which stays after
-    # first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
-    $logonIndex = 0
-    $logonCommands = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
-        if ($_.Definition) { Get-LogonTaskCommand -Index $logonIndex; $logonIndex++ } else { $_.Command }
-    })
+    # FIRSTLOGON tasks (plain commands too) run through Run-LogonTask.ps1 in C:\ProgramData\ImagingTool\Tasks, which
+    # stays after first boot clears C:\Temp, so they get the same timeout, success codes and log as FIRSTBOOT tasks.
+    $logonCount = @($deployTasks | Where-Object Phase -eq 'FIRSTLOGON').Count
+    $logonCommands = @(for ($i = 0; $i -lt $logonCount; $i++) { Get-LogonTaskCommand -Index $i })
     $unattendXml = New-UnattendXml -Answer $answer -ComputerName $ComputerName -JoinPassword $joinPassword -AdminPassword $adminPassword -LogonCommands $logonCommands
     $unattendProblems = @(Test-UnattendXml -Xml $unattendXml)
     if ($unattendProblems) {
@@ -821,13 +807,6 @@ finally {
         # Content on a disk of this PC is the USB stick (a network share has no disk number).
         $onStick = $null -ne (Get-ContentDiskNumber $root)
         Set-DeployStatus -LocalOnly -Step 'Image applied' -Percent 100 -State Succeeded -Fields @{ whenDone = $whenDone; removableMedia = $onStick }
-    }
-    # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
-    if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {
-        try {
-            Write-DriverReport -ContentRoot $root -Identity $hw -Match $driverMatch -ComputerName $ComputerName `
-                -AnswerFile $(if ($answer) { $answer.Name }) -Result $status
-        } catch { Write-Warning "Could not write the driver report: $($_.Exception.Message)" }
     }
 }
 

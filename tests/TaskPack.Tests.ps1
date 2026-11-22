@@ -105,19 +105,24 @@ try {
     Assert-Equal "$($plan[2].Arguments)|$($plan[2].Definition.script)" '-Path X.jpg|set.ps1' 'a library task carries its answer file arguments'
 
     $fb = New-FirstBootPlan -Answer $b -Tasks $plan
-    Assert-Equal (($fb.tasks | ForEach-Object { if ($_.task) { "task:$($_.name)" } else { "cmd:$($_.command)" } }) -join '|') 'cmd:echo hi|task:Wallpaper' 'first boot gets the FIRSTBOOT commands and tasks in order'
+    Assert-Equal (($fb.tasks | ForEach-Object { "$($_.task.type):$($_.name)" }) -join '|') 'command:echo hi|powershell:Wallpaper' 'first boot gets the FIRSTBOOT commands and tasks in order, each with a definition'
+    $echo = $plan | Where-Object Command -eq 'echo hi'
+    Assert-Equal "$($echo.Definition.type)|$($echo.Definition.successCodes -join ',')|$($echo.Definition.stopOnFailure)|$($echo.Folder)" 'command|0|True|' 'a plain command is a task definition too: exit 0, stops a POSTIMAGE deploy, no folder'
+    Assert-Equal ((Get-TaskLaunch -Definition $echo.Definition) | ForEach-Object { "$($_.FilePath) $($_.Arguments)" }) 'cmd.exe /c echo hi' 'a plain command runs with cmd /c'
+    Assert-Equal (Get-TaskLogName 'copy "C:\a b\x.txt" D:\' ) 'Task-copy _C_a b_x.txt_ D_.log' 'a plain command makes a safe log name'
+    Assert-Equal (Get-TaskLogName 'Wallpaper' -Suffix 'pat') 'Task-Wallpaper-pat.log' 'a library task keeps its name in the log name'
     $fbJson = $fb | ConvertTo-Json -Depth 8 | ConvertFrom-Json
     $again = ConvertTo-TaskDefinition -Name $fbJson.tasks[1].name -Json $fbJson.tasks[1].task
     Assert-Equal "$($again.script)|$($again.type)|$($fbJson.tasks[1].arguments)" 'set.ps1|powershell|-Path X.jpg' 'FirstBoot.ps1 can rebuild the task from firstboot.json'
     Assert-Equal @((New-FirstBootPlan -Answer $b).tasks).Count 1 'without resolved tasks only plain commands go in the plan'
 
     $logon = @($plan | Where-Object Phase -eq 'FIRSTLOGON' | ForEach-Object {
-        if ($_.Definition) { Get-TaskCommandLine -Definition $_.Definition -Folder (Get-LogonTaskFolder $_.Name) -ExtraArguments $_.Arguments } else { $_.Command }
+        Get-TaskCommandLine -Definition $_.Definition -Folder (Get-LogonTaskFolder $_.Name) -ExtraArguments $_.Arguments
     })
     [xml]$u = New-UnattendXml -Answer $b -ComputerName 'PC-01' -LogonCommands $logon
     $ns = [Xml.XmlNamespaceManager]::new($u.NameTable); $ns.AddNamespace('u', 'urn:schemas-microsoft-com:unattend')
     $cmds = @($u.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand/u:CommandLine', $ns) | ForEach-Object InnerText)
-    Assert-Equal ($cmds -join '|') 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\ImagingTool\Tasks\Rename\Rename-Pc.ps1"|logon.cmd' 'FIRSTLOGON tasks run from ProgramData, in order with commands'
+    Assert-Equal ($cmds -join '|') 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\ImagingTool\Tasks\Rename\Rename-Pc.ps1"|cmd.exe /c logon.cmd' 'FIRSTLOGON tasks run from ProgramData, in order with commands'
     [xml]$u2 = New-UnattendXml -Answer $b -ComputerName 'PC-01'
     Assert-Equal (@($u2.SelectNodes('//u:FirstLogonCommands/u:SynchronousCommand', $ns)).Count) 1 'without resolved tasks a script task is not written as a command'
 
@@ -132,10 +137,13 @@ try {
 
     # FIRSTLOGON library tasks go through Run-LogonTask.ps1 with their own entry in logon-tasks.json.
     $logonPlan = @(New-LogonTaskPlan -Tasks $plan)
-    Assert-Equal (($logonPlan | ForEach-Object name) -join ',') 'Rename' 'logon-tasks.json holds the FIRSTLOGON library tasks only'
+    Assert-Equal (($logonPlan | ForEach-Object name) -join ',') 'Rename,logon.cmd' 'logon-tasks.json holds every FIRSTLOGON task, plain commands too'
+    $deployText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+    Assert-Equal ($deployText.Contains('for ($i = 0; $i -lt $logonCount; $i++) { Get-LogonTaskCommand -Index $i }')) $true 'every FIRSTLOGON task goes through Run-LogonTask.ps1'
+    Assert-Equal ($deployText.Contains("Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', `$t.Command)")) $false 'POSTIMAGE commands run through Invoke-TaskPack too'
     Assert-Equal (Get-LogonTaskCommand -Index 0) 'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\ImagingTool\Tasks\Run-LogonTask.ps1" -Index 0' 'a logon task runs through Run-LogonTask.ps1'
     $runner = Get-Content -Raw (Join-Path $repo 'src/Run-LogonTask.ps1')
-    Assert-Equal ($runner -match '\$all = Get-Content' -and $runner -match 'Temp\\Task-\$\(\$def\.name\)-\$\(\$env:USERNAME\)\.log') $true 'the logon runner reads the plan safely in 5.1 and logs per user'
+    Assert-Equal ($runner -match '\$all = Get-Content' -and $runner.Contains('Get-TaskLogName $def.name -Suffix $env:USERNAME')) $true 'the logon runner reads the plan safely in 5.1 and logs per user'
     $runnerErrors = $null
     [void][Management.Automation.Language.Parser]::ParseInput($runner, [ref]$null, [ref]$runnerErrors)
     Assert-Equal @($runnerErrors).Count 0 'the logon runner parses'
@@ -180,7 +188,7 @@ try {
     # (C:\Temp\Tasks, without Windows, is where FIRSTBOOT tasks are staged.)
     foreach ($f in 'FirstBoot.ps1', 'Deploy-Image.ps1') {
         $text = Get-Content -Raw (Join-Path $repo "src/$f")
-        Assert-Equal ($text -match '\\Temp\\Task-\$\(' -and $text -notmatch '\\Windows\\Temp\\Tasks\\') $true "$f logs tasks to C:\Windows\Temp\Task-<name>.log"
+        Assert-Equal ($text -match 'Temp\\\$(\(Get-TaskLogName|logName)' -and $text -notmatch '\\Windows\\Temp\\Tasks\\') $true "$f logs tasks to C:\Windows\Temp\Task-<name>.log"
     }
 
     # Running tasks for real needs Windows (powershell.exe, cmd.exe).

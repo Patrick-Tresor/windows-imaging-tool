@@ -9,7 +9,7 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-GoldenImage.ps1, Capture-VMImage.ps1,
+src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-VMImage.ps1,
                      Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
                      Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, DeployWizard.psm1,
@@ -262,8 +262,10 @@ tries or **Shut down**.
 
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
-right after the answer file, with one box for each missing password; an
-unattended answer file asks in one window before its countdown. Nothing under
+right after the answer file, with one box for each missing password. An
+unattended answer file that needs one opens the wizard instead of counting
+down, and a reimage from the console stops with the name of the missing
+password. That page is the only place a password is typed. Nothing under
 `config\secrets` is ever copied to the stick.
 
 **The join account is checked before the disk is wiped.** When WinPE can reach
@@ -397,7 +399,11 @@ the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
 and each FIRSTBOOT task is a post-deploy check on the Dashboard. FIRSTLOGON tasks
 are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `Run-LogonTask.ps1` with the same timeout and success codes, logged to
-`C:\Windows\Temp\Task-<name>-<user>.log`. **Export...** zips a task to copy it to
+`C:\Windows\Temp\Task-<name>-<user>.log`. A plain command in the list runs the
+same way in every phase (`cmd /c`, exit code 0 is success, 60 minute timeout,
+its own log named after the command); a POSTIMAGE command that fails stops the
+deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
+**Export...** zips a task to copy it to
 another content root; **Import...** adds it back.
 
 **Importing a deploy wizard answer file** keeps the mode, delay, image name, application
@@ -447,7 +453,7 @@ applied (Windows first, then .NET, oldest KB first); move a standalone servicing
 stack update to the top if there is one. For Windows 11 24H2 checkpoint updates,
 keep the earlier checkpoint in the same folder: DISM picks it up from there.
 
-It runs `Update-OfflineImage.ps1` in its own window, on this PC. For each edition
+It runs `Update-OfflineImage.ps1` in the background on this PC, with each step in the Progress window. For each edition
 it mounts the image, adds the packages, optionally cleans up the replaced
 components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
@@ -570,35 +576,31 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    apps and updates, no OEM drivers. Step by step, including audit mode and keeping the Microsoft Store
    in the image: [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md).
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
-   1. Choose the reference machine: **a VM's disk file on this PC** (the default, see
-      below) or a **capture ISO** for a VM that boots from it.
+   1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
       Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
-      Or, for a disk file, tick **Skip sysprep here: each PC runs sysprep at its first start** and only
+      Or tick **Skip sysprep here: each PC runs sysprep at its first start** and only
       run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
       (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
-   3. **Check the disk** (disk file only): each line gets a tick or a cross. The quick checks (the
+   3. **Check the disk**: each line gets a tick or a cross. The quick checks (the
       disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
       free space for the temporary copy) come first, then the wizard reads the Windows on the disk
       and shows its edition, version, size and whether sysprep has run. Next stays off until every
       line has a tick, so a disk that was not generalized is caught here, not after the capture
       started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
-   4. Name the image, choose compression and, for a disk file, **Save to**: the content root's
+   4. Name the image, choose compression and **Save to**: the content root's
       `Images` folder by default (**Default** puts it back), or **Browse...** to any folder on this PC
       or a server share (`\\server\share\Images`). An image saved outside the open content root
       shows on the Images tab when the console opens that folder's content root.
-   5. Review and click Start (disk file) or Build and start. A disk file capture shows a progress
-      window with each step (copy, read, capture, save), its bar and the time left.
-   The image is saved to the Save to folder (disk file) or the share's
-   `Images` folder (ISO), and a
-   `CAPTURE-<name>` log appears on the Logs tab.
-   Without the console: run `Prepare-Reference.ps1`, boot any deploy media and run
-   `X:\Deploy\Capture-GoldenImage.ps1 -Name Win11-24H2-Enterprise`.
+   5. Review and click Start. The capture is a card in the Progress window with each step (copy,
+      read, capture, save), its bar and the time left.
+   The image is saved to the Save to folder, and a `CAPTURE-VM-<name>` log appears on the Logs tab.
+   Without the console: run `Prepare-Reference.ps1` in the VM, then
+   `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot <content root>` on this PC.
 
    **A VM's disk file (VMware, VirtualBox, Proxmox, ESXi and others).** The simplest way
-   to capture a VM. In the wizard pick
-   **A VM's disk file on this PC** and the VM's disk. On the next page the wizard shows the
+   to capture a VM. In the wizard pick the VM's disk. On the next page the wizard shows the
    prepare command: run it in the VM as administrator (turn BitLocker off first, and don't
    capture while updates are installing), and sysprep shuts the VM down. Then the tool runs
    `src\Capture-VMImage.ps1 -DiskPath <disk file>` on the admin PC. VHD and VHDX files are
