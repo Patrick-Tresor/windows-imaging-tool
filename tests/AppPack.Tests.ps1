@@ -240,8 +240,29 @@ Installers:
     Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $true 'a download with the expected SHA256 is kept'
     Remove-Item (Join-Path $hf 'h.exe')
     $hd.downloadSha256 = '0' * 64
-    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $abc } '*could not download*' 'a download with another SHA256 fails'
+    $script:abcCalls = 0
+    $abcCount = { param($Url, $Path) $script:abcCalls++; [IO.File]::WriteAllText($Path, 'abc') }
+    $unsigned = { param($Path) [pscustomobject]@{ Status = 'NotSigned'; Subject = '' } }
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 3 -WaitSeconds 0 -Downloader $abcCount -Signature $unsigned } '*SHA256*not signed by the publisher*' 'a download with another SHA256 and no signature fails'
+    Assert-Equal $script:abcCalls 1 'a download with another SHA256 is not downloaded again (same file every time)'
     Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $false 'a download with another SHA256 is deleted'
+    # Office's setup.exe behind a "latest" link changes: a valid signature from the pack's publisher is enough.
+    $hd.publisher = 'Microsoft Corporation'
+    $msSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } }
+    $script:dlLog = @()
+    Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) $script:dlLog += $m } -Downloader $abc -Signature $msSigned
+    Assert-Equal "$(Test-Path (Join-Path $hf 'h.exe'))|$(@($script:dlLog -like '*publisher updated the file*').Count)" 'True|1' 'another SHA256 signed by the publisher is kept and logged'
+    Remove-Item (Join-Path $hf 'h.exe')
+    $otherSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=Contoso Ltd, O=Contoso Ltd, C=US' } }
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $otherSigned } '*signed by CN=Contoso Ltd*not by Microsoft Corporation*' 'another SHA256 signed by someone else fails'
+    $badSig = { param($Path) [pscustomobject]@{ Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation' } }
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $badSig } '*signature HashMismatch*' 'another SHA256 with a broken signature fails'
+    $hd.publisher = ''
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $msSigned } '*not signed by the publisher*' 'with no publisher in the pack, a signature alone is not enough'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN="Google LLC", O="Google LLC", L=Mountain View' -Publisher 'Google LLC') $true 'signer match: quoted names'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN=VideoLAN, O=VideoLAN, L=Paris' -Publisher 'videolan.') $true 'signer match: case and trailing dot ignored'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN=Not Microsoft Corporation, O=Evil' -Publisher 'Microsoft Corporation') $false 'signer match: the whole name must match'
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $broken } '*after 2 tries*Last error: The remote name could not be resolved*' 'no internet: the message gives the last error'
     $hd.downloadSha256 = 'xyz'
     Assert-Equal @(@(Test-AppPack -Definition $hd) -like '*64 hexadecimal*').Count 1 'a SHA256 must be 64 hexadecimal characters'
 

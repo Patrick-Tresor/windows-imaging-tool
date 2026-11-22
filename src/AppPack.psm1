@@ -724,7 +724,13 @@ function Get-AppDownload {
         [int]$Attempts = 10,
         [int]$WaitSeconds = 30,
         # Tests pass their own; the default is Invoke-WebRequest.
-        [scriptblock]$Downloader = { param($Url, $Path) Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing }
+        [scriptblock]$Downloader = { param($Url, $Path) Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing },
+        # Tests pass their own; the default reads the file's Authenticode signature (Status, Subject).
+        [scriptblock]$Signature = {
+            param($Path)
+            $s = Get-AuthenticodeSignature -LiteralPath $Path
+            [pscustomobject]@{ Status = "$($s.Status)"; Subject = $(if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { '' }) }
+        }
     )
     $d = $Definition
     if (-not $d.downloadUrl) { return }
@@ -734,27 +740,64 @@ function Get-AppDownload {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
     try {
+        $last = ''
         for ($i = 1; $i -le $Attempts; $i++) {
             try {
                 & $Downloader $d.downloadUrl $path
                 if (-not [IO.File]::Exists($path)) { throw 'nothing was saved' }
-                if ($d.downloadSha256) {
-                    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-                    if ($hash -ne $d.downloadSha256.ToUpperInvariant()) {
-                        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-                        throw "the download's SHA256 $hash is not the expected $($d.downloadSha256); the publisher changed the file, so add the application again"
-                    }
-                }
-                & $Log ("  Downloaded {0} ({1:N1} MB)" -f $d.downloadUrl, ((Get-Item -LiteralPath $path).Length / 1MB))
-                return
             } catch {
-                & $Log "  Download attempt $i of $Attempts failed: $($_.Exception.Message)"
+                $last = $_.Exception.Message
+                & $Log "  Download attempt $i of $Attempts failed: $last"
                 if ([IO.File]::Exists($path)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
                 if ($i -lt $Attempts) { Start-Sleep -Seconds $WaitSeconds }
+                continue
             }
+            # The download worked. A file that fails the check is refused at once: downloading it again gives the same file.
+            $problem = Test-AppDownloadFile -Definition $d -Path $path -Signature $Signature -Log $Log
+            if ($problem) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                throw $problem
+            }
+            & $Log ("  Downloaded {0} ({1:N1} MB)" -f $d.downloadUrl, ((Get-Item -LiteralPath $path).Length / 1MB))
+            return
         }
     } finally { $ProgressPreference = $old }
-    throw "could not download $($d.downloadUrl) (no internet?)"
+    throw "could not download $($d.downloadUrl) after $Attempts tries (no internet?). Last error: $last"
+}
+
+function Test-AppSignerMatch {
+    # Whether an Authenticode signer subject ('CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, ...') is
+    # the application's publisher (from the winget catalog): its CN or O is that name, ignoring case and a trailing dot.
+    param([string]$Subject, [string]$Publisher)
+    $want = "$Publisher".Trim().TrimEnd('.')
+    if (-not $want -or -not $Subject) { return $false }
+    foreach ($m in [regex]::Matches($Subject, '(?:^|,)\s*(?:CN|O)=("([^"]*)"|[^,]*)')) {
+        $v = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[1].Value }
+        if ($v.Trim().TrimEnd('.') -ieq $want) { return $true }
+    }
+    $false
+}
+
+function Test-AppDownloadFile {
+    <#
+    .SYNOPSIS
+        Checks a downloaded installer against the pack's downloadSha256. Returns '' when it is fine, else why not.
+        Publishers update the file behind a "latest" link (Microsoft's Office setup.exe at officecdn.microsoft.com does,
+        so the SHA256 saved from the winget catalog goes stale): a file with another SHA256 is still taken when it has
+        a valid Authenticode signature from the pack's publisher, and the log says so.
+    #>
+    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][scriptblock]$Signature, [scriptblock]$Log = { param($m) })
+    $d = $Definition
+    if (-not $d.downloadSha256) { return '' }
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($hash -eq $d.downloadSha256.ToUpperInvariant()) { return '' }
+    $sig = try { & $Signature $Path } catch { [pscustomobject]@{ Status = "unreadable ($($_.Exception.Message))"; Subject = '' } }
+    if ($sig.Status -eq 'Valid' -and (Test-AppSignerMatch -Subject $sig.Subject -Publisher $d.publisher)) {
+        & $Log "  The publisher updated the file (SHA256 $hash, not the saved $($d.downloadSha256)); kept because it is signed by $($d.publisher)"
+        return ''
+    }
+    $signer = if ($sig.Status -eq 'Valid') { "signed by $($sig.Subject), not by $(if ($d.publisher) { $d.publisher } else { 'a known publisher' })" } else { "signature $($sig.Status)" }
+    "the download's SHA256 $hash is not the expected $($d.downloadSha256) and the file is not signed by the publisher ($signer); add the application again"
 }
 
 function Get-MediaAppDownloads {
@@ -872,7 +915,7 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, Copy-AppTemplateFiles,
     ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
-    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload,
+    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch,
     Get-MediaAppDownloads, Add-MediaCopyItems,
     Save-AppPack,
     Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
