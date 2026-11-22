@@ -865,9 +865,10 @@ function Join-ContentPath {
 }
 
 function Get-AnswerFileNames {
-    # The answer files in <content root>\AnswerFiles, by name without .xml, sorted: the console's lists and the
-    # deploy in WinPE. Always an array, also for a single answer file: PowerShell unrolls a returned array, and a lone
-    # string indexed with [0] gives its first letter ("Answer file W not found", 2026-11-20); callers still wrap it in @().
+    # The answer files in <content root>\AnswerFiles, by name without .xml, sorted: the console's lists, the media
+    # build and the deploy in WinPE. Callers wrap the call in @(): a lone name then stays a one-item array, and its
+    # [0] is the whole name, not its first letter ("Answer file W not found", 2026-11-20). Not ,$names: @() around
+    # that gives ONE item holding every name, so with two answer files the deploy took both as one name.
     # -Required (the deploy): none is an error that says how to fix it, instead of PowerShell's "Cannot find path"
     # (old USB sticks were built without the AnswerFiles folder).
     param([Parameter(Mandatory)][string]$ContentRoot, [switch]$Required)
@@ -878,9 +879,7 @@ function Get-AnswerFileNames {
             'Rebuild the USB stick from the console (Media tab, with the answer files checked), ' +
             'or copy AnswerFiles\<name>.xml and the image it names from the content root to the stick.')
     }
-    # An empty list returns nothing (@() around the call gives an empty array; ,@() would give one empty item).
-    if (-not $names) { return }
-    ,$names
+    $names
 }
 
 function Get-AnswerFileUsage {
