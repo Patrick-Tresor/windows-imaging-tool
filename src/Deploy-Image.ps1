@@ -581,7 +581,7 @@ try {
     $imagePath = $deployPlan.ImagePath; $driverMatch = $deployPlan.DriverMatch; $driverPack = $deployPlan.DriverPack
     $driverRoot = $deployPlan.DriverRoot; $appRoot = $deployPlan.AppRoot
     $driverPackName = if (-not $driverPack) { 'inbox only' } elseif ($driverPack.StartsWith($driverRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $driverPack.Substring($driverRoot.TrimEnd('\').Length).TrimStart('\') } else { $driverPack }
-    Set-DeployStatus -Fields @{ driverPack = $driverPackName }
+    Set-DeployStatus -Fields @{ driverPack = $driverPackName; driverStatus = "$($driverMatch.Status)" }   # driverStatus: the Unknown Models report
     if (-not $driverPack) { Set-DeployStatus -Warning "No driver pack for $($hw.Maker) $($hw.Model)" }
 
     # Applications are checked now, before the disk is wiped.
@@ -821,13 +821,6 @@ finally {
         # Content on a disk of this PC is the USB stick (a network share has no disk number).
         $onStick = $null -ne (Get-ContentDiskNumber $root)
         Set-DeployStatus -LocalOnly -Step 'Image applied' -Percent 100 -State Succeeded -Fields @{ whenDone = $whenDone; removableMedia = $onStick }
-    }
-    # Which drivers this PC got, for the console's Unknown Models report. Never fails the deployment.
-    if ($root -and $hw -and $driverMatch -and $status -ne 'CANCELLED') {
-        try {
-            Write-DriverReport -ContentRoot $root -Identity $hw -Match $driverMatch -ComputerName $ComputerName `
-                -AnswerFile $(if ($answer) { $answer.Name }) -Result $status
-        } catch { Write-Warning "Could not write the driver report: $($_.Exception.Message)" }
     }
 }
 

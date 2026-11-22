@@ -1,23 +1,42 @@
-# Unknown models report: PCs that were deployed without an exact driver pack, read from the
-# Reports\Drivers\<serial>.json files Deploy-Image.ps1 writes, and the vendor pack that would fix each model.
-# No UI code here, so it can be tested without Windows.
+# Unknown models report: PCs that were deployed without an exact driver pack, read from the dashboard's status
+# records (Status\<id>.json, which Deploy-Image.ps1 writes with the driver match), and the vendor pack that would
+# fix each model. No UI code here, so it can be tested without Windows.
 
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1')
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1')
 # Same matching as the deploy, so a model drops off the report as soon as the catalog covers it.
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployCommon.psm1') -Function Find-DriverCatalogMatch
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployStatus.psm1') -Function Get-StatusFolder
 
 function Get-DriverReportDir {
+    # Where the deployment records are: the dashboard's status folder.
     param([Parameter(Mandatory)][string]$ContentRoot)
-    Join-Path (Join-Path $ContentRoot 'Reports') 'Drivers'
+    $settings = try { Get-DeploySettings -ContentRoot $ContentRoot } catch { $null }
+    Get-StatusFolder -ContentRoot $ContentRoot -Settings $settings
 }
 
 function Get-DriverReportRecords {
-    # One record per deployed PC (its newest deployment). Unreadable files are skipped.
-    param([Parameter(Mandatory)][string]$ContentRoot)
-    foreach ($f in Get-ChildItem -Path (Get-DriverReportDir $ContentRoot) -Filter *.json -File -ErrorAction SilentlyContinue) {
-        try { Get-Content -Raw $f.FullName | ConvertFrom-Json } catch { Write-Warning "Skipping $($f.Name): $($_.Exception.Message)" }
-    }
+    # One record per deployed PC (its newest deployment), from the status records. Older tool versions wrote
+    # Reports\Drivers\<serial>.json instead; those are still read, and a newer status record of the same PC wins.
+    # Cancelled deployments and records without a driver match are left out. Unreadable files are skipped.
+    param([Parameter(Mandatory)][string]$ContentRoot, [string]$StatusFolder)
+    if (-not $StatusFolder) { $StatusFolder = Get-DriverReportDir $ContentRoot }
+    $all = @(
+        foreach ($f in Get-ChildItem -Path $StatusFolder -Filter *.json -File -ErrorAction SilentlyContinue) {
+            try { $s = Get-Content -Raw $f.FullName | ConvertFrom-Json } catch { Write-Warning "Skipping $($f.Name): $($_.Exception.Message)"; continue }
+            if (-not $s.PSObject.Properties['driverStatus'] -or -not $s.driverStatus -or $s.state -eq 'Cancelled') { continue }
+            $when = try { ([datetime]$s.started).ToString('yyyy-MM-dd HH:mm') } catch { '' }
+            [pscustomobject]@{
+                serial = $s.serial; computerName = $s.computerName; maker = $s.maker; model = $s.model
+                sku = $s.sku; machineType = $s.machineType; driverStatus = $s.driverStatus; date = $when
+            }
+        }
+        foreach ($f in Get-ChildItem -Path (Join-ContentPath $ContentRoot 'Reports\Drivers') -Filter *.json -File -ErrorAction SilentlyContinue) {
+            try { Get-Content -Raw $f.FullName | ConvertFrom-Json } catch { Write-Warning "Skipping $($f.Name): $($_.Exception.Message)" }
+        }
+    )
+    $all | Group-Object { if ($_.serial) { "$($_.serial)" } else { "$($_.maker)|$($_.model)" } } |
+        ForEach-Object { $_.Group | Sort-Object date -Descending | Select-Object -First 1 }
 }
 
 function Get-UnknownModels {

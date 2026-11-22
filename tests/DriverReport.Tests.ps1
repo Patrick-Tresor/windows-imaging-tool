@@ -7,6 +7,7 @@ Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/Console/DriverPacks.psm1') -Force
 Import-Module (Join-Path $repo 'src/Console/DriverReport.psm1') -Force
 $common = Import-Module (Join-Path $repo 'src/DeployCommon.psm1') -Force -PassThru
+Import-Module (Join-Path $repo 'src/DeployStatus.psm1') -Force
 $fixtures = Join-Path $PSScriptRoot 'fixtures/driverpacks'
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
@@ -28,7 +29,10 @@ try {
     $deploy = {
         param($Pc, $Name)
         $m = Resolve-DriverPack -Identity $Pc -CatalogPath $catalog -DriverRoot $drivers -Detailed 6>$null
-        Write-DriverReport -ContentRoot $root -Identity $Pc -Match $m -ComputerName $Name -AnswerFile Default -Result OK
+        # The deploy keeps the driver match in the dashboard's status record; that is what the report reads.
+        Start-DeployStatus -Folder (Join-Path $root 'Status') -Identity $Pc -LogPath @() | Out-Null
+        Set-DeployStatus -Fields @{ computerName = "$Name"; driverStatus = "$($m.Status)" }
+        Set-DeployStatus -State Succeeded
         $m
     }
     $ok      = & $deploy (New-Pc Dell 'Latitude 5440' '0B0B' $null 'SN-OK') 'PC-OK'
@@ -69,10 +73,31 @@ try {
     Remove-Item -Recurse -Force $pe
 
     $reports = Get-DriverReportDir $root
-    Assert-Equal (@(Get-ChildItem $reports -Filter *.json).Count) 6 'one report file per PC'
-    Assert-Equal (Test-Path (Join-Path $reports 'To_be_filled_by_O.E.M..json')) $true 'serial is made safe for a file name'
-    $r = Get-Content -Raw (Join-Path $reports 'SN-1.json') | ConvertFrom-Json
-    Assert-Equal "$($r.computerName)|$($r.driverStatus)|$($r.sku)|$($r.result)" 'PC-1|Fallback|0B0C|OK' 'report fields'
+    Assert-Equal ([IO.Path]::GetFileName($reports)) 'Status' 'the records are the status records'
+    Assert-Equal (@(Get-DriverReportRecords -ContentRoot $root).Count) 6 'one record per PC'
+    $r = Get-DriverReportRecords -ContentRoot $root | Where-Object serial -eq 'SN-1'
+    Assert-Equal "$($r.computerName)|$($r.driverStatus)|$($r.sku)|$($r.date -match '^\d{4}-\d\d-\d\d \d\d:\d\d$')" 'PC-1|Fallback|0B0C|True' 'record fields'
+    $s = Get-Content -Raw (Join-Path $reports 'SN-1.json') | ConvertFrom-Json
+    Assert-Equal "$($s.sku)|$($s.machineType)|$($s.driverStatus)" '0B0C||Fallback' 'the status record holds the SKU and the driver match'
+
+    # A cancelled deployment and one stopped before the driver match are left out.
+    Start-DeployStatus -Folder $reports -Identity (New-Pc Dell 'Latitude 7777' '0777' $null 'SN-C') -LogPath @() | Out-Null
+    Set-DeployStatus -Fields @{ driverStatus = 'None' } -State Cancelled
+    Start-DeployStatus -Folder $reports -Identity (New-Pc Dell 'Latitude 8888' '0888' $null 'SN-E') -LogPath @() | Out-Null
+    Set-DeployStatus -Message 'disk not found' -State Failed
+    Assert-Equal (@(Get-DriverReportRecords -ContentRoot $root).Count) 6 'cancelled and early failures are left out'
+
+    # Old Reports\Drivers files are still read; a newer status record of the same PC wins.
+    $old = Join-Path $root 'Reports/Drivers'
+    New-Item -ItemType Directory -Path $old -Force | Out-Null
+    @{ serial = 'SN-OLD'; computerName = 'PC-OLD'; maker = 'Dell'; model = 'Latitude 5540'; sku = '0B0C'; driverStatus = 'Fallback'; date = '2026-01-01 10:00' } |
+        ConvertTo-Json | Set-Content (Join-Path $old 'SN-OLD.json')
+    @{ serial = 'SN-1'; computerName = 'PC-1-OLD'; maker = 'Dell'; model = 'Latitude 5540'; sku = '0B0C'; driverStatus = 'None'; date = '2026-01-01 10:00' } |
+        ConvertTo-Json | Set-Content (Join-Path $old 'SN-1.json')
+    $recs = @(Get-DriverReportRecords -ContentRoot $root)
+    Assert-Equal $recs.Count 7 'old report files are read too'
+    Assert-Equal ($recs | Where-Object serial -eq 'SN-1').computerName 'PC-1' 'the newest record of a PC wins'
+    Remove-Item (Join-Path $old 'SN-OLD.json')
 
     # The report: grouped by model, most PCs first, matched and inbox-only PCs left out.
     $unknown = @(Get-UnknownModels -ContentRoot $root)

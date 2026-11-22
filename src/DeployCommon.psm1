@@ -716,37 +716,6 @@ function Resolve-DriverPack {
     $m | Add-Member -NotePropertyName FullPath -NotePropertyValue $full -PassThru
 }
 
-function Write-DriverReport {
-    # Records which drivers this PC got in <content root>\Reports\Drivers\<serial>.json, one file per PC, newest
-    # deployment wins. The console's Unknown Models report lists the PCs that got no exact pack.
-    param(
-        [Parameter(Mandatory)][string]$ContentRoot,
-        [Parameter(Mandatory)]$Identity,
-        [Parameter(Mandatory)]$Match,
-        [string]$ComputerName,
-        [string]$AnswerFile,
-        [string]$Result
-    )
-    $dir = Join-Path (Join-Path $ContentRoot 'Reports') 'Drivers'
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    $serial = "$($Identity.Serial)" -replace '[\\/:*?"<>|\s]', '_'
-    if (-not $serial.Trim('_')) { $serial = "$($Identity.Maker)-$($Identity.Model)" -replace '[\\/:*?"<>|\s]', '_' }
-    [ordered]@{
-        serial       = $Identity.Serial
-        computerName = $ComputerName
-        maker        = $Identity.Maker
-        model        = $Identity.Model
-        sku          = $Identity.Sku
-        machineType  = $Identity.MachineType
-        driverStatus = $Match.Status
-        matchedBy    = $Match.MatchedBy
-        driverPath   = $Match.Path
-        answerFile   = $AnswerFile
-        result       = $Result
-        date         = (Get-Date).ToString('yyyy-MM-dd HH:mm')
-    } | ConvertTo-Json | Set-Content -Path (Join-Path $dir "$serial.json") -Encoding utf8
-}
-
 function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
     # Decrypt: turns the share password the console encrypted in the settings into text (Get-ShareCredential).
@@ -921,6 +890,6 @@ function Test-GenericComputerName {
     "$Name".Trim() -match '^(DESKTOP|LAPTOP|WIN)-[A-Z0-9]{7,11}$'
 }
 
-Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack, Write-DriverReport,
+Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

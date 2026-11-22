@@ -213,9 +213,9 @@ no longer create `fwfiles`).
    first run claims `C:\Temp\firstboot.started`, deletes the task and runs;
    a second one stops.
 8. Run POSTIMAGE tasks, then `bcdboot W:\Windows /s S: /f UEFI`.
-9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, and
-   `Reports\Drivers\<serial>.json` (which driver pack the PC got and how it was
-   matched), then reboot or shut down.
+9. Write a log to `W:\Windows\Temp\Deploy.log` and the content root, then
+   reboot or shut down. The status record (`Status\<id>.json`) already holds
+   which driver pack the PC got and how it was matched.
 
 ### UEFI only
 
@@ -370,14 +370,16 @@ and import it from the Driver Library tab.
 
 ### Unknown models report
 
-Every deployment writes `Reports\Drivers\<serial>.json` on the content root:
-the PC's maker, model, SKU / machine type, computer name, and the driver
-result from `Find-DriverCatalogMatch` (the same matching as the deploy):
-`Matched`, `InboxOnly` (a catalog entry with no folder), `Fallback` (maker
-fallback), `None`, or `MissingFolder`. One file per PC, so a reimage
-replaces it. Writing it never fails a deployment.
+Every deployment's dashboard status record (`Status\<id>.json`, the same
+file the Dashboard reads) holds the PC's maker, model, SKU / machine type,
+computer name, and `driverStatus`, the result from `Find-DriverCatalogMatch`
+(the same matching as the deploy): `Matched`, `InboxOnly` (a catalog entry
+with no folder), `Fallback` (maker fallback), `None`, or `MissingFolder`.
+One record per PC, so a reimage replaces it. Cancelled deployments are left
+out. Older versions wrote `Reports\Drivers\<serial>.json`; those files are
+still read, and a newer status record of the same PC wins.
 
-`src/Console/DriverReport.psm1` reads these files and re-checks each PC against
+`src/Console/DriverReport.psm1` reads these records and re-checks each PC against
 the current catalog and `Drivers\` folder, so a model leaves the report as soon
 as the library covers it. The rest are grouped by maker, model and SKU / machine
 type, most PCs first. For Dell, HP and Lenovo it looks the model up in the
