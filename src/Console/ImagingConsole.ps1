@@ -546,6 +546,8 @@ function Update-All {
 
 #region Content root
 
+$ui.BtnShowProgress.Add_Click({ Invoke-Safely { Show-ProgressWindows } })
+
 $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $path = Select-Folder 'Choose the content root: a USB DEPLOY volume, a local folder, or the network share'
     if (-not $path) { return }
@@ -1437,6 +1439,8 @@ $ui.Tabs.Add_SelectionChanged({
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
     }
 })
+# Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
+$window.Add_Closing({ $script:ConsoleClosing = $true })
 $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop() })
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
