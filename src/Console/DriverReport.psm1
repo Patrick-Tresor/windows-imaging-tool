@@ -5,7 +5,7 @@
 Import-Module (Join-Path $PSScriptRoot 'ConsoleData.psm1')
 Import-Module (Join-Path $PSScriptRoot 'DriverPacks.psm1')
 # Same matching as the deploy, so a model drops off the report as soon as the catalog covers it.
-Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployCommon.psm1') -Function Find-DriverCatalogMatch
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployCommon.psm1') -Function Find-DriverCatalogMatch, ConvertTo-CatalogIdentity
 Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployStatus.psm1') -Function Get-StatusFolder
 
 function Get-DriverReportDir {
@@ -36,7 +36,9 @@ function Get-DriverReportRecords {
         }
     )
     $all | Group-Object { if ($_.serial) { "$($_.serial)" } else { "$($_.maker)|$($_.model)" } } |
-        ForEach-Object { $_.Group | Sort-Object date -Descending | Select-Object -First 1 }
+        ForEach-Object { $_.Group | Sort-Object date -Descending | Select-Object -First 1 } |
+        # Older deploys reported a Lenovo's SystemSKU text as its SKU: use its machine type, as the catalog does.
+        ForEach-Object { ConvertTo-CatalogIdentity $_ }
 }
 
 function Get-UnknownModels {

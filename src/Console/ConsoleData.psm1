@@ -137,6 +137,46 @@ function Remove-SampleDriverEntries {
     $removed
 }
 
+function Merge-LenovoSkuEntries {
+    <#
+    .SYNOPSIS
+        Fixes catalog entries keyed on a Lenovo's SystemSKU text (LENOVO_MT_20FR_BU_Think_FM_ThinkPad X1 Yoga 1st),
+        which older versions wrote from the Unknown models report: the SKU becomes the machine type (20FR). When
+        another Lenovo entry already covers that machine type, the old entry is removed, so one model is one row
+        (Patrick, 2026-11-23). Such an entry also won over the downloaded pack at deploy (SKU is matched first), so
+        the PC got inbox drivers only. Returns how many entries were changed or removed.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    $path = Join-ContentPath $ContentRoot 'config\driver-catalog.json'
+    if (-not (Test-Path -LiteralPath $path)) { return 0 }
+    $catalog = Get-DriverCatalog -ContentRoot $ContentRoot
+    $entries = @($catalog.entries)
+    $split = { param($v) @("$v" -split '\s*[,;]\s*' | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ }) }
+    $isOld = { param($e) $e.maker -eq 'Lenovo' -and "$($e.sku)".Trim() -match '^LENOVO_MT_[0-9A-Za-z]{4}' }
+    if (-not @($entries | Where-Object { & $isOld $_ }).Count) { return 0 }
+    $keep = [Collections.Generic.List[object]]::new()
+    $changed = 0
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $e = $entries[$i]
+        if (-not (& $isOld $e)) { $keep.Add($e); continue }
+        $changed++
+        $type = "$($e.sku)".Trim().Substring(10, 4).ToUpperInvariant()
+        # Covered by another Lenovo entry for that machine type (the downloaded pack): this one goes. An entry with
+        # a folder is only replaced by another entry with a folder.
+        $others = @(for ($j = 0; $j -lt $entries.Count; $j++) { if ($j -ne $i -and -not (& $isOld $entries[$j])) { $entries[$j] } }) + @($keep)
+        $covered = @($others | Where-Object {
+            $_.maker -eq 'Lenovo' -and (& $split $_.machineType) -contains $type -and ($_.path -or -not $e.path)
+        }).Count
+        if ($covered) { continue }
+        [void]$e.PSObject.Properties.Remove('sku')
+        if (-not "$($e.machineType)".Trim()) { $e | Add-Member -NotePropertyName machineType -NotePropertyValue $type -Force }
+        $keep.Add($e)
+    }
+    $catalog.entries = @($keep)
+    Save-JsonFile -Path $path -InputObject $catalog -Depth 5
+    $changed
+}
+
 function Get-DriverCatalogRows {
     # Flattens catalog entries into uniform rows for a grid, with a status column showing whether the folder is populated.
     param([Parameter(Mandatory)][string]$ContentRoot)
@@ -1132,7 +1172,7 @@ function Get-ImageLogPath {
 
 #endregion
 
-Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries,
+Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries, Merge-LenovoSkuEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,

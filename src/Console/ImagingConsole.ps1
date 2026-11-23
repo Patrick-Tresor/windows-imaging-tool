@@ -288,6 +288,8 @@ function Update-Drivers {
     if (Test-ContentRoot $script:root) {
         # The example rows new content roots used to get (Latitude 5440, EliteBook 840 G9...): gone unless they hold drivers.
         try { $gone = Remove-SampleDriverEntries -ContentRoot $script:root; if ($gone) { Set-Status "Removed $gone example rows from the driver library" } } catch { }
+        # Lenovo rows keyed on the SystemSKU text (older Unknown models report): merged into the model's own row.
+        try { $merged = Merge-LenovoSkuEntries -ContentRoot $script:root; if ($merged) { Set-Status "Merged $merged duplicate Lenovo row(s) in the driver library" } } catch { }
         foreach ($r in Get-DriverCatalogRows -ContentRoot $script:root) {
             $row = [DriverRow]::new()
             foreach ($p in 'Maker', 'Model', 'Sku', 'MachineType', 'ModelPattern', 'Path', 'Status') { $row.$p = $r.$p }

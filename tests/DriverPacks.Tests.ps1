@@ -255,6 +255,9 @@ Assert-Equal (Get-Found '21he') 'Lenovo ThinkPad T14 Gen 4' 'find: Lenovo machin
 Assert-Equal (Get-Found '0C1D') 'Dell Latitude 5440' 'find: Dell SKU'
 Assert-Equal (Get-Found 'Latitude 9999') '' 'find: every word must match'
 Assert-Equal (Get-Found '   ') '' 'find: blank finds nothing'
+$yogas = @([pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad X1 Yoga Type 20FQ 20FR'; Skus = @(); MachineTypes = @('20FQ', '20FR') },
+           [pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad X13 Yoga Gen 1'; Skus = @(); MachineTypes = @('20SX', '20SY') })
+Assert-Equal ((@(Find-VendorDriverPack -Query 'X1 Yoga' -Packs $yogas)).Model -join ',') 'ThinkPad X1 Yoga Type 20FQ 20FR' 'find: a word with a digit matches a whole word (X1 is not X13)'
 $r = Find-VendorDriverPackOnline -Query 'lenovo t14' -CatalogPaths $cats
 Assert-Equal "$(@($r.Packs).Count) $($r.Packs[0].Model) $(@($r.Errors).Count)" '1 ThinkPad T14 Gen 4 0' 'find online: maker word reads only that catalog'
 $r = Find-VendorDriverPackOnline -Query 'thinkpad' -CatalogPaths @{ Dell = (Join-Path $fixtures 'missing.xml'); HP = $cats.HP; Lenovo = $cats.Lenovo }

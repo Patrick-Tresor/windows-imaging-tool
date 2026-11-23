@@ -212,6 +212,12 @@ function Get-HardwareIdentity {
         $machineType = $model.Substring(0, [Math]::Min(4, $model.Length))
         $model = $csp.Version.Trim()
     }
+    if ($maker -eq 'Lenovo') {
+        # Lenovo's SystemSKU is a long text (LENOVO_MT_20FR_BU_Think_FM_ThinkPad X1 Yoga 1st), not an ID driver
+        # catalogs use: the machine type is the Lenovo ID. Kept as a SKU it became a second catalog row (Patrick,
+        # 2026-11-23: three Lenovo rows for one model).
+        $sku = $null
+    }
     if ($maker -eq 'HP' -and $sku) {
         # HP's SystemSKU is the order number; the 4-char baseboard product is what driver catalogs use.
         $sku = (Get-CimInstance Win32_BaseBoard).Product.Trim()
@@ -621,6 +627,23 @@ function Test-CatalogIdMatch {
     @("$List" -split '\s*[,;]\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -contains "$Value".Trim()
 }
 
+function ConvertTo-CatalogIdentity {
+    # The IDs the driver catalog matches on, for a PC identity or a catalog entry. Older deploys reported a Lenovo's
+    # SystemSKU text (LENOVO_MT_20FR_BU_Think_FM_ThinkPad X1 Yoga 1st) as its SKU: that becomes the machine type
+    # (20FR) and the SKU is dropped, so it matches the same entry as the machine type. Other makers are unchanged.
+    # Works on any object with Maker, Sku and MachineType (any case); returns a copy.
+    param([Parameter(Mandatory)]$Identity)
+    $c = $Identity.PSObject.Copy()
+    $maker = "$($c.Maker)"
+    $sku = "$($c.Sku)".Trim()
+    if ($maker -eq 'Lenovo' -and $sku -match '^LENOVO_MT_([0-9A-Za-z]{4})') {
+        $type = $Matches[1].ToUpperInvariant()
+        if (-not "$($c.MachineType)".Trim()) { $c | Add-Member -NotePropertyName MachineType -NotePropertyValue $type -Force }
+        $c | Add-Member -NotePropertyName Sku -NotePropertyValue $null -Force
+    }
+    $c
+}
+
 function Find-DriverCatalogMatch {
     # The most specific catalog entry for a PC, without logging, so the console can re-check reported PCs.
     # Status: Matched, InboxOnly (an entry with no path), Fallback (maker fallback), None.
@@ -630,7 +653,9 @@ function Find-DriverCatalogMatch {
         $Catalog   # the parsed catalog, instead of CatalogPath, when checking many PCs
     )
     $catalog = if ($Catalog) { $Catalog } else { Get-Content -Raw -Path $CatalogPath | ConvertFrom-Json }
-    $mine = @($catalog.entries | Where-Object { $_.maker -eq $Identity.Maker })
+    $Identity = ConvertTo-CatalogIdentity $Identity
+    # Old catalogs can hold a Lenovo entry keyed on the SystemSKU text: it matches as its machine type.
+    $mine = @($catalog.entries | Where-Object { $_.maker -eq $Identity.Maker } | ForEach-Object { ConvertTo-CatalogIdentity $_ })
 
     $by = 'sku'
     # sku and machineType may list several values ("0B0B, 0C1D"): a downloaded pack is one entry for all its IDs.
@@ -890,6 +915,6 @@ function Test-GenericComputerName {
     "$Name".Trim() -match '^(DESKTOP|LAPTOP|WIN)-[A-Z0-9]{7,11}$'
 }
 
-Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack,
+Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, ConvertTo-CatalogIdentity, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack,
     Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment
