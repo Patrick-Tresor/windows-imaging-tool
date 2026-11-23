@@ -15,12 +15,12 @@ src/                 the scripts and modules that run in WinPE, at first boot an
                      Update-OfflineImage.ps1, Start-RemoteReimage.ps1, Invoke-SysprepAtDeploy.ps1,
                      Get-DriverPacks.ps1, Test-Deployment.ps1, and their *.psm1 modules; Assets\ (logo)
 src/Console/         ImagingConsole.ps1 (WPF GUI, MainWindow.xaml), the capture wizard, answer file, application
-                     and task editors, Update image, Versions and Progress windows, ConsoleData.psm1,
-                     DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
+                     and task editors, Update image, Versions and Progress windows, Styles.xaml (colours and
+                     button styles), ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, app-templates.json, task-templates.json,
                      office-configuration.xml, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
-tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
+tests/               Run-All.ps1 (every suite, as CI runs them), *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 ```
 
 ## Admin console
@@ -36,25 +36,19 @@ plugged-in stick or the network boot image is older than the console, with **Upd
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
 by itself once nothing is left; a failed job stays, with its log. **Show progress** in the header opens
 it again after you close it.
-Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
-with **Browse...**; a new folder gets the content folders right away. Then:
+
+The window has a header bar at the top (logo, version, the **content root** with **Browse...**
+and **Open folder**, and **Show progress** while a job runs), the tabs down the left side, and a
+status line at the bottom. Pick a **content root** (a local folder, the USB `DEPLOY` volume, or
+the share) with **Browse...**; a new folder gets the content folders right away. Each tab
+reloads when you open it, so there are no Refresh buttons. The tabs, top to bottom:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
   **Versions...** (or double-click an image) lists its earlier versions (see
   [Image versions and rollback](#image-versions-and-rollback)).
   **Update image...** adds Windows updates to the selected image (see
-  [Updating an image](#updating-an-image)).
-- **Answer Files**: create, edit and check deployment profiles, and
-  **Delete** one (it asks first).
-  **New** and **Edit** (or double-click) open the answer file editor, where every
-  setting is a form field: General, Image and disk, Applications (pick and order
-  them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
-  boxes and saved in the answer file, encrypted (see Passwords below).
-- **Apps and Tasks**: one list of application packs and task scripts, with
-  when each runs. **New application...** opens the pack builder, **New task...**
-  the task editor (see Applications and Tasks below).
+  [Updating an image](#updating-an-image)). **Open log** shows the capture or update log.
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
   driver pack catalogs for a model, SKU or machine type; pick the pack and it
   downloads, checks, extracts and registers it. You can also import a pack you already have
@@ -77,6 +71,21 @@ with **Browse...**; a new folder gets the content folders right away. Then:
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
+  Pick the **USB disk**, tick **Update a stick this console built before** to refresh one
+  without erasing it, uncheck the **Driver packs on USB** you don't need, type the
+  **WinPE password** twice and click **Build media**. When Windows refused the console's
+  Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
+- **Answer Files**: create, edit and check deployment profiles, and
+  **Delete** one (it asks first).
+  **New** and **Edit** (or double-click) open the answer file editor, where every
+  setting is a form field: General, Image and disk, Applications (pick and order
+  them, or add a new installer), Windows settings, Computer name (with a preview),
+  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
+  boxes and saved in the answer file, encrypted (see Passwords below).
+- **Apps and Tasks**: one list of application packs and task scripts, with
+  when each runs. **New application...** opens the pack builder, **New task...**
+  the task editor, **Edit** and **Delete** the selected one, and **Find an app online**
+  adds an application from the winget catalog (see Applications and Tasks below).
 - **Deploy Settings**: four short sections. 1) The network share, left empty
   for USB sticks only (needed for ISO boot and the Computers tab; with a share,
   every PC, USB ones too, reports to its `Status` folder for the Dashboard).
@@ -94,9 +103,10 @@ with **Browse...**; a new folder gets the content folders right away. Then:
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. At the end, the **Result**
-  column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open; every tab
-  reloads when you open it, so there are no Refresh buttons.
-  See [Deployment dashboard](#deployment-dashboard). The **History** filter
+  column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open.
+  Counters at the top (Deploying, Succeeded, With warnings, Failed or stalled, PCs
+  listed), a **Show** filter (All, Deploying, Failed or stalled, Finished, History),
+  **Open folder** and **Remove**. **History**
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.
 
