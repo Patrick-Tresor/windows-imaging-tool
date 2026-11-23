@@ -76,6 +76,23 @@ function Test-PackRequirement {
     [bool]($makerOk -and $modelOk)
 }
 
+function Set-SystemAwake {
+    # Tells Windows the system is in use: resets the sleep timer once (like a key press, the screen may still turn
+    # off), or with -Continuous keeps the PC from sleeping until this process ends. Called every few seconds while an
+    # installer or task runs, and once at the start of first boot. Does nothing where the call is not available.
+    param([switch]$Continuous)
+    if (-not $script:awakeReady) {
+        $script:awakeReady = $true
+        if (-not ('ImagingTool.PowerState' -as [type])) {
+            try { Add-Type -Namespace ImagingTool -Name PowerState -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);' -ErrorAction Stop } catch { }
+        }
+    }
+    if (-not ('ImagingTool.PowerState' -as [type])) { return }
+    # ES_SYSTEM_REQUIRED, plus ES_CONTINUOUS to keep it.
+    $flags = if ($Continuous) { [uint32]2147483649 } else { [uint32]1 }
+    try { [void][ImagingTool.PowerState]::SetThreadExecutionState($flags) } catch { }
+}
+
 function Invoke-PackProcess {
     <#
     .SYNOPSIS
@@ -108,7 +125,15 @@ function Invoke-PackProcess {
     $p = [Diagnostics.Process]::Start($psi)
     $stdout = $p.StandardOutput.ReadToEndAsync()
     $stderr = $p.StandardError.ReadToEndAsync()
-    $timedOut = -not $p.WaitForExit($TimeoutMinutes * 60000)
+    # The deadline is wall-clock time, checked every few seconds, and the PC is kept awake meanwhile: a laptop at the
+    # logon screen goes to sleep during first boot, and a plain WaitForExit(30 min) does not count the time asleep
+    # (Office "still running after 30 minutes" was logged 2 hours later on a Latitude 5521, 2026-11-23).
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $timedOut = $false
+    while (-not $p.WaitForExit(5000)) {
+        Set-SystemAwake
+        if ((Get-Date) -ge $deadline) { $timedOut = $true; break }
+    }
     if ($timedOut) { try { & taskkill.exe /PID $p.Id /T /F | Out-Null } catch { } }
     else { $p.WaitForExit() }
     # The pipes close once the program (and anything it started) has ended; don't hang on one that stays open.
@@ -127,4 +152,4 @@ function Invoke-PackProcess {
     }
 }
 
-Export-ModuleMember -Function Read-PackJson, Save-PackFolder, Get-PackTemplates, Test-PackRequirement, Invoke-PackProcess
+Export-ModuleMember -Function Read-PackJson, Save-PackFolder, Get-PackTemplates, Test-PackRequirement, Invoke-PackProcess, Set-SystemAwake

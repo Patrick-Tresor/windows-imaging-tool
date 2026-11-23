@@ -830,6 +830,227 @@ function Get-MediaAppDownloads {
     [pscustomobject]@{ Items = $items; Failed = $failed }
 }
 
+#region Office offline source
+
+function Test-OfficeDeploymentCommand {
+    # Whether an application runs the Office Deployment Tool (setup.exe /configure <file>.xml).
+    param([Parameter(Mandatory)]$Definition)
+    [regex]::IsMatch("$($Definition.command)", '/configure\s+\S', 'IgnoreCase')
+}
+
+function Get-OfficeConfigPath {
+    <#
+    .SYNOPSIS
+        For an Office Deployment Tool pack (command "setup.exe /configure <file>.xml"), the full path of its
+        configuration file; '' for any other application or when the file is nowhere.
+        The file in -AppFolder wins, by its name alone: a command written with a path on the console PC
+        (C:\imager\Applications\Microsoft-Office\Configuration.xml) still finds the copy that travels with the pack.
+    #>
+    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$AppFolder)
+    $m = [regex]::Match("$($Definition.command)", '/configure\s+(?:"([^"]+)"|(\S+))', 'IgnoreCase')
+    if (-not $m.Success) { return '' }
+    $name = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+    $leaf = @($name -split '[\\/]')[-1]
+    if ([IO.Directory]::Exists($AppFolder)) {
+        $local = @([IO.Directory]::GetFiles($AppFolder) | Where-Object { [IO.Path]::GetFileName($_) -ieq $leaf })
+        if ($local) { return $local[0] }
+    }
+    if ([IO.Path]::IsPathRooted($name) -and [IO.File]::Exists($name)) { return $name }
+    ''
+}
+
+function New-OfficeDeployConfig {
+    <#
+    .SYNOPSIS
+        On the PC, just before Office installs: writes configuration-deploy.xml next to setup.exe from the pack's
+        configuration and returns the command to run, "<setup.exe>" /configure "configuration-deploy.xml".
+        - Display Level None and AcceptEULA: with any window the Office Deployment Tool waits forever for a click
+          nobody can see (first boot runs as SYSTEM, behind the logon screen).
+        - The Office files next to setup.exe (Office\Data, from Update-OfficeSource) are the source, with the
+          internet as a fallback; a SourcePath that this PC can't reach is dropped, so Office comes from the internet.
+        Returns Command and Notes (what was changed, for the log). Throws when the configuration file is missing.
+    #>
+    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$AppFolder)
+    $config = Get-OfficeConfigPath -Definition $Definition -AppFolder $AppFolder
+    if (-not $config) {
+        $m = [regex]::Match("$($Definition.command)", '/configure\s+(?:"([^"]+)"|(\S+))', 'IgnoreCase')
+        throw "the Office configuration file ($(if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value })) is not in the application's folder; put configuration.xml next to setup.exe"
+    }
+    [xml]$xml = [IO.File]::ReadAllText($config)
+    $root = $xml.SelectSingleNode('/Configuration')
+    if (-not $root) { throw "$([IO.Path]::GetFileName($config)) is not an Office Deployment Tool configuration (no <Configuration>)." }
+    $notes = @()
+    $display = $xml.SelectSingleNode('/Configuration/Display')
+    if (-not $display) { $display = $root.AppendChild($xml.CreateElement('Display')) }
+    if ($display.GetAttribute('Level') -ne 'None' -or $display.GetAttribute('AcceptEULA') -ne 'TRUE') { $notes += 'silent (Display Level None, AcceptEULA)' }
+    $display.SetAttribute('Level', 'None'); $display.SetAttribute('AcceptEULA', 'TRUE')
+    $local = Get-OfficeSourceVersion -AppFolder $AppFolder
+    foreach ($add in @($xml.SelectNodes('/Configuration/Add'))) {
+        $src = $add.GetAttribute('SourcePath').Trim()
+        if ($local) {
+            $add.SetAttribute('SourcePath', $AppFolder); $add.SetAttribute('AllowCdnFallback', 'TRUE')
+        } elseif ($src -and $src -notin '.', '.\', './' -and -not [IO.Directory]::Exists($src)) {
+            $add.RemoveAttribute('SourcePath'); $add.SetAttribute('AllowCdnFallback', 'TRUE')
+            $notes += "SourcePath $src not reachable here, so from the internet"
+        }
+    }
+    $notes = @($(if ($local) { "Office $local files from this folder" } else { 'no Office files in this folder, so from the internet' })) + $notes
+    $out = [IO.Path]::Combine($AppFolder, 'configuration-deploy.xml')
+    $xml.Save($out)
+    [pscustomobject]@{ Command = "`"$($Definition.installer)`" /configure `"configuration-deploy.xml`""; Notes = $notes }
+}
+
+function Get-OfficeSourceVersion {
+    # The newest Office version folder (Office\Data\16.0.x.y) in an app folder, or $null.
+    param([Parameter(Mandatory)][string]$AppFolder)
+    $data = [IO.Path]::Combine($AppFolder, 'Office', 'Data')
+    if (-not [IO.Directory]::Exists($data)) { return $null }
+    $versions = @(foreach ($d in [IO.Directory]::GetDirectories($data)) {
+        $v = $null
+        if ([version]::TryParse([IO.Path]::GetFileName($d), [ref]$v)) { $v }
+    })
+    if ($versions) { ($versions | Sort-Object -Descending)[0] } else { $null }
+}
+
+function Remove-OldOfficeSource {
+    # Office\Data keeps every version /download ever fetched: only the newest folder and its cabs are kept,
+    # so the stick and each deploy copy one version (about 2-3 GB), not all of them.
+    param([Parameter(Mandatory)][string]$AppFolder, [scriptblock]$Log = { param($m) })
+    $keep = Get-OfficeSourceVersion -AppFolder $AppFolder
+    if (-not $keep) { return }
+    $data = [IO.Path]::Combine($AppFolder, 'Office', 'Data')
+    foreach ($d in [IO.Directory]::GetDirectories($data)) {
+        $v = $null
+        if ([version]::TryParse([IO.Path]::GetFileName($d), [ref]$v) -and $v -ne $keep) {
+            & $Log "  Removing the older Office files $v"
+            [IO.Directory]::Delete($d, $true)
+        }
+    }
+    foreach ($f in [IO.Directory]::GetFiles($data, 'v*_*.cab')) {
+        $m = [regex]::Match([IO.Path]::GetFileName($f), '^v(?:32|64)_(\d+(?:\.\d+){3})\.cab$')
+        if ($m.Success -and [version]$m.Groups[1].Value -ne $keep) { [IO.File]::Delete($f) }
+    }
+}
+
+function Update-OfficeSource {
+    <#
+    .SYNOPSIS
+        Puts the Office installation files next to setup.exe in an Office Deployment Tool pack (setup.exe /download
+        on this PC), so each deployed PC installs Office from its own copy instead of downloading 2-3 GB from
+        Microsoft at first boot, the step that failed most. With no SourcePath in configuration.xml the Office
+        Deployment Tool takes the files next to setup.exe, and goes to the internet only when they aren't there.
+        Skipped while the files are newer than -MaxAgeDays and configuration.xml is unchanged.
+        Returns Status (NotOffice, OwnSource, Fresh, Downloaded), Version and Message. Throws when the download fails.
+    #>
+    param(
+        [Parameter(Mandatory)]$Definition,
+        [Parameter(Mandatory)][string]$AppFolder,
+        [int]$MaxAgeDays = 14,
+        [int]$TimeoutMinutes = 120,
+        [scriptblock]$Log = { param($m) Write-Host $m },
+        [string]$LogPath,
+        # Tests pass their own; the default runs setup.exe /download (Invoke-PackProcess).
+        [scriptblock]$Runner,
+        [scriptblock]$Downloader
+    )
+    $out = { param($s, $v, $msg) [pscustomobject]@{ Status = $s; Version = $v; Message = $msg } }
+    $d = $Definition
+    $config = Get-OfficeConfigPath -Definition $d -AppFolder $AppFolder
+    if (-not $config) { return & $out 'NotOffice' $null '' }
+    [xml]$xml = [IO.File]::ReadAllText($config)
+    $add = $xml.SelectSingleNode('/Configuration/Add')
+    if (-not $add) { throw "$([IO.Path]::GetFileName($config)) has no <Add> element." }
+    $own = $add.GetAttribute('SourcePath').Trim()
+    # A file server (\\server\office) is the admin's own choice and every PC reaches it; a drive path
+    # (C:\imager\...) only exists on the console PC, so the files are downloaded into the pack all the same.
+    if ($own -and $own.StartsWith('\\') -and [IO.Directory]::Exists($own)) {
+        return & $out 'OwnSource' $null "configuration.xml installs from $own; left as is"
+    }
+    $configHash = (Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
+    $markerPath = [IO.Path]::Combine($AppFolder, 'office-source.json')
+    $have = Get-OfficeSourceVersion -AppFolder $AppFolder
+    if ($have -and [IO.File]::Exists($markerPath)) {
+        $marker = try { [IO.File]::ReadAllText($markerPath) | ConvertFrom-Json } catch { $null }
+        $age = if ($marker -and $marker.downloaded) { ((Get-Date) - [datetime]$marker.downloaded).TotalDays } else { [double]::MaxValue }
+        if ($marker -and $marker.configSha256 -eq $configHash -and $age -lt $MaxAgeDays) {
+            return & $out 'Fresh' $have ("Office $have files already there (downloaded {0:N0} day(s) ago)" -f $age)
+        }
+    }
+
+    # setup.exe itself (the Office Deployment Tool), from the pack's download link when it isn't in the folder.
+    if ($d.downloadUrl) {
+        $dlArgs = @{ Definition = $d; AppFolder = $AppFolder; Log = $Log; Attempts = 3; WaitSeconds = 10 }
+        if ($Downloader) { $dlArgs.Downloader = $Downloader }
+        Get-AppDownload @dlArgs
+    }
+    $setup = [IO.Path]::Combine($AppFolder, $d.installer)
+    if (-not [IO.File]::Exists($setup)) { throw "$($d.installer) (Office Deployment Tool) is not in $AppFolder." }
+
+    # The download uses a copy of configuration.xml pointing at this folder (a network share works too); the
+    # pack's own file keeps no SourcePath, so on the PC it reads the files next to setup.exe wherever it is copied.
+    $add.SetAttribute('SourcePath', $AppFolder)
+    $tmp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "office-download-$([guid]::NewGuid().ToString('N').Substring(0, 8)).xml")
+    $xml.Save($tmp)
+    if (-not $LogPath) { $LogPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'Office-download.log') }
+    & $Log "  Downloading the Office files into $AppFolder (2-3 GB, can take a while)"
+    try {
+        $run = if ($Runner) { & $Runner $setup "/download `"$tmp`"" $AppFolder }
+               else { Invoke-PackProcess -FilePath $setup -Arguments "/download `"$tmp`"" -WorkingDirectory $AppFolder -TimeoutMinutes $TimeoutMinutes -LogPath $LogPath -Log $Log }
+    } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    if ($run.TimedOut) { throw "the Office download was still running after $TimeoutMinutes minutes" }
+    if ($run.ExitCode -ne 0) { throw "setup.exe /download ended with exit code $($run.ExitCode)$(if ($run.LastLine) { ": $($run.LastLine)" })" }
+    $version = Get-OfficeSourceVersion -AppFolder $AppFolder
+    if (-not $version) { throw "setup.exe /download ended with exit 0 but there is no Office\Data folder in $AppFolder" }
+    Remove-OldOfficeSource -AppFolder $AppFolder -Log $Log
+    [IO.File]::WriteAllText($markerPath, ([ordered]@{ downloaded = (Get-Date).ToString('o'); version = "$version"; configSha256 = $configHash } | ConvertTo-Json))
+    & $Log "  Office $version files are ready in $AppFolder"
+    & $out 'Downloaded' $version "Office $version files downloaded"
+}
+
+function Update-OfficeSources {
+    <#
+    .SYNOPSIS
+        Update-OfficeSource for every Office Deployment Tool pack in -AppRoot (only -Names when given).
+        A failure only warns: that PC then downloads Office from Microsoft at first boot, as before.
+        Returns one row per Office pack: Name, Status, Version, Message.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$AppRoot,
+        [string[]]$Names,
+        [scriptblock]$Log = { param($m) Write-Host $m },
+        [scriptblock]$OnApp,
+        [scriptblock]$Runner,
+        [scriptblock]$Downloader
+    )
+    if (-not [IO.Directory]::Exists($AppRoot)) { return @() }
+    $folders = @([IO.Directory]::GetDirectories($AppRoot) | Where-Object {
+        (-not $Names -or $Names -contains [IO.Path]::GetFileName($_)) -and [IO.File]::Exists([IO.Path]::Combine($_, 'app.json'))
+    })
+    $office = @(foreach ($f in $folders) {
+        $name = [IO.Path]::GetFileName($f)
+        $def = try { Read-AppPack -AppRoot $AppRoot -Name $name } catch { $null }
+        if ($def -and (Get-OfficeConfigPath -Definition $def -AppFolder $f)) { [pscustomobject]@{ Name = $name; Folder = $f; Definition = $def } }
+    })
+    $i = 0
+    @(foreach ($o in $office) {
+        $i++
+        if ($OnApp) { & $OnApp $o.Name $i $office.Count }
+        $a = @{ Definition = $o.Definition; AppFolder = $o.Folder; Log = $Log }
+        if ($Runner) { $a.Runner = $Runner }
+        if ($Downloader) { $a.Downloader = $Downloader }
+        try {
+            $r = Update-OfficeSource @a
+            & $Log "  $($o.Name): $($r.Message)"
+            [pscustomobject]@{ Name = $o.Name; Status = $r.Status; Version = $r.Version; Message = $r.Message }
+        } catch {
+            & $Log "  $($o.Name): Office files not downloaded ($($_.Exception.Message)); the PC downloads Office from Microsoft at first boot"
+            [pscustomobject]@{ Name = $o.Name; Status = 'Failed'; Version = $null; Message = $_.Exception.Message }
+        }
+    })
+}
+
+#endregion
+
 function Add-MediaCopyItems {
     # Adds extra files (Relative, Source, Length) to a media copy plan; returns the new plan.
     param([Parameter(Mandatory)]$Plan, [object[]]$Items)
@@ -866,10 +1087,21 @@ function Invoke-AppInstall {
         catch { return & $out 'Failed' $null $false "download failed: $($_.Exception.Message)" }
     }
 
+    $command = $d.command
+    $odt = $null
+    if (Test-OfficeDeploymentCommand -Definition $d) {
+        # Office Deployment Tool: the pack's configuration, made silent, from the Office files in the folder.
+        try { $odt = New-OfficeDeployConfig -Definition $d -AppFolder $AppFolder }
+        catch { return & $out 'Failed' $null $false $_.Exception.Message }
+        $command = $odt.Command
+        & $Log "  Office: $($odt.Notes -join '; ')"
+    }
     if (-not $LogPath) { $LogPath = Join-Path ([IO.Path]::GetTempPath()) "App-$($d.name).log" }
-    $run = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments "/c $($d.command)" -WorkingDirectory $AppFolder -TimeoutMinutes $d.timeoutMinutes -LogPath $LogPath -Log $Log
+    # Office takes 10-20 minutes from local files, longer from the internet: never less than an hour for it.
+    $timeout = if ($odt) { [Math]::Max(60, [int]$d.timeoutMinutes) } else { $d.timeoutMinutes }
+    $run = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments "/c $command" -WorkingDirectory $AppFolder -TimeoutMinutes $timeout -LogPath $LogPath -Log $Log
     $tail = if ($run.LastLine) { "; last line: $($run.LastLine)" } else { '' }
-    if ($run.TimedOut) { return & $out 'TimedOut' $null $false "still running after $($d.timeoutMinutes) minutes; stopped$tail" }
+    if ($run.TimedOut) { return & $out 'TimedOut' $null $false "still running after $timeout minutes; stopped$tail" }
     $code = $run.ExitCode
     if ($d.successCodes -notcontains $code) { return & $out 'Failed' $code $false "exit code $code is not a success code ($($d.successCodes -join ', '))$tail" }
     $reboot = $d.rebootCodes -contains $code
@@ -890,6 +1122,6 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     Get-AppTemplates, Copy-AppTemplateFiles,
     ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch,
-    Get-MediaAppDownloads, Add-MediaCopyItems,
+    Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
     Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall

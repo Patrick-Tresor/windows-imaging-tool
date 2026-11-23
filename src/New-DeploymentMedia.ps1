@@ -181,11 +181,27 @@ if ($appDownloads -and $copyPlan) {
     Start-BuildStep 'apps'
     $appCache = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }), 'ImagingConsole', 'AppDownloads')
     $onApp = { param($name, $i, $count) Set-BuildStepProgress 'apps' -Percent ([int](100 * ($i - 1) / [Math]::Max(1, $count))) -Detail $name }
+    # Microsoft 365 Apps (Office Deployment Tool packs): the Office files go into the pack's folder in the content
+    # root, so each PC installs Office from the stick or the share instead of downloading 2-3 GB at first boot.
+    $appFolders = @($copyPlan.Items | Where-Object { $_.Relative -match '\\app\.json$' } | ForEach-Object { [IO.Path]::GetDirectoryName($_.Source) })
+    $officeRows = @(foreach ($root in @($appFolders | ForEach-Object { [IO.Path]::GetDirectoryName($_) } | Sort-Object -Unique)) {
+        $names = @($appFolders | Where-Object { [IO.Path]::GetDirectoryName($_) -eq $root } | ForEach-Object { [IO.Path]::GetFileName($_) })
+        Update-OfficeSources -AppRoot $root -Names $names -OnApp { param($name, $i, $count) Set-BuildStepProgress 'apps' -Percent -1 -Detail "$name`: Office files" }
+    })
+    foreach ($o in @($officeRows | Where-Object Status -eq 'Failed')) { Write-Warning "$($o.Name): the Office files are not on the stick ($($o.Message)). The PC downloads Office at first boot, so it needs internet." }
+    if (@($officeRows | Where-Object Status -eq 'Downloaded')) {
+        # New files in the content root: list the content again so they go on the stick.
+        $copyPlan = Get-MediaCopyPlan -ContentRoot $ContentSource -Folders $content.Folders -Files $content.Files -Exclude $content.Exclude
+        Write-Host ('Content to copy with the Office files: {0} files, {1}' -f $copyPlan.FileCount, (Format-ByteSize $copyPlan.TotalBytes))
+    }
     $dl = Get-MediaAppDownloads -Plan $copyPlan -CacheRoot $appCache -OnApp $onApp
     $copyPlan = Add-MediaCopyItems -Plan $copyPlan -Items $dl.Items
     foreach ($f in $dl.Failed) { Write-Warning "$f was not downloaded onto the stick: the PC downloads it at first boot, so it needs internet." }
     $appDetail = if (-not $dl.Items -and -not $dl.Failed) { 'No online applications' }
                  else { '{0} on the stick{1}' -f @($dl.Items).Count, $(if ($dl.Failed) { ", not downloaded: $($dl.Failed -join ', ')" }) }
+    $officeOk = @($officeRows | Where-Object { $_.Status -in 'Downloaded', 'Fresh' })
+    if ($officeOk) { $appDetail += "; Office $($officeOk[0].Version) offline" }
+    if (@($officeRows | Where-Object Status -eq 'Failed')) { $appDetail += '; Office files not downloaded' }
     Complete-BuildStep 'apps' -Detail $appDetail
 } elseif ($appDownloads) { Start-BuildStep 'apps'; Complete-BuildStep 'apps' -Detail 'No content to copy' }
 
