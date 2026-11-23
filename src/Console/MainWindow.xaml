@@ -232,10 +232,6 @@
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
-            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
-            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
-
 
             <Label Grid.Row="8" Content="WinPE password" VerticalAlignment="Top"/>
             <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">
@@ -387,8 +383,17 @@
               </Grid>
             </StackPanel>
 
-            <!-- 3. Checks -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Checks after deploy"/>
+            <!-- 3. Active Directory, for the Computers tab -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Active Directory"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="The Computers tab reads Active Directory with the account above, or with your own sign-in when there is none. The domain comes from the domain controller's full name or the account (user@corp.local), else it is the domain this PC is joined to."/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Label Content="Domain controller"/>
+              <TextBox x:Name="TxtAdServer" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="For example dc01.corp.local. Leave it empty when this PC is joined to the domain."/>
+            </Grid>
+
+            <!-- 4. Checks -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
             <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
                       Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
             <Grid>
@@ -404,7 +409,6 @@
             </StackPanel>
             <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
               <DockPanel>
-                <Button x:Name="BtnSettingsMedia" DockPanel.Dock="Right" Content="Open the Media tab" Margin="12,0,0,0"/>
                 <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>
               </DockPanel>
             </Border>
@@ -418,28 +422,9 @@
           <DockPanel MinHeight="760" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab, and Active Directory is read with the account and domain controller set there."/>
             </StackPanel>
-            <!-- Hidden once the tab connects by itself with the Deploy Settings account; Connection... shows it again. -->
-            <GroupBox x:Name="GrpAdConnect" DockPanel.Dock="Top" Header="1. Connect to Active Directory" Padding="12,10" Margin="0,4,0,12">
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
-                  <ColumnDefinition Width="140"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
-                <Label Content="Domain" VerticalAlignment="Center"/>
-                <TextBox x:Name="TxtAdDomain" Grid.Column="1" ToolTip="For example corp.local. Empty = the domain this PC is joined to."/>
-                <Label Grid.Column="3" Content="Domain controller" VerticalAlignment="Center"/>
-                <TextBox x:Name="TxtAdServer" Grid.Column="4" ToolTip="Optional. Needed only when this PC is not joined to the domain, e.g. dc01.corp.local."/>
-                <Label Grid.Row="2" Content="Account" VerticalAlignment="Center"/>
-                <TextBox x:Name="TxtAdUser" Grid.Row="2" Grid.Column="1" ToolTip="CORP\admin, or empty for the account you are signed in with. Its password is asked once and not saved."/>
-                <CheckBox x:Name="ChkAdUseShare" Grid.Row="2" Grid.Column="3" Grid.ColumnSpan="3" VerticalAlignment="Center" Content="Use the Deploy Settings account"
-                          ToolTip="The account and saved password from the Deploy Settings tab, so nothing is typed twice. Untick it to use another account (an administrator on the PCs)."/>
-                <Button x:Name="BtnAdConnect" Grid.Column="5" HorizontalAlignment="Left" Margin="16,0,0,0" MinWidth="120" Content="Connect" Style="{StaticResource Primary}"/>
-              </Grid>
-            </GroupBox>
-            <GroupBox DockPanel.Dock="Top" Header="2. Find computers" Padding="12,10" Margin="0,0,0,12">
+            <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
@@ -452,13 +437,10 @@
                 <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
-                  <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
-                  <Button x:Name="BtnAdShowConnect" Content="Connection..." Margin="10,0,0,0" Visibility="Collapsed"
-                          ToolTip="The domain, domain controller and account this tab connected with"/>
                 </StackPanel>
               </Grid>
             </GroupBox>
-            <GroupBox DockPanel.Dock="Bottom" Header="3. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
+            <GroupBox DockPanel.Dock="Bottom" Header="2. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="0"/><RowDefinition Height="0"/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>

@@ -72,12 +72,6 @@
             <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
             <Label Grid.Row="3" Content="Target disk number"/>
             <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
-            <Label Grid.Row="4" Content="Disk option"/>
-            <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
-              <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
-            </ComboBox>
-            <Label Grid.Row="5" Content="Driver library folder"/>
-            <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>
@@ -148,24 +142,15 @@
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
           <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
-          <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number"/>
-          <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom scheme"/>
+          <TextBlock Style="{StaticResource Hint}" Text="{}{SERIAL} is the serial number and # a random digit, for example LAB-{SERIAL} or A########."/>
           <Grid Margin="0,10,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-            <Label Content="Prefix"/>
-            <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left"/>
-            <Label Grid.Row="1" Content="WMI query"/>
-            <ComboBox x:Name="CmbWmi" Grid.Row="1" Grid.Column="1" IsEditable="True">
-              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
-              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
-              <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
-              <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
-            </ComboBox>
-            <Label Grid.Row="2" Content="Custom scheme"/>
-            <TextBox x:Name="TxtScheme" Grid.Row="2" Grid.Column="1" ToolTip="# = random digit, {SERIAL} = BIOS serial. Example: LAB-####"/>
-            <Label Grid.Row="3" Content="Example on this PC"/>
-            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Name pattern"/>
+            <TextBox x:Name="TxtScheme" Grid.Column="1" Width="240" HorizontalAlignment="Left" ToolTip="{}{SERIAL} = serial number, # = random digit. Example: LAB-{SERIAL}"/>
+            <TextBlock x:Name="TxtNameWmi" Grid.Row="1" Grid.Column="1" Style="{StaticResource Hint}" Visibility="Collapsed" TextWrapping="Wrap"/>
+            <Label Grid.Row="2" Content="Example on this PC"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
               <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
               <Button x:Name="BtnNamePreview" Content="Preview"/>
             </StackPanel>
@@ -264,8 +249,6 @@
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Encryption"/>
             <ComboBox x:Name="CmbBlMethod" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-            <Label Grid.Row="1" Content="Encrypt"/>
-            <CheckBox x:Name="ChkBlUsedSpace" Grid.Row="1" Grid.Column="1" Content="Used space only (faster; fine for a freshly wiped disk)"/>
             <Label Grid.Row="2" Content="Unlock at startup"/>
             <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
               <RadioButton x:Name="RbBlTpm" GroupName="BlProt" Content="TPM only"/>
@@ -280,8 +263,8 @@
             <CheckBox x:Name="ChkBlAD" Grid.Row="4" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>
             <Label Grid.Row="5" Content="Also save to folder"/>
             <TextBox x:Name="TxtBlFolder" Grid.Row="5" Grid.Column="1" ToolTip="\\server\share\BitLocker. One text file per PC. Domain Computers need write access; restrict who can read it."/>
-            <Label Grid.Row="6" Content="If no backup worked"/>
-            <CheckBox x:Name="ChkBlRequire" Grid.Row="6" Grid.Column="1" Content="Leave BitLocker off (recommended)"/>
+            <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Hint}" Margin="0,4,0,0"
+                       Text="Only the used space is encrypted (the disk was just wiped), and BitLocker stays off when no recovery key backup worked."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

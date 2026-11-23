@@ -654,9 +654,9 @@ function Get-UpdateKB {
 }
 
 function Get-UpdatePackageRows {
-    # .msu and .cab files from the given files and folders, in a sensible default order:
-    # Windows updates (SSU, cumulative), then .NET (catalog names contain "ndp"), then anything else; oldest KB first in each.
-    # Standalone SSUs can carry a higher KB than the cumulative update they go with, so the console lets the order be changed.
+    # .msu and .cab files from the given files and folders, in the order they are applied: a standalone servicing
+    # stack update first ("ssu" in its name), then Windows updates, then .NET (catalog names contain "ndp"), then
+    # anything else; oldest KB first in each. Windows 10 21H2 and later ship the SSU inside the cumulative update.
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Path)
     $files = foreach ($p in $Path) {
         if (Test-Path -LiteralPath $p -PathType Container) { Get-ChildItem -LiteralPath $p -File | Where-Object Extension -in '.msu', '.cab' }
@@ -664,14 +664,14 @@ function Get-UpdatePackageRows {
     }
     $files | Sort-Object FullName -Unique | ForEach-Object {
         $kb = Get-UpdateKB $_.Name
-        $kind = if ($_.Name -match '(?i)ndp\d|dotnet|\.net') { '.NET' } elseif ($_.Name -match '(?i)^windows\d') { 'Windows' } else { 'Other' }
+        $kind = if ($_.Name -match '(?i)(^|[-_.])ssu([-_.]|$)') { 'SSU' } elseif ($_.Name -match '(?i)ndp\d|dotnet|\.net') { '.NET' } elseif ($_.Name -match '(?i)^windows\d') { 'Windows' } else { 'Other' }
         [pscustomobject]@{
             Name     = $_.Name
             KB       = $kb
             Kind     = $kind
             SizeMB   = [Math]::Round($_.Length / 1MB)
             FullName = $_.FullName
-            Order    = @{ 'Windows' = 0; '.NET' = 1; 'Other' = 2 }[$kind]
+            Order    = @{ 'SSU' = 0; 'Windows' = 1; '.NET' = 2; 'Other' = 3 }[$kind]
             KBNumber = if ($kb) { [int]$kb.Substring(2) } else { [int]::MaxValue }
         }
     } | Sort-Object Order, KBNumber, Name | Select-Object Name, KB, Kind, SizeMB, FullName

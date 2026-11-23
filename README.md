@@ -110,17 +110,17 @@ Reimage\       <serial>.json per PC waiting to be reimaged, Started\ for the one
 The **Computers** tab lists the computers in your domain and reinstalls Windows
 on the ones you pick, with nobody at the PCs.
 
-1. The tab connects by itself the first time you open it when it needs no
-   password typed; otherwise click **Connect**. By default the tab uses the account and saved password
-   from the Deploy Settings tab (**Use the Deploy Settings account**), and the
-   domain comes from that account (`user@corp.local`) or the console PC. To use
-   another account, for example an administrator of the PCs, untick it and type
-   one (`CORP\admin`); its password is asked once and never saved. Not joined to
-   the domain? Also type a domain controller.
+1. The tab connects by itself the first time you open it, with the account
+   and saved password from the Deploy Settings tab (or your own sign-in when
+   none is set there). Not joined to the domain? Type a **Domain controller**
+   in Deploy Settings, section 3. The domain comes from the domain controller's
+   full name (`dc01.corp.local`), the account (`user@corp.local`) or the
+   console PC. If it could not connect, the first **Search** tries again.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
    are left out. Each row shows the OU, Windows version, last
-   logon and whether the console can reach it now. **Online** (point at it for
+   logon and whether the console can reach it, checked on every Search (Search again
+   to check again). **Online** (point at it for
    details):
    - **Yes**: PowerShell remoting (WinRM) answers.
    - **Yes (SMB)**: remoting is off, but file sharing answers. The console
@@ -181,14 +181,14 @@ the console; the format is documented in the commented
 - **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
   (start after `unattendDelay` seconds; a key pressed during the countdown opens
   the wizard instead).
-- **image** and index, **disk** number, **drivers** root.
+- **image** and index, **disk** number (the disk is always erased and partitioned again; drivers come from `Drivers`).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
-- **computer naming**: a WMI query (for example the serial from
-  `Win32_SystemEnclosure`) with a prefix, a custom scheme like `A########`
-  (`#` = random digit, `{SERIAL}` = BIOS serial). Older answer files that asked
-  the technician use the serial instead.
+- **computer name pattern**: `{SERIAL}` is the BIOS serial and `#` a random
+  digit, for example `LAB-{SERIAL}` or `A########`. Older answer files with a
+  serial number WMI query or a prefix are read as that pattern; one with
+  another WMI query (an asset tag) keeps it until a pattern is typed.
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
@@ -287,9 +287,10 @@ domain, the check is skipped and noted in `Deploy.log`.
 tab, or with **New application...** in the answer file editor:
 
 1. Pick the installer file, or a folder when it needs files next to it.
-   **Inspect** reads its type (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
+   The editor reads its type at once (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
    code, and fills in the silent command, uninstall command and a detection rule.
+   Changing the installer type changes the silent command too, unless you typed it.
 2. Or apply a **template** from `config\app-templates.json`. There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
@@ -446,11 +447,12 @@ checkpoint update), then applies it. The catalog has no official interface, so t
 can stop working when Microsoft changes the site: the update then fails before
 touching the image, and the message says to download the `.msu` by hand into
 `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
-downloaded by hand) are applied after it, from top to bottom; move a standalone
-servicing stack update to the top if there is one.
+downloaded by hand) are applied after it, in a fixed order: a standalone
+servicing stack update (`ssu` in its name) first, then Windows, then .NET,
+oldest KB first.
 
 It runs `Update-OfflineImage.ps1` in the background on this PC, with each step in the Progress window. For each edition
-it mounts the image, adds the packages, optionally cleans up the replaced
+it mounts the image, adds the packages, cleans up the replaced
 components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
@@ -460,9 +462,9 @@ with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass
 `-WorkDir`). A package that does not apply to the image is logged and skipped; any
-other failure discards the changes and leaves the image as it was. **Reset base**
-makes the image smallest but means those updates can't be uninstalled on deployed
-PCs. Without the console:
+other failure discards the changes and leaves the image as it was. The console
+never resets the base, so the updates can still be uninstalled on deployed PCs
+(`-ResetBase` from the command line does). Without the console:
 
 ```powershell
 .\src\Update-OfflineImage.ps1 -ImagePath D:\DeployShare\Images\Win11-24H2-Enterprise.wim `
@@ -538,7 +540,8 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 ```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; their final logs stay under the **History** filter. A PC
+succeeded, warning and cancelled PCs; finished PCs also leave by themselves 7 days
+after their last report. Their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 

@@ -36,11 +36,11 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.3a | Dashboard with USB deploys, no network share set | Deploy a PC from the stick with no network, then plug the stick into the console PC with the Dashboard open: the PC appears within 10 s (state Succeeded, "applications install at first boot"), its log shows under its Dashboard row, and the stick's `Status` folder is empty |
 | 2.3b | Dashboard with USB deploys, network share set (Domain Computers can write to its `Status` folder) | The PC shows live from WinPE, then first boot (apps, checks) until "Deployment complete"; unplug the network cable in WinPE before the deploy and the status goes to the stick instead (2.3a) |
 | 2.4 | Deploy Settings: Network share, your AD account and password, **Test connection** | Green "Connected as ... The Dashboard folder ... can be written"; a wrong password gives one red line "wrong user name or password"; `deploy-settings.json` shows only `aes256:...` for the password, and ISO boot still maps the share |
-| 2.5 | Computers tab: open it, Search | It connects by itself with the Deploy Settings account (no Connect click); the domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
+| 2.5 | Computers tab: open it, Search | It connects by itself with the Deploy Settings account and domain controller (there is no Connect box); the domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
 | 2.6 | Build network boot image | `Boot\boot.wim`, `boot.json`, `tool-version.json` and `Deploy-WinPE.iso` on the content root; the tab says it is ready; after updating the console, the yellow banner offers **Rebuild network boot image** |
 | 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |
 | 2.8 | Reimage a PC that is off, and one with a wrong DNS record | Both rows fail with one line, nothing changed on either PC |
-| 2.8b | Check online and Reimage on a PC with PowerShell remoting off (file sharing on) | Online says Yes (SMB); the reimage goes through the admin share, no `ImagingToolRun*` service is left on it (`sc.exe \\PC query state= all`), and no `C:\Windows\Temp\ImagingTool-*` folder |
+| 2.8b | Search and Reimage on a PC with PowerShell remoting off (file sharing on) | Online says Yes (SMB); the reimage goes through the admin share, no `ImagingToolRun*` service is left on it (`sc.exe \\PC query state= all`), and no `C:\Windows\Temp\ImagingTool-*` folder |
 
 ## 3. Features on the deployed PC
 

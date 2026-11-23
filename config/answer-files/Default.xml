@@ -62,11 +62,10 @@
   </regional>
 
   <identification>
-    <!-- WMI: prefix + the query's value. Custom: prefix + scheme, # = random digit, {SERIAL} = BIOS serial.
-         Prompt: ask in interactive mode, WMI otherwise. Names are cut to 15 characters. -->
-    <naming mode="WMI">
-      <wmiQuery>SELECT SerialNumber FROM Win32_SystemEnclosure</wmiQuery>
-      <customScheme>A########</customScheme>
+    <!-- The computer name pattern: {SERIAL} = BIOS serial, # = random digit, for example LAB-{SERIAL} or A########.
+         Names are cleaned to letters, digits and dashes and cut to 15 characters. -->
+    <naming mode="Custom">
+      <customScheme>{SERIAL}</customScheme>
       <prefix></prefix>
     </naming>
   </identification>

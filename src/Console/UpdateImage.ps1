@@ -26,8 +26,10 @@ function Show-UpdateImageDialog {
     $packages = [Collections.ObjectModel.ObservableCollection[object]]::new()
     $add = {
         param([string[]]$Paths)
-        $known = @($packages | ForEach-Object FullName)
-        foreach ($row in Get-UpdatePackageRows -Path $Paths) { if ($known -notcontains $row.FullName) { $packages.Add($row) } }
+        # The whole list is sorted again: the order they are applied in is fixed (Get-UpdatePackageRows).
+        $all = @(@($packages | ForEach-Object FullName) + @($Paths))
+        $packages.Clear()
+        foreach ($row in Get-UpdatePackageRows -Path $all) { $packages.Add($row) }
     }
     & $add @($updatesDir)
     $d.GridPackages.ItemsSource = $packages
@@ -44,23 +46,8 @@ function Show-UpdateImageDialog {
         if ($fb.ShowDialog() -eq 'OK') { & $add @($fb.SelectedPath) }
     })
     $d.BtnRemove.Add_Click({ if ($d.GridPackages.SelectedItem) { [void]$packages.Remove($d.GridPackages.SelectedItem) } })
-    $move = {
-        param([int]$Offset)
-        $i = $d.GridPackages.SelectedIndex
-        $j = $i + $Offset
-        if ($i -lt 0 -or $j -lt 0 -or $j -ge $packages.Count) { return }
-        $packages.Move($i, $j)
-        $d.GridPackages.SelectedIndex = $j
-    }
-    $d.BtnUp.Add_Click({ & $move -1 })
-    $d.BtnDown.Add_Click({ & $move 1 })
     $d.BtnOpenUpdates.Add_Click({ Invoke-Item $updatesDir })
 
-    $d.ChkResetBase.IsEnabled = $d.ChkCleanup.IsChecked
-    $d.ChkCleanup.Add_Click({
-        $d.ChkResetBase.IsEnabled = $d.ChkCleanup.IsChecked
-        if (-not $d.ChkCleanup.IsChecked) { $d.ChkResetBase.IsChecked = $false }
-    })
 
     $d.BtnStart.Add_Click({
         try {
@@ -69,8 +56,8 @@ function Show-UpdateImageDialog {
             $getArgs = {
                 param($ProgressFile, $LogPath)
                 Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
-                    -Packages @($packages | ForEach-Object FullName) -LatestUpdate:$latest -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
-                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
+                    -Packages @($packages | ForEach-Object FullName) -LatestUpdate:$latest -Cleanup `
+                    -ProgressFile $ProgressFile -LogPath $LogPath
             }
             [void](& $getArgs '' '')
             $lines = @(if ($latest) { '- The latest cumulative update (downloaded first)' }) + @($packages | ForEach-Object { "- $($_.Name)" })

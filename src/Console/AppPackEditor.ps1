@@ -132,7 +132,7 @@ function Show-AppPackEditor {
         $e.CmbInstaller.Text = $info.Installer
         $e.CmbType.Text = $info.Type
         $e.TxtTypeNote.Text = $info.Note
-        if (-not $e.TxtCommand.Text) { $e.TxtCommand.Text = $info.Command }
+        if (-not $e.TxtCommand.Text -or $e.TxtCommand.Text -eq $state.Suggested) { $e.TxtCommand.Text = $info.Command; $state.Suggested = $info.Command }
         if ($info.UninstallCommand -and -not $e.TxtUninstall.Text) { $e.TxtUninstall.Text = $info.UninstallCommand }
         if ($info.Detection -and -not $rules.Count) {
             $row = [DetectionRow]::new()
@@ -171,7 +171,12 @@ function Show-AppPackEditor {
 
     Register-SourceBrowse -Controls $e -Owner $win -FolderText 'Folder with the installer and the files it needs' -After { & $afterSource } `
         -Filter 'Installers (*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat)|*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat|All files (*.*)|*.*'
-    $e.BtnInspect.Add_Click({ try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message } })
+    # Picking another file of the folder reads that one at once (no Inspect button). Only when the operator picks it:
+    # opening an existing application must not overwrite what it has.
+    $e.CmbInstaller.Add_SelectionChanged({
+        if (-not $e.CmbInstaller.IsKeyboardFocusWithin) { return }
+        $win.Dispatcher.BeginInvoke([Action]{ if ($e.CmbInstaller.Text) { try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message } } }) | Out-Null
+    })
 
     $e.BtnTemplate.Add_Click({
         $t = Get-PickedTemplate -Controls $e -Templates $templates
@@ -193,13 +198,15 @@ function Show-AppPackEditor {
         $e.TxtProblems.Text = if ($d.command -match 'REPLACE_[A-Z_]+') { "Replace $($Matches[0]) in the install command (Install command)." } else { '' }
     })
 
-    $e.BtnSuggest.Add_Click({
-        if (-not $e.CmbInstaller.Text) { $e.TxtProblems.Text = 'Pick the installer to run first.'; return }
-        $type = if ($e.CmbType.Text) { $e.CmbType.Text } else { 'exe' }
-        $e.TxtCommand.Text = Get-SilentInstallCommand -Installer $e.CmbInstaller.Text.Trim() -Type $type
+    # Another installer type gives its silent command at once (no Suggest button), unless the command was typed by hand.
+    $e.CmbType.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{
+        $type = $e.CmbType.Text
         $e.TxtTypeNote.Text = Get-InstallerTypeNote $type
-    })
-    $e.CmbType.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{ $e.TxtTypeNote.Text = Get-InstallerTypeNote $e.CmbType.Text }) | Out-Null })
+        if ($type -and $e.CmbType.IsKeyboardFocusWithin -and $e.CmbInstaller.Text -and (-not $e.TxtCommand.Text -or $e.TxtCommand.Text -eq $state.Suggested)) {
+            $state.Suggested = Get-SilentInstallCommand -Installer $e.CmbInstaller.Text.Trim() -Type $type
+            $e.TxtCommand.Text = $state.Suggested
+        }
+    }) | Out-Null })
 
     # Detection rules
     $e.BtnRuleAdd.Add_Click({ $r = [DetectionRow]::new(); $r.Type = 'uninstall'; $r.Operator = 'exists'; $rules.Add($r); $e.GridRules.SelectedItem = $r })

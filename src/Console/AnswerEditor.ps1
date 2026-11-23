@@ -100,7 +100,6 @@ function Show-AnswerEditor {
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     $e.TxtDisk.Text = $a.DiskNumber
-    $e.TxtDrivers.Text = $a.DriverRoot
 
     $selected = [Collections.ObjectModel.ObservableCollection[string]]::new()
     foreach ($n in $a.Applications) { $selected.Add($n) }
@@ -121,11 +120,13 @@ function Show-AnswerEditor {
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
 
-    $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
-    $e.RbNameCustom.IsChecked = $a.NamingMode -eq 'Custom'
-    $e.TxtPrefix.Text = $a.Prefix
-    $e.CmbWmi.Text = $a.WmiQuery
-    $e.TxtScheme.Text = $a.CustomScheme
+    # One name pattern. An older answer file with a WMI query other than the serial keeps it until a pattern is typed.
+    $keepWmi = $a.NamingMode -eq 'WMI'
+    $e.TxtScheme.Text = if ($keepWmi) { '' } else { $a.CustomScheme }
+    if ($keepWmi) {
+        $e.TxtNameWmi.Text = "This answer file names PCs with $(if ($a.Prefix) { "the prefix $($a.Prefix) and " })the WMI query $($a.WmiQuery). Type a pattern to replace it."
+        $e.TxtNameWmi.Visibility = 'Visible'
+    }
 
     $e.RbDomain.IsChecked = $a.Membership -eq 'Domain'
     $e.RbWorkgroup.IsChecked = $a.Membership -ne 'Domain'
@@ -157,13 +158,11 @@ function Show-AnswerEditor {
     $bl = $a.BitLocker
     $e.ChkBitLocker.IsChecked = $bl.Enabled
     $e.CmbBlMethod.SelectedItem = $bl.EncryptionMethod
-    $e.ChkBlUsedSpace.IsChecked = $bl.UsedSpaceOnly
     $e.RbBlTpm.IsChecked = $bl.Protector -ne 'TpmPin'
     $e.RbBlTpmPin.IsChecked = $bl.Protector -eq 'TpmPin'
     $e.TxtBlPinState.Text = & $pwState $bl.PinFile $bl.PinEncrypted
     $e.ChkBlAD.IsChecked = $bl.BackupToAD
     $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
-    $e.ChkBlRequire.IsChecked = $bl.RequireBackup
 
     # --- Behaviour -------------------------------------------------------------------------------------------
     $e.LstSections.Add_SelectionChanged({
@@ -174,19 +173,17 @@ function Show-AnswerEditor {
     $syncEnabled = {
         $e.TxtDelay.IsEnabled = [bool]$e.RbUnattended.IsChecked
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
-        $e.CmbWmi.IsEnabled = -not $e.RbNameCustom.IsChecked
-        $e.TxtScheme.IsEnabled = [bool]$e.RbNameCustom.IsChecked
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
         $on = [bool]$e.ChkBitLocker.IsChecked
-        foreach ($c in 'CmbBlMethod', 'ChkBlUsedSpace', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder', 'ChkBlRequire') { $e[$c].IsEnabled = $on }
+        foreach ($c in 'CmbBlMethod', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder') { $e[$c].IsEnabled = $on }
         $e.PwdBlPin.IsEnabled = $on -and $e.RbBlTpmPin.IsChecked
         # Recovery keys only go to AD from a domain-joined PC.
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
     foreach ($c in 'ChkAdmin', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
@@ -261,7 +258,6 @@ function Show-AnswerEditor {
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
         $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
-        $a.DriverRoot    = $e.TxtDrivers.Text.Trim()
         $a.Applications  = @($selected)
         $a.FullName      = $e.TxtFullName.Text.Trim()
         $a.Organization  = $e.TxtOrg.Text.Trim()
@@ -270,10 +266,11 @@ function Show-AnswerEditor {
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
-        $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } else { 'WMI' }
-        $a.Prefix        = $e.TxtPrefix.Text.Trim()
-        $a.WmiQuery      = $e.CmbWmi.Text.Trim()
-        $a.CustomScheme  = $e.TxtScheme.Text.Trim()
+        if (-not $keepWmi -or $e.TxtScheme.Text.Trim()) {
+            $a.NamingMode   = 'Custom'
+            $a.Prefix       = ''
+            $a.CustomScheme = $e.TxtScheme.Text.Trim()
+        }
         $a.Membership    = if ($e.RbDomain.IsChecked) { 'Domain' } else { 'Workgroup' }
         $a.Domain        = $e.TxtDomain.Text.Trim()
         $a.OrganizationalUnit = $e.TxtOU.Text.Trim()
@@ -290,19 +287,20 @@ function Show-AnswerEditor {
         })
         $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
         $a.BitLocker.EncryptionMethod  = "$($e.CmbBlMethod.SelectedItem)"
-        $a.BitLocker.UsedSpaceOnly     = [bool]$e.ChkBlUsedSpace.IsChecked
+        $a.BitLocker.UsedSpaceOnly     = $true
         $a.BitLocker.Protector         = if ($e.RbBlTpmPin.IsChecked) { 'TpmPin' } else { 'Tpm' }
         $a.BitLocker.BackupToAD        = [bool]$e.ChkBlAD.IsChecked
         $a.BitLocker.RecoveryKeyFolder = $e.TxtBlFolder.Text.Trim()
-        $a.BitLocker.RequireBackup     = [bool]$e.ChkBlRequire.IsChecked
+        $a.BitLocker.RequireBackup     = $true
     }
 
     $e.BtnNamePreview.Add_Click({
         & $collect
         try {
-            $wmi = Get-WmiNamingValue -Query $a.WmiQuery
-            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial (Get-CimInstance Win32_BIOS).SerialNumber
-        } catch { $e.TxtNamePreview.Text = "Query failed: $($_.Exception.Message)" }
+            $serial = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
+            $wmi = if ($a.NamingMode -eq 'WMI') { Get-WmiNamingValue -Query $a.WmiQuery } else { $serial }
+            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial $serial
+        } catch { $e.TxtNamePreview.Text = "Could not read this PC: $($_.Exception.Message)" }
     })
 
     $e.BtnCancel.Add_Click({ $win.Close() })

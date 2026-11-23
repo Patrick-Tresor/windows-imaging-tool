@@ -37,6 +37,22 @@ function Read-BitLockerNode($d) {
     }
 }
 
+function ConvertTo-NamePattern {
+    # Naming is one pattern ({SERIAL} = BIOS serial, # = random digit). An older answer file that named PCs from a
+    # serial number WMI query, or had a separate prefix, becomes that pattern. Another WMI query (an asset tag)
+    # stays as it was so the deploy keeps naming PCs the same way.
+    param([Parameter(Mandatory)]$Answer)
+    $serialQuery = '(?i)^\s*SELECT\s+(SerialNumber\s+FROM\s+Win32_(BIOS|SystemEnclosure)|IdentifyingNumber\s+FROM\s+Win32_ComputerSystemProduct)\s*$'
+    if ($Answer.NamingMode -eq 'WMI' -and "$($Answer.WmiQuery)" -match $serialQuery) {
+        $Answer.NamingMode = 'Custom'
+        $Answer.CustomScheme = '{SERIAL}'
+    }
+    if ($Answer.NamingMode -eq 'Custom' -and $Answer.Prefix) {
+        $Answer.CustomScheme = "$($Answer.Prefix)$($Answer.CustomScheme)"
+        $Answer.Prefix = ''
+    }
+}
+
 function Read-AnswerFile {
     <#
     .SYNOPSIS
@@ -112,6 +128,7 @@ function Read-AnswerFile {
         }
     })
 
+    ConvertTo-NamePattern $a
     if ($SkipValidation) { return $a }
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Answer file $($a.Name) has problems:`n - " + ($problems -join "`n - ") }
@@ -128,7 +145,7 @@ function Test-AnswerFile {
     if ($a.ImageVersion -and $a.ImageVersion -notmatch '^\d{8}-\d{4}(-\d+)?$') { "image/version '$($a.ImageVersion)' must be a version time stamp such as 20261022-1530, or empty for the current image." }
     if ($a.DiskOption -ne 'Recreate') { "disk/option '$($a.DiskOption)' is not supported yet; only Recreate (wipe the disk and recreate partitions)." }
     if ($a.NamingMode -notin 'WMI', 'Custom') { "identification/naming mode must be WMI or Custom, not '$($a.NamingMode)'." }
-    if ($a.NamingMode -eq 'Custom' -and -not $a.CustomScheme) { 'Custom naming needs identification/naming/customScheme.' }
+    if ($a.NamingMode -eq 'Custom' -and -not $a.CustomScheme) { 'The computer name pattern (identification/naming/customScheme) is empty.' }
     if ($a.Membership -notin 'Domain', 'Workgroup') { "network/membership must be Domain or Workgroup, not '$($a.Membership)'." }
     if ($a.Membership -eq 'Domain') {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
@@ -175,8 +192,9 @@ function Test-AnswerFile {
 function Resolve-ComputerName {
     <#
     .SYNOPSIS
-        Builds the computer name: prefix + WMI value (WMI), or prefix + scheme (Custom) where # is a random
-        digit and {SERIAL} the BIOS serial. Cleaned to letters, digits and dashes, cut to 15 characters.
+        Builds the computer name from the pattern (Custom): # is a random digit and {SERIAL} the BIOS serial.
+        An older answer file with another WMI query uses prefix + that query's value (WMI).
+        Cleaned to letters, digits and dashes, cut to 15 characters.
     #>
     param(
         [Parameter(Mandatory)]$Answer,

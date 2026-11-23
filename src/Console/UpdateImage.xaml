@@ -25,24 +25,18 @@
         <CheckBox x:Name="ChkLatest" IsChecked="True" Margin="0,0,0,8"
                   Content="Download the latest cumulative update for this Windows version from the Microsoft Update Catalog"/>
         <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}"
-                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, from top to bottom."/>
+                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, in the order listed: a servicing stack update first, then Windows, then .NET, oldest KB first."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-        <CheckBox x:Name="ChkCleanup" IsChecked="True"
-                  Content="Clean up superseded components after the updates (smaller image, takes longer)"/>
-        <CheckBox x:Name="ChkResetBase" Margin="22,2,0,4"
-                  Content="Also reset the base: smallest image, but these updates can no longer be uninstalled on deployed PCs"/>
         <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0"
-                   Text="The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy. The current version is kept in Images\Previous, so Versions... can roll back to it."/>
+                   Text="Superseded components are cleaned up after the updates (a smaller image; the updates can still be uninstalled on deployed PCs). The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy. The current version is kept in Images\Previous, so Versions... can roll back to it."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0">
         <Button x:Name="BtnAddFiles" Content="Add files..." Margin="0,0,0,6"/>
         <Button x:Name="BtnAddFolder" Content="Add folder..." Margin="0,0,0,6"/>
         <Button x:Name="BtnRemove" Content="Remove" Margin="0,0,0,18"/>
-        <Button x:Name="BtnUp" Content="Move up" Margin="0,0,0,6"/>
-        <Button x:Name="BtnDown" Content="Move down" Margin="0,0,0,18"/>
         <Button x:Name="BtnOpenUpdates" Content="Open Updates folder" Margin="0"/>
       </StackPanel>
 
