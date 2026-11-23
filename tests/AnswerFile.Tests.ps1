@@ -252,23 +252,26 @@ try {
     Assert-Equal "$($default.BitLocker.Enabled)" 'False' 'sample has BitLocker off'
     $sec = $d.PSObject.Copy()
     $sec.BitLocker = $default.BitLocker.PSObject.Copy()
-    $sec.BitLocker.Enabled = $true; $sec.BitLocker.Protector = 'TpmPin'; $sec.BitLocker.PinFile = $null; $sec.BitLocker.RecoveryKeyFolder = 'keys'
-    Assert-Equal @(Test-AnswerFile $sec).Count 2 'validation catches PIN file and key folder'
+    $sec.BitLocker.Enabled = $true; $sec.BitLocker.RecoveryKeyFolder = 'keys'
+    Assert-Equal @(Test-AnswerFile $sec).Count 1 'validation catches the key folder'
     $ws = $default.PSObject.Copy(); $ws.BitLocker = $default.BitLocker.PSObject.Copy(); $ws.BitLocker.Enabled = $true
     Assert-Equal (@(Test-AnswerFile $ws) -join '|') 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' 'AD key backup needs a domain'
     $ws.BitLocker.BackupToAD = $false
     Assert-Equal (@(Test-AnswerFile $ws) -join '|') 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' 'required backup needs somewhere to go'
 
-    $sec.BitLocker.PinFile = 'config\secrets\pin.txt'; $sec.BitLocker.RecoveryKeyFolder = '\\srv\Keys$'
+    $sec.BitLocker.RecoveryKeyFolder = '\\srv\Keys$'
     Assert-Equal @(Test-AnswerFile $sec).Count 0 'valid BitLocker settings pass'
     $secPath = Join-Path $tmp 'Secure.xml'
     Export-AnswerFile -Answer $sec -Path $secPath
     $sb = Read-AnswerFile -Path $secPath
-    Assert-Equal "$($sb.BitLocker.Enabled)|$($sb.BitLocker.Protector)|$($sb.BitLocker.PinFile)|$($sb.BitLocker.RecoveryKeyFolder)|$($sb.BitLocker.EncryptionMethod)" 'True|TpmPin|config\secrets\pin.txt|\\srv\Keys$|XtsAes256' 'BitLocker settings survive export and read'
-    $bp = New-FirstBootPlan -Answer $sb -BitLockerPin '123456'
-    Assert-Equal "$($bp.bitlocker.protector)|$($bp.bitlocker.pin)|$($bp.bitlocker.backupToAD)" 'TpmPin|123456|True' 'first boot plan carries BitLocker with the PIN'
-    $sb.BitLocker.Protector = 'Tpm'
-    Assert-Equal "[$((New-FirstBootPlan -Answer $sb -BitLockerPin '123456').bitlocker.pin)]" '[]' 'no PIN in the plan for TPM only'
+    Assert-Equal "$($sb.BitLocker.Enabled)|$($sb.BitLocker.Protector)|$($sb.BitLocker.RecoveryKeyFolder)|$($sb.BitLocker.EncryptionMethod)" 'True|Tpm|\\srv\Keys$|XtsAes256' 'BitLocker settings survive export and read'
+    $bp = New-FirstBootPlan -Answer $sb
+    Assert-Equal "$($bp.bitlocker.protector)|$($bp.bitlocker.encryptionMethod)|$($bp.bitlocker.backupToAD)|$([bool]$bp.bitlocker.PSObject.Properties['pin'])" 'Tpm|XtsAes256|True|False' 'first boot plan: TPM only, XTS-AES 256, no PIN'
+    # An older answer file with a startup PIN and another method deploys as TPM only, XTS-AES 256.
+    [xml]$pinXml = '<deployment><mode>Interactive</mode><image><file>a.wim</file></image><bitlocker><enabled>true</enabled><encryptionMethod>Aes128</encryptionMethod><protector>TpmPin</protector><pinFile>config\secrets\pin.txt</pinFile><backupToAD>false</backupToAD><recoveryKeyFolder>\\srv\Keys$</recoveryKeyFolder></bitlocker></deployment>'
+    $pinPath = Join-Path $tmp 'OldPin.xml'; $pinXml.Save($pinPath)
+    $op = Read-AnswerFile -Path $pinPath -SkipValidation
+    Assert-Equal "$($op.BitLocker.Protector)|$($op.BitLocker.EncryptionMethod)|$([bool]$op.BitLocker.PSObject.Properties['PinFile'])" 'Tpm|XtsAes256|False' 'old answer file: PIN and method ignored'
     Assert-Equal ($null -eq (New-FirstBootPlan -Answer $default).bitlocker) $true 'no BitLocker in the plan when it is off'
     [xml]$old = '<deployment><mode>Interactive</mode><image><file>a.wim</file></image></deployment>'
     $oldPath = Join-Path $tmp 'Old.xml'; $old.Save($oldPath)

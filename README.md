@@ -28,7 +28,7 @@ Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin right
 opens: the PowerShell window behind it stays hidden. If the console stops on an error, a message says so and
 the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
-and click **Create folders** the first time. Then:
+with **Browse...**; a new folder gets the content folders right away. Then:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
@@ -198,7 +198,7 @@ the console; the format is documented in the commented
   the built-in Administrator). The PC restarts into Windows when the deploy is
   done; the result screen in WinPE still has **Shut down**. (An older answer file
   with `<shutdown>` or `<reboot>false` keeps doing that until it is saved again.)
-- **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
+- **BitLocker** on the Windows drive at first boot (TPM only, XTS-AES 256), with
   the recovery key backed up to AD and/or a share first.
 
 **BitLocker** needs a TPM that is on and ready, or it is skipped (see
@@ -207,7 +207,7 @@ Directory needs a domain join; on most domains the computer can write its own
 key without extra setup. A recovery key folder (`\\server\share\BitLocker`)
 needs write access for Domain Computers and tight read access. With **leave
 BitLocker off if no backup worked** (the default), no PC is encrypted without a
-saved key. A startup PIN is the same for every PC deployed with that answer file.
+saved key. There is no startup PIN: the TPM unlocks the drive.
 
 ### Windows on any PC, and the target disk
 
@@ -368,7 +368,7 @@ output); when winget itself fails, the status line says why instead of
 
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
 script (and any files it needs) and a `task.json`. Make them on the **Apps and Tasks** tab (**New task...**),
-or with **New script...** on the answer file editor's Tasks page:
+or with **New task...** on the answer file editor's Tasks page:
 
 1. Start from a **template** (`config\task-templates.json`): sync the clock,
    turn on Remote Desktop, no sleep on mains power, remove consumer Store apps,
@@ -394,9 +394,11 @@ or with **New script...** on the answer file editor's Tasks page:
 }
 ```
 
-In the answer file editor's **Tasks** page, pick a task and **Add script**: it
-goes in the list with the other commands, in order, and its **Command** column
-takes extra arguments for that answer file. A missing or broken task stops the
+In the answer file editor's **Tasks** page, pick a task under **Available** and
+**Add >** (or double-click it): it goes in the **Run order**, where you set when it
+runs, its order (**Up**/**Down**) and, in **Arguments**, extra arguments for that
+answer file. A plain command saved by an older version still runs and shows as
+**Command**; for a new one, make a task. A missing or broken task stops the
 deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
 the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
@@ -539,9 +541,8 @@ the warning clears when everything passes:
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deployment.ps1
 ```
 
-**Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; finished PCs also leave by themselves 7 days
-after their last report. Their final logs stay under the **History** filter. A PC
+**Remove** takes one PC off the dashboard; succeeded, warning and cancelled PCs
+leave by themselves 7 days after their last report. Their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
@@ -565,8 +566,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    mounting boot.wim, adding components and drivers, configuring WinPE, unmounting, partitioning the
    stick, copying WinPE and the content) with its own bar, elapsed time and a tick when it is complete;
    steps taken from the WinPE build cache say Reused. If a step fails it is marked Failed with one line;
-   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`) and
-   **Show build window** brings up the build's own window. Closing the progress window does not stop the
+   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`); the
+   build's own PowerShell window stays minimized on the taskbar. Closing the progress window does not stop the
    build. From the command line, `-ProgressFile` and `-LogPath` do the same.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).

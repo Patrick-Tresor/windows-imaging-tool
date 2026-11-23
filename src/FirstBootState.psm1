@@ -96,7 +96,7 @@ function Get-FirstBootLock {
 
 function Get-AdminOnlyAclArgs {
     # icacls arguments that leave only Administrators and SYSTEM on Path, with nothing inherited. A folder made at
-    # the root of C: lets every signed-in user change it, and C:\Temp holds the BitLocker PIN and installers that
+    # the root of C: lets every signed-in user change it, and C:\Temp holds installers that
     # run as SYSTEM. A -Folder passes the rights on to what goes in it later. SIDs, so a French Windows
     # (Administrateurs) works the same and WinPE can set them on the offline Windows drive.
     param([Parameter(Mandatory)][string]$Path, [switch]$Folder)

@@ -21,8 +21,6 @@
             <Button Tag="remove" DockPanel.Dock="Right" Content="Remove" ToolTip="Take this finished item off the list"
                     Visibility="{Binding Finished, Converter={StaticResource BoolToVisibility}}"/>
             <Button Tag="log" DockPanel.Dock="Right" Content="Open log" IsEnabled="{Binding HasLog}"/>
-            <Button Tag="window" DockPanel.Dock="Right" Content="Show build window" ToolTip="The build's own window, with every line DISM and the copy print"
-                    Visibility="{Binding CanShowWindow, Converter={StaticResource BoolToVisibility}}"/>
           </DockPanel>
           <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{DynamicResource StepRowTemplate}" Margin="0,6,0,0"/>
         </DockPanel>

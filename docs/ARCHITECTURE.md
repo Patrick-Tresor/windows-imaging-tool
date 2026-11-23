@@ -257,19 +257,15 @@ BitLocker is turned on by `FirstBoot.ps1` as SYSTEM, after the domain join
 (specialize pass) and the FIRSTBOOT tasks:
 
 1. Skip if the drive is not fully decrypted, or if there is no ready TPM (logged).
-2. For TPM + PIN, write the "require additional authentication at startup"
-   policy values under `HKLM\SOFTWARE\Policies\Microsoft\FVE`.
-3. Add a recovery password protector and back it up: `Backup-BitLockerKeyProtector`
+2. Add a recovery password protector and back it up: `Backup-BitLockerKeyProtector`
    to the computer object in AD (four tries, 15 s apart, in case the network is
    still coming up), and/or a text file in `recoveryKeyFolder` written with the
    computer account.
-4. With `requireBackup`, if no backup worked, remove the protector and leave
+3. With `requireBackup`, if no backup worked, remove the protector and leave
    BitLocker off.
-5. `Enable-BitLocker -TpmProtector` (or `-TpmAndPinProtector`) with the chosen
-   method, used space only by default, skipping the hardware test so encryption
+4. `Enable-BitLocker -TpmProtector -EncryptionMethod XtsAes256`, used space
+   only by default, skipping the hardware test so encryption
    starts at once.
-
-The startup PIN travels in `firstboot.json`, which is deleted from `C:\Temp` at the end of first boot.
 Microsoft Entra key backup is not done: the PC is not Entra joined at first boot.
 
 ### Status reporting

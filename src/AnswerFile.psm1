@@ -3,8 +3,6 @@
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
-$script:BitLockerMethods = 'XtsAes128', 'XtsAes256', 'Aes128', 'Aes256'
-$script:BitLockerProtectors = 'Tpm', 'TpmPin'
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1')
 
 function Get-XmlText {
@@ -24,13 +22,12 @@ function ConvertTo-Bool([string]$Value, [bool]$Default) {
 
 function Read-BitLockerNode($d) {
     # <bitlocker>: encrypt the OS drive at first boot. Defaults when the element is missing (BitLocker off).
+    # Always TPM only and XTS-AES 256: an older file's encryptionMethod, protector (TpmPin) and PIN are ignored.
     [pscustomobject]@{
         Enabled           = ConvertTo-Bool (Get-XmlText $d 'bitlocker/enabled') $false
-        EncryptionMethod  = Get-XmlText $d 'bitlocker/encryptionMethod' 'XtsAes256'
+        EncryptionMethod  = 'XtsAes256'
         UsedSpaceOnly     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/usedSpaceOnly') $true
-        Protector         = Get-XmlText $d 'bitlocker/protector' 'Tpm'
-        PinFile           = Get-XmlText $d 'bitlocker/pinFile'
-        PinEncrypted      = Get-XmlText $d 'bitlocker/encryptedPin' ''
+        Protector         = 'Tpm'
         BackupToAD        = ConvertTo-Bool (Get-XmlText $d 'bitlocker/backupToAD') $true
         RecoveryKeyFolder = Get-XmlText $d 'bitlocker/recoveryKeyFolder'
         RequireBackup     = ConvertTo-Bool (Get-XmlText $d 'bitlocker/requireBackup') $true
@@ -180,9 +177,6 @@ function Test-AnswerFile {
     }
     $bl = $a.BitLocker
     if ($bl -and $bl.Enabled) {
-        if ($bl.EncryptionMethod -notin $script:BitLockerMethods) { "bitlocker/encryptionMethod must be one of $($script:BitLockerMethods -join ', '), not '$($bl.EncryptionMethod)'." }
-        if ($bl.Protector -notin $script:BitLockerProtectors) { "bitlocker/protector must be Tpm or TpmPin, not '$($bl.Protector)'." }
-        if ($bl.Protector -eq 'TpmPin' -and -not $bl.PinFile) { 'A TpmPin protector needs bitlocker/pinFile.' }
         if ($bl.BackupToAD -and $a.Membership -ne 'Domain') { 'bitlocker/backupToAD needs domain membership; use recoveryKeyFolder for workgroup PCs.' }
         if ($bl.RecoveryKeyFolder -and $bl.RecoveryKeyFolder -notmatch '^\\\\[^\\]+\\.+') { "bitlocker/recoveryKeyFolder '$($bl.RecoveryKeyFolder)' must be a \\server\share path." }
         if ($bl.RequireBackup -and -not $bl.BackupToAD -and -not $bl.RecoveryKeyFolder) { 'bitlocker/requireBackup needs backupToAD or recoveryKeyFolder.' }
@@ -533,9 +527,9 @@ function Test-UnattendXml {
 
 function New-FirstBootPlan {
     # What FirstBoot.ps1 runs on the deployed PC (as SYSTEM, from SetupComplete.cmd): apps in order, then tasks.
-    # BitLocker runs last, after the FIRSTBOOT tasks. The PIN, if any, is read in WinPE and removed from C:\Temp at the end of first boot.
+    # BitLocker runs last, after the FIRSTBOOT tasks (TPM only, XTS-AES 256).
     # -Tasks: Resolve-DeployTasks rows (library tasks read, other PCs' tasks left out). Not passed: the plain commands.
-    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [string]$BitLockerPin, [object[]]$Tasks)
+    param([Parameter(Mandatory)]$Answer, [object[]]$AppDefinitions = @(), [object[]]$Tasks)
     $bl = $Answer.BitLocker
     $rows = if ($PSBoundParameters.ContainsKey('Tasks')) { @($Tasks) }
             else { @($Answer.Tasks | Where-Object { -not ($_.PSObject.Properties['Script'] -and $_.Script) } | ForEach-Object { [pscustomobject]@{ Phase = $_.Phase; Name = $_.Command; Command = $_.Command; Definition = $null; Arguments = '' } }) }
@@ -550,10 +544,9 @@ function New-FirstBootPlan {
         })
         bitlocker            = if ($bl -and $bl.Enabled) {
             [pscustomobject]@{
-                encryptionMethod  = $bl.EncryptionMethod
+                encryptionMethod  = 'XtsAes256'
                 usedSpaceOnly     = $bl.UsedSpaceOnly
-                protector         = $bl.Protector
-                pin               = if ($bl.Protector -eq 'TpmPin') { $BitLockerPin } else { $null }
+                protector         = 'Tpm'
                 backupToAD        = $bl.BackupToAD
                 recoveryKeyFolder = $bl.RecoveryKeyFolder
                 requireBackup     = $bl.RequireBackup
@@ -666,11 +659,7 @@ $($shares -join "`n")
   </shares>
   <bitlocker>
     <enabled>$(& $b $bl.Enabled)</enabled>
-    <encryptionMethod>$(& $x $bl.EncryptionMethod)</encryptionMethod>
     <usedSpaceOnly>$(& $b $bl.UsedSpaceOnly)</usedSpaceOnly>
-    <protector>$(& $x $bl.Protector)</protector>
-    <pinFile>$(& $x $bl.PinFile)</pinFile>
-$(& $e $bl 'PinEncrypted' 'encryptedPin' '    ')
     <backupToAD>$(& $b $bl.BackupToAD)</backupToAD>
     <recoveryKeyFolder>$(& $x $bl.RecoveryKeyFolder)</recoveryKeyFolder>
     <requireBackup>$(& $b $bl.RequireBackup)</requireBackup>

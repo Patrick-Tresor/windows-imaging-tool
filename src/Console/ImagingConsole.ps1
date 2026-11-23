@@ -168,7 +168,7 @@ function Invoke-Safely([scriptblock]$Action) {
 
 function Test-RootReady {
     if (Test-ContentRoot $script:root) { return $true }
-    Show-Error 'Choose a content root first (Browse...), then click Create folders if it is new.'
+    Show-Error 'Choose a content root first (Browse...).'
     $false
 }
 
@@ -520,15 +520,11 @@ $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $cfg = Get-ConsoleConfig
     $cfg | Add-Member -NotePropertyName contentRoot -NotePropertyValue $path -Force
     Save-ConsoleConfig $cfg
-    if (-not (Test-ContentRoot $path)) { Set-Status 'This folder is not a content root yet. Click Create folders.' }
+    # A new folder becomes a content root right away (nothing existing is overwritten).
+    $created = -not (Test-ContentRoot $path)
+    if ($created) { Initialize-ContentRoot -Path $path }
     Update-All
-} })
-
-$ui.BtnInitRoot.Add_Click({ Invoke-Safely {
-    if (-not $script:root) { Show-Error 'Choose a folder with Browse... first.'; return }
-    Initialize-ContentRoot -Path $script:root
-    Update-All
-    Set-Status "Created the content folders (Images, Drivers, AnswerFiles, Applications, config, Logs) in $($script:root)"
+    if ($created) { Set-Status "Created the content folders (Images, Drivers, AnswerFiles, Applications, Tasks, config, Logs) in $path" }
 } })
 
 #endregion
@@ -629,13 +625,9 @@ function Remove-LibraryRow($Row) {
     Set-Status "Deleted $($Row.Name)"
 }
 
-function Get-SelectedLibraryRow([string]$Kind) {
-    # The selected row; with -Kind only a row of that kind (Test detection is for applications).
+function Get-SelectedLibraryRow {
     $row = $ui.GridLibrary.SelectedItem
-    if (-not $row -or ($Kind -and $row.Kind -ne $Kind)) {
-        Show-Error $(if ($Kind -eq 'Application') { 'Select an application first.' } else { 'Select an application or a task first.' })
-        return
-    }
+    if (-not $row) { Show-Error 'Select an application or a task first.'; return }
     $row
 }
 
@@ -711,17 +703,6 @@ $ui.GridLibrary.Add_SelectionChanged({
         $lines -join "`r`n"
     }
 })
-
-$ui.BtnAppTest.Add_Click({ Invoke-Safely {
-    $row = Get-SelectedLibraryRow Application
-    if (-not $row -or -not $row.Definition) { return }
-    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
-    $ui.TxtLibIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
-        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
-        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
-    }
-    Set-Status "Detection tested for $($row.Name)"
-} })
 
 #endregion
 
@@ -823,9 +804,13 @@ $ui.BtnSrcFile.Add_Click({
 
 $ui.BtnImport.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $maker = $ui.CmbMaker.Text.Trim()
     $model = $ui.TxtModel.Text.Trim()
-    if (-not $maker -or -not $model -or -not $ui.TxtSource.Text) { Show-Error 'Maker, model and source are required.'; return }
+    if (-not $model -or -not $ui.TxtSource.Text) { Show-Error 'Model and source are required.'; return }
+    $maker = Get-DriverPackMaker -Model $model -Source $ui.TxtSource.Text
+    if (-not $maker) { Show-Error 'Could not tell the maker. Start the model with Dell, HP or Lenovo, for example Dell Latitude 5521.'; return }
+    # 'Dell Latitude 5521' is stored as maker Dell, model Latitude 5521.
+    $model = ($model -replace "^(?i)(dell|hp|hewlett[- ]packard|lenovo)\s+", '').Trim()
+    if (-not $model) { Show-Error 'Type the model after the maker, for example Dell Latitude 5521.'; return }
     $window.Cursor = 'Wait'
     Set-Status "Importing $maker $model..."
     try {
@@ -1146,7 +1131,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
-    # window shows each step; the build's window (Show build window) and its log have every line.
+    # window shows each step; the build's log (Open log) has every line.
     $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)"
     Set-Status 'Media build started. The Build progress window shows each step.'
@@ -1234,17 +1219,6 @@ $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
     Set-Status "Removed $($r.Serial) from the dashboard. Show: History has its final log."
-} })
-
-$ui.BtnDashClear.Add_Click({ Invoke-Safely {
-    $folder = Get-DashboardFolder
-    if (-not $folder) { return }
-    $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
-    if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. Their final logs stay under Show: History.")) { return }
-    Remove-DeploymentStatus -Rows $done
-    Update-Dashboard
-    Set-Status "Cleared $($done.Count) finished deployment(s)"
 } })
 
 $ui.BtnDashOpen.Add_Click({ Invoke-Safely {

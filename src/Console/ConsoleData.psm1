@@ -222,6 +222,23 @@ function Save-DriverCatalog {
     Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -InputObject $catalog -Depth 5
 }
 
+function Get-DriverPackMaker {
+    # Works out the maker (Dell, HP, Lenovo) for an imported pack: from the model name first (maker word or
+    # product line), then from the source file or folder name. Returns '' when it cannot tell.
+    param([string]$Model, [string]$Source)
+    $lines = [ordered]@{
+        Dell   = '\b(dell|latitude|optiplex|precision|vostro|xps|inspiron|alienware)\b'
+        HP     = '\b(hp|hewlett|elitebook|probook|zbook|elitedesk|prodesk|elite\s?one|elitepad|pro\s?one|z[0-9]+ g[0-9]+|sp[0-9]{5,6})\b'
+        Lenovo = '\b(lenovo|thinkpad|thinkcentre|thinkstation|thinkbook|ideapad|ideacentre|yoga|legion)\b|^tp_'
+    }
+    $name = if ($Source) { [IO.Path]::GetFileName("$Source".TrimEnd('\', '/')) } else { '' }
+    foreach ($text in @($Model, ($name -replace '[_\-.]', ' '), $name)) {
+        if (-not $text) { continue }
+        foreach ($maker in $lines.Keys) { if ($text -match $lines[$maker]) { return $maker } }
+    }
+    ''
+}
+
 function Import-DriverPack {
     # Copies a driver folder, or expands a CAB, into Drivers\<Maker>\<Model> and adds a catalog entry.
     param(
@@ -349,7 +366,6 @@ function Get-NewAnswer {
     $a.Path = $null
     $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
-    $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
     $a
 }
 
@@ -419,7 +435,6 @@ function Save-AnswerFromEditor {
         [string]$JoinPassword,
         [string]$AdminPassword,
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
-        [string]$BitLockerPin,
         [switch]$IsNew
     )
     $a = $Answer
@@ -429,8 +444,6 @@ function Save-AnswerFromEditor {
 
     if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
-    if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
-    if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -438,7 +451,7 @@ function Save-AnswerFromEditor {
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Can't save yet:`n - " + ($problems -join "`n - ") }
 
-    $typed = @($JoinPassword, $AdminPassword, $BitLockerPin) + @($SharePasswords.Values) | Where-Object { $_ }
+    $typed = @($JoinPassword, $AdminPassword) + @($SharePasswords.Values) | Where-Object { $_ }
     $key = if ($typed) { Get-AnswerKey -ContentRoot $ContentRoot -Create } else { $null }
     $protect = {
         param($Object, [string]$Property, [string]$Password)
@@ -447,7 +460,6 @@ function Save-AnswerFromEditor {
     }
     & $protect $a 'JoinPasswordEncrypted' $JoinPassword
     & $protect $a 'AdminPasswordEncrypted' $AdminPassword
-    & $protect $a.BitLocker 'PinEncrypted' $BitLockerPin
     foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] }
     Export-AnswerFile -Answer $a -Path $dest
     $dest
@@ -1173,7 +1185,7 @@ function Get-ImageLogPath {
 #endregion
 
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries, Merge-LenovoSkuEntries,
-    Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
+    Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack, Get-DriverPackMaker,
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,

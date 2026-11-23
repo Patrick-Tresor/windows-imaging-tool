@@ -24,7 +24,6 @@
         <!-- Shown while a progress window exists (build, capture, reimage), also one that was closed: shows them again. -->
         <Button x:Name="BtnShowProgress" DockPanel.Dock="Right" Content="Show progress" Margin="20,0,0,0" Visibility="Collapsed"
                 ToolTip="Opens the progress windows again, also the ones you closed while the work goes on."/>
-        <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
         <Button x:Name="BtnOpenRoot" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0" ToolTip="Opens the content root in File Explorer"/>
         <Button x:Name="BtnBrowseRoot" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0"/>
         <TextBox x:Name="TxtRoot" IsReadOnly="True"/>
@@ -143,12 +142,8 @@
                   <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-                <Label Content="Maker"/>
-                <ComboBox x:Name="CmbMaker" Grid.Column="1" IsEditable="True">
-                  <ComboBoxItem Content="Dell"/><ComboBoxItem Content="HP"/><ComboBoxItem Content="Lenovo"/>
-                </ComboBox>
-                <Label Grid.Column="2" Content="Model" Margin="8,0,0,0"/>
-                <TextBox x:Name="TxtModel" Grid.Column="3"/>
+                <Label Content="Model"/>
+                <TextBox x:Name="TxtModel" Grid.Column="1" Grid.ColumnSpan="3" ToolTip="For example Latitude 5521 or HP EliteBook 840 G8. The maker is read from the model or the pack's name."/>
                 <Label Grid.Column="4" Content="SKU" Margin="8,0,0,0"/>
                 <TextBox x:Name="TxtSku" Grid.Column="5"/>
                 <Label Grid.Column="6" Content="Machine type" Margin="8,0,0,0"/>
@@ -302,7 +297,6 @@
             <Button x:Name="BtnAppNew" Content="New application..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnTaskNew" Content="New task..."/>
             <Button x:Name="BtnLibEdit" Content="Edit"/>
-            <Button x:Name="BtnAppTest" Content="Test detection" ToolTip="Applications: are they installed on this PC, by their detection rules?"/>
             <Button x:Name="BtnLibDelete" Content="Delete"/>
           </WrapPanel>
           <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
@@ -507,7 +501,6 @@
                 <ComboBoxItem Content="History"/>
               </ComboBox>
               <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
-              <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
               <Button x:Name="BtnDashRemove" DockPanel.Dock="Right" Content="Remove" Margin="8,0,0,0"/>
               <TextBlock/>
             </DockPanel>

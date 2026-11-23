@@ -102,15 +102,15 @@ $full = [pscustomobject]@{
     Membership = 'Domain'; Domain = 'corp.example.com'; JoinUser = 'CORP\svc-join'; JoinDomain = ''; JoinPasswordFile = 'config\secrets\Join.txt'
     Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\images'; Username = 'svc-read'; PasswordFile = 'config/secrets/share.txt' },
                [pscustomobject]@{ LocalName = 'Z:'; RemoteName = '\\srv\apps'; Username = 'svc-join'; PasswordFile = 'config\secrets\join.txt' })
-    BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'TpmPin'; PinFile = 'config\secrets\pin.txt' }
+    BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'Tpm' }
 }
 $needed = @(Get-AnswerSecrets -Answer $full)
-Assert-Equal (($needed | ForEach-Object Key) -join ',') 'config\secrets\admin.txt,config\secrets\join.txt,config\secrets\share.txt,config\secrets\pin.txt' 'answer secrets: every password once, the shared join file only once'
+Assert-Equal (($needed | ForEach-Object Key) -join ',') 'config\secrets\admin.txt,config\secrets\join.txt,config\secrets\share.txt' 'answer secrets: every password once, the shared join file only once (BitLocker has none)'
 Assert-Equal $needed[1].Label 'Join account password (CORP\svc-join)' 'answer secrets: the join account is named'
 Assert-Equal "$($needed[2].Share)|$($needed[0].Share)" 'Y:|' 'answer secrets: share passwords say which drive'
 $bare = [pscustomobject]@{
     EnableAdministrator = $false; AdminPasswordFile = 'config\secrets\admin.txt'; Membership = 'Workgroup'; JoinPasswordFile = 'config\secrets\join.txt'
-    Shares = @(); BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'Tpm'; PinFile = 'config\secrets\pin.txt' }
+    Shares = @(); BitLocker = [pscustomobject]@{ Enabled = $true; Protector = 'Tpm' }
 }
 Assert-Equal @(Get-AnswerSecrets -Answer $bare).Count 0 'answer secrets: nothing for settings that are off'
 
@@ -171,15 +171,14 @@ try {
     # Export-AnswerFile (the editor's save) keeps the encrypted values; the stick needs no password file.
     $a = Read-AnswerFile -Path $af -SkipValidation
     $a.Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\apps'; Username = 'svc'; Domain = ''; PasswordFile = 'config\secrets\y.txt'; PasswordEncrypted = (Protect-AnswerPassword -Password 'Sh' -Key $k1) })
-    $a.BitLocker | Add-Member -NotePropertyName PinEncrypted -NotePropertyValue (Protect-AnswerPassword -Password '123456' -Key $k1) -Force
     $a | Add-Member -NotePropertyName AdminPasswordEncrypted -NotePropertyValue (Protect-AnswerPassword -Password 'Adm' -Key $k1) -Force
     $out = Join-Path $root 'AnswerFiles/Copy.xml'
     Export-AnswerFile -Answer $a -Path $out
     $c = Read-AnswerFile -Path $out -SkipValidation
-    $vals = foreach ($v in $c.JoinPasswordEncrypted, $c.AdminPasswordEncrypted, $c.Shares[0].PasswordEncrypted, $c.BitLocker.PinEncrypted) { Unprotect-AnswerPassword -Value $v -Key $k1 }
-    Assert-Equal ($vals -join '|') 'N3w pw|Adm|Sh|123456' 'export: every encrypted password survives export and read'
+    $vals = foreach ($v in $c.JoinPasswordEncrypted, $c.AdminPasswordEncrypted, $c.Shares[0].PasswordEncrypted) { Unprotect-AnswerPassword -Value $v -Key $k1 }
+    Assert-Equal ($vals -join '|') 'N3w pw|Adm|Sh' 'export: every encrypted password survives export and read'
     $plain = Join-Path $root 'AnswerFiles/Plain.xml'
-    $c.JoinPasswordEncrypted = ''; $c.AdminPasswordEncrypted = ''; $c.Shares[0].PasswordEncrypted = ''; $c.BitLocker.PinEncrypted = ''
+    $c.JoinPasswordEncrypted = ''; $c.AdminPasswordEncrypted = ''; $c.Shares[0].PasswordEncrypted = ''
     Export-AnswerFile -Answer $c -Path $plain
     Assert-Equal ([IO.File]::ReadAllText($plain) -match 'encrypted') $false 'export: no empty encrypted elements'
 }

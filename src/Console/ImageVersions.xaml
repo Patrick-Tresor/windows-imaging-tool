@@ -34,7 +34,6 @@
         <StackPanel Orientation="Horizontal">
           <Button x:Name="BtnRollback" Content="Roll back to selected" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnDelete" Content="Delete selected"/>
-          <Button x:Name="BtnRefresh" Content="Refresh"/>
         </StackPanel>
       </DockPanel>
     </StackPanel>
