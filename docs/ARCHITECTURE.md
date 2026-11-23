@@ -413,4 +413,4 @@ pack on them by other means, once it is in the library.
 ## Not in v1
 
 BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
-user data migration (USMT), multicast, PXE/WDS, Wake-on-LAN, a Windows 11 hardware check, wipe-and-load / keep-user-data disk options, static IP, display settings, Azure AD join, and a management agent.
+user data migration (USMT), multicast, PXE/WDS, Wake-on-LAN, a Windows 11 hardware check, wipe-and-load / keep-user-data disk options, static IP, display settings and Azure AD join.
