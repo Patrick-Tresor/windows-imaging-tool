@@ -50,9 +50,6 @@ try {
     Assert-Throws { Get-ImageVersionPath -ImagePath $wim -Version '20250101-0000' } 'a missing version throws'
     Assert-Throws { Get-ImageVersionPath -ImagePath $wim -Version '..\x' } 'a malformed version throws'
 
-    Set-ImageVersionNote -ImagePath $wim -Version '20261015-1430' -Note 'Driver issue on G10'
-    Assert-Equal (Get-ImageVersions -ImagePath $wim | Where-Object Version -eq '20261015-1430').Note 'Driver issue on G10' 'notes can be changed'
-
     # Rollback: current is archived, the chosen version is copied back and stays archived.
     $old = Restore-ImageVersion -ImagePath $wim -Version '20261001-0900' -Date ([datetime]'2026-10-22 16:00')
     Assert-Equal (Get-Content $wim) 'v1' 'rollback makes the chosen version current'

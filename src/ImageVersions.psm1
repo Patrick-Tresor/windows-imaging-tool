@@ -244,14 +244,6 @@ function Save-ImageVersion {
     Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $version
 }
 
-function Set-ImageVersionNote {
-    param([Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Version, [AllowEmptyString()][string]$Note)
-    $v = Get-ImageVersions -ImagePath $ImagePath | Where-Object Version -eq $Version
-    if (-not $v) { throw "Version $Version of $(Split-Path $ImagePath -Leaf) was not found." }
-    Save-JsonFile -Path (Join-Path $v.Folder 'version.json') -InputObject ([pscustomobject]@{ image = (Split-Path $ImagePath -Leaf)
-        archived = $v.Archived.ToString('yyyy-MM-dd HH:mm'); reason = $v.Reason; note = "$Note" })
-}
-
 function Set-ImageFileLink {
     # Makes Destination the same file as Source when the volume allows a hard link, else a copy. A rollback then takes
     # no time and no extra space. Nothing writes an image file in place (captures, updates and rollbacks all write new
@@ -358,6 +350,6 @@ function Publish-CapturedImage {
 }
 
 Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
-    Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
+    Save-ImageVersion, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-VersionsToKeep, Set-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks
