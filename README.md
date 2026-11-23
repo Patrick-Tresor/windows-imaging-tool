@@ -71,8 +71,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-  Pick the **USB disk**, tick **Update a stick this console built before** to refresh one
-  without erasing it, uncheck the **Driver packs on USB** you don't need, type the
+  Pick the **USB disk** (a stick this tool built before is updated in place, any other
+  is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
   **WinPE password** twice and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
@@ -601,8 +601,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
    pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
-   To refresh a stick you built before without erasing it, tick **Update a stick this console built
-   before** (`-UpdateOnly`): WinPE is replaced, only files whose size or date changed are copied, and
+   A stick you built before (it has WINPE and DEPLOY partitions) is refreshed without erasing it
+   (`-UpdateOnly`); to start one fresh, format it in File Explorer first. WinPE is replaced, only files whose size or date changed are copied, and
    files the new content no longer has are deleted from `AnswerFiles`, `Images`, `Drivers`,
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold

@@ -208,8 +208,7 @@
 
             <Label Grid.Row="2" Content="Copy content to USB" VerticalAlignment="Top"/>
             <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
-              <CheckBox x:Name="ChkUsbUpdate" DockPanel.Dock="Top" Margin="0,0,0,8"
-                        Content="Update a stick this console built before, without erasing it: new WinPE, and only the files that changed are copied"/>
+              <TextBlock x:Name="TxtUsbMode" DockPanel.Dock="Top" Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold"/>
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="The stick gets the answer files checked below, the image each one deploys, drivers, applications and config. An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
               <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
