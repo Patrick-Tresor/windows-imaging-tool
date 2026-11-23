@@ -142,12 +142,8 @@
                   <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-                <Label Content="Maker"/>
-                <ComboBox x:Name="CmbMaker" Grid.Column="1" IsEditable="True">
-                  <ComboBoxItem Content="Dell"/><ComboBoxItem Content="HP"/><ComboBoxItem Content="Lenovo"/>
-                </ComboBox>
-                <Label Grid.Column="2" Content="Model" Margin="8,0,0,0"/>
-                <TextBox x:Name="TxtModel" Grid.Column="3"/>
+                <Label Content="Model"/>
+                <TextBox x:Name="TxtModel" Grid.Column="1" Grid.ColumnSpan="3" ToolTip="For example Latitude 5521 or HP EliteBook 840 G8. The maker is read from the model or the pack's name."/>
                 <Label Grid.Column="4" Content="SKU" Margin="8,0,0,0"/>
                 <TextBox x:Name="TxtSku" Grid.Column="5"/>
                 <Label Grid.Column="6" Content="Machine type" Margin="8,0,0,0"/>

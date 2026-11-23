@@ -30,6 +30,16 @@ try {
     Assert-Equal $hp.Status '1 drivers' 'catalog row shows the driver count'
     Assert-Equal (($rows | Where-Object Model -eq 'Latitude 5440').Status) 'Missing folder' 'catalog row flags a missing folder'
 
+    # The import reads the maker from the model or the pack's name.
+    Assert-Equal (Get-DriverPackMaker -Model 'Latitude 5521') 'Dell' 'maker: Dell product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'EliteBook 840 G8') 'HP' 'maker: HP product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'ThinkPad T14 Gen 4') 'Lenovo' 'maker: Lenovo product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'HP 250 G9') 'HP' 'maker: maker word in the model'
+    Assert-Equal (Get-DriverPackMaker -Model '5521' -Source 'C:\Packs\Latitude-5521-WIN11-A05-XXXX.CAB') 'Dell' 'maker: from the file name'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\sp173204.exe') 'HP' 'maker: HP SoftPaq file'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\tp_t14_gen4_w11_202310.exe') 'Lenovo' 'maker: Lenovo pack file'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\drivers') '' 'maker: unknown stays empty'
+
     # Saving drops empty fields and keeps fallbacks.
     Save-DriverCatalog -ContentRoot $root -Rows ($rows | Where-Object Maker -ne 'Dell')
     $catalog = Get-DriverCatalog -ContentRoot $root

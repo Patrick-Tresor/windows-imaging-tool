@@ -819,9 +819,13 @@ $ui.BtnSrcFile.Add_Click({
 
 $ui.BtnImport.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $maker = $ui.CmbMaker.Text.Trim()
     $model = $ui.TxtModel.Text.Trim()
-    if (-not $maker -or -not $model -or -not $ui.TxtSource.Text) { Show-Error 'Maker, model and source are required.'; return }
+    if (-not $model -or -not $ui.TxtSource.Text) { Show-Error 'Model and source are required.'; return }
+    $maker = Get-DriverPackMaker -Model $model -Source $ui.TxtSource.Text
+    if (-not $maker) { Show-Error 'Could not tell the maker. Start the model with Dell, HP or Lenovo, for example Dell Latitude 5521.'; return }
+    # 'Dell Latitude 5521' is stored as maker Dell, model Latitude 5521.
+    $model = ($model -replace "^(?i)(dell|hp|hewlett[- ]packard|lenovo)\s+", '').Trim()
+    if (-not $model) { Show-Error 'Type the model after the maker, for example Dell Latitude 5521.'; return }
     $window.Cursor = 'Wait'
     Set-Status "Importing $maker $model..."
     try {

@@ -222,6 +222,23 @@ function Save-DriverCatalog {
     Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\driver-catalog.json') -InputObject $catalog -Depth 5
 }
 
+function Get-DriverPackMaker {
+    # Works out the maker (Dell, HP, Lenovo) for an imported pack: from the model name first (maker word or
+    # product line), then from the source file or folder name. Returns '' when it cannot tell.
+    param([string]$Model, [string]$Source)
+    $lines = [ordered]@{
+        Dell   = '\b(dell|latitude|optiplex|precision|vostro|xps|inspiron|alienware)\b'
+        HP     = '\b(hp|hewlett|elitebook|probook|zbook|elitedesk|prodesk|elite\s?one|elitepad|pro\s?one|z[0-9]+ g[0-9]+|sp[0-9]{5,6})\b'
+        Lenovo = '\b(lenovo|thinkpad|thinkcentre|thinkstation|thinkbook|ideapad|ideacentre|yoga|legion)\b|^tp_'
+    }
+    $name = if ($Source) { [IO.Path]::GetFileName("$Source".TrimEnd('\', '/')) } else { '' }
+    foreach ($text in @($Model, ($name -replace '[_\-.]', ' '), $name)) {
+        if (-not $text) { continue }
+        foreach ($maker in $lines.Keys) { if ($text -match $lines[$maker]) { return $maker } }
+    }
+    ''
+}
+
 function Import-DriverPack {
     # Copies a driver folder, or expands a CAB, into Drivers\<Maker>\<Model> and adds a catalog entry.
     param(
@@ -1173,7 +1190,7 @@ function Get-ImageLogPath {
 #endregion
 
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries, Merge-LenovoSkuEntries,
-    Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack,
+    Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack, Get-DriverPackMaker,
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
