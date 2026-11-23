@@ -32,8 +32,6 @@ $p = @(Get-DeploySettingsProblems -SharePath '\\SRV01\Deploy' -ShareUser 'svc-de
 Assert-Equal $p.Count 0 'a UPN account with a typed password is fine'
 $p = @(Get-DeploySettingsProblems -ShareUser 'DOMAIN\x')
 Assert-Equal $p.Count 0 'no share ignores the account'
-$p = @(Get-DeploySettingsProblems -VersionsToKeep 'two')
-Assert-Equal ($p[0] -like 'Older image versions*') $true 'versions to keep must be a number'
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-settings-" + [guid]::NewGuid())
 try {
@@ -51,7 +49,7 @@ try {
     Set-Content -LiteralPath (Join-ContentPath $root 'config\share.cred') -Value 'Plain-Pass' -NoNewline
     Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $false 'a password in an old plain file does not count as saved'
     Assert-Equal ($null -eq (Get-SharePassword -ContentRoot $root)) $true 'and is not read'
-    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -NewPassword 'Old-Pass1' -VersionsToKeep 3
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -NewPassword 'Old-Pass1'
     $s = Get-DeploySettings -ContentRoot $root
     Assert-Equal $s.share.path '\\SRV01\Deploy' 'share saved without the trailing backslash'
     Assert-Equal ($null -eq $s.share.PSObject.Properties['passwordFile']) $true 'no passwordFile in the settings any more'
@@ -60,13 +58,12 @@ try {
     Assert-Equal ((Get-Content -Raw $settingsFile) -like '*Old-Pass1*') $false 'never as plain text'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'and decrypts to the same password'
     Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'the page shows it as saved'
-    Assert-Equal $s.versionsToKeep 3 'versions to keep saved'
     Assert-Equal $r.MediaOutOfDate $true 'a new share means the stick needs updating'
 
-    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -VersionsToKeep 2
-    Assert-Equal $r.MediaOutOfDate $false 'only the versions changed: the stick is still up to date'
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy'
+    Assert-Equal $r.MediaOutOfDate $false 'nothing WinPE reads changed: the stick is still up to date'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'saving again keeps the password'
-    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!' -VersionsToKeep 2
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!'
     Assert-Equal $r.MediaOutOfDate $true 'a new password means the stick needs updating'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'N3w-Pass!' 'the typed password is saved'
 

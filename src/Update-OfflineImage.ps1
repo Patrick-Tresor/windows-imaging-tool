@@ -8,8 +8,8 @@
     For each edition (index) in the image it mounts the image, adds the packages in the
     order given, optionally cleans up the component store, and commits. The serviced image
     is then exported to a new file, which drops the space left behind by the replaced
-    components, and replaces the original. The previous version is moved to
-    Images\Previous\ unless -NoBackup is used.
+    components, and replaces the original. The previous version is always moved to
+    Images\Previous\ (a version the Versions window can roll back to).
 
     The work happens in a local folder (-WorkDir), because mounting from a share is slow and
     a mount must be on a local NTFS volume. It needs about three times the image size free.
@@ -28,7 +28,6 @@ param(
     [int[]]$Index,                                    # default: every edition in the image
     [switch]$Cleanup,                                 # DISM /StartComponentCleanup after the updates
     [switch]$ResetBase,                               # with -Cleanup: smaller, but the updates can no longer be removed
-    [switch]$NoBackup,
     [int]$SplitSizeMB = 3800,                         # part size when the image is split (.swm)
     [string]$WorkDir = (Join-Path $env:ProgramData 'ImagingConsole\Servicing'),
     [switch]$NoPrompt,
@@ -180,14 +179,10 @@ try {
     Complete-BuildStep 'export' -Detail "build $($builds -join ', ')"
     Start-BuildStep 'save' -Detail $imagesDir
     $swapping = $true
-    if (-not $NoBackup) {
-        # Archived as a version (with version.json), so the Versions dialog shows why and with what.
-        $kept = Save-ImageVersion -ImagePath $image.FullName -Move -Reason 'Replaced by an offline update' -Note ($packages.Name -join ', ')
-        $backup = $kept.Folder
-        Write-DeployLog "Moved the previous version to $backup"
-    } else {
-        $parts | Remove-Item -Force
-    }
+    # Archived as a version (with version.json), so the Versions dialog shows why and with what.
+    $kept = Save-ImageVersion -ImagePath $image.FullName -Move -Reason 'Replaced by an offline update' -Note ($packages.Name -join ', ')
+    $backup = $kept.Folder
+    Write-DeployLog "Moved the previous version to $backup"
 
     if ($isSplit) {
         Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Split-Image', "/ImageFile:$outWim", "/SWMFile:$(Join-Path $imagesDir "$name.swm")", "/FileSize:$SplitSizeMB")

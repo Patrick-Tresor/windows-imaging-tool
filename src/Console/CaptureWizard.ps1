@@ -102,7 +102,6 @@ function Show-CaptureWizard {
             Name        = $w.TxtName.Text.Trim()
             Description = $w.TxtDescription.Text.Trim()
             Compression = $w.CmbCompression.SelectedItem.Tag
-            NewVersion  = [bool]$w.ChkNewVersion.IsChecked
             SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             SaveTo      = $w.TxtSaveTo.Text.Trim().Trim('"').TrimEnd('\')
@@ -214,9 +213,6 @@ function Show-CaptureWizard {
             3 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
                 elseif ($saveProblem = Get-CaptureSaveFolderProblem -Path $c.SaveTo) { $saveProblem }
-                elseif (-not $c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
-                    "An image named $($c.Name) already exists in $($c.SaveTo). Pick another name, or tick the box to capture it as a new version."
-                }
             }
         }
     }
@@ -233,7 +229,7 @@ function Show-CaptureWizard {
             "Image name:    $($c.Name).$(if ($c.Compression -eq 'recovery') { 'esd' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
-            $(if ($c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
+            $(if (@(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
                 "Existing image: replaced after the capture succeeds; the old one is kept in Previous next to it" })
             ''
             "Media:         $target"
@@ -263,7 +259,7 @@ function Show-CaptureWizard {
             param($progressFile, $logPath)
             Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
+                -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
         }
         $state.HandedOver = $true
         Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"

@@ -13,14 +13,14 @@
     <StackPanel DockPanel.Dock="Top">
       <TextBlock x:Name="TxtTitle" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
       <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"
-                 Text="Earlier versions are kept in Images\Previous when you capture over an image, update it offline, keep a copy or roll back. Roll back makes the selected version current again for every answer file without a version; the image you roll away from is kept as a version too. To keep one answer file on a version, pick it in the answer file's Image page."/>
+                 Text="Earlier versions are kept in Images\Previous automatically when you capture over an image, update it offline or roll back. Roll back makes the selected version current again for every answer file without a version; the image you roll away from is kept as a version too. To keep one answer file on a version, pick it in the answer file's Image page."/>
     </StackPanel>
 
     <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
       <DockPanel Margin="0,0,0,10">
-        <TextBlock Text="Keep newest for this image" VerticalAlignment="Center" Margin="0,0,8,0"/>
-        <Button x:Name="BtnLimitSave" DockPanel.Dock="Right" Content="Save limit" Margin="8,0,0,0"/>
-        <TextBox x:Name="TxtLimit" Width="80" HorizontalAlignment="Left" ToolTip="How many of the newest versions of this image to keep after a copy, rollback or replacing capture. Blank uses the default in Deploy Settings. Pinned versions are never deleted."/>
+        <TextBlock Text="Earlier versions to keep (every image)" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBox x:Name="TxtLimit" Width="60" VerticalContentAlignment="Center" ToolTip="How many of the newest earlier versions each image keeps; older ones are deleted when a capture, update or rollback replaces the image. 0 keeps them all. Versions an answer file uses are never deleted."/>
+        <Button x:Name="BtnLimitSave" Content="Save" Margin="8,0,0,0" HorizontalAlignment="Left"/>
       </DockPanel>
       <DockPanel Margin="0,0,0,10">
         <TextBlock Text="Note" VerticalAlignment="Center" Width="50"/>
@@ -32,12 +32,8 @@
           <Button x:Name="BtnClose" Content="Close" Margin="0"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BtnKeep" Content="Keep a copy of current"/>
           <Button x:Name="BtnRollback" Content="Roll back to selected" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnDelete" Content="Delete selected"/>
-          <TextBlock Text="Keep newest" VerticalAlignment="Center" Margin="8,0,6,0"/>
-          <TextBox x:Name="TxtKeep" Width="40" Text="3" HorizontalContentAlignment="Center"/>
-          <Button x:Name="BtnPrune" Content="Delete older" Margin="8,0,8,0" ToolTip="Deletes archived versions beyond the newest ones, except versions an answer file uses."/>
           <Button x:Name="BtnRefresh" Content="Refresh"/>
         </StackPanel>
       </DockPanel>

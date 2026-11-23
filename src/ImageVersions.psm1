@@ -144,40 +144,25 @@ function Get-ImageVersionUsage {
     }.GetNewClosure()
 }
 
-function Get-ImageVersionLimitPath {
-    # Images\<name>.versions.json: the image's own "keep newest N" limit. Not a version, so Get-ImageList ignores it.
-    param([Parameter(Mandatory)][string]$ImagePath)
-    Join-Path (Split-Path $ImagePath -Parent) ([IO.Path]::GetFileNameWithoutExtension($ImagePath) + '.versions.json')
-}
-
-function Get-ImageVersionLimit {
-    # The image's own limit, or $null when it uses the default from deploy-settings.json.
-    param([Parameter(Mandatory)][string]$ImagePath)
-    $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
-    if (-not (Test-Path -LiteralPath $path)) { return $null }
-    $value = (Get-Content -Raw -LiteralPath $path | ConvertFrom-Json).keep
-    if ($null -eq $value) { return $null }
-    [int]$value
-}
-
-function Set-ImageVersionLimit {
-    # Sets the image's own limit. With -Keep $null the image goes back to the default.
-    param([Parameter(Mandatory)][string]$ImagePath, $Keep)
-    $path = Get-ImageVersionLimitPath -ImagePath $ImagePath
-    if ($null -eq $Keep) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue; return }
-    if ([int]$Keep -lt 0) { throw 'Keep must be 0 or more.' }
-    Save-JsonFile -Path $path -InputObject ([pscustomobject]@{ keep = [int]$Keep })
-}
-
 function Get-VersionsToKeep {
-    # How many versions to keep for an image: its own limit, else versionsToKeep in deploy-settings.json, else 0 (keep all).
-    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImagePath)
-    $own = Get-ImageVersionLimit -ImagePath $ImagePath
-    if ($null -ne $own) { return $own }
+    # How many earlier versions to keep of each image: versionsToKeep in deploy-settings.json, else 0 (keep all).
+    # One number for every image, set in the Versions window. (An older per-image Images\<name>.versions.json is
+    # no longer read.)
+    param([Parameter(Mandatory)][string]$ContentRoot, [string]$ImagePath)
     $settingsPath = Join-Path (Join-Path $ContentRoot 'config') 'deploy-settings.json'
     if (-not (Test-Path -LiteralPath $settingsPath)) { return 0 }
     $settings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
     if ($settings.PSObject.Properties['versionsToKeep']) { [int]$settings.versionsToKeep } else { 0 }
+}
+
+function Set-VersionsToKeep {
+    # Saves the one keep count for every image in deploy-settings.json (0 keeps every version).
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][int]$Keep)
+    if ($Keep -lt 0) { throw 'Keep must be 0 or more.' }
+    $settingsPath = Join-Path (Join-Path $ContentRoot 'config') 'deploy-settings.json'
+    $settings = if (Test-Path -LiteralPath $settingsPath) { Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json } else { [pscustomobject]@{} }
+    $settings | Add-Member -NotePropertyName versionsToKeep -NotePropertyValue $Keep -Force
+    Save-JsonFile -Path $settingsPath -InputObject $settings -Depth 6
 }
 
 function Invoke-ImageVersionRetention {
@@ -374,5 +359,5 @@ function Publish-CapturedImage {
 
 Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
-    Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
+    Get-ImageVersionUsage, Get-VersionsToKeep, Set-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

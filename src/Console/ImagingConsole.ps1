@@ -301,7 +301,6 @@ function Update-Settings {
     $script:sharePwSaved = $v.PasswordSaved
     $ui.TxtShareTest.Text = ''
     $ui.TxtSettingsProblem.Text = ''
-    $ui.TxtVersionsToKeep.Text = $v.VersionsToKeep
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
@@ -1245,11 +1244,11 @@ $ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $problems = @(Get-DeploySettingsProblems -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password -VersionsToKeep $ui.TxtVersionsToKeep.Text)
+        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password)
     if ($problems) { $ui.TxtSettingsProblem.Text = $problems[0]; Set-Status "Not saved: $($problems[0])"; return }
     $ui.TxtSettingsProblem.Text = ''
     $r = Save-DeploySettingsPage -ContentRoot $script:root -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -NewPassword $ui.PwdShare.Password -VersionsToKeep ([int]$ui.TxtVersionsToKeep.Text.Trim())
+        -NewPassword $ui.PwdShare.Password
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
         enabled       = [bool]$ui.ChkChecksEnabled.IsChecked

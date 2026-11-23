@@ -122,18 +122,21 @@ try {
     Assert-Equal ((Get-ImageVersions -ImagePath $wim).Version -join ',') "20261023-1700,$($ten.Version),20261015-1430" 'the protected version is still listed'
     Remove-ImageVersion -ImagePath $wim -Version $ten.Version
 
-    # Per-image limit overrides the default, and clearing it goes back to the default.
-    Set-ImageVersionLimit -ImagePath $wim -Keep 5
-    Assert-Equal (Get-VersionsToKeep -ContentRoot $root -ImagePath $wim) 5 'a per-image limit overrides the default'
-    Set-ImageVersionLimit -ImagePath $wim -Keep $null
-    Assert-Equal (Get-VersionsToKeep -ContentRoot $root -ImagePath $wim) 1 'clearing the per-image limit restores the default'
+    # One keep count for every image, saved by the Versions window; an old per-image file is not read.
+    Set-VersionsToKeep -ContentRoot $root -Keep 5
+    Assert-Equal (Get-VersionsToKeep -ContentRoot $root) 5 'the keep count is saved in deploy-settings.json'
+    Assert-Equal ((Get-Content -Raw $settingsPath | ConvertFrom-Json).versionsToKeep) 5 'next to the other settings'
+    Set-Content (Join-Path $images 'Win11.versions.json') '{"keep":9}'
+    Assert-Equal (Get-VersionsToKeep -ContentRoot $root -ImagePath $wim) 5 'an old per-image limit is ignored'
+    Assert-Throws { Set-VersionsToKeep -ContentRoot $root -Keep -1 } '*0 or more*' 'a negative count is refused'
+    Set-VersionsToKeep -ContentRoot $root -Keep 1
     Assert-Equal ((Get-ImageList -ContentRoot $root | Where-Object Name -eq 'Win11.wim').Name) 'Win11.wim' 'limit files do not show up as images'
     Assert-Equal (Test-ImageHardLinks -Path $images) $true 'the hard link check runs on the images folder'
 
     # Command lines the console starts.
-    $cmd = Get-ImageVersionArguments -ScriptPath 'C:\Tool\src\Invoke-ImageVersion.ps1' -ContentRoot $root -ImageName 'Win11.wim' -Action Rollback -Version '20261015-1430'
-    Assert-Equal ($cmd -contains '-Version' -and $cmd -contains '20261015-1430' -and $cmd -contains 'Rollback') $true 'rollback command names the version'
-    Assert-Throws { Get-ImageVersionArguments -ScriptPath 'x' -ContentRoot $root -ImageName 'Win11.wim' -Action Rollback } 'rollback needs a version'
+    $cmd = Get-ImageVersionArguments -ScriptPath 'C:\Tool\src\Invoke-ImageVersion.ps1' -ContentRoot $root -ImageName 'Win11.wim' -Version '20261015-1430'
+    Assert-Equal ($cmd -contains '-Version' -and $cmd -contains '20261015-1430') $true 'rollback command names the version'
+    Assert-Throws { Get-ImageVersionArguments -ScriptPath 'x' -ContentRoot $root -ImageName 'Win11.wim' } 'rollback needs a version'
 
     # A new capture replaces the image: the old one becomes a version and the new one moves in from staging.
     function global:Write-DeployLog { param($Message, $Level) }

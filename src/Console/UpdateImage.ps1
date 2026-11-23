@@ -69,7 +69,7 @@ function Show-UpdateImageDialog {
                 param($ProgressFile, $LogPath)
                 Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
                     -Packages @($packages | ForEach-Object FullName) -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
-                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -NoBackup:(-not $d.ChkBackup.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
+                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
             }
             [void](& $getArgs '' '')
             $text = "Apply $($packages.Count) update(s) to $($Image.Name)?`n`n" + (($packages | ForEach-Object { "- $($_.Name)" }) -join "`n") +

@@ -1,4 +1,4 @@
-# Image versions window: list, keep a copy, roll back, notes and cleanup for one image.
+# Image versions window: list, roll back, notes, delete, and the one keep count for every image.
 # Dot-sourced by ImagingConsole.ps1, which loads WPF, ConsoleData.psm1 and ImageVersions.psm1.
 
 function Show-ImageVersionsDialog {
@@ -15,7 +15,7 @@ function Show-ImageVersionsDialog {
     $v.TxtTitle.Text = "Versions of $($Image.Name)"
     $state = @{ Changed = $false }
     $imagePath = Join-Path (Join-Path $ContentRoot 'Images') $Image.Name
-    $v.TxtLimit.Text = "$(Get-ImageVersionLimit -ImagePath $imagePath)"
+    $v.TxtLimit.Text = "$(Get-VersionsToKeep -ContentRoot $ContentRoot)"
 
     $say = { param($Text, $Icon = 'Information') [Windows.MessageBox]::Show($win, $Text, 'Image versions', 'OK', $Icon) | Out-Null }
     $ask = { param($Text) [Windows.MessageBox]::Show($win, $Text, 'Image versions', 'YesNo', 'Question') -eq 'Yes' }
@@ -23,14 +23,14 @@ function Show-ImageVersionsDialog {
     $load = { $v.GridVersions.ItemsSource = @(Get-ImageVersionRows -ContentRoot $ContentRoot -ImageName $Image.Name) }
     $selected = { @($v.GridVersions.SelectedItems) }
     $run = {
-        param($Action, $Version, $Note)
+        param($Version)
         $args2 = Get-ImageVersionArguments -ScriptPath (Join-Path $SrcDir 'Invoke-ImageVersion.ps1') -ContentRoot $ContentRoot `
-            -ImageName $Image.Name -Action $Action -Version $Version -Note $Note
+            -ImageName $Image.Name -Version $Version
         # Hidden, with its steps as a card in the Progress window; the Images tab refreshes when it ends. This window
         # closes so the Progress window can be used (a dialog blocks the others while it is open).
         $job = Start-ConsoleJob -Name 'image-version' -ArgumentList $args2 -Hidden
         Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Noun 'copy' -Hidden `
-            -Title $(if ($Action -eq 'Keep') { "Keeping a copy of $($Image.Name)" } else { "Rolling $($Image.Name) back to $Version" }) `
+            -Title "Rolling $($Image.Name) back to $Version" `
             -OnFinished { try { Update-Images; Update-Answers } catch { } }
         $state.Changed = $true
         $win.Close()
@@ -41,12 +41,6 @@ function Show-ImageVersionsDialog {
         $v.TxtNote.Text = if ($rows.Count -eq 1) { $rows[0].Note } else { '' }
     })
 
-    $v.BtnKeep.Add_Click({ & $safely {
-        $note = $v.TxtNote.Text.Trim()
-        if (-not (& $ask "Copy $($Image.Name) ($($Image.SizeGB) GB) to Images\Previous as a new version?")) { return }
-        & $run 'Keep' $null $note
-    } })
-
     $v.BtnRollback.Add_Click({ & $safely {
         $rows = @(& $selected)
         if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version (not Current).' 'Warning'; return }
@@ -55,12 +49,12 @@ function Show-ImageVersionsDialog {
                 "Every answer file without a version deploys it from then on. PCs being deployed right now should finish first."
         if (-not (Test-ImageHardLinks -Path (Split-Path $imagePath -Parent))) { $text += "`n`nThis folder can't make hard links, so the rollback copies $($r.SizeGB) GB." }
         if (-not (& $ask $text)) { return }
-        & $run 'Rollback' $r.Version $null
+        & $run $r.Version
     } })
 
     $v.BtnNote.Add_Click({ & $safely {
         $rows = @(& $selected)
-        if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version to add a note to. A note for the current image goes in with Keep a copy.' 'Warning'; return }
+        if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version to add a note to.' 'Warning'; return }
         Set-ImageVersionNote -ImagePath $imagePath -Version $rows[0].Version -Note $v.TxtNote.Text.Trim()
         & $load
     } })
@@ -74,28 +68,22 @@ function Show-ImageVersionsDialog {
         & $load
     } })
 
-    $v.BtnPrune.Add_Click({ & $safely {
-        $keep = 0
-        if (-not [int]::TryParse($v.TxtKeep.Text, [ref]$keep) -or $keep -lt 0) { & $say 'Type how many of the newest versions to keep (0 or more).' 'Warning'; return }
-        $old = @(Get-ImageVersionsToDelete -ContentRoot $ContentRoot -ImageName $Image.Name -Keep $keep)
-        if (-not $old) { & $say "Nothing to delete: there are $keep or fewer versions, or answer files use the older ones."; return }
-        $gb = ($old | Measure-Object SizeGB -Sum).Sum
-        if (-not (& $ask ("Delete {0} older version(s) ({1}), freeing {2:N1} GB? Versions answer files use are kept." -f $old.Count, ($old.Version -join ', '), $gb))) { return }
-        Remove-ImageVersions -ContentRoot $ContentRoot -ImageName $Image.Name -Version @($old.Version)
-        $state.Changed = $true
-        & $load
-    } })
-
     $v.BtnLimitSave.Add_Click({ & $safely {
-        $text = $v.TxtLimit.Text.Trim()
-        $keep = $null
-        if ($text) {
-            $n = 0
-            if (-not [int]::TryParse($text, [ref]$n) -or $n -lt 0) { & $say 'Type how many of the newest versions to keep (0 or more), or leave it blank for the default.' 'Warning'; return }
-            $keep = $n
+        $keep = 0
+        if (-not [int]::TryParse($v.TxtLimit.Text.Trim(), [ref]$keep) -or $keep -lt 0) { & $say 'Type how many earlier versions to keep (0 keeps them all).' 'Warning'; return }
+        Set-VersionsToKeep -ContentRoot $ContentRoot -Keep $keep
+        # This image now; the others when a capture, update or rollback next replaces them.
+        $old = @(if ($keep -gt 0) { Get-ImageVersionsToDelete -ContentRoot $ContentRoot -ImageName $Image.Name -Keep $keep })
+        if ($old) {
+            $gb = ($old | Measure-Object SizeGB -Sum).Sum
+            if (& $ask ("Every image now keeps its newest {0} earlier versions. Delete the {1} older version(s) of {2} now ({3}), freeing {4:N1} GB? Versions answer files use are kept." -f $keep, $old.Count, $Image.Name, ($old.Version -join ', '), $gb)) {
+                Remove-ImageVersions -ContentRoot $ContentRoot -ImageName $Image.Name -Version @($old.Version)
+                $state.Changed = $true
+                & $load
+            }
+        } else {
+            & $say $(if ($keep -eq 0) { 'Every image now keeps all its earlier versions.' } else { "Every image now keeps its newest $keep earlier versions." })
         }
-        Set-ImageVersionLimit -ImagePath $imagePath -Keep $keep
-        & $say $(if ($null -eq $keep) { 'This image now uses the default from Deploy Settings.' } else { "This image now keeps its newest $keep versions after a copy, rollback or replacing capture." })
     } })
     $v.BtnRefresh.Add_Click({ & $safely { & $load } })
     $v.BtnClose.Add_Click({ $win.Close() })

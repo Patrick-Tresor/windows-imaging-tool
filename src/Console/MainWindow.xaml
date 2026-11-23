@@ -426,20 +426,8 @@
               </Grid>
             </StackPanel>
 
-            <!-- 3. Deployments -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Deployments"/>
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Label Content="Older image versions to keep"/>
-              <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <TextBox x:Name="TxtVersionsToKeep" Width="80"
-                         ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. Versions an answer file is pinned to are never deleted."/>
-                <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/>
-              </StackPanel>
-            </Grid>
-
-            <!-- 4. Checks -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
+            <!-- 3. Checks -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Checks after deploy"/>
             <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
                       Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
             <Grid>

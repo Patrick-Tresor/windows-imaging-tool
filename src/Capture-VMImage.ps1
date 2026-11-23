@@ -17,9 +17,9 @@
     deployed to then runs sysprep at its first start (src\SysprepAtDeploy.psm1). A VM that was hibernated by
     Fast Startup is refused, since its disk is not a clean copy.
 
-    The image goes to the Images folder of the content root (or -ImagesDir). With -NewVersion
-    an existing image of the same name is replaced only once the capture has succeeded, and the old one is kept
-    as a version in Images\Previous\ (see ImageVersions.psm1).
+    The image goes to the Images folder of the content root (or -ImagesDir). An existing image of the same name is
+    replaced only once the capture has succeeded, and the old one is kept as a version in Images\Previous\ (see
+    ImageVersions.psm1).
 .EXAMPLE
     .\src\Capture-VMImage.ps1 -DiskPath 'D:\VMware\Win11-Ref\Win11-Ref.vmdk' -Name Win11-24H2 -ContentRoot D:\DeployShare
 #>
@@ -30,7 +30,6 @@ param(
     [string]$ContentRoot,
     [string]$Description,
     [ValidateSet('max', 'recovery')][string]$Compression = 'max',   # recovery = Smallest: an .esd about a quarter smaller than max
-    [switch]$NewVersion,         # replace an existing image, keeping the old one as a version
     [switch]$NoPrompt,
     [switch]$CheckOnly,          # only read the disk and write what was found to -ResultPath
     [string]$ResultPath,
@@ -318,10 +317,8 @@ $captureSteps += , @('save', 'Saving to the Images folder')
 Start-BuildProgress -Path $ProgressFile -Title "Capturing $Name" -LogPath $logPath -Steps $captureSteps
 
 try {
+    # An image of the same name is kept as a version once the capture has succeeded (Publish-CapturedImage).
     $existing = @(Get-ExistingImageFiles -ImagesDir $imagesDir -Name $Name)
-    if ($existing -and -not $NewVersion) {
-        throw "An image named $Name already exists in $imagesDir. Pick another name, or capture it as a new version."
-    }
 
     if (-not (Test-Path -LiteralPath $DiskPath -PathType Leaf)) { throw "Disk file not found: $DiskPath" }
     $DiskPath = (Resolve-Path -LiteralPath $DiskPath).ProviderPath

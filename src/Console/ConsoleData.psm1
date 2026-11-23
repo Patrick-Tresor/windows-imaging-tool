@@ -623,22 +623,18 @@ function Get-ImageEditions {
 }
 
 function Get-ImageVersionArguments {
-    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console hidden, with a card in
+    # Command line for Invoke-ImageVersion.ps1 (roll back), run by the console hidden, with a card in
     # the Progress window (Start-ConsoleJob adds -ProgressFile and -LogPath), because copying an image takes minutes.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$ImageName,
-        [Parameter(Mandatory)][ValidateSet('Keep', 'Rollback')][string]$Action,
-        [string]$Version,
-        [string]$Note
+        [string]$Version
     )
-    if ($Action -eq 'Rollback' -and -not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
+    if (-not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
     $q = { param($v) '"' + ($v -replace '"', "'") + '"' }
     $cmd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
-        '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Action', $Action, '-NoPrompt')
-    if ($Version) { $cmd += @('-Version', $Version) }
-    if ($Note) { $cmd += @('-Note', (& $q $Note)) }
+        '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Version', $Version, '-NoPrompt')
     $cmd
 }
 
@@ -719,7 +715,6 @@ function Get-ImageUpdateArguments {
         [int[]]$Index,
         [switch]$Cleanup,
         [switch]$ResetBase,
-        [switch]$NoBackup,
         [string]$ProgressFile,
         [string]$LogPath
     )
@@ -730,7 +725,6 @@ function Get-ImageUpdateArguments {
     if ($Index) { $cmd += " -Index $($Index -join ',')" }
     if ($Cleanup) { $cmd += ' -Cleanup' }
     if ($ResetBase) { $cmd += ' -ResetBase' }
-    if ($NoBackup) { $cmd += ' -NoBackup' }
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
     if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
@@ -764,7 +758,6 @@ function Get-VMCaptureArguments {
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('max', 'recovery')][string]$Compression = 'max',
-        [switch]$NewVersion,
         [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,
         [string]$ProgressFile,
@@ -776,7 +769,6 @@ function Get-VMCaptureArguments {
     $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($ImagesDir) { $cmd += " -ImagesDir $(& $quote $ImagesDir)" }
-    if ($NewVersion) { $cmd += ' -NewVersion' }
     if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
     if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
@@ -926,7 +918,6 @@ function Get-DeploySettingsView {
         SharePath      = $path
         ShareUser      = & $get $share 'user'
         PasswordSaved  = [bool](Test-AnswerPasswordText (& $get $share 'encryptedPassword'))
-        VersionsToKeep = if ($s.PSObject.Properties['versionsToKeep']) { "$($s.versionsToKeep)" } else { '0' }
     }
 }
 
@@ -954,8 +945,7 @@ function Get-DeploySettingsProblems {
         [string]$SharePath,
         [string]$ShareUser,
         [bool]$PasswordSaved,
-        [string]$NewPassword,
-        [string]$VersionsToKeep = '0'
+        [string]$NewPassword
     )
     $out = @()
     $SharePath = "$SharePath".Trim(); $ShareUser = "$ShareUser".Trim()
@@ -969,15 +959,13 @@ function Get-DeploySettingsProblems {
             elseif (-not $PasswordSaved -and -not $NewPassword) { $out += "Type the password of $ShareUser." }
         }
     }
-    $keep = 0
-    if (-not [int]::TryParse("$VersionsToKeep".Trim(), [ref]$keep) -or $keep -lt 0) { $out += 'Older image versions to keep must be 0 or more (0 keeps every version).' }
     $out
 }
 
 function Save-DeploySettingsPage {
     <#
     .SYNOPSIS
-        Saves the share, account and versions parts of the Deploy Settings page. An empty share means USB only.
+        Saves the share and account parts of the Deploy Settings page. An empty share means USB only.
         Every deploy reports to <share>\Status, so an old setup's separate reporting.path is dropped. The share password is kept
         encrypted in deploy-settings.json (share.encryptedPassword, AES-256 with the answer file key, like the answer
         files' passwords): no password file. An older setup's passwordFile entry is dropped (its file is not read).
@@ -988,8 +976,7 @@ function Save-DeploySettingsPage {
         [Parameter(Mandatory)][string]$ContentRoot,
         [string]$SharePath,
         [string]$ShareUser,
-        [string]$NewPassword,
-        [int]$VersionsToKeep = 0
+        [string]$NewPassword
     )
     $s = Get-DeploySettings -ContentRoot $ContentRoot
     $before = ($s | ConvertTo-Json -Depth 5 -Compress)
@@ -1008,7 +995,6 @@ function Save-DeploySettingsPage {
     & $set $s.share 'user' $(if ($SharePath) { "$ShareUser".Trim() } else { '' })
     if ($s.share.PSObject.Properties['passwordFile']) { $s.share.PSObject.Properties.Remove('passwordFile') }
     if ($s.PSObject.Properties['reporting']) { $s.PSObject.Properties.Remove('reporting') }
-    & $set $s 'versionsToKeep' $VersionsToKeep
     $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$(if ($o.share.PSObject.Properties['encryptedPassword']) { $o.share.encryptedPassword })|$(if ($o.PSObject.Properties['reporting'] -and $o.reporting) { $o.reporting.path })" }
     $old = $before | ConvertFrom-Json
     $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
