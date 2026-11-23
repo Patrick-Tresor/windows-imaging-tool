@@ -258,15 +258,14 @@ under `config\secrets` is not read, so type it once in the editor. Use a join ac
 restrict who can read `config\secrets`.
 
 How far that protects them, honestly: the answer files on the stick, or a copy
-mailed or left on a share, give nothing away without the key. But without a
-WinPE password the key sits in `boot.wim` on the same stick, so someone who has
-the whole stick and knows where to look can decrypt them. This is still real
-encryption, not the base64 that unattend.xml calls `PlainText=false`, but it is
-only as safe as the stick. Set a **WinPE password** on the Media tab (8
-characters or more) to close that gap: the key then goes
+mailed or left on a share, give nothing away without the key. Every USB stick
+the console builds needs a **WinPE password** (Media tab, 8 characters or
+more, typed for each build): the key goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
-tries or **Shut down**.
+tries or **Shut down**. (The network boot image has no WinPE password, since
+nobody is at the PC to type it; its key sits in `Boot\boot.wim` on the share, so
+keep that folder readable only by the share account.)
 
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page

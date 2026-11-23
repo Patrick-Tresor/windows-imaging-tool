@@ -1172,6 +1172,11 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
     $disk = $ui.CmbUsb.SelectedItem
     if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
+    # A stick always has a WinPE password: the answer files' passwords and the key that decrypts them are on it.
+    $pePw = $ui.PwdWinPE.Password
+    if (-not $pePw) { Show-Error 'Type the WinPE password, twice. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
+    if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; [void]$ui.PwdWinPE2.Focus(); return }
+    if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; [void]$ui.PwdWinPE.Focus(); return }
     # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
     $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
     if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
@@ -1198,16 +1203,10 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
     # (a command line argument would show in the process list).
-    $pePw = $ui.PwdWinPE.Password
-    if ($pePw -or $ui.PwdWinPE2.Password) {
-        if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; return }
-        if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; return }
-        $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
-        [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
-        $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } else {
-        if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
-    }
+    # Required (checked before anything is asked, see the top of this handler).
+    $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    [IO.File]::WriteAllText($pwFile, $ui.PwdWinPE.Password, (New-Object Text.UTF8Encoding($false)))
+    $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.

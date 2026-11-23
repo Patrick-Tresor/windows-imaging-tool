@@ -245,7 +245,7 @@
                 <PasswordBox x:Name="PwdWinPE2" Width="200"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
-                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm."/>
+                         Text="Required, at least 8 characters. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. Not saved: type it for each build or update."/>
             </StackPanel>
           </Grid>
 
