@@ -12,6 +12,7 @@ function Get-WindowsReleaseName {
     param([Parameter(Mandatory)][string]$Build)
     $n = if ($Build -match '^\d+\.\d+\.(\d+)') { [int]$Matches[1] } elseif ($Build -match '^(\d+)$') { [int]$Matches[1] } else { 0 }
     switch ($n) {
+        26300 { 'Windows 11 Version 26H2' }
         26200 { 'Windows 11 Version 25H2' }
         26100 { 'Windows 11 Version 24H2' }
         22631 { 'Windows 11 Version 23H2' }
@@ -20,6 +21,16 @@ function Get-WindowsReleaseName {
         19044 { 'Windows 10 Version 21H2' }
         17763 { 'Windows 10 Version 1809' }
         default { $null }
+    }
+}
+
+function Get-CatalogReleaseNames {
+    # The release names to search the catalog for, best first. 24H2, 25H2 and 26H2 share one cumulative update (same KB,
+    # same .msu): when the catalog has no row titled for the newer release yet, the older release's row is that update.
+    param([Parameter(Mandatory)][string]$Release)
+    switch ($Release) {
+        'Windows 11 Version 26H2' { @($Release, 'Windows 11 Version 25H2') }
+        default { @($Release) }
     }
 }
 
@@ -101,11 +112,15 @@ function Find-LatestCumulativeUpdate {
         [scriptblock]$Request = { param($Url, $Body) if ($null -ne $Body) { Invoke-CatalogRequest -Url $Url -Body $Body } else { Invoke-CatalogRequest -Url $Url } }
     )
     $release = Get-WindowsReleaseName -Build $Build
-    if (-not $release) { throw "Windows build $Build is not one the tool can find updates for. Download the update by hand." }
-    $query = [Uri]::EscapeDataString("Cumulative Update for $release for x64-based Systems")
-    try { $html = & $Request "$script:CatalogUrl/Search.aspx?q=$query" $null }
-    catch { throw "Could not reach the Microsoft Update Catalog: $($_.Exception.Message)" }
-    $best = Select-LatestCumulativeUpdate -Rows @(ConvertFrom-CatalogSearch -Html "$html") -Release $release
+    if (-not $release) { throw "Windows build $Build is not one the tool knows." }
+    $best = $null
+    foreach ($name in @(Get-CatalogReleaseNames -Release $release)) {
+        $query = [Uri]::EscapeDataString("Cumulative Update for $name for x64-based Systems")
+        try { $html = & $Request "$script:CatalogUrl/Search.aspx?q=$query" $null }
+        catch { throw "Could not reach the Microsoft Update Catalog: $($_.Exception.Message)" }
+        $best = Select-LatestCumulativeUpdate -Rows @(ConvertFrom-CatalogSearch -Html "$html") -Release $name
+        if ($best) { break }
+    }
     if (-not $best) { throw "No cumulative update for $release found in the Microsoft Update Catalog." }
 
     $ids = '[{"size":0,"languages":"","uidInfo":"' + $best.Id + '","updateID":"' + $best.Id + '"}]'

@@ -8,6 +8,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/UpdateCatalog.psm1') -Force
 
 Assert-Equal (Get-WindowsReleaseName -Build '10.0.26100.4349') 'Windows 11 Version 24H2' 'build 26100 is 24H2'
+Assert-Equal (Get-WindowsReleaseName -Build '10.0.26300.10075') 'Windows 11 Version 26H2' 'build 26300 is 26H2'
 Assert-Equal (Get-WindowsReleaseName -Build '19045') 'Windows 10 Version 22H2' 'build 19045 is Windows 10 22H2'
 Assert-Equal (Get-WindowsReleaseName -Build '10.0.99999.1') $null 'an unknown build has no name'
 
@@ -54,7 +55,13 @@ $fake = { param($Url, $Body) $requests.Add("$Url|$Body"); if ($Url -like '*Searc
 $found = Find-LatestCumulativeUpdate -Build '10.0.26100.1' -Request $fake
 Assert-Equal "$($found.Kb)|$($found.Urls.Count)" 'KB5066835|2' 'finds the update and its files'
 Assert-Equal ($requests[1] -like "*DownloadDialog.aspx|updateIDs=*$($ids[1])*") $true 'asks the download dialog for that update'
-Assert-Throws { Find-LatestCumulativeUpdate -Build '10.0.99999.1' -Request $fake } '*not one the tool can find updates for*' 'unknown build: short message'
+# 26H2 (26300) shares 25H2's update: when no row says 26H2, the 25H2 row is used.
+$html25 = $html -replace 'Version 24H2', 'Version 25H2' -replace 'version 24H2', 'version 25H2'
+$searches = [Collections.Generic.List[string]]::new()
+$fake26 = { param($Url, $Body) if ($Url -like '*Search.aspx*') { $searches.Add($Url); if ($Url -like '*26H2*') { $html } else { $html25 } } else { $dialog } }.GetNewClosure()
+$found26 = Find-LatestCumulativeUpdate -Build '10.0.26300.10075' -Request $fake26
+Assert-Equal "$($found26.Kb)|$($searches.Count)|$($found26.Title -like '*25H2*')" 'KB5066835|2|True' '26H2 falls back to the 25H2 update'
+Assert-Throws { Find-LatestCumulativeUpdate -Build '10.0.99999.1' -Request $fake } '*not one the tool knows*' 'unknown build: short message'
 Assert-Throws { Find-LatestCumulativeUpdate -Build '10.0.26100.1' -Request { throw 'offline' } } '*Could not reach the Microsoft Update Catalog*' 'catalog unreachable: short message'
 Assert-Throws { Find-LatestCumulativeUpdate -Build '10.0.26100.1' -Request { param($Url, $Body) if ($Url -like '*Search*') { $html } else { 'nothing' } }.GetNewClosure() } '*no download link*' 'no link: short message'
 
