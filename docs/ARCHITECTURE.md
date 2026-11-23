@@ -246,7 +246,7 @@ configuration (Display None, AcceptEULA, CDN fallback, an unreachable SourcePath
 `app.json`, validation, installer inspection (MSI properties through the Windows
 Installer COM object, MSIX manifests, framework markers in .exe files), silent
 switch suggestions, templates (`config\app-templates.json`), downloads at first boot
-(`Get-AppDownload`: SHA256 check, or a file signed by the pack's publisher), maker and
+(`Get-AppDownload`: SHA256 check, or a file signed by the pack's publisher; `Get-AppExpectedSigners` adds the signer names of well-known publishers by name or download site), maker and
 model requirements, and detection rules (all must match). The console's builder is
 `src/Console/AppPackEditor.ps1` + `.xaml`.
 

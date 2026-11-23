@@ -231,6 +231,10 @@ Installers:
     Assert-Equal "$($added.name)|$($saved.publisher)|$($saved.version)|$($saved.downloadUrl)|$($saved.downloadSha256)" 'VideoLAN-VLC|VideoLAN|3.0.21|https://download.videolan.org/videolan/vlc/3.0.21/win64/vlc-3.0.21-win64.exe|9742689A50E96DDC04D80CEFF046B28DA2BEEFD617BE18166F8C5E715EC60C59' 'winget app: saved pack downloads from the publisher with its SHA256'
     Assert-Equal (Test-Path (Join-Path $wRoot 'VideoLAN-VLC/vlc-3.0.21-win64.exe')) $false 'winget app: nothing big is downloaded when it is added'
     Assert-Throws { New-AppFromWinget -AppRoot $wRoot -Id 'VideoLAN.VLC' -Version '3.0.21' -Fetch $fetch } '*already exists*' 'winget app: adding it twice is refused'
+    $chromeYaml = "PackageIdentifier: Google.Chrome`nInstallers:`n- Architecture: x64`n  InstallerType: wix`n  Scope: machine`n  InstallerUrl: https://dl.google.com/edgedl/chrome/install/GoogleChromeStandaloneEnterprise64.msi`n  InstallerSha256: 3A6E02F372F35DD9F97B4109440C5622E02DB4C42406A7FD99D08145A5276BA0`n"
+    $fetchChrome = { param($Url) if ($Url -like '*.locale.en-US.yaml') { "PackageIdentifier: Google.Chrome`nPublisher: Google LLC`n" } elseif ($Url -like '*.installer.yaml') { $chromeYaml } else { throw '404' } }
+    New-AppFromWinget -AppRoot $wRoot -Id 'Google.Chrome' -Version '131.0' -Fetch $fetchChrome | Out-Null
+    Assert-Equal (Read-AppPack -AppRoot $wRoot -Name 'Google-Chrome').publisher 'Google LLC' 'winget app: the publisher is read from the locale manifest'
     Assert-Throws { New-AppFromWinget -AppRoot $wRoot -Id 'No.Such' -Version '1' -Fetch { param($Url) throw '404' } } '*Could not read the winget manifest*' 'winget app: no manifest gives a short error'
 
     # The download is checked against the catalog's SHA256 (SHA256 of "abc").
@@ -244,7 +248,7 @@ Installers:
     $script:abcCalls = 0
     $abcCount = { param($Url, $Path) $script:abcCalls++; [IO.File]::WriteAllText($Path, 'abc') }
     $unsigned = { param($Path) [pscustomobject]@{ Status = 'NotSigned'; Subject = '' } }
-    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 3 -WaitSeconds 0 -Downloader $abcCount -Signature $unsigned } '*SHA256*not signed by the publisher*' 'a download with another SHA256 and no signature fails'
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 3 -WaitSeconds 0 -Downloader $abcCount -Signature $unsigned } 'download refused: the file changed and its signature is NotSigned' 'a download with another SHA256 and no signature fails'
     Assert-Equal $script:abcCalls 1 'a download with another SHA256 is not downloaded again (same file every time)'
     Assert-Equal (Test-Path (Join-Path $hf 'h.exe')) $false 'a download with another SHA256 is deleted'
     # Office's setup.exe behind a "latest" link changes: a valid signature from the pack's publisher is enough.
@@ -252,17 +256,41 @@ Installers:
     $msSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } }
     $script:dlLog = @()
     Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) $script:dlLog += $m } -Downloader $abc -Signature $msSigned
-    Assert-Equal "$(Test-Path (Join-Path $hf 'h.exe'))|$(@($script:dlLog -like '*publisher updated the file*').Count)" 'True|1' 'another SHA256 signed by the publisher is kept and logged'
+    Assert-Equal "$(Test-Path (Join-Path $hf 'h.exe'))|$(@($script:dlLog -like '*New version from the publisher*kept: signed by Microsoft Corporation').Count)" 'True|1' 'another SHA256 signed by the publisher is kept and logged'
     Remove-Item (Join-Path $hf 'h.exe')
     $otherSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=Contoso Ltd, O=Contoso Ltd, C=US' } }
-    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $otherSigned } '*signed by CN=Contoso Ltd*not by Microsoft Corporation*' 'another SHA256 signed by someone else fails'
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $otherSigned } 'download refused: the file changed and is signed by Contoso Ltd, not Microsoft Corporation' 'another SHA256 signed by someone else fails'
     $badSig = { param($Path) [pscustomobject]@{ Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation' } }
     Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $badSig } '*signature HashMismatch*' 'another SHA256 with a broken signature fails'
     $hd.publisher = ''
-    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $msSigned } '*not signed by the publisher*' 'with no publisher in the pack, a signature alone is not enough'
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $msSigned } '*signed by Microsoft Corporation, not a known publisher' 'with no publisher in the pack and an unknown site, a signature alone is not enough'
     Assert-Equal (Test-AppSignerMatch -Subject 'CN="Google LLC", O="Google LLC", L=Mountain View' -Publisher 'Google LLC') $true 'signer match: quoted names'
     Assert-Equal (Test-AppSignerMatch -Subject 'CN=VideoLAN, O=VideoLAN, L=Paris' -Publisher 'videolan.') $true 'signer match: case and trailing dot ignored'
     Assert-Equal (Test-AppSignerMatch -Subject 'CN=Not Microsoft Corporation, O=Evil' -Publisher 'Microsoft Corporation') $false 'signer match: the whole name must match'
+    # Chrome on the 5521 (v1.11): winget pack with no publisher saved, "latest" MSI from dl.google.com, new SHA256.
+    $googleSubject = 'CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US'
+    $googleSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = $googleSubject } }
+    $cd = ConvertTo-AppDefinition -Name 'Google-Chrome' -Json @{ installer = 'c.msi'; command = 'msiexec /i c.msi /qn'; downloadUrl = 'https://dl.google.com/edgedl/chrome/install/GoogleChromeStandaloneEnterprise64.msi'; downloadSha256 = '3A6E02F372F35DD9F97B4109440C5622E02DB4C42406A7FD99D08145A5276BA0' }
+    $cf = Join-Path $tmp 'chrome'; New-Item -ItemType Directory -Path $cf -Force | Out-Null
+    Get-AppDownload -Definition $cd -AppFolder $cf -Log { param($m) } -Downloader $abc -Signature $googleSigned
+    Assert-Equal (Test-Path (Join-Path $cf 'c.msi')) $true 'Chrome with no publisher saved: signed by Google LLC and from dl.google.com is kept'
+    Remove-Item (Join-Path $cf 'c.msi')
+    $cd.publisher = 'Google'
+    $cd.downloadUrl = 'https://mirror.example/chrome.msi'
+    Get-AppDownload -Definition $cd -AppFolder $cf -Log { param($m) } -Downloader $abc -Signature $googleSigned
+    Assert-Equal (Test-Path (Join-Path $cf 'c.msi')) $true 'publisher Google accepts a file signed by Google LLC'
+    Remove-Item (Join-Path $cf 'c.msi')
+    $cd.publisher = ''
+    $script:cLog = @()
+    $err = try { Get-AppDownload -Definition $cd -AppFolder $cf -Log { param($m) $script:cLog += $m } -Downloader $abc -Signature $googleSigned; '' } catch { $_.Exception.Message }
+    Assert-Equal $err 'download refused: the file changed and is signed by Google LLC, not a known publisher' 'refusal is one short line'
+    Assert-Equal @($script:cLog -like '*Download refused: SHA256*expected signer: none known').Count 1 'the details go to the log'
+    Assert-Equal (Test-AppSignerMatch -Subject $googleSubject -Publisher 'Google') $true 'signer match: Google = Google LLC'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN="Zoom Video Communications, Inc.", O="Zoom Video Communications, Inc.", C=US' -Publisher @(Get-AppExpectedSigners -Definition @{ publisher = 'Zoom' })) $true 'signer match: Zoom = Zoom Video Communications, Inc.'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN=Mozilla Corporation, O=Mozilla Corporation' -Publisher @(Get-AppExpectedSigners -Definition @{ downloadUrl = 'https://download.mozilla.org/?product=firefox' })) $true 'signer match: Mozilla from the download site'
+    Assert-Equal (Test-AppSignerMatch -Subject 'CN=Google Tools Inc, O=Google Tools Inc' -Publisher @(Get-AppExpectedSigners -Definition @{ publisher = 'Google' })) $false 'signer match: a lookalike company is not the publisher'
+    Assert-Equal (@(Get-AppExpectedSigners -Definition @{ downloadUrl = 'https://evilgoogle.com/x.msi' }).Count) 0 'expected signers: a lookalike domain is not Google'
+    Assert-Equal (Get-WingetManifestUrl -Id 'Google.Chrome' -Version '1' -Locale 'en-US') 'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/g/Google/Chrome/1/Google.Chrome.locale.en-US.yaml' 'winget locale manifest address'
     Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $broken } '*after 2 tries*Last error: The remote name could not be resolved*' 'no internet: the message gives the last error'
     $hd.downloadSha256 = 'xyz'
     Assert-Equal @(@(Test-AppPack -Definition $hd) -like '*64 hexadecimal*').Count 1 'a SHA256 must be 64 hexadecimal characters'

@@ -456,9 +456,10 @@ function Find-WingetPackage {
 
 function Get-WingetManifestUrl {
     # Where the winget catalog keeps a package's installer manifest (github.com/microsoft/winget-pkgs).
-    param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][string]$Version, [switch]$Singleton)
+    # -Locale gives the locale manifest instead (Publisher, PackageName); en-US is the catalog's usual default.
+    param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][string]$Version, [switch]$Singleton, [string]$Locale)
     $path = "$($Id.Substring(0, 1).ToLowerInvariant())/$($Id.Replace('.', '/'))/$Version"
-    $file = if ($Singleton) { "$Id.yaml" } else { "$Id.installer.yaml" }
+    $file = if ($Locale) { "$Id.locale.$Locale.yaml" } elseif ($Singleton) { "$Id.yaml" } else { "$Id.installer.yaml" }
     "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$path/$file"
 }
 
@@ -557,6 +558,12 @@ function New-AppFromWinget {
     if (-not $yaml) { throw "Could not read the winget manifest of $Id $Version. Check the internet connection, or search again." }
     if ($yaml -is [byte[]]) { $yaml = [Text.Encoding]::UTF8.GetString($yaml) }
     $publisher = if ("$yaml" -match '(?m)^Publisher:\s*(.+?)\s*$') { $Matches[1] } else { '' }
+    if (-not $publisher) {
+        # A multi-file manifest keeps Publisher in the locale manifest. The download check needs it (Test-AppDownloadFile).
+        $loc = try { & $Fetch (Get-WingetManifestUrl -Id $Id -Version $Version -Locale 'en-US') } catch { $null }
+        if ($loc -is [byte[]]) { $loc = [Text.Encoding]::UTF8.GetString($loc) }
+        if ("$loc" -match '(?m)^Publisher:\s*(.+?)\s*$') { $publisher = $Matches[1].Trim().Trim('"', "'") }
+    }
     $inst = Select-WingetInstaller -Installers @(ConvertFrom-WingetInstallerYaml -Text "$yaml")
     if (-not $inst) { throw "$Id $Version has no installer this tool can run (only zip or portable files)." }
     $d = New-AppDefinitionFromWinget -Installer $inst -Id $Id -Name $Name -DisplayName $DisplayName -Version $Version -Publisher $publisher
@@ -739,15 +746,67 @@ function Get-AppDownload {
     throw "could not download $($d.downloadUrl) after $Attempts tries (no internet?). Last error: $last"
 }
 
+# Signer names of well-known publishers. A pack matches an entry when its publisher is one of the entry's names
+# (ignoring Inc/LLC/Corporation...) or its download address is on one of the entry's domains; then a file signed
+# by any of the entry's names is the publisher's. Packs added before the publisher was saved still work this way.
+$script:KnownPublishers = @(
+    @{ Names = 'Google LLC', 'Google';                                   Domains = 'google.com', 'googleapis.com', 'gstatic.com' }
+    @{ Names = 'Mozilla Corporation', 'Mozilla';                         Domains = 'mozilla.org', 'mozilla.net' }
+    @{ Names = 'Microsoft Corporation', 'Microsoft';                     Domains = 'microsoft.com', 'office.com', 'office.net', 'aka.ms', 'dot.net', 'live.com', 'skype.com' }
+    @{ Names = 'Zoom Video Communications, Inc.', 'Zoom Communications, Inc.', 'Zoom'; Domains = 'zoom.us', 'zoom.com' }
+    @{ Names = 'Adobe Inc.', 'Adobe Systems Incorporated', 'Adobe';      Domains = 'adobe.com' }
+    @{ Names = 'VideoLAN';                                               Domains = 'videolan.org' }
+    @{ Names = 'Dell Inc', 'Dell Technologies Inc.', 'Dell';             Domains = 'dell.com' }
+    @{ Names = 'HP Inc.', 'Hewlett-Packard Company', 'HP';               Domains = 'hp.com' }
+    @{ Names = 'Lenovo';                                                 Domains = 'lenovo.com' }
+    @{ Names = 'Cisco Systems, Inc.', 'Cisco WebEx LLC', 'Cisco';        Domains = 'cisco.com', 'webex.com' }
+    @{ Names = 'Notepad++';                                              Domains = 'notepad-plus-plus.org' }
+    @{ Names = 'Oracle America, Inc.', 'Oracle';                         Domains = 'oracle.com', 'java.com' }
+)
+
+function ConvertTo-PublisherKey {
+    # A company name without case, quotes, trailing dots and legal endings: 'Google LLC' and 'Google' give 'google'.
+    param([string]$Name)
+    $n = "$Name".ToLowerInvariant() -replace '["]', '' -replace '\s+', ' '
+    do { $old = $n; $n = ($n.Trim().TrimEnd('.', ',').Trim() -replace '[ ,]+(llc|l\.l\.c|inc|incorporated|corp|corporation|ltd|limited|gmbh|ag|s\.?a|co|company)$', '') } while ($n -ne $old)
+    $n
+}
+
+function Get-AppExpectedSigners {
+    # Names a download of this pack may be signed by: the pack's publisher, plus the known publisher it or its
+    # download address belongs to.
+    param([Parameter(Mandatory)]$Definition)
+    $names = [Collections.Generic.List[string]]::new()
+    if ("$($Definition.publisher)".Trim()) { $names.Add("$($Definition.publisher)".Trim()) }
+    $pubKey = ConvertTo-PublisherKey $Definition.publisher
+    $urlHost = try { ([Uri]"$($Definition.downloadUrl)").Host.ToLowerInvariant() } catch { '' }
+    foreach ($k in $script:KnownPublishers) {
+        $byName = $pubKey -and @($k.Names | Where-Object { (ConvertTo-PublisherKey $_) -eq $pubKey }).Count
+        $byHost = $urlHost -and @($k.Domains | Where-Object { $urlHost -eq $_ -or $urlHost.EndsWith(".$_") }).Count
+        if ($byName -or $byHost) { foreach ($n in $k.Names) { if (-not $names.Contains($n)) { $names.Add($n) } } }
+    }
+    $names.ToArray()
+}
+
+function Get-SignerName {
+    # The O= (else CN=) name of an Authenticode signer subject, for short messages.
+    param([string]$Subject)
+    foreach ($f in 'O', 'CN') {
+        $m = [regex]::Match("$Subject", "(?:^|,)\s*$f=(`"([^`"]*)`"|[^,]*)")
+        if ($m.Success) { return $(if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[1].Value }).Trim() }
+    }
+    "$Subject"
+}
+
 function Test-AppSignerMatch {
-    # Whether an Authenticode signer subject ('CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, ...') is
-    # the application's publisher (from the winget catalog): its CN or O is that name, ignoring case and a trailing dot.
-    param([string]$Subject, [string]$Publisher)
-    $want = "$Publisher".Trim().TrimEnd('.')
-    if (-not $want -or -not $Subject) { return $false }
+    # Whether an Authenticode signer subject ('CN=Google LLC, O=Google LLC, L=Mountain View, ...') is one of the
+    # -Publisher names: its CN or O is that name, ignoring case, quotes, a trailing dot and legal endings (Inc, LLC...).
+    param([string]$Subject, [string[]]$Publisher)
+    $want = @($Publisher | ForEach-Object { ConvertTo-PublisherKey $_ } | Where-Object { $_ })
+    if (-not $want.Count -or -not $Subject) { return $false }
     foreach ($m in [regex]::Matches($Subject, '(?:^|,)\s*(?:CN|O)=("([^"]*)"|[^,]*)')) {
         $v = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { $m.Groups[1].Value }
-        if ($v.Trim().TrimEnd('.') -ieq $want) { return $true }
+        if ((ConvertTo-PublisherKey $v) -in $want) { return $true }
     }
     $false
 }
@@ -756,9 +815,9 @@ function Test-AppDownloadFile {
     <#
     .SYNOPSIS
         Checks a downloaded installer against the pack's downloadSha256. Returns '' when it is fine, else why not.
-        Publishers update the file behind a "latest" link (Microsoft's Office setup.exe at officecdn.microsoft.com does,
-        so the SHA256 saved from the winget catalog goes stale): a file with another SHA256 is still taken when it has
-        a valid Authenticode signature from the pack's publisher, and the log says so.
+        Publishers update the file behind a "latest" link (Chrome, Office's setup.exe), so the SHA256 saved from the
+        winget catalog goes stale: a file with another SHA256 is still taken when it has a valid Authenticode
+        signature from the pack's publisher (Get-AppExpectedSigners), and the log says so.
     #>
     param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][scriptblock]$Signature, [scriptblock]$Log = { param($m) })
     $d = $Definition
@@ -766,12 +825,14 @@ function Test-AppDownloadFile {
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
     if ($hash -eq $d.downloadSha256.ToUpperInvariant()) { return '' }
     $sig = try { & $Signature $Path } catch { [pscustomobject]@{ Status = "unreadable ($($_.Exception.Message))"; Subject = '' } }
-    if ($sig.Status -eq 'Valid' -and (Test-AppSignerMatch -Subject $sig.Subject -Publisher $d.publisher)) {
-        & $Log "  The publisher updated the file (SHA256 $hash, not the saved $($d.downloadSha256)); kept because it is signed by $($d.publisher)"
+    $expected = @(Get-AppExpectedSigners -Definition $d)
+    if ($sig.Status -eq 'Valid' -and (Test-AppSignerMatch -Subject $sig.Subject -Publisher $expected)) {
+        & $Log "  New version from the publisher (SHA256 $hash, saved $($d.downloadSha256)); kept: signed by $(Get-SignerName $sig.Subject)"
         return ''
     }
-    $signer = if ($sig.Status -eq 'Valid') { "signed by $($sig.Subject), not by $(if ($d.publisher) { $d.publisher } else { 'a known publisher' })" } else { "signature $($sig.Status)" }
-    "the download's SHA256 $hash is not the expected $($d.downloadSha256) and the file is not signed by the publisher ($signer); add the application again"
+    & $Log "  Download refused: SHA256 $hash, expected $($d.downloadSha256); signature $($sig.Status) $($sig.Subject); expected signer: $(if ($expected.Count) { $expected -join ' / ' } else { 'none known' })"
+    if ($sig.Status -ne 'Valid') { return "download refused: the file changed and its signature is $($sig.Status)" }
+    "download refused: the file changed and is signed by $(Get-SignerName $sig.Subject), not $(if ($expected.Count) { $expected[0] } else { 'a known publisher' })"
 }
 
 function Get-MediaAppDownloads {
@@ -1121,7 +1182,7 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, Copy-AppTemplateFiles,
     ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
-    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch,
+    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
     Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
     Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
