@@ -189,7 +189,7 @@ no longer create `fwfiles`).
 
 1. Detect hardware and content root; take a reimage job for this PC's serial if
    the console left one (its answer file, name and OU win); else choose the
-   answer file (the default, or a menu in interactive mode); map its extra shares.
+   answer file (the default, or a menu in interactive mode).
    The PC is named by the answer file's naming. A `-ComputerName` or
    `-AnswerFile` parameter wins over it.
 2. Check everything before touching the disk: image, driver pack, applications,

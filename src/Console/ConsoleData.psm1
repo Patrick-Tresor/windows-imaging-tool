@@ -296,7 +296,7 @@ function Get-AnswerFilePath {
 
 function Get-AnswerFileIssues {
     # Validation plus what Deploy-Image.ps1 would trip over on this content root: missing image,
-    # applications or password files. Paths outside the content root (extra shares) are not checked.
+    # applications or password files. Paths outside the content root are not checked.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Answer)
     $a = $Answer
     @(Test-AnswerFile $a)
@@ -434,7 +434,6 @@ function Save-AnswerFromEditor {
         [Parameter(Mandatory)]$Answer,
         [string]$JoinPassword,
         [string]$AdminPassword,
-        [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
         [switch]$IsNew
     )
     $a = $Answer
@@ -444,14 +443,11 @@ function Save-AnswerFromEditor {
 
     if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
-    foreach ($sh in $a.Shares) {
-        if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
-    }
 
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Can't save yet:`n - " + ($problems -join "`n - ") }
 
-    $typed = @($JoinPassword, $AdminPassword) + @($SharePasswords.Values) | Where-Object { $_ }
+    $typed = @($JoinPassword, $AdminPassword) | Where-Object { $_ }
     $key = if ($typed) { Get-AnswerKey -ContentRoot $ContentRoot -Create } else { $null }
     $protect = {
         param($Object, [string]$Property, [string]$Password)
@@ -460,7 +456,6 @@ function Save-AnswerFromEditor {
     }
     & $protect $a 'JoinPasswordEncrypted' $JoinPassword
     & $protect $a 'AdminPasswordEncrypted' $AdminPassword
-    foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] }
     Export-AnswerFile -Answer $a -Path $dest
     $dest
 }

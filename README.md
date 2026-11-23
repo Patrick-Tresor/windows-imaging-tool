@@ -80,7 +80,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
+  Domain or workgroup, Tasks and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
 - **Apps and Tasks**: one list of application packs and task scripts, with
   when each runs. **New application...** opens the pack builder, **New task...**

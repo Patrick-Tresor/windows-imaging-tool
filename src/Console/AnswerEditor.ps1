@@ -9,15 +9,6 @@ class TaskRow {
     [string]$Task      # what the Task column shows: the library task, or Command for an older answer file's plain command
 }
 
-class ShareRow {
-    [string]$LocalName
-    [string]$RemoteName
-    [string]$Username
-    [string]$Domain
-    [string]$PasswordFile
-    [string]$PasswordEncrypted
-}
-
 function Show-AnswerEditor {
     <#
     .SYNOPSIS
@@ -36,7 +27,7 @@ function Show-AnswerEditor {
     $win = $form.Window
     $e = $form.Controls
     $win.Title = if ($isNew) { 'New answer file' } else { "Answer file: $($a.Name)" }
-    $state = @{ Saved = $false; SharePasswords = @{} }
+    $state = @{ Saved = $false }
 
     # --- Choices -------------------------------------------------------------------------------------------
     $images = @(Get-ImageList -ContentRoot $ContentRoot)
@@ -144,13 +135,6 @@ function Show-AnswerEditor {
     $e.GridTasks.ItemsSource = $tasks
     & $refreshTaskLibrary
 
-    $shares = [Collections.ObjectModel.ObservableCollection[ShareRow]]::new()
-    foreach ($s in $a.Shares) {
-        $r = [ShareRow]::new()
-        foreach ($p in 'LocalName', 'RemoteName', 'Username', 'Domain', 'PasswordFile', 'PasswordEncrypted') { $r.$p = $s.$p }
-        $shares.Add($r)
-    }
-    $e.GridShares.ItemsSource = $shares
 
 
     $bl = $a.BitLocker
@@ -218,28 +202,9 @@ function Show-AnswerEditor {
     $e.BtnTaskDown.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -ge 0 -and $i -lt $tasks.Count - 1) { $tasks.Move($i, $i + 1); $e.GridTasks.SelectedIndex = $i + 1 } })
 
 
-    # Shares: the password box applies to the selected row and is kept until Save.
-    $e.BtnShareAdd.Add_Click({
-        $used = @($shares | ForEach-Object LocalName)
-        $r = [ShareRow]::new()
-        $r.LocalName = [char[]](89..68) | ForEach-Object { "$($_):" } | Where-Object { $_ -notin $used -and $_ -notin 'R:', 'S:', 'W:', 'X:' } | Select-Object -First 1
-        $shares.Add($r); $e.GridShares.SelectedItem = $r
-    })
-    $e.BtnShareRemove.Add_Click({ $r = $e.GridShares.SelectedItem; if ($r -is [ShareRow]) { [void]$shares.Remove($r) } })
-    $e.GridShares.Add_SelectionChanged({
-        $r = $e.GridShares.SelectedItem
-        $e.PwdShare.Password = ''
-        $e.TxtSharePwState.Text = if ($r -is [ShareRow]) { if ($state.SharePasswords[$r.LocalName]) { 'New password set.' } else { & $pwState $r.PasswordFile $r.PasswordEncrypted } } else { '' }
-    })
-    $e.PwdShare.Add_PasswordChanged({
-        $r = $e.GridShares.SelectedItem
-        if ($r -is [ShareRow] -and $e.PwdShare.Password) { $state.SharePasswords[$r.LocalName] = $e.PwdShare.Password }
-    })
-
     # --- Collect and save ------------------------------------------------------------------------------------
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
-        $e.GridShares.CommitEdit('Row', $true) | Out-Null
         $n = 0
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
@@ -273,10 +238,6 @@ function Show-AnswerEditor {
         $a.Workgroup     = $e.TxtWorkgroup.Text.Trim()
         $a.Tasks         = @($tasks | Where-Object { $_.Command -or $_.Script } | ForEach-Object {
             [pscustomobject]@{ Phase = $_.Phase; Script = "$($_.Script)".Trim(); Command = "$($_.Command)".Trim() }
-        })
-        $a.Shares        = @($shares | Where-Object { $_.RemoteName } | ForEach-Object {
-            [pscustomobject]@{ LocalName = "$($_.LocalName)".Trim().ToUpperInvariant(); RemoteName = $_.RemoteName.Trim()
-                               Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile; PasswordEncrypted = $_.PasswordEncrypted }
         })
         $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
         $a.BitLocker.UsedSpaceOnly     = $true
@@ -321,7 +282,7 @@ function Show-AnswerEditor {
                 throw 'Enter the Administrator password (Windows settings).'
             }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `
-                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords -IsNew:$isNew | Out-Null
+                -AdminPassword $e.PwdAdmin.Password -IsNew:$isNew | Out-Null
             $state.Saved = $true
             $win.Close()
         } catch {

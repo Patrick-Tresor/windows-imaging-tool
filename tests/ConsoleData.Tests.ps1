@@ -110,14 +110,13 @@ try {
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'
     $ed.Applications = @('Zoom')
-    $ed.Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\apps'; Username = 'svc'; Domain = 'CORP'; PasswordFile = $null })
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -SharePasswords @{ 'Y:' = 'Sh4re' } -IsNew
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -IsNew
     $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.Membership)|$($back.JoinPasswordFile)|$($back.Shares[0].PasswordFile)|$($back.Applications)" 'Domain|config\secrets\Office-join.txt|config\secrets\Office-share-y.txt|Zoom' 'editor save writes the answer file with password file paths'
+    Assert-Equal "$($back.Membership)|$($back.JoinPasswordFile)|$($back.Applications)" 'Domain|config\secrets\Office-join.txt|Zoom' 'editor save writes the answer file with password file paths'
     $key = Get-AnswerKey -ContentRoot $root
-    Assert-Equal "$(Unprotect-AnswerPassword -Value $back.JoinPasswordEncrypted -Key $key)|$(Unprotect-AnswerPassword -Value $back.Shares[0].PasswordEncrypted -Key $key)" 'J0in!|Sh4re' 'typed passwords are saved encrypted in the answer file'
-    Assert-Equal "$(Test-Path (Join-Path $root 'config/secrets/Office-join.txt'))|$(Test-Path (Join-Path $root 'config/secrets/Office-share-y.txt'))" 'False|False' 'and not in password files'
-    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!|Sh4re') $false 'the answer file holds no password in plain text'
+    Assert-Equal "$(Unprotect-AnswerPassword -Value $back.JoinPasswordEncrypted -Key $key)" 'J0in!' 'typed passwords are saved encrypted in the answer file'
+    Assert-Equal "$(Test-Path (Join-Path $root 'config/secrets/Office-join.txt'))" 'False' 'and not in password files'
+    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!') $false 'the answer file holds no password in plain text'
     Assert-Equal (@(Get-AnswerFileIssues -ContentRoot $root -Answer $back | Where-Object { $_ -like '*password*' }).Count) 0 'encrypted passwords count as saved'
     $kept = Save-AnswerFromEditor -ContentRoot $root -Answer $back
     Assert-Equal "$((Read-AnswerFile -Path $kept).JoinPasswordEncrypted)" "$($back.JoinPasswordEncrypted)" 'saving again without typing keeps the encrypted password'

@@ -102,17 +102,6 @@
     <!-- <task phase="FIRSTBOOT" script="Set-Wallpaper">-Path C:\Windows\Web\Wallpaper\School.jpg</task> -->
   </tasks>
 
-  <!-- Extra shares mapped in WinPE before the deploy, for images or applications kept elsewhere. -->
-  <shares>
-    <!-- <share>
-      <localName>Y:</localName>
-      <remoteName>\\server\Apps</remoteName>
-      <username>svc-deploy</username>
-      <domain>CORP</domain>
-      <passwordFile>config\secrets\share.txt</passwordFile>
-    </share> -->
-  </shares>
-
   <!-- BitLocker on the OS drive, turned on at first boot as SYSTEM after the applications and FIRSTBOOT tasks.
        The recovery password is backed up first; with requireBackup, BitLocker stays off if no backup worked.
        Always TPM only (no startup PIN) and XTS-AES 256.

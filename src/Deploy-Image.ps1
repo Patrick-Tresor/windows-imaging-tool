@@ -5,7 +5,7 @@
     Launched by startnet.cmd. Finds content on a USB volume labelled DEPLOY, or on the network share in
     deploy-settings.json (ISO or network boot). Reads an answer file
     from <content root>\AnswerFiles: image, applications, disk, regional settings, naming,
-    domain join, tasks, extra shares and BitLocker.
+    domain join, tasks and BitLocker.
     A reimage started from the console's Computers tab left a job for this PC's BIOS serial in Reimage\ on the
     share (RemoteReimage.psm1): its answer file, computer name and OU are used without asking, after a countdown.
     Unless -NoPrompt, an Unattended answer file or such a job starts it, a graphical wizard
@@ -94,7 +94,6 @@ function Read-DeployAnswer([string]$Root, [string]$Name, [string]$JobOU) {
     $a
 }
 
-$script:Mounted = @{}
 $script:DiskNotes = @{}
 $script:PeDriversLoaded = $false
 $script:NoDiskLogged = $false
@@ -130,15 +129,6 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     # so a problem (missing image, no disk, a wrong join password) shows there.
     # No Windows 11 hardware check: Windows is installed on any PC (Patrick, 2026-11-22).
     # Passwords not on the media were typed on the wizard's Passwords page; Get-DeploySecret says which one is missing.
-    foreach ($share in $Answer.Shares) {
-        if ($script:Mounted[$share.LocalName] -eq $share.RemoteName) { continue }
-        $pw = if ($share.PasswordFile) { Get-DeploySecret -Root $Root -RelativePath $share.PasswordFile -Answer $Answer -Label "password for $($share.RemoteName)" } else { $null }
-        # A user name that already names its domain (CORP\svc, svc@corp.example.com) gets no second one in front.
-        $user = if ($share.Domain -and $share.Username -and $share.Username -notmatch '[\\@]') { "$($share.Domain)\$($share.Username)" } else { $share.Username }
-        Mount-NetworkShare -LocalName $share.LocalName -RemoteName $share.RemoteName -User $user -Password $pw
-        $script:Mounted[$share.LocalName] = $share.RemoteName
-    }
-
     $imagePath = Resolve-ContentPath $Root $Answer.ImageFile
     if ($Answer.ImageVersion) {
         # Pinned to an earlier version kept in Images\Previous.
@@ -259,7 +249,7 @@ function Get-MissingDeploySecrets([string]$Root, $Answer) {
     # Nothing when nobody is at the PC to type them (Get-DeploySecret then says what is missing).
     if (-not $script:CanAskSecrets) { return @() }
     @(Get-AnswerSecrets -Answer $Answer | Where-Object {
-        -not ($_.Share -and $script:Mounted[$_.Share]) -and -not (Test-DeploySecretKnown -Root $Root -RelativePath $_.RelativePath -Answer $Answer)
+        -not (Test-DeploySecretKnown -Root $Root -RelativePath $_.RelativePath -Answer $Answer)
     })
 }
 
