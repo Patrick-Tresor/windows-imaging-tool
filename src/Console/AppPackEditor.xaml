@@ -62,8 +62,6 @@
             <TextBlock Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you Apply it with no installer picked."/>
           </Grid>
-          <Label Content="Notes"/>
-          <TextBox x:Name="TxtNotes" Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>
         </StackPanel>
       </ScrollViewer>
 
@@ -84,8 +82,7 @@
             <TextBox x:Name="TxtUninstall" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas" ToolTip="Optional. Kept with the pack for removing the app later."/>
             <Label Grid.Row="4" Content="Success exit codes"/>
             <TextBox x:Name="TxtCodes" Grid.Row="4" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
-            <Label Grid.Row="5" Content="Restart exit codes"/>
-            <TextBox x:Name="TxtRebootCodes" Grid.Row="5" Grid.Column="1" Width="200" HorizontalAlignment="Left" ToolTip="Success codes that mean a restart is needed (MSI: 3010, 1641)."/>
+            <TextBlock Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10" Text="3010 and 1641 always mean the install worked and the PC needs a restart."/>
             <Label Grid.Row="6" Content="Timeout (minutes)"/>
             <TextBox x:Name="TxtTimeout" Grid.Row="6" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
           </Grid>
@@ -96,10 +93,7 @@
       <DockPanel x:Name="Sec2" Visibility="Collapsed">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Style="{StaticResource Title}" Text="Detection"/>
-          <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skip when already there, e.g. in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
-          <StackPanel Orientation="Horizontal">
-            <CheckBox x:Name="ChkSkip" Content="Skip the install when already detected (every rule must match)" Margin="0,4,0,8"/>
-          </StackPanel>
+          <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skipped when every rule matches, e.g. already in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
           <StackPanel Orientation="Horizontal">

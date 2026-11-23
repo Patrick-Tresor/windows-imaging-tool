@@ -325,11 +325,13 @@ tab, or with **New application...** in the answer file editor:
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
    *verify* are best guesses to test on a VM first.
-3. Check the **install command**, success and restart exit codes, and timeout.
+3. Check the **install command**, success exit codes and timeout (3010 and 1641
+   always mean "installed, restart needed").
 4. Add **detection** rules: MSI product code, program name in Programs and
    Features (wildcards, optional minimum version), file (with version), registry
    key or value, MSIX package, or a `.ps1` that exits 0 when installed. Every
-   rule must match. **Test on this PC** runs them on the admin PC.
+   rule must match; when they all do, the install is skipped (the app is already
+   there). **Test on this PC** runs them on the admin PC.
 5. Limit **which PCs** get it by maker and model (Dell Command Update only on
    Dell, Lenovo System Update only on Lenovo).
 

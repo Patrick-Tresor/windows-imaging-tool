@@ -60,16 +60,15 @@ function Show-AppPackEditor {
         $e.TxtDisplayName.Text = $d.displayName
         $e.TxtVersion.Text = $d.version
         $e.TxtPublisher.Text = $d.publisher
-        $e.TxtNotes.Text = $d.notes
+        # Notes come from the template; they show in the pack's details on the Apps and Tasks tab, not here.
+        $state.Notes = "$($d.notes)"
         if ($d.installer) { $e.CmbInstaller.Text = $d.installer }
         $e.TxtDownloadUrl.Text = $d.downloadUrl
         $e.CmbType.Text = $d.installerType
         $e.TxtCommand.Text = $d.command
         $e.TxtUninstall.Text = $d.uninstallCommand
         $e.TxtCodes.Text = $d.successCodes -join ', '
-        $e.TxtRebootCodes.Text = $d.rebootCodes -join ', '
         $e.TxtTimeout.Text = $d.timeoutMinutes
-        $e.ChkSkip.IsChecked = $d.skipIfDetected
         $rules.Clear()
         foreach ($r in $d.detection.rules) {
             $row = [DetectionRow]::new()
@@ -108,7 +107,7 @@ function Show-AppPackEditor {
             command          = $e.TxtCommand.Text.Trim()
             uninstallCommand = $e.TxtUninstall.Text.Trim()
             successCodes     = ConvertFrom-ListText $e.TxtCodes.Text -Numbers
-            rebootCodes      = ConvertFrom-ListText $e.TxtRebootCodes.Text -Numbers
+            rebootCodes      = @(3010, 1641)     # always: the standard "restart needed" codes
             timeoutMinutes   = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 60 }
             requirements     = Get-RequirementBoxes -Controls $e
             detection        = [pscustomobject]@{
@@ -116,8 +115,8 @@ function Show-AppPackEditor {
                 rules = @($rules | Where-Object { $_.Type -and $_.Target } | ForEach-Object {
                     [pscustomobject]@{ type = $_.Type; target = $_.Target.Trim(); value = "$($_.Value)".Trim(); operator = $_.Operator; version = "$($_.Version)".Trim() } })
             }
-            skipIfDetected   = [bool]$e.ChkSkip.IsChecked
-            notes            = $e.TxtNotes.Text.Trim()
+            skipIfDetected   = $true             # always skipped when every detection rule matches
+            notes            = "$($state.Notes)"
         }
         ConvertTo-AppDefinition -Name $e.TxtName.Text.Trim() -Json $json
     }
