@@ -88,7 +88,6 @@ Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
 . (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 . (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
-. (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
 . (Join-Path $PSScriptRoot 'BuildProgress.ps1')
@@ -283,11 +282,13 @@ function Update-Drivers {
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
     Update-MediaPacks
-    # The count on the button is the nudge to open the report.
-    $unknown = 0
-    if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root).Count } catch { } }
-    $ui.BtnDriversUnknown.Content = if ($unknown) { "Unknown models ($unknown)..." } else { 'Unknown models...' }
-    $ui.BtnDriversUnknown.FontWeight = if ($unknown) { 'SemiBold' } else { 'Normal' }
+    # Models deployed without their driver pack, above the library; hidden when every deployed PC got its pack.
+    $unknown = @()
+    if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root) } catch { } }
+    $ui.GridUnknown.ItemsSource = $unknown
+    $pcs = ($unknown | Measure-Object PCs -Sum).Sum
+    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) deployed without their driver pack. Select one and click Find its pack, then Download."
+    $ui.BdrUnknown.Visibility = if ($unknown) { 'Visible' } else { 'Collapsed' }
 }
 
 function Update-Settings {
@@ -745,12 +746,38 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The Progress window shows it; the library refreshes when it is done."
 } })
 
-$ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    if (Show-UnknownModels -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Update-Drivers
-        Set-Status 'Driver library updated. A download that started refreshes it again when it is done.'
+function Show-DriverPacksFound([object[]]$Packs) {
+    # Puts packs in the Find a model online box, the first one picked, ready for Download.
+    $ui.CmbDriverFound.Items.Clear()
+    $script:driverFound = @($Packs)
+    foreach ($p in $script:driverFound) { [void]$ui.CmbDriverFound.Items.Add((Format-VendorDriverPack $p)) }
+    $ui.CmbDriverFound.SelectedIndex = 0; $ui.CmbDriverFound.IsEnabled = $true; $ui.BtnDriverFoundDownload.IsEnabled = $true
+}
+$ui.BtnUnknownFind.Add_Click({ Invoke-Safely {
+    $m = $ui.GridUnknown.SelectedItem
+    if (-not $m) { Set-Status 'Select a model in the list first.'; return }
+    # Its maker's catalog by SKU or machine type first (exact), then a search by name.
+    Set-Status "Looking up the $($m.Maker) $($m.Model) pack..."
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    $window.Dispatcher.Invoke([action]{}, 'Background')
+    try { $hit = @(Add-UnknownModelPacks -Models @($m.PSObject.Copy()) 3>$null)[0] } finally { $window.Cursor = $null }
+    $ui.TxtDriverFind.Text = if ($m.Sku) { $m.Sku } elseif ($m.MachineType) { $m.MachineType } else { $m.Model }
+    if ($hit.Pack) {
+        Show-DriverPacksFound @($hit.Pack)
+        Set-Status "Found $($hit.PackText). Click Download."
+    } else {
+        $ui.TxtDriverFind.Text = $m.Model
+        Find-DriverPackOnline
     }
+} })
+$ui.BtnUnknownInbox.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = @($ui.GridUnknown.SelectedItems)
+    if (-not $rows) { Set-Status 'Select the models that need no driver pack first.'; return }
+    if (-not (Confirm-Action ("Deploy these with Windows inbox drivers only, without a warning?`n`n" + (($rows | ForEach-Object { "$($_.Maker) $($_.Model)" }) -join "`n")))) { return }
+    foreach ($r in $rows) { Set-UnknownModelInbox -ContentRoot $script:root -Model $r }
+    Update-Drivers
+    Set-Status "$($rows.Count) model(s) set to Windows inbox drivers"
 } })
 
 $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {

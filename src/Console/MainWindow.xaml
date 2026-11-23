@@ -110,6 +110,28 @@
                 <Button x:Name="BtnDriverFoundDownload" Grid.Column="5" Content="Download" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                         ToolTip="Downloads the pack from the vendor, checks it, extracts it to Drivers\Maker\Model and adds it to the library"/>
               </Grid>
+              <!-- Models deployed without their driver pack (from the Dashboard's status records). Hidden when there are none. -->
+              <Border x:Name="BdrUnknown" Visibility="Collapsed" Margin="0,0,0,10" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
+                <DockPanel>
+                  <TextBlock x:Name="TxtUnknown" DockPanel.Dock="Top" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                  <StackPanel DockPanel.Dock="Right" Margin="10,0,0,0" VerticalAlignment="Top">
+                    <Button x:Name="BtnUnknownFind" Content="Find its pack" Margin="0,0,0,6"
+                            ToolTip="Looks up the selected model's pack in its maker's catalog (by SKU or machine type first) and puts it in the box above, ready to Download"/>
+                    <Button x:Name="BtnUnknownInbox" Content="No pack needed" Margin="0"
+                            ToolTip="For the selected models (a VM, say): a catalog entry with no folder, so they leave this list and deploy with Windows inbox drivers without a warning"/>
+                  </StackPanel>
+                  <DataGrid x:Name="GridUnknown" IsReadOnly="True" MaxHeight="150" SelectionMode="Extended">
+                    <DataGrid.Columns>
+                      <DataGridTextColumn Header="Maker" Binding="{Binding Maker}" Width="80"/>
+                      <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="2*"/>
+                      <DataGridTextColumn Header="SKU / type" Binding="{Binding Ids}" Width="90"/>
+                      <DataGridTextColumn Header="PCs" Binding="{Binding PCs}" Width="45"/>
+                      <DataGridTextColumn Header="Computers" Binding="{Binding Computers}" Width="*"/>
+                      <DataGridTextColumn Header="Got" Binding="{Binding Drivers}" Width="110"/>
+                    </DataGrid.Columns>
+                  </DataGrid>
+                </DockPanel>
+              </Border>
             </StackPanel>
 
             <GroupBox DockPanel.Dock="Bottom" Header="Import a driver pack" Margin="0,12,0,0" Padding="10">
@@ -147,7 +169,6 @@
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
               <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
               <Button x:Name="BtnDriversOpen" Content="Open folder"/>
-              <Button x:Name="BtnDriversUnknown" Content="Unknown models..." ToolTip="Deployed PCs that got no driver pack, with the vendor pack for each model"/>
             </StackPanel>
 
             <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
