@@ -2,7 +2,7 @@
 # Plain LDAP through System.DirectoryServices (ADSI): no RSAT or ActiveDirectory module needed on the console PC.
 # The console PC can be joined to the domain (the signed-in account is used) or not (a domain controller and an
 # account are given). Only reads: nothing in Active Directory is changed.
-# PowerShell 5.1 compatible. Everything but Get-AdComputers, Get-AdOrganizationalUnits and Get-AdDefaultDomain
+# PowerShell 5.1 compatible. Everything but Get-AdComputers and Get-AdDefaultDomain
 # works without a domain, for the tests.
 
 function ConvertTo-DomainDN {
@@ -281,18 +281,7 @@ function Resolve-AdComputerNameFromIp {
     ''
 }
 
-function Get-AdOrganizationalUnits {
-    # Every OU in the domain, plus the default Computers container, for the OU list: Path (Sales/Laptops) and DN.
-    param([string]$Domain, [string]$Server, [pscredential]$Credential)
-    if (-not $Domain) { $Domain = Get-AdDefaultDomain }
-    $root = ConvertTo-DomainDN $Domain
-    if (-not $root) { throw 'Type the domain name (for example corp.local): this PC is not joined to a domain.' }
-    $ous = @(Invoke-AdSearch -Path (Get-AdLdapPath -Server $Server -DN $root) -Filter '(objectClass=organizationalUnit)' -Properties 'distinguishedName' -Credential $Credential |
-        ForEach-Object { $dn = "$(Get-AdValue $_ 'distinguishedName')"; [pscustomobject]@{ Path = ConvertTo-AdFriendlyPath $dn; DN = $dn } })
-    @([pscustomobject]@{ Path = 'Computers'; DN = "CN=Computers,$root" }) + @($ous | Sort-Object Path)
-}
-
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
-    Get-AdDomainFromAccount, Resolve-AdDomain, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits,
+    Get-AdDomainFromAccount, Resolve-AdDomain, Get-AdDefaultDomain, Get-AdComputers,
     ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp, New-LocalComputerRow, ConvertTo-LocalAccountName

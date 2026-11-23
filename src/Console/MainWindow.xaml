@@ -422,20 +422,16 @@
           <DockPanel MinHeight="760" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab, and Active Directory is read with the account and domain controller set there."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab, and Active Directory is read with the account and domain controller set there."/>
             </StackPanel>
             <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
-                  <ColumnDefinition Width="140"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/></Grid.RowDefinitions>
-                <Label Content="OU" VerticalAlignment="Center"/>
-                <ComboBox x:Name="CmbAdOu" Grid.Column="1" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
-                <Label Grid.Column="3" Content="Name or IP" VerticalAlignment="Center"/>
-                <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
-                <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
+                <Label Content="Name or IP" VerticalAlignment="Center"/>
+                <TextBox x:Name="TxtAdName" Grid.Column="1" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                 </StackPanel>
               </Grid>

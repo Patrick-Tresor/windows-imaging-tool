@@ -844,25 +844,22 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
 
 $script:adRows = @()
 $script:adOnline = @{}
-$script:adLoaded = $false
-$script:adOusLoaded = $false
 
 function Get-AdSettings {
-    # The Computers tab's domain controller (set on Deploy Settings) and last OU, kept in console.json (never a
-    # password). domain is only what an older console saved.
+    # The Computers tab's domain controller (set on Deploy Settings), kept in console.json (never a password).
+    # domain is only what an older console saved.
     $c = Get-ConsoleConfig
     if ($c.PSObject.Properties['activeDirectory'] -and $c.activeDirectory) { return $c.activeDirectory }
-    [pscustomobject]@{ domain = ''; server = ''; searchBase = '' }
+    [pscustomobject]@{ domain = ''; server = '' }
 }
 
 function Save-AdSettings {
-    param([string]$Server, [string]$SearchBase)
+    param([string]$Server)
     $c = Get-ConsoleConfig
     $old = Get-AdSettings
     $ad = [pscustomobject]@{
         domain     = "$($old.domain)"
         server     = $(if ($PSBoundParameters.ContainsKey('Server')) { $Server.Trim() } else { "$($old.server)" })
-        searchBase = $(if ($PSBoundParameters.ContainsKey('SearchBase')) { $SearchBase } else { "$($old.searchBase)" })
     }
     $c | Add-Member -NotePropertyName activeDirectory -NotePropertyValue $ad -Force
     Save-ConsoleConfig $c
@@ -928,14 +925,6 @@ function Show-AdRows {
 }
 
 function Update-Computers {
-    if (-not $script:adLoaded) {
-        $script:adLoaded = $true
-        $ad = Get-AdSettings
-        $ou = if ($ad.searchBase) { [pscustomobject]@{ Path = (ConvertTo-AdFriendlyPath "$($ad.searchBase)"); DN = "$($ad.searchBase)" } }
-              else { [pscustomobject]@{ Path = '(whole domain)'; DN = '' } }
-        $ui.CmbAdOu.ItemsSource = @($ou)
-        $ui.CmbAdOu.SelectedIndex = 0
-    }
     $answers = @(if (Test-ContentRoot $script:root) { Get-ChildItem (Join-Path $script:root 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName })
     $picked = $ui.CmbAdAnswer.SelectedItem
     $ui.CmbAdAnswer.ItemsSource = $answers
@@ -946,12 +935,7 @@ function Update-Computers {
 }
 
 function Search-AdComputers {
-    # The OU list is read with the first search when opening the tab could not read it by itself. A PC typed by IP
-    # can still be found without Active Directory.
-    if (-not $script:adOusLoaded) {
-        try { Connect-AdDirectory; return } catch { if (-not (ConvertFrom-AdSearchText $ui.TxtAdName.Text).Ip) { throw } }
-    }
-    $base = if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' }
+    # The whole domain: no OU choice (Patrick, 2026-11-23). A PC typed by IP can still be found without Active Directory.
     $window.Cursor = 'Wait'
     $localNote = ''
     try {
@@ -968,7 +952,7 @@ function Search-AdComputers {
             try {
                 $cred = Get-AdCredential
                 $conn = Get-AdConnection
-                $found = @(Get-AdComputers -Domain $conn.Domain -Server $conn.Server -SearchBase $base -Name $find.Name -Credential $cred)
+                $found = @(Get-AdComputers -Domain $conn.Domain -Server $conn.Server -Name $find.Name -Credential $cred)
             } catch {
                 # A PC typed by IP can still be reimaged without Active Directory (a laptop outside the domain).
                 if (-not $find.Ip) { throw }
@@ -989,7 +973,6 @@ function Search-AdComputers {
         Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
         Update-AdOnline
     } finally { $window.Cursor = $null }
-    Save-AdSettings -SearchBase $base
     Show-AdRows
     Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)$localNote"
 }
@@ -1004,30 +987,12 @@ function Get-AdOnlineSummary {
         [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
 }
 
-function Connect-AdDirectory {
-    # Reads the OUs and lists the computers: when the tab first opens (Invoke-AdAutoConnect), or at the first Search.
-    $cred = Get-AdCredential
-    $conn = Get-AdConnection
-    $window.Cursor = 'Wait'
-    try {
-        Set-Status 'Reading the OUs from Active Directory...'
-        $ous = @(Get-AdOrganizationalUnits -Domain $conn.Domain -Server $conn.Server -Credential $cred)
-    } finally { $window.Cursor = $null }
-    $script:adOusLoaded = $true
-    $keep = "$((Get-AdSettings).searchBase)"
-    $items = @([pscustomobject]@{ Path = '(whole domain)'; DN = '' }) + $ous
-    $ui.CmbAdOu.ItemsSource = $items
-    $sel = @($items | Where-Object { $_.DN -eq $keep })
-    $ui.CmbAdOu.SelectedItem = if ($sel) { $sel[0] } else { $items[0] }
-    Search-AdComputers
-}
-
 function Invoke-AdAutoConnect {
-    # The first time the Computers tab opens: read the OUs and list the computers by itself, unless the Deploy
+    # The first time the Computers tab opens: list the computers by itself, unless the Deploy
     # Settings account has no saved password yet. A failure is one line in the status bar; Search tries again.
     if (-not (Test-ContentRoot $script:root)) { return }
     if ((Get-ShareAccount) -and -not (Get-SharePassword -ContentRoot $script:root)) { return }
-    try { Connect-AdDirectory }
+    try { Search-AdComputers }
     catch {
         $window.Cursor = $null
         Set-Status "Could not connect to Active Directory by itself: $($_.Exception.Message)"
@@ -1245,9 +1210,8 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
-    # The domain controller is this console's own (console.json). The Computers tab reads the OUs again at its next
-    # Search, with this account and domain controller.
-    $script:adOusLoaded = $false
+    # The domain controller is this console's own (console.json). The Computers tab's next Search uses this account
+    # and domain controller.
     Save-AdSettings -Server $ui.TxtAdServer.Text
     # The Computers tab uses this account and share: show the change there too.
     Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
