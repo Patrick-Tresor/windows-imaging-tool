@@ -18,13 +18,13 @@
     </Border>
 
     <!-- Problems and buttons -->
-    <Border DockPanel.Dock="Bottom" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
+    <Border Style="{StaticResource EditorFooter}">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
           <Button x:Name="BtnSave" Content="Save" Style="{StaticResource Primary}"/>
           <Button x:Name="BtnCancel" Content="Cancel" Margin="0"/>
         </StackPanel>
-        <TextBlock x:Name="TxtProblems" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0"/>
+        <TextBlock x:Name="TxtProblems" Style="{StaticResource ProblemsText}"/>
       </DockPanel>
     </Border>
 

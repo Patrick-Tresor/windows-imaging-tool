@@ -205,8 +205,8 @@ no longer create `fwfiles`).
    left in place; FirstBoot.ps1 also keeps a copy with the passwords removed in
    `C:\Windows\Temp\unattend-deployed.xml`.
 7. Stage the applications in `W:\Temp\Apps` (leaving out those whose maker or
-   model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`
-   and `firstboot.json`, and write `SetupComplete.cmd` to run it. Windows skips
+   model requirements don't match this PC), plus `FirstBoot.ps1`, `AppPack.psm1`,
+   `TaskPack.psm1`, `LibraryPack.psm1`, `ScriptLog.psm1` and `firstboot.json`, and write `SetupComplete.cmd` to run it. Windows skips
    SetupComplete.cmd with an OEM product key (firmware keys on Dell, HP and
    Lenovo) except on Enterprise, so specialize also creates the startup task
    `ImagingTool\FirstBoot` (`FirstBoot.ps1 -FromTask`, 5 minute delay). The
@@ -240,6 +240,16 @@ Installer COM object, MSIX manifests, framework markers in .exe files), silent
 switch suggestions, templates (`config\app-templates.json`), export and import as
 .zip, maker and model requirements, and detection rules. The console's builder is
 `src/Console/AppPackEditor.ps1` + `.xaml`.
+
+`TaskPack.psm1` is the same for library tasks (`task.json`). What applications and
+tasks share is written once in `LibraryPack.psm1`: reading and saving the pack
+folder, templates, the maker and model check, and running the program with a
+timeout, success codes and a log of its output (`App-<name>.log`, `Task-<name>.log`
+in `C:\Windows\Temp`). The two editor windows share their Makers / Models boxes,
+template picker and File... / Folder... buttons through `XamlWindow.psm1`.
+The scripts that run on their own (`FirstBoot.ps1`, `Clear-UnattendPasswords.ps1`,
+`Invoke-SysprepAtDeploy.ps1`, `Add-ScanExclusions.ps1`) write their logs through
+`ScriptLog.psm1`, staged next to each.
 
 ## BitLocker
 

@@ -32,11 +32,9 @@ $logPath = 'C:\Windows\Temp\SysprepAtDeploy.log'
 $taskName = 'ImagingTool\SysprepAtDeploy'
 $noticeKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 Import-Module ([IO.Path]::Combine($folder, 'SysprepAtDeploy.psm1')) -Force -ErrorAction Stop
+Import-Module ([IO.Path]::Combine($folder, 'ScriptLog.psm1')) -Force -ErrorAction Stop
 
-function Write-Log([string]$Message, [string]$Level = 'INFO') {
-    $line = '{0:yyyy-MM-dd HH:mm:ss} [{1}] [{2}] {3}' -f (Get-Date), $Level, $Stage, $Message
-    try { Add-Content -LiteralPath $logPath -Value $line } catch { }
-}
+function Write-Log([string]$Message, [string]$Level = 'INFO') { Write-ScriptLog -Path $logPath -Message $Message -Prefix "[$Level] [$Stage] " }
 
 function Read-Plan {
     $path = [IO.Path]::Combine($folder, 'sysprep.json')

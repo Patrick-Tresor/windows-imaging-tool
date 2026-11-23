@@ -6,7 +6,7 @@
     passwords. OOBE still reads it after first boot (deleting it early made OOBE ask for a local account on the Dell
     5521), and Windows Setup is not relied on to blank them. So this runs as SYSTEM from the ImagingTool\ClearUnattend
     task at each logon (FirstBoot.ps1 creates it), waits until setup and OOBE are over, replaces every password value
-    with *removed* in each copy, logs to C:\Windows\Temp\FirstBoot.log, then deletes the task and itself.
+    with *removed* in each copy, logs to C:\Windows\Temp\FirstBoot.log, then deletes the task, itself and ScriptLog.psm1 next to it.
     Deploy-Image.ps1 stages it in C:\ProgramData\ImagingTool, for Administrators and SYSTEM only.
     No DeployCommon here: this runs on the deployed PC. PowerShell 5.1 compatible.
 #>
@@ -23,9 +23,8 @@ param(
     [switch]$KeepTask
 )
 $ErrorActionPreference = 'Continue'
-function Write-Log([string]$Message) {
-    try { Add-Content -Path $LogPath -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message) } catch { }
-}
+Import-Module ([IO.Path]::Combine($PSScriptRoot, 'ScriptLog.psm1')) -Force   # staged next to this script
+function Write-Log([string]$Message) { Write-ScriptLog -Path $LogPath -Message $Message }
 
 function Remove-UnattendPasswordText([string]$Text) {
     # Every <Value> and <Password> element (local accounts, AutoLogon, AdministratorPassword, domain join Credentials)
@@ -70,4 +69,4 @@ foreach ($p in $Path) {
 if ($failed -or $KeepTask) { exit 0 }
 & schtasks.exe /Delete /TN $TaskName /F 2>&1 | Out-Null
 Write-Log "unattend.xml passwords: task $TaskName removed (exit $LASTEXITCODE)"
-Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & del /f /q `"$PSCommandPath`"" -WindowStyle Hidden
+Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 5 >nul & del /f /q `"$PSCommandPath`" `"$PSScriptRoot\ScriptLog.psm1`"" -WindowStyle Hidden

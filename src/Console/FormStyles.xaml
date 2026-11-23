@@ -26,4 +26,18 @@
     <Setter Property="CanUserAddRows" Value="False"/>
     <Setter Property="SelectionMode" Value="Single"/>
   </Style>
+  <!-- The bar at the bottom of every editor: what is wrong on the left, Save and Cancel on the right. -->
+  <Style x:Key="EditorFooter" TargetType="Border">
+    <Setter Property="DockPanel.Dock" Value="Bottom"/>
+    <Setter Property="Background" Value="{DynamicResource SubtleBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+    <Setter Property="BorderThickness" Value="0,1,0,0"/>
+    <Setter Property="Padding" Value="16,12"/>
+  </Style>
+  <Style x:Key="ProblemsText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+    <Setter Property="TextWrapping" Value="Wrap"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="Margin" Value="0,0,16,0"/>
+  </Style>
 </ResourceDictionary>

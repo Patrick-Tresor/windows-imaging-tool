@@ -374,7 +374,7 @@ function Set-SysprepAtDeploy([string]$UnattendXml) {
     $ErrorActionPreference = 'Continue'   # reg.exe query writes to stderr for a missing value; failures still throw
     $folder = 'W:\ProgramData\ImagingTool\Sysprep'
     New-Item -ItemType Directory -Path $folder -Force -ErrorAction Stop | Out-Null
-    Copy-Item (Join-Path $PSScriptRoot 'Invoke-SysprepAtDeploy.ps1'), (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1'),
+    Copy-Item (Join-Path $PSScriptRoot 'Invoke-SysprepAtDeploy.ps1'), (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1'), (Join-Path $PSScriptRoot 'ScriptLog.psm1'),
         (Join-Path $PSScriptRoot 'Prepare-Reference.ps1') $folder -Force -ErrorAction Stop
     # sysprep /unattend caches its own copy in Windows\Panther; the script deletes this one as soon as sysprep returns.
     $UnattendXml | Set-Content -Path (Join-Path $folder 'unattend.xml') -Encoding utf8 -ErrorAction Stop
@@ -724,12 +724,13 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
         (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'LibraryPack.psm1'),
-        (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
+        (Join-Path $PSScriptRoot 'ScriptLog.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
     # Removes the passwords from unattend.xml once OOBE is over (FirstBoot.ps1 sets up the logon task that runs it).
     # It runs as SYSTEM, so only Administrators and SYSTEM may change it.
     New-Item -ItemType Directory -Path 'W:\ProgramData\ImagingTool' -Force | Out-Null
-    Copy-Item (Join-Path $PSScriptRoot 'Clear-UnattendPasswords.ps1') 'W:\ProgramData\ImagingTool\' -Force
+    Copy-Item (Join-Path $PSScriptRoot 'Clear-UnattendPasswords.ps1'), (Join-Path $PSScriptRoot 'ScriptLog.psm1') 'W:\ProgramData\ImagingTool\' -Force
     Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1'
+    Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\ScriptLog.psm1'
     $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
@@ -749,7 +750,7 @@ try {
     Set-Content -Path 'W:\Temp\firstboot-progress.json' -Value '{}' -Encoding ascii
     Set-Content -Path 'W:\Temp\firstboot.lock' -Value '' -Encoding ascii
     foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1',
-                   'LibraryPack.psm1', 'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
+                   'LibraryPack.psm1', 'ScriptLog.psm1', 'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
         Protect-StagedItem -Path "W:\Temp\$f"
     }
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null

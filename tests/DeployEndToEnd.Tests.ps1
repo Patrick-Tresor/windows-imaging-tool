@@ -124,11 +124,12 @@ function Set-WindowsBootNext { param([string]$SystemDrive) Add-E2ECall "bootnext
     Assert-Equal (@($fb.applications | ForEach-Object name) -join ',') 'E2E-App' 'first boot installs the answer file''s application'
     Assert-Equal $fb.deploy.driversAdded 1 'first boot plan knows how many drivers were added'
     Assert-Equal $fb.deploy.computerName 'E2E-PC01' 'first boot plan has the computer name'
-    foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'AppPack.psm1', 'LibraryPack.psm1', 'FirstBootState.psm1', 'Apps\E2E-App\app.json', 'deployed.json') {
+    foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'AppPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'FirstBootState.psm1', 'Apps\E2E-App\app.json', 'deployed.json') {
         Assert-Equal (Test-Path (Join-Path 'W:\Temp' $f)) $true "staged: C:\Temp\$f"
     }
     Assert-Equal ((Get-Content -Raw 'W:\Windows\Setup\Scripts\SetupComplete.cmd') -match 'C:\\Temp\\FirstBoot\.ps1') $true 'SetupComplete.cmd starts first boot'
     Assert-Equal (Test-Path 'W:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1') $true 'the unattend password cleanup is staged'
+    Assert-Equal (Test-Path 'W:\ProgramData\ImagingTool\ScriptLog.psm1') $true 'with the log writer it imports'
     Assert-Equal (@(Get-ChildItem (Join-Path $root 'Logs') -Filter "${serial}_*_OK.log").Count) 1 'Deploy.log copied to the content root''s Logs as OK'
 
     $statusFile = @(Get-ChildItem (Join-Path $root 'Status') -Filter *.json)[0]

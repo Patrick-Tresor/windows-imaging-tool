@@ -129,4 +129,21 @@ Assert-Equal ($fb -match '/SC ONLOGON /RU SYSTEM') $true 'unattend: first boot c
 $dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($dp -match "Protect-StagedItem -Path 'W:\\ProgramData\\ImagingTool\\Clear-UnattendPasswords\.ps1'") $true 'unattend: the script is staged for admins only'
 
+# The scripts that run on their own write their log through ScriptLog.psm1, staged next to each of them.
+foreach ($f in 'FirstBoot.ps1', 'Clear-UnattendPasswords.ps1', 'Invoke-SysprepAtDeploy.ps1', 'Add-ScanExclusions.ps1') {
+    $text = Get-Content -Raw (Join-Path $repo "src/$f")
+    Assert-Equal ($text -match "ScriptLog\.psm1" -and $text -match 'Write-ScriptLog') $true "$f logs through ScriptLog.psm1"
+}
+foreach ($staged in "(Join-Path `$PSScriptRoot 'SysprepAtDeploy.psm1'), (Join-Path `$PSScriptRoot 'ScriptLog.psm1')",
+                    "(Join-Path `$PSScriptRoot 'Clear-UnattendPasswords.ps1'), (Join-Path `$PSScriptRoot 'ScriptLog.psm1')",
+                    "(Join-Path `$PSScriptRoot 'ScriptLog.psm1'), (Join-Path `$PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'") {
+    Assert-Equal ($dp.Contains($staged)) $true "deploy stages ScriptLog.psm1: $staged"
+}
+$logFile = Join-Path ([IO.Path]::GetTempPath()) ("scriptlog-" + [guid]::NewGuid() + "/x/test.log")
+Import-Module (Join-Path $repo 'src/ScriptLog.psm1') -Force
+Write-ScriptLog -Path $logFile -Message 'hello' -Prefix '[INFO] '
+Write-ScriptLog -Path '' -Message 'nowhere'
+Assert-Equal ((Get-Content $logFile) -match '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[INFO\] hello$') $true 'a log line: time, prefix, message; the folder is made'
+Remove-Item (Split-Path (Split-Path $logFile)) -Recurse -Force
+
 Complete-Tests 'All first boot state tests passed.'

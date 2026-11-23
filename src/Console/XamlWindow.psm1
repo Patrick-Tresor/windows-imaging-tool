@@ -77,4 +77,69 @@ function Show-WindowMessage {
     [void][Windows.MessageBox]::Show($Owner, $Text, $Title, 'OK', $Icon)
 }
 
-Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, Set-ConsoleLogo, New-ConsoleWindow, Show-WindowMessage
+#region Library editors (Application and Task windows)
+
+function ConvertFrom-ListText {
+    # "Dell, HP" -> Dell, HP. -Numbers: "0, 3010; 1641" -> 0, 3010, 1641 (commas, semicolons or spaces).
+    param([AllowEmptyString()][string]$Text, [switch]$Numbers)
+    if ($Numbers) { return @($Text -split '[,; ]+' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
+    @($Text -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Set-RequirementBoxes {
+    # Fills the Makers and Models boxes (TxtMakers, TxtModels) from a definition's requirements.
+    param([Parameter(Mandatory)]$Controls, [Parameter(Mandatory)]$Definition)
+    $Controls.TxtMakers.Text = @($Definition.requirements.makers) -join ', '
+    $Controls.TxtModels.Text = @($Definition.requirements.models) -join ', '
+}
+
+function Get-RequirementBoxes {
+    # The requirements as typed in the Makers and Models boxes.
+    param([Parameter(Mandatory)]$Controls)
+    [pscustomobject]@{ makers = @(ConvertFrom-ListText $Controls.TxtMakers.Text); models = @(ConvertFrom-ListText $Controls.TxtModels.Text) }
+}
+
+function Initialize-TemplatePicker {
+    # Lists the templates in CmbTemplate after "(none)" and shows the picked one's note in TxtTemplateNote.
+    # -Note { param($Template) } gives the note; "Best guess, test it on a VM first." goes in front for a template to verify.
+    param([Parameter(Mandatory)]$Controls, [object[]]$Templates = @(), [scriptblock]$Note = { param($t) "$($t.notes)" })
+    $c = $Controls
+    $list = @($Templates)
+    $c.CmbTemplate.ItemsSource = @('(none)') + @($list | ForEach-Object { "$($_.name)$(if ($_.verify) { ' (verify)' })" })
+    $c.CmbTemplate.SelectedIndex = 0
+    $c.CmbTemplate.Add_SelectionChanged({
+        # Inline, not Get-PickedTemplate: this closure does not see the module's functions.
+        $i = $c.CmbTemplate.SelectedIndex
+        $t = if ($i -gt 0) { $list[$i - 1] }
+        $c.TxtTemplateNote.Text = if ($t) { "$(if ($t.verify) { 'Best guess, test it on a VM first. ' })$(& $Note $t)" } else { '' }
+    }.GetNewClosure())
+}
+
+function Get-PickedTemplate {
+    # The template picked in CmbTemplate, or $null for "(none)".
+    param([Parameter(Mandatory)]$Controls, [object[]]$Templates = @())
+    $i = $Controls.CmbTemplate.SelectedIndex
+    if ($i -gt 0) { @($Templates)[$i - 1] }
+}
+
+function Register-SourceBrowse {
+    # File... and Folder... (BtnSourceFile, BtnSourceFolder) put the path in TxtSource, then run -After.
+    param([Parameter(Mandatory)]$Controls, [Parameter(Mandatory)]$Owner, [Parameter(Mandatory)][string]$Filter,
+          [Parameter(Mandatory)][string]$FolderText, [scriptblock]$After = { })
+    $c = $Controls
+    $c.BtnSourceFile.Add_Click({
+        $f = [Microsoft.Win32.OpenFileDialog]::new()
+        $f.Filter = $Filter
+        if ($f.ShowDialog($Owner)) { $c.TxtSource.Text = $f.FileName; & $After }
+    }.GetNewClosure())
+    $c.BtnSourceFolder.Add_Click({
+        $f = [Windows.Forms.FolderBrowserDialog]::new()
+        $f.Description = $FolderText
+        if ($f.ShowDialog() -eq 'OK') { $c.TxtSource.Text = $f.SelectedPath; & $After }
+    }.GetNewClosure())
+}
+
+#endregion
+
+Export-ModuleMember -Function Read-ConsoleXaml, Get-XamlControls, Set-ConsoleLogo, New-ConsoleWindow, Show-WindowMessage,
+    ConvertFrom-ListText, Set-RequirementBoxes, Get-RequirementBoxes, Initialize-TemplatePicker, Get-PickedTemplate, Register-SourceBrowse
