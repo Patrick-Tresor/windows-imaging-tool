@@ -150,7 +150,7 @@ function Show-AppPackEditor {
         $t = Find-AppTemplate -Installer $info.Installer -Templates $templates
         if ($t) {
             $e.CmbTemplate.SelectedIndex = [array]::IndexOf(@($templates), $t) + 1
-            $e.TxtTemplateNote.Text = "Matches the $($t.name) template: click Apply to use its settings. $($t.notes)"
+            $e.TxtTemplateNote.Text = "Matches the $($t.name) template: its settings are filled in. $($t.notes)"
         }
         $e.TxtProblems.Text = ''
     }
@@ -178,7 +178,8 @@ function Show-AppPackEditor {
         $win.Dispatcher.BeginInvoke([Action]{ if ($e.CmbInstaller.Text) { try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message } } }) | Out-Null
     })
 
-    $e.BtnTemplate.Add_Click({
+    # Picking a template fills the form in at once (no Apply button).
+    $applyTemplate = {
         $t = Get-PickedTemplate -Controls $e -Templates $templates
         if (-not $t) { return }
         $typed = $e.TxtName.Text.Trim()
@@ -196,7 +197,10 @@ function Show-AppPackEditor {
         }
         & $load $d
         $e.TxtProblems.Text = if ($d.command -match 'REPLACE_[A-Z_]+') { "Replace $($Matches[0]) in the install command (Install command)." } else { '' }
-    })
+    }
+    $e.CmbTemplate.Add_SelectionChanged({ & $applyTemplate })
+    # A template picked before the form opened (rebuilding an imported pack by name) is filled in now.
+    if ($e.CmbTemplate.SelectedIndex -gt 0) { & $applyTemplate }
 
     # Another installer type gives its silent command at once (no Suggest button), unless the command was typed by hand.
     $e.CmbType.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{

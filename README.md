@@ -320,7 +320,8 @@ tab, or with **New application...** in the answer file editor:
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
    code, and fills in the silent command, uninstall command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
-2. Or apply a **template** from `config\app-templates.json`. There are templates
+2. Or pick a **template** from `config\app-templates.json` (it fills the form in at once,
+   and an installer that matches one picks it by itself). There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
    *verify* are best guesses to test on a VM first.
@@ -379,8 +380,8 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`.
-To make one, click **New application...** on the Apps and Tasks tab, pick the template,
-leave the installer empty and click **Apply**: the pack gets the publisher's
+To make one, click **New application...** on the Apps and Tasks tab and pick the
+template with the installer left empty: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). A pack's details on the Apps and
 Tasks tab show where it downloads from, and the builder's **Download from**
 box takes any other address. When the installer file is
