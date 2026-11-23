@@ -116,8 +116,8 @@ on the ones you pick, with nobody at the PCs.
    in Deploy Settings, section 3. The domain comes from the domain controller's
    full name (`dc01.corp.local`), the account (`user@corp.local`) or the
    console PC. If it could not connect, the first **Search** tries again.
-2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
-   `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
+2. Optionally type part of a name (`LAB` or `LAB-*`) or an IP address, and
+   **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the OU, Windows version, last
    logon and whether the console can reach it, checked on every Search (Search again
    to check again). **Online** (point at it for
