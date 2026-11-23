@@ -261,7 +261,7 @@ Installers:
     $otherSigned = { param($Path) [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=Contoso Ltd, O=Contoso Ltd, C=US' } }
     Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $otherSigned } 'download refused: the file changed and is signed by Contoso Ltd, not Microsoft Corporation' 'another SHA256 signed by someone else fails'
     $badSig = { param($Path) [pscustomobject]@{ Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation' } }
-    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $badSig } '*signature HashMismatch*' 'another SHA256 with a broken signature fails'
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $badSig } '*signature is HashMismatch' 'another SHA256 with a broken signature fails'
     $hd.publisher = ''
     Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Downloader $abc -Signature $msSigned } '*signed by Microsoft Corporation, not a known publisher' 'with no publisher in the pack and an unknown site, a signature alone is not enough'
     Assert-Equal (Test-AppSignerMatch -Subject 'CN="Google LLC", O="Google LLC", L=Mountain View' -Publisher 'Google LLC') $true 'signer match: quoted names'
