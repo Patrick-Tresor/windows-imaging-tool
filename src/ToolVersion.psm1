@@ -1,25 +1,41 @@
 # Which version of the tool built a stick, a boot image or a deploy, so an old stick is easy to spot.
 #
-# The version is the commit and its date. src\version.txt holds a git placeholder that GitHub fills in when main is
+# The version people see is v1.NN: NN counts the pull requests merged into main since v1.00 (PR #143), read from
+# the merge commit's subject ("Merge pull request #144 ..." -> v1.01). A copy that is not a merge on main (a branch,
+# a commit pushed straight to main) shows its commit and date instead. Old and new copies are compared by commit
+# date. src\version.txt holds a git placeholder that GitHub fills in when main is
 # downloaded as a zip (export-subst in .gitattributes), so a downloaded copy knows its commit without git. A git
 # clone has git itself. The media build writes the version into boot.wim (Deploy\config\tool-version.json) and onto
 # the stick's DEPLOY partition (tool-version.json), where the console reads it to say a stick is out of date.
 # Used by the console, the media build and WinPE: plain .NET file calls only (no Join-Path on WinPE volumes).
 
+# v1.00 is the merge of pull request #143; each merged pull request after it adds one.
+$script:FirstReleasePr = 143
+
+function Get-ToolReleaseNumber {
+    # v1.NN from a commit subject: "Merge pull request #144 from ..." or a squash merge "Title (#144)". '' otherwise.
+    param([string]$Subject)
+    $pr = 0
+    if ("$Subject" -match '^Merge pull request #(\d+)\b') { $pr = [int]$Matches[1] }
+    elseif ("$Subject" -match '\(#(\d+)\)\s*$') { $pr = [int]$Matches[1] }
+    if ($pr -lt $script:FirstReleasePr) { return '' }
+    'v1.{0:D2}' -f ($pr - $script:FirstReleasePr)
+}
+
 function ConvertTo-ToolVersion {
-    # Turns "<commit> <ISO date>" (version.txt or git log) into the version object, or $null for anything else.
+    # Turns "<commit> <ISO date> [subject]" (version.txt or git log) into the version object, or $null for anything else.
     param([string]$Text)
     if (-not $Text) { return $null }
     $t = $Text.Trim()
-    if ($t -notmatch '^([0-9a-f]{6,40})\s+(\S+)$') { return $null }
-    $commit = $Matches[1]; $dateText = $Matches[2]
+    if ($t -notmatch '^([0-9a-f]{6,40})\s+(\S+)(?:\s+(.*))?$') { return $null }
+    $commit = $Matches[1]; $dateText = $Matches[2]; $subject = "$($Matches[3])"
     $date = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse($dateText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$date)) { return $null }
-    New-ToolVersion -Commit $commit -Date $date.UtcDateTime
+    New-ToolVersion -Commit $commit -Date $date.UtcDateTime -Release (Get-ToolReleaseNumber $subject)
 }
 
 function New-ToolVersion {
-    param([Parameter(Mandatory)][string]$Commit, $Date)
+    param([Parameter(Mandatory)][string]$Commit, $Date, [string]$Release)
     $d = $null
     if ($Date -is [datetime]) { $d = $Date.ToUniversalTime() }
     elseif ($Date) {
@@ -28,9 +44,10 @@ function New-ToolVersion {
     }
     $short = if ($Commit.Length -gt 7 -and $Commit -match '^[0-9a-f]+$') { $Commit.Substring(0, 7) } else { $Commit }
     [pscustomobject]@{
-        Commit = $short
-        Date   = $d
-        Text   = if ($d) { '{0} ({1})' -f $short, $d.ToLocalTime().ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } else { $short }
+        Commit  = $short
+        Date    = $d
+        Release = "$Release"
+        Text    = if ($Release) { $Release } elseif ($d) { '{0} ({1})' -f $short, $d.ToLocalTime().ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } else { $short }
     }
 }
 
@@ -54,13 +71,13 @@ function Get-ToolVersion {
     }
     try {
         $git = Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1
-        $out = & $git.Source -C $SourceRoot log -1 '--format=%h %cI' 2>$null
+        $out = & $git.Source -C $SourceRoot log -1 '--format=%h %cI %s' 2>$null
         if ($LASTEXITCODE -eq 0) {
             $v = ConvertTo-ToolVersion "$out"
             if ($v) {
                 # Changed files not committed yet: say so, the commit alone would not describe this copy.
                 $dirty = & $git.Source -C $SourceRoot status --porcelain -- . 2>$null
-                if ($dirty) { $v.Commit += '+'; $v.Text = $v.Text -replace '^(\S+)', '$1+' }
+                if ($dirty) { $v.Commit += '+'; $v.Release = ''; $v.Text = '{0} ({1})' -f $v.Commit, $v.Date.ToLocalTime().ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) }
                 return $v
             }
         }
@@ -78,6 +95,7 @@ function ConvertTo-ToolVersionRecord {
     param([Parameter(Mandatory)]$Version, [string]$Target, [datetime]$Built = (Get-Date))
     [ordered]@{
         commit = $Version.Commit
+        release = $(if ($Version.PSObject.Properties['Release']) { "$($Version.Release)" } else { '' })
         date   = if ($Version.Date) { $Version.Date.ToString('o', [Globalization.CultureInfo]::InvariantCulture) } else { $null }
         built  = $Built.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)
         target = $Target
@@ -90,7 +108,7 @@ function Read-ToolVersionFile {
     if (-not [IO.File]::Exists($Path)) { return $null }
     try { $j = [IO.File]::ReadAllText($Path) | ConvertFrom-Json } catch { return $null }
     if (-not $j -or -not $j.commit) { return $null }
-    $v = New-ToolVersion -Commit "$($j.commit)" -Date $j.date
+    $v = New-ToolVersion -Commit "$($j.commit)" -Date $j.date -Release $(if ($j.PSObject.Properties['release']) { "$($j.release)" } else { '' })
     $v | Add-Member -NotePropertyName Built -NotePropertyValue "$($j.built)"
     $v
 }
@@ -146,5 +164,5 @@ function Get-StaleBootImageMessage {
     else { "The network boot image was built before this console stamped versions; this console is $($Console.Text). Rebuild it so reimaged PCs get the latest fixes." }
 }
 
-Export-ModuleMember -Function ConvertTo-ToolVersion, New-ToolVersion, Get-ToolVersion, ConvertTo-ToolVersionRecord, Read-ToolVersionFile,
+Export-ModuleMember -Function Get-ToolReleaseNumber, ConvertTo-ToolVersion, New-ToolVersion, Get-ToolVersion, ConvertTo-ToolVersionRecord, Read-ToolVersionFile,
     Get-StickToolVersion, Compare-ToolVersion, Get-StaleStickMessage, Get-StaleBootImageMessage

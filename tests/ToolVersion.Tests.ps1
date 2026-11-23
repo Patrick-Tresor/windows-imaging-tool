@@ -16,11 +16,26 @@ try {
     Assert-Equal $v.Commit '853ca2f' 'commit read from version.txt'
     Assert-Equal $v.Date.ToString('yyyy-MM-dd HH:mm') '2026-11-20 22:10' 'date read as UTC'
     Assert-Equal ($v.Text -like '853ca2f (2026-11-2*)') $true 'text has the commit and the date'
-    Assert-Equal (ConvertTo-ToolVersion '$Format:%h %cI$') $null 'the unfilled placeholder is not a version'
+    Assert-Equal (ConvertTo-ToolVersion '$Format:%h %cI %s$') $null 'the unfilled placeholder is not a version'
+    Assert-Equal $v.Release '' 'no subject: no v1 number'
+
+    # v1.NN: pull requests merged since #143 (v1.00), from the merge commit's subject.
+    $r = ConvertTo-ToolVersion '1aa57f4 2026-11-23T13:42:38+00:00 Merge pull request #143 from Patrick-Tresor/claude/x'
+    Assert-Equal "$($r.Release)|$($r.Text)|$($r.Commit)" 'v1.00|v1.00|1aa57f4' 'the merge of #143 is v1.00'
+    Assert-Equal (Get-ToolReleaseNumber 'Merge pull request #144 from a/b') 'v1.01' 'the next merge is v1.01'
+    Assert-Equal (Get-ToolReleaseNumber 'Fix the stick copy (#250)') 'v1.107' 'a squash merge counts too'
+    Assert-Equal (Get-ToolReleaseNumber 'Merge pull request #120 from a/b') '' 'a merge before v1.00 has no number'
+    Assert-Equal (Get-ToolReleaseNumber 'Dashboard: History after 7 days') '' 'a plain commit has no number'
+    $plain = ConvertTo-ToolVersion '853ca2f 2026-11-20T22:10:00+00:00 Dashboard: History after 7 days'
+    Assert-Equal ($plain.Text -like '853ca2f (2026-11-2*)') $true 'a plain commit shows its commit and date'
+    $rec = ConvertTo-ToolVersionRecord -Version $r -Target Usb
+    $recPath = Join-Path $tmp 'rel.json'
+    Save-JsonFile -Path $recPath -InputObject $rec
+    Assert-Equal (Read-ToolVersionFile -Path $recPath).Text 'v1.00' 'the stick keeps the v1 number'
     Assert-Equal (ConvertTo-ToolVersion '') $null 'empty is not a version'
 
     # The repo's own version.txt keeps the placeholder that GitHub fills in, and .gitattributes asks for it.
-    Assert-Equal ([IO.File]::ReadAllText((Join-Path $repo 'src/version.txt')).Trim()) '$Format:%h %cI$' 'version.txt holds the git placeholder'
+    Assert-Equal ([IO.File]::ReadAllText((Join-Path $repo 'src/version.txt')).Trim()) '$Format:%h %cI %s$' 'version.txt holds the git placeholder'
     Assert-Equal ([bool](Select-String -LiteralPath (Join-Path $repo '.gitattributes') -Pattern '^src/version\.txt export-subst' -Quiet)) $true '.gitattributes fills version.txt in downloads'
 
     # A downloaded copy (no git): version.txt wins.

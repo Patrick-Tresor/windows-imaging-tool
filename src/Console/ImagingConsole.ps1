@@ -129,7 +129,7 @@ $ui = $form.Controls
 
 # This copy's version in the header; a stick built with an older one gets a banner (Update-StickVersionBanner).
 $script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
-$ui.TxtToolVersion.Text = "version $($script:toolVersion.Text)"
+$ui.TxtToolVersion.Text = if ($script:toolVersion.Release) { $script:toolVersion.Release } else { "version $($script:toolVersion.Text)" }
 $script:stickOldHidden = ''
 $script:bootOldMsg = $null
 
