@@ -120,11 +120,13 @@ function Show-AnswerEditor {
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
 
-    $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
-    $e.RbNameCustom.IsChecked = $a.NamingMode -eq 'Custom'
-    $e.TxtPrefix.Text = $a.Prefix
-    $e.CmbWmi.Text = $a.WmiQuery
-    $e.TxtScheme.Text = $a.CustomScheme
+    # One name pattern. An older answer file with a WMI query other than the serial keeps it until a pattern is typed.
+    $keepWmi = $a.NamingMode -eq 'WMI'
+    $e.TxtScheme.Text = if ($keepWmi) { '' } else { $a.CustomScheme }
+    if ($keepWmi) {
+        $e.TxtNameWmi.Text = "This answer file names PCs with $(if ($a.Prefix) { "the prefix $($a.Prefix) and " })the WMI query $($a.WmiQuery). Type a pattern to replace it."
+        $e.TxtNameWmi.Visibility = 'Visible'
+    }
 
     $e.RbDomain.IsChecked = $a.Membership -eq 'Domain'
     $e.RbWorkgroup.IsChecked = $a.Membership -ne 'Domain'
@@ -171,8 +173,6 @@ function Show-AnswerEditor {
     $syncEnabled = {
         $e.TxtDelay.IsEnabled = [bool]$e.RbUnattended.IsChecked
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
-        $e.CmbWmi.IsEnabled = -not $e.RbNameCustom.IsChecked
-        $e.TxtScheme.IsEnabled = [bool]$e.RbNameCustom.IsChecked
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
@@ -183,7 +183,7 @@ function Show-AnswerEditor {
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
     foreach ($c in 'ChkAdmin', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
@@ -266,10 +266,11 @@ function Show-AnswerEditor {
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
-        $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } else { 'WMI' }
-        $a.Prefix        = $e.TxtPrefix.Text.Trim()
-        $a.WmiQuery      = $e.CmbWmi.Text.Trim()
-        $a.CustomScheme  = $e.TxtScheme.Text.Trim()
+        if (-not $keepWmi -or $e.TxtScheme.Text.Trim()) {
+            $a.NamingMode   = 'Custom'
+            $a.Prefix       = ''
+            $a.CustomScheme = $e.TxtScheme.Text.Trim()
+        }
         $a.Membership    = if ($e.RbDomain.IsChecked) { 'Domain' } else { 'Workgroup' }
         $a.Domain        = $e.TxtDomain.Text.Trim()
         $a.OrganizationalUnit = $e.TxtOU.Text.Trim()
@@ -296,9 +297,10 @@ function Show-AnswerEditor {
     $e.BtnNamePreview.Add_Click({
         & $collect
         try {
-            $wmi = Get-WmiNamingValue -Query $a.WmiQuery
-            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial (Get-CimInstance Win32_BIOS).SerialNumber
-        } catch { $e.TxtNamePreview.Text = "Query failed: $($_.Exception.Message)" }
+            $serial = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
+            $wmi = if ($a.NamingMode -eq 'WMI') { Get-WmiNamingValue -Query $a.WmiQuery } else { $serial }
+            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial $serial
+        } catch { $e.TxtNamePreview.Text = "Could not read this PC: $($_.Exception.Message)" }
     })
 
     $e.BtnCancel.Add_Click({ $win.Close() })

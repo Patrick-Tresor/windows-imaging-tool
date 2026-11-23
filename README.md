@@ -186,10 +186,10 @@ the console; the format is documented in the commented
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
-- **computer naming**: a WMI query (for example the serial from
-  `Win32_SystemEnclosure`) with a prefix, a custom scheme like `A########`
-  (`#` = random digit, `{SERIAL}` = BIOS serial). Older answer files that asked
-  the technician use the serial instead.
+- **computer name pattern**: `{SERIAL}` is the BIOS serial and `#` a random
+  digit, for example `LAB-{SERIAL}` or `A########`. Older answer files with a
+  serial number WMI query or a prefix are read as that pattern; one with
+  another WMI query (an asset tag) keeps it until a pattern is typed.
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
