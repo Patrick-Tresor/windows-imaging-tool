@@ -85,7 +85,6 @@ function Show-ImageVersionsDialog {
             & $say $(if ($keep -eq 0) { 'Every image now keeps all its earlier versions.' } else { "Every image now keeps its newest $keep earlier versions." })
         }
     } })
-    $v.BtnRefresh.Add_Click({ & $safely { & $load } })
     $v.BtnClose.Add_Click({ $win.Close() })
 
     & $safely { & $load }
