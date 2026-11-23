@@ -436,6 +436,8 @@ switch ($Target) {
         # What the console's Computers tab checks before it starts this image on PCs over the network: which share it maps.
         Save-JsonFile -Path (Join-Path $OutputPath 'boot.json') -InputObject ([ordered]@{ built = (Get-Date).ToString('yyyy-MM-dd HH:mm')
             share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"; toolVersion = $toolVersion.Text })
+        # The console compares this with its own version and says when the network boot image needs rebuilding.
+        Save-JsonFile -Path (Join-Path $OutputPath 'tool-version.json') -InputObject $versionRecord
         Complete-BuildStep 'wim'
         Write-Host "boot.wim written to $OutputPath."
         # The same WinPE as an ISO, for a VM or a PC without a stick: it maps the share like the network boot image.

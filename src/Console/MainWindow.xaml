@@ -30,11 +30,12 @@
       </DockPanel>
     </Border>
 
-    <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
+    <!-- Shown when a USB stick plugged into this PC, or the network boot image, was built with an older version of the tool. -->
     <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
+          <Button x:Name="BtnBootOldRebuild" Content="Rebuild network boot image" Margin="8,0,0,0" Visibility="Collapsed"/>
           <Button x:Name="BtnStickOldHide" Content="Not now" Margin="8,0,0,0"/>
         </StackPanel>
         <TextBlock x:Name="TxtStickOld" TextWrapping="Wrap" VerticalAlignment="Center"/>

@@ -111,6 +111,7 @@ $ui = $form.Controls
 $script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
 $ui.TxtToolVersion.Text = "version $($script:toolVersion.Text)"
 $script:stickOldHidden = ''
+$script:bootOldMsg = $null
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -414,13 +415,23 @@ function Update-UsbDisks {
 function Update-StickVersionBanner {
     # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
     # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
-    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    # The network boot image gets the same banner, with a Rebuild button (checked on refresh, not on the timer).
+    $stick = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    $msg = (@($stick, $script:bootOldMsg) | Where-Object { $_ }) -join ' '
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
+        $ui.BtnStickOldUpdate.Visibility = if ($stick) { 'Visible' } else { 'Collapsed' }
+        $ui.BtnBootOldRebuild.Visibility = if ($script:bootOldMsg) { 'Visible' } else { 'Collapsed' }
         $ui.BdrStickOld.Visibility = 'Visible'
     } else {
         $ui.BdrStickOld.Visibility = 'Collapsed'
     }
+}
+
+function Update-BootVersionBanner {
+    # Is <content root>\Boot\boot.wim older than this console? Then the banner says so (Update-StickVersionBanner).
+    $script:bootOldMsg = if ($script:root) { try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null } }
+    Update-StickVersionBanner
 }
 
 function Select-StickForUpdate {
@@ -454,6 +465,7 @@ function Update-AdkStatus {
 function Update-All {
     $ui.TxtRoot.Text = $script:root
     Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
+    try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -1076,7 +1088,7 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
     $buildArgs += Get-WinPEDriverArgs
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
     Set-Status 'Network boot image build started.'
 } })
 
@@ -1349,6 +1361,7 @@ $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
+$ui.BtnBootOldRebuild.Add_Click({ $ui.BtnAdBuildBoot.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) })
 $ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
 $script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:stickTimer.Interval = [timespan]::FromSeconds(5)
@@ -1360,6 +1373,5 @@ $script:stickTimer.Start()
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
-Invoke-Safely { Update-StickVersionBanner }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()
