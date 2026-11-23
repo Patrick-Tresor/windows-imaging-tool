@@ -4,6 +4,8 @@
 # Used by the console (Tasks tab, answer file editor), Deploy-Image.ps1 in WinPE and FirstBoot.ps1 on the deployed PC.
 # PowerShell 5.1 compatible; nothing Windows-only runs at import.
 
+Import-Module (Join-Path $PSScriptRoot 'LibraryPack.psm1')   # what applications and tasks share
+
 $script:TaskTypes = 'powershell', 'cmd', 'exe'
 $script:TaskPhases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
 # Where FIRSTLOGON tasks are kept on the deployed PC: first boot clears what it staged in C:\Temp.
@@ -65,9 +67,7 @@ function ConvertTo-TaskJson {
 function Read-TaskPack {
     # Reads Tasks\<name>\task.json into a full definition. Throws when it is missing.
     param([Parameter(Mandatory)][string]$TaskRoot, [Parameter(Mandatory)][string]$Name)
-    $json = Join-Path (Join-Path $TaskRoot $Name) 'task.json'
-    if (-not (Test-Path $json)) { throw "Task '$Name' has no task.json in $TaskRoot\$Name." }
-    ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw $json | ConvertFrom-Json)
+    ConvertTo-TaskDefinition -Name $Name -Json (Read-PackJson -Root $TaskRoot -Name $Name -File 'task.json' -Noun 'Task')
 }
 
 function Test-TaskPack {
@@ -108,31 +108,12 @@ function Save-TaskPack {
         [AllowNull()][string]$ScriptText,
         [switch]$Overwrite
     )
-    $dest = Join-Path $TaskRoot $Definition.name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "A task named $($Definition.name) already exists." }
-    if ($Source -and -not (Test-Path $Source)) { throw "Script not found: $Source" }
-    $problems = @(Test-TaskPack -Definition $Definition)
-    if ($problems) { throw ($problems -join "`n") }
-
-    $isNew = -not (Test-Path $dest)
-    New-Item -ItemType Directory -Path $dest -Force | Out-Null
-    try {
-        if ($Source) {
-            if (Test-Path $Source -PathType Container) { Copy-Item -Path (Join-Path $Source '*') -Destination $dest -Recurse -Force }
-            else { Copy-Item -Path $Source -Destination $dest -Force }
-        }
-        if ($PSBoundParameters.ContainsKey('ScriptText') -and $null -ne $ScriptText) {
-            if ($Definition.type -eq 'exe') { throw 'An .exe task runs a program from its folder; it has no script text.' }
-            Write-TaskScriptText -Path (Join-Path $dest $Definition.script) -Text $ScriptText
-        }
-        $problems = @(Test-TaskPack -Definition $Definition -Folder $dest)
-        if ($problems) { throw ($problems -join "`n") }
-    } catch {
-        if ($isNew -and (Test-Path $dest)) { Remove-Item $dest -Recurse -Force }
-        throw
-    }
-    ConvertTo-TaskJson $Definition | Set-Content (Join-Path $dest 'task.json') -Encoding utf8
-    $dest
+    $writeScript = $PSBoundParameters.ContainsKey('ScriptText') -and $null -ne $ScriptText
+    if ($writeScript -and $Definition.type -eq 'exe') { throw 'An .exe task runs a program from its folder; it has no script text.' }
+    $fill = if ($writeScript) { { param($Folder) Write-TaskScriptText -Path (Join-Path $Folder $Definition.script) -Text $ScriptText } }
+    Save-PackFolder -Root $TaskRoot -Name $Definition.name -Noun 'task' -File 'task.json' -JsonText (ConvertTo-TaskJson $Definition) `
+        -Source $Source -SourceNoun 'Script' -Problems { param($Folder) Test-TaskPack -Definition $Definition -Folder $Folder } `
+        -Fill $fill -Overwrite:$Overwrite
 }
 
 function Get-TaskScriptText {
@@ -175,15 +156,6 @@ function Get-TaskCommandLine {
     if ($l.Arguments) { "$exe $($l.Arguments)" } else { $exe }
 }
 
-function Test-TaskRequirement {
-    # $true when the task is for this PC. Makers and models are wildcards, the same as for applications.
-    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)]$Identity)
-    $r = $Definition.requirements
-    $makerOk = -not @($r.makers).Count -or @($r.makers | Where-Object { $Identity.Maker -like $_ }).Count
-    $modelOk = -not @($r.models).Count -or @($r.models | Where-Object { $Identity.Model -like $_ -or ($Identity.MachineType -and $Identity.MachineType -like $_) }).Count
-    [bool]($makerOk -and $modelOk)
-}
-
 function Resolve-DeployTasks {
     <#
     .SYNOPSIS
@@ -212,7 +184,7 @@ function Resolve-DeployTasks {
         try { $def = Read-TaskPack -TaskRoot $TaskRoot -Name $scriptName } catch { $problems += $_.Exception.Message; continue }
         $bad = @(Test-TaskPack -Definition $def -Folder $folder)
         if ($bad) { $problems += "Task ${scriptName}: $($bad -join ' ')"; continue }
-        if ($Identity -and -not (Test-TaskRequirement -Definition $def -Identity $Identity)) {
+        if ($Identity -and -not (Test-PackRequirement -Definition $def -Identity $Identity)) {
             & $OnSkip "Skipping task ${scriptName}: it is for $((@($def.requirements.makers) + @($def.requirements.models)) -join ', ') only"
             continue
         }
@@ -274,41 +246,10 @@ function Invoke-TaskPack {
     $d = $Definition
     $out = { param($s, $code, $msg) [pscustomobject]@{ Status = $s; ExitCode = $code; Message = $msg; LogPath = $LogPath } }
     $l = Get-TaskLaunch -Definition $d -Folder $Folder -ExtraArguments $ExtraArguments
-    & $Log "  > $($l.FilePath) $($l.Arguments)"
-    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force | Out-Null
-    # Console programs (powershell.exe, cmd.exe) write redirected output in the OEM code page, so read it that way
-    # or accented letters in the log come out wrong. Both streams are read while the task runs so neither pipe fills.
-    $oem = try { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage) } catch { [Console]::OutputEncoding }
-    $psi = New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName = $l.FilePath
-    $psi.Arguments = "$($l.Arguments)"
-    if ($Folder -and [IO.Directory]::Exists($Folder)) { $psi.WorkingDirectory = $Folder }
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.StandardOutputEncoding = $oem
-    $psi.StandardErrorEncoding = $oem
-    $p = [Diagnostics.Process]::Start($psi)
-    $stdout = $p.StandardOutput.ReadToEndAsync()
-    $stderr = $p.StandardError.ReadToEndAsync()
-    $timedOut = -not $p.WaitForExit($d.timeoutMinutes * 60000)
-    if ($timedOut) { try { & taskkill.exe /PID $p.Id /T /F | Out-Null } catch { } }
-    else { $p.WaitForExit() }
-    # The pipes close once the task (and anything it started) has ended; don't hang on one that stays open.
-    $null = [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 15000)
-
-    # One log per task: the command, its output, then its errors. UTF-8, so accents survive.
-    $lines = @("{0:yyyy-MM-dd HH:mm:ss} {1} {2}" -f (Get-Date), $l.FilePath, $l.Arguments)
-    foreach ($t in $stdout, $stderr) {
-        if ($t.IsCompleted -and -not $t.IsFaulted -and $t.Result) { $lines += @($t.Result -split "\r?\n" | Where-Object { $_ -ne '' }) }
-    }
-    Add-Content -Path $LogPath -Value $lines -Encoding UTF8
-    $last = @($lines | Select-Object -Skip 1 | Where-Object { "$_".Trim() } | Select-Object -Last 1)
-    $tail = if ($last) { "; last line: $("$($last[0])".Trim())" } else { '' }
-
-    if ($timedOut) { return & $out 'TimedOut' $null "still running after $($d.timeoutMinutes) minutes; stopped$tail" }
-    $code = $p.ExitCode
+    $run = Invoke-PackProcess -FilePath $l.FilePath -Arguments $l.Arguments -WorkingDirectory $Folder -TimeoutMinutes $d.timeoutMinutes -LogPath $LogPath -Log $Log
+    $tail = if ($run.LastLine) { "; last line: $($run.LastLine)" } else { '' }
+    if ($run.TimedOut) { return & $out 'TimedOut' $null "still running after $($d.timeoutMinutes) minutes; stopped$tail" }
+    $code = $run.ExitCode
     if ($d.successCodes -notcontains $code) { return & $out 'Failed' $code "exit code $code is not a success code ($($d.successCodes -join ', '))$tail" }
     & $out 'Succeeded' $code "exit $code"
 }
@@ -319,9 +260,8 @@ function Invoke-TaskPack {
 
 function Get-TaskTemplates {
     # config\task-templates.json: ready-made scripts for common jobs, to start a new task from.
-    param([string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/task-templates.json'))
-    if (-not (Test-Path $Path)) { return @() }
-    @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
+    param([string]$Path)
+    Get-PackTemplates -File 'task-templates.json' -Path $Path
 }
 
 function New-TaskFromTemplate {
@@ -339,6 +279,6 @@ function New-TaskFromTemplate {
 #endregion
 
 Export-ModuleMember -Function Get-TaskTypeFromFile, ConvertTo-TaskDefinition, ConvertTo-TaskJson, Read-TaskPack, Test-TaskPack, New-CommandTaskDefinition, Get-TaskLogName,
-    Write-TaskScriptText, Save-TaskPack, Get-TaskScriptText, Get-TaskLaunch, Get-TaskCommandLine, Test-TaskRequirement,
+    Write-TaskScriptText, Save-TaskPack, Get-TaskScriptText, Get-TaskLaunch, Get-TaskCommandLine,
     Resolve-DeployTasks, Get-LogonTaskFolder, Get-LogonTaskCommand, New-LogonTaskPlan, Invoke-TaskPack,
     Get-TaskTemplates, New-TaskFromTemplate

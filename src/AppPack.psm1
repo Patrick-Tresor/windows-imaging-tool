@@ -3,6 +3,8 @@
 # Used by the console (build, inspect, export/import), Deploy-Image.ps1 in WinPE (requirements) and
 # FirstBoot.ps1 on the deployed PC (detection). PowerShell 5.1 compatible; nothing Windows-only runs at import.
 
+Import-Module (Join-Path $PSScriptRoot 'LibraryPack.psm1')   # what applications and tasks share
+
 $script:InstallerTypes = 'msi', 'msix', 'nsis', 'inno', 'installshield', 'burn', 'advancedinstaller', 'squirrel', 'exe', 'script'
 $script:RuleTypes = 'msi', 'uninstall', 'file', 'registry', 'appx', 'script'
 $script:UninstallKeys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -82,9 +84,7 @@ function ConvertTo-DetectionRule {
 function Read-AppPack {
     # Reads Applications\<name>\app.json into a full definition. Throws when it is missing or has no command.
     param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Name)
-    $json = Join-Path (Join-Path $AppRoot $Name) 'app.json'
-    if (-not (Test-Path $json)) { throw "Application '$Name' has no app.json in $AppRoot\$Name." }
-    $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw $json | ConvertFrom-Json)
+    $def = ConvertTo-AppDefinition -Name $Name -Json (Read-PackJson -Root $AppRoot -Name $Name -File 'app.json' -Noun 'Application')
     if (-not $def.command) { throw "Application '$Name': app.json has no command." }
     $def
 }
@@ -279,9 +279,8 @@ function Get-MsixIdentity {
 
 function Get-AppTemplates {
     # config\app-templates.json: known silent switches and detection rules for common applications.
-    param([string]$Path = (Join-Path (Split-Path $PSScriptRoot -Parent) 'config/app-templates.json'))
-    if (-not (Test-Path $Path)) { return @() }
-    @((Get-Content -Raw $Path | ConvertFrom-Json).templates)
+    param([string]$Path)
+    Get-PackTemplates -File 'app-templates.json' -Path $Path
 }
 
 function Copy-AppTemplateFiles {
@@ -581,39 +580,14 @@ function Save-AppPack {
         [string]$Source,
         [switch]$Overwrite
     )
-    $dest = Join-Path $AppRoot $Definition.name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "An application named $($Definition.name) already exists." }
-    if ($Source -and -not (Test-Path $Source)) { throw "Installer not found: $Source" }
-    $problems = @(Test-AppPack -Definition $Definition | Where-Object { $_ -notlike 'Warning:*' })
-    if ($problems) { throw ($problems -join "`n") }
-
-    $isNew = -not (Test-Path $dest)
-    New-Item -ItemType Directory -Path $dest -Force | Out-Null
-    if ($Source) {
-        if (Test-Path $Source -PathType Container) { Copy-Item -Path (Join-Path $Source '*') -Destination $dest -Recurse -Force }
-        else { Copy-Item -Path $Source -Destination $dest -Force }
-    }
-    $problems = @(Test-AppPack -Definition $Definition -Folder $dest | Where-Object { $_ -notlike 'Warning:*' })
-    if ($problems) {
-        if ($isNew) { Remove-Item $dest -Recurse -Force }
-        throw ($problems -join "`n")
-    }
-    ConvertTo-AppJson $Definition | Set-Content (Join-Path $dest 'app.json') -Encoding utf8
-    $dest
+    Save-PackFolder -Root $AppRoot -Name $Definition.name -Noun 'application' -File 'app.json' -JsonText (ConvertTo-AppJson $Definition) `
+        -Source $Source -SourceNoun 'Installer' -Overwrite:$Overwrite `
+        -Problems { param($Folder) Test-AppPack -Definition $Definition -Folder $Folder | Where-Object { $_ -notlike 'Warning:*' } }
 }
 
 #endregion
 
 #region On the target PC
-
-function Test-AppRequirement {
-    # $true when the app is for this PC. Makers and models are wildcards, compared with Get-HardwareIdentity's Maker/Model.
-    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)]$Identity)
-    $r = $Definition.requirements
-    $makerOk = -not @($r.makers).Count -or @($r.makers | Where-Object { $Identity.Maker -like $_ }).Count
-    $modelOk = -not @($r.models).Count -or @($r.models | Where-Object { $Identity.Model -like $_ -or ($Identity.MachineType -and $Identity.MachineType -like $_) }).Count
-    [bool]($makerOk -and $modelOk)
-}
 
 function Compare-AppVersion {
     # True when $Found satisfies "$Operator $Wanted". Dotted versions compare numerically, anything else as text.
@@ -872,10 +846,14 @@ function Invoke-AppInstall {
     <#
     .SYNOPSIS
         Installs one application on this PC: skips it when already detected, runs the command with a timeout,
-        then checks the detection rules again. Returns @{ Status; ExitCode; RebootNeeded; Message }.
+        then checks the detection rules again; the installer's output goes to -LogPath, as a task's does.
+        Returns @{ Status; ExitCode; RebootNeeded; Message }.
         Status is Installed, AlreadyInstalled, Failed or TimedOut.
     #>
-    param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$AppFolder, [scriptblock]$Log = { param($m) Write-Host $m })
+    param(
+        [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$AppFolder, [scriptblock]$Log = { param($m) Write-Host $m },
+        [string]$LogPath   # the installer's own output; default App-<name>.log in TEMP
+    )
     $d = $Definition
     $out = { param($s, $code, $reboot, $msg) [pscustomobject]@{ Status = $s; ExitCode = $code; RebootNeeded = [bool]$reboot; Message = $msg } }
 
@@ -888,16 +866,12 @@ function Invoke-AppInstall {
         catch { return & $out 'Failed' $null $false "download failed: $($_.Exception.Message)" }
     }
 
-    & $Log "  > $($d.command)"
-    $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $($d.command)" -WorkingDirectory $AppFolder -PassThru -WindowStyle Hidden
-    $null = $p.Handle   # keeps the handle open, or ExitCode is empty after a timed wait
-    if (-not $p.WaitForExit($d.timeoutMinutes * 60000)) {
-        try { & taskkill.exe /PID $p.Id /T /F | Out-Null } catch { }
-        return & $out 'TimedOut' $null $false "still running after $($d.timeoutMinutes) minutes; stopped"
-    }
-    $p.WaitForExit()
-    $code = $p.ExitCode
-    if ($d.successCodes -notcontains $code) { return & $out 'Failed' $code $false "exit code $code is not a success code ($($d.successCodes -join ', '))" }
+    if (-not $LogPath) { $LogPath = Join-Path ([IO.Path]::GetTempPath()) "App-$($d.name).log" }
+    $run = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments "/c $($d.command)" -WorkingDirectory $AppFolder -TimeoutMinutes $d.timeoutMinutes -LogPath $LogPath -Log $Log
+    $tail = if ($run.LastLine) { "; last line: $($run.LastLine)" } else { '' }
+    if ($run.TimedOut) { return & $out 'TimedOut' $null $false "still running after $($d.timeoutMinutes) minutes; stopped$tail" }
+    $code = $run.ExitCode
+    if ($d.successCodes -notcontains $code) { return & $out 'Failed' $code $false "exit code $code is not a success code ($($d.successCodes -join ', '))$tail" }
     $reboot = $d.rebootCodes -contains $code
 
     $after = Test-AppDetection -Definition $d -AppFolder $AppFolder
@@ -918,4 +892,4 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch,
     Get-MediaAppDownloads, Add-MediaCopyItems,
     Save-AppPack,
-    Test-AppRequirement, Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
+    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall

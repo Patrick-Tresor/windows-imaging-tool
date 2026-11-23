@@ -29,6 +29,7 @@ Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'LibraryPack.psm1') -Force   # Test-PackRequirement
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TaskPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
@@ -575,7 +576,7 @@ try {
     # Applications are checked now, before the disk is wiped.
     # Apps limited to other makers or models (Dell Command Update on a Lenovo) are left out.
     $apps = @($answer.Applications | ForEach-Object { Get-AppDefinition -AppRoot $appRoot -Name $_ } | Where-Object {
-        if (Test-AppRequirement -Definition $_ -Identity $hw) { return $true }
+        if (Test-PackRequirement -Definition $_ -Identity $hw) { return $true }
         Write-DeployLog "Skipping application $($_.name): it is for $((@($_.requirements.makers) + @($_.requirements.models)) -join ', ') only"
         $false
     })
@@ -717,12 +718,13 @@ try {
     }
     if ($logonPlan) {
         $logonDir = 'W:\ProgramData\ImagingTool\Tasks'
-        Copy-Item (Join-Path $PSScriptRoot 'Run-LogonTask.ps1'), (Join-Path $PSScriptRoot 'TaskPack.psm1') $logonDir -Force
+        Copy-Item (Join-Path $PSScriptRoot 'Run-LogonTask.ps1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'LibraryPack.psm1') $logonDir -Force
         Save-JsonFile -Path (Join-Path $logonDir 'logon-tasks.json') -InputObject $logonPlan -Depth 8
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
         (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
-        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
+        (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'LibraryPack.psm1'),
+        (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
     # Removes the passwords from unattend.xml once OOBE is over (FirstBoot.ps1 sets up the logon task that runs it).
     # It runs as SYSTEM, so only Administrators and SYSTEM may change it.
     New-Item -ItemType Directory -Path 'W:\ProgramData\ImagingTool' -Force | Out-Null
@@ -747,7 +749,7 @@ try {
     Set-Content -Path 'W:\Temp\firstboot-progress.json' -Value '{}' -Encoding ascii
     Set-Content -Path 'W:\Temp\firstboot.lock' -Value '' -Encoding ascii
     foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1',
-                   'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
+                   'LibraryPack.psm1', 'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
         Protect-StagedItem -Path "W:\Temp\$f"
     }
     New-Item -ItemType Directory -Path 'W:\Windows\Setup\Scripts' -Force | Out-Null

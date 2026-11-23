@@ -76,7 +76,7 @@ $lockApps = $deploy.IndexOf("Protect-StagedItem -Path `$f -Folder")
 Assert-Equal ($lockApps -gt 0 -and $lockApps -lt $deploy.IndexOf("Copy-Item -Path (Join-Path `$appRoot `$app.name)")) $true 'Apps and Tasks are locked before anything is copied in'
 $lockEnd = $deploy.IndexOf('Protect-StagedItem -Path "W:\Temp\$f"')
 $lockList = $deploy.Substring($deploy.LastIndexOf('foreach ($f in', $lockEnd), $lockEnd - $deploy.LastIndexOf('foreach ($f in', $lockEnd))
-foreach ($f in 'FirstBoot.ps1', 'FirstBootState.psm1', 'AppPack.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
+foreach ($f in 'FirstBoot.ps1', 'FirstBootState.psm1', 'AppPack.psm1', 'LibraryPack.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
     Assert-Equal ($lockEnd -gt 0 -and $lockList.Contains("'$f'")) $true "deploy locks $f"
 }
 Assert-Equal ($deploy.Contains("Protect-StagedItem -Path 'W:\Temp\deployed.json'")) $true 'deploy locks deployed.json'
