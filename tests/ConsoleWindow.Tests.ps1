@@ -19,7 +19,7 @@ $relaunch = [regex]::Match($text, "(?s)Start-Process powershell\.exe -Verb RunAs
 Assert-Equal ($relaunch -match "-WindowStyle Hidden -ArgumentList") $true 'the elevated relaunch opens no visible window'
 Assert-Equal ($relaunch -match "'-HideConsole'") $true 'the elevated relaunch hides its console window too'
 Assert-Equal ($text -match 'ShowWindow\(\$h, 0\)') $true 'the console hides its own console window (SW_HIDE)'
-Assert-Equal ($text -match "(?s)trap \{.*?console-error\.log.*?MessageBox\]::Show") $true 'a startup error is logged and shown in a message box'
+Assert-Equal ($text -match "(?s)function Write-ConsoleErrorLog.*?console-error\.log.*?trap \{.*?Write-ConsoleErrorLog.*?MessageBox\]::Show") $true 'a startup error is logged and shown in a message box'
 $trapAt = $text.IndexOf('trap {'); $windowAt = $text.IndexOf("MainWindow.xaml")
 Assert-Equal ($trapAt -gt 0 -and $trapAt -lt $windowAt) $true 'the error trap is set before the main window loads'
 
