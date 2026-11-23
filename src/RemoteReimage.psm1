@@ -544,6 +544,159 @@ function Get-LocalBootCleanupCommand {
     "cmd.exe /c $cmd & schtasks /Delete /TN $TaskName /F"
 }
 
+#region Restart notice
+
+# The tasks that restart the PC into WinPE and tell the people signed in to it. Windows' own shutdown /t notice
+# ("You're about to be signed out") has only Close, so the console shows its own window with Reboot now.
+$script:NoticeFolder = 'C:\_ImagingBoot\Notice'
+$script:NoticeScriptPath = 'C:\_ImagingBoot\Notice\ReimageNotice.ps1'
+$script:RestartTaskName = 'ImagingTool\ReimageRestart'
+$script:NoticeTaskName = 'ImagingTool\ReimageNotice'
+# SYSTEM and Administrators full control, signed-in users read and run: Reboot now runs it with schtasks /Run.
+$script:RestartTaskSddl = 'D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;AU)'
+
+function Get-ReimageNoticeFolderAclArgs {
+    # The notice script sits under C:\_ImagingBoot (removed with it) in a subfolder the users signed in can read.
+    @($script:NoticeFolder, '/grant', '*S-1-5-32-545:(OI)(CI)RX')
+}
+
+function Get-ReimageRestartCommand {
+    # What the SYSTEM restart task runs: closes the notice windows' task, then restarts at once (apps closed).
+    "/c schtasks /Delete /TN $script:NoticeTaskName /F & shutdown.exe /r /t 0 /f /d p:4:1"
+}
+
+function Get-ReimageRestartTaskXml {
+    <#
+    .SYNOPSIS
+        Task Scheduler XML for the SYSTEM task that restarts the PC into WinPE. {START} and {END} are filled on the PC
+        with its own clock (local time): it runs once at {START}, and deletes itself after {END} if Windows comes back.
+    #>
+    $actionArgs = [Security.SecurityElement]::Escape((Get-ReimageRestartCommand))
+    @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Restarts this PC into WinPE to reinstall Windows (imaging console).</Description></RegistrationInfo>
+  <Triggers>
+    <TimeTrigger><StartBoundary>{START}</StartBoundary><EndBoundary>{END}</EndBoundary><Enabled>true</Enabled></TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec><Command>cmd.exe</Command><Arguments>$actionArgs</Arguments></Exec>
+  </Actions>
+</Task>
+"@
+}
+
+function Get-ReimageNoticeTaskXml {
+    # Task Scheduler XML for the notice window: no trigger, started at once in the session of every user signed in
+    # (group BUILTIN\Users, their own rights).
+    $cmd = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $script:NoticeScriptPath"
+    @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Tells the user this PC restarts to reinstall Windows (imaging console).</Description></RegistrationInfo>
+  <Principals>
+    <Principal id="Author"><GroupId>S-1-5-32-545</GroupId><RunLevel>LeastPrivilege</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec><Command>powershell.exe</Command><Arguments>$cmd</Arguments></Exec>
+  </Actions>
+</Task>
+"@
+}
+
+function Get-ReimageNoticeScript {
+    <#
+    .SYNOPSIS
+        The window the users signed in to the PC see: the message, a countdown, Reboot now and Close. {DEADLINE} is
+        filled on the PC (UTC ticks of the restart). Reboot now runs the SYSTEM restart task, or restarts directly
+        when it can't (users may restart a workstation). Close only hides the window: the PC still restarts on time.
+    #>
+    param([Parameter(Mandatory)][string]$Message)
+    $msg = $Message -replace "'", "''"
+    @"
+`$ErrorActionPreference = 'Continue'
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+[Windows.Forms.Application]::EnableVisualStyles()
+`$deadline = [datetime]::new([int64]'{DEADLINE}', [DateTimeKind]::Utc)
+`$font = New-Object Drawing.Font('Segoe UI', 10)
+`$form = New-Object Windows.Forms.Form
+`$form.Text = 'Windows is being reinstalled'
+`$form.FormBorderStyle = 'FixedDialog'; `$form.MaximizeBox = `$false; `$form.MinimizeBox = `$false
+`$form.StartPosition = 'CenterScreen'; `$form.TopMost = `$true; `$form.ShowInTaskbar = `$true
+`$form.AutoSize = `$true; `$form.AutoSizeMode = 'GrowAndShrink'; `$form.Font = `$font
+`$form.BackColor = [Drawing.Color]::White; `$form.Padding = New-Object Windows.Forms.Padding(8)
+`$layout = New-Object Windows.Forms.TableLayoutPanel
+`$layout.AutoSize = `$true; `$layout.ColumnCount = 1; `$layout.Dock = 'Fill'
+`$title = New-Object Windows.Forms.Label
+`$title.Text = 'This PC is about to restart'; `$title.AutoSize = `$true
+`$title.Font = New-Object Drawing.Font('Segoe UI Semibold', 13); `$title.Margin = New-Object Windows.Forms.Padding(8, 8, 8, 4)
+`$text = New-Object Windows.Forms.Label
+`$text.Text = '$msg'; `$text.AutoSize = `$true; `$text.MaximumSize = New-Object Drawing.Size(420, 0)
+`$text.Margin = New-Object Windows.Forms.Padding(8, 4, 8, 4)
+`$count = New-Object Windows.Forms.Label
+`$count.AutoSize = `$true; `$count.Margin = New-Object Windows.Forms.Padding(8, 4, 8, 12); `$count.ForeColor = [Drawing.Color]::DimGray
+`$buttons = New-Object Windows.Forms.FlowLayoutPanel
+`$buttons.AutoSize = `$true; `$buttons.FlowDirection = 'RightToLeft'; `$buttons.Dock = 'Fill'
+`$close = New-Object Windows.Forms.Button
+`$close.Text = 'Close'; `$close.AutoSize = `$true; `$close.MinimumSize = New-Object Drawing.Size(100, 32)
+`$reboot = New-Object Windows.Forms.Button
+`$reboot.Text = 'Reboot now'; `$reboot.AutoSize = `$true; `$reboot.MinimumSize = New-Object Drawing.Size(120, 32)
+`$buttons.Controls.AddRange(@(`$close, `$reboot))
+`$layout.Controls.AddRange(@(`$title, `$text, `$count, `$buttons))
+`$form.Controls.Add(`$layout)
+`$form.AcceptButton = `$reboot; `$form.CancelButton = `$close
+`$showLeft = {
+    `$left = `$deadline - [datetime]::UtcNow
+    if (`$left.TotalSeconds -le 0) { `$count.Text = 'Restarting now...'; return }
+    `$count.Text = 'Save your work. It restarts by itself in {0}:{1:00}.' -f [int][math]::Floor(`$left.TotalMinutes), `$left.Seconds
+}
+& `$showLeft
+`$timer = New-Object Windows.Forms.Timer
+`$timer.Interval = 1000
+`$timer.Add_Tick(`$showLeft)
+`$timer.Start()
+`$close.Add_Click({ `$form.Close() })
+`$reboot.Add_Click({
+    `$reboot.Enabled = `$false; `$close.Enabled = `$false
+    `$timer.Stop(); `$count.Text = 'Restarting now...'; `$form.Refresh()
+    & schtasks.exe /Run /TN '$script:RestartTaskName' 2>&1 | Out-Null
+    # Users may restart a workstation themselves when the task can't be run.
+    if (`$LASTEXITCODE -ne 0) {
+        & shutdown.exe /r /t 0 /f /d p:4:1 2>&1 | Out-Null
+    }
+    if (`$LASTEXITCODE -ne 0) {
+        `$close.Enabled = `$true; `$timer.Start()
+        `$text.Text = 'This PC could not restart now. It restarts by itself when the time is up.'
+    }
+})
+[void]`$form.ShowDialog()
+`$timer.Stop()
+"@
+}
+
+#endregion
+
 function Remove-LocalDiskBoot {
     # Takes WinPE off a PC that is back in Windows without being reimaged: the folder, the boot entry and the task.
     param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
@@ -552,7 +705,7 @@ function Remove-LocalDiskBoot {
         Invoke-RemoteChannel -Channel $ch -ArgumentList "$BootEntry" -ScriptBlock {
             param($Entry)
             if ($Entry) { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null }
-            & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
+            foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null }
             Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
             if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
         } | Out-Null
@@ -604,8 +757,13 @@ function Invoke-LocalDiskBoot {
         $steps = Get-LocalBootCommands -RamdiskId $ramId -LoaderId $loaderId
         $cleanup = Get-LocalBootCleanupCommand -BootEntry $loaderId
         & $OnStage 'restart'
-        Invoke-RemoteChannel -Channel $ch -ArgumentList $steps, $DelaySeconds, $Message, $cleanup -ScriptBlock {
-            param($Steps, $Delay, $Message, $Cleanup)
+        $notice = [pscustomobject]@{
+            Folder = $script:NoticeFolder; FolderAcl = @(Get-ReimageNoticeFolderAclArgs); ScriptPath = $script:NoticeScriptPath
+            Script = Get-ReimageNoticeScript -Message $Message; NoticeXml = Get-ReimageNoticeTaskXml
+            RestartXml = Get-ReimageRestartTaskXml; RestartSddl = $script:RestartTaskSddl
+        }
+        Invoke-RemoteChannel -Channel $ch -ArgumentList $steps, $DelaySeconds, $Message, $cleanup, $notice -ScriptBlock {
+            param($Steps, $Delay, $Message, $Cleanup, $Notice)
             foreach ($a in $Steps) {
                 $o = & bcdedit.exe ([string[]]$a) 2>&1
                 if ($LASTEXITCODE -ne 0) { throw "bcdedit $($a -join ' ') failed: $o" }
@@ -617,9 +775,34 @@ function Invoke-LocalDiskBoot {
             # erases the disk anyway.
             $bl = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue
             if ($bl -and $bl.ProtectionStatus -eq 'On') { Suspend-BitLocker -MountPoint 'C:' -RebootCount 1 | Out-Null }
-            # /d p:4:1 = planned, application installation. A delay over 0 also closes the apps that are open.
-            & shutdown.exe /r /t $Delay /c $Message /d p:4:1
-            if ($LASTEXITCODE -ne 0) { throw "shutdown.exe failed (exit $LASTEXITCODE)." }
+            # The restart: a SYSTEM task at the time, and a window with Reboot now and Close for each user signed in
+            # (Windows' own shutdown /t notice has only Close). Old way if the task can't be made.
+            $at = (Get-Date).AddSeconds($Delay)
+            $inv = [Globalization.CultureInfo]::InvariantCulture
+            $scheduled = $false
+            try {
+                $svc = New-Object -ComObject Schedule.Service
+                $svc.Connect()
+                try { $folder = $svc.GetFolder('\ImagingTool') } catch { $folder = $svc.GetFolder('\').CreateFolder('ImagingTool') }
+                $xml = $Notice.RestartXml.Replace('{START}', $at.ToString("yyyy-MM-dd'T'HH:mm:ss", $inv)).Replace('{END}', $at.AddHours(1).ToString("yyyy-MM-dd'T'HH:mm:ss", $inv))
+                # 6 = create or update, 5 = service account (SYSTEM).
+                [void]$folder.RegisterTask('ReimageRestart', $xml, 6, $null, $null, 5, $Notice.RestartSddl)
+                $scheduled = $true
+                try {
+                    New-Item -ItemType Directory -Path $Notice.Folder -Force | Out-Null
+                    & icacls.exe ([string[]]$Notice.FolderAcl) 2>&1 | Out-Null
+                    $text = $Notice.Script.Replace('{DEADLINE}', "$($at.ToUniversalTime().Ticks)")
+                    [IO.File]::WriteAllText($Notice.ScriptPath, $text, (New-Object Text.UTF8Encoding $true))
+                    # 4 = group: runs in the session of each user signed in.
+                    $task = $folder.RegisterTask('ReimageNotice', $Notice.NoticeXml, 6, $null, $null, 4, $null)
+                    [void]$task.Run($null)
+                } catch { }    # no window: the PC still restarts on time
+            } catch { }
+            if (-not $scheduled) {
+                # /d p:4:1 = planned, application installation. A delay over 0 also closes the apps that are open.
+                & shutdown.exe /r /t $Delay /c $Message /d p:4:1
+                if ($LASTEXITCODE -ne 0) { throw "shutdown.exe failed (exit $LASTEXITCODE)." }
+            }
         } | Out-Null
         $created = @()
         [pscustomobject]@{ ComputerName = $ComputerName; BootEntry = $loaderId; Method = $Method }
@@ -629,7 +812,7 @@ function Invoke-LocalDiskBoot {
             Invoke-RemoteChannel -Channel $ch -ArgumentList (, $created) -ScriptBlock {
                 param($Ids)
                 foreach ($id in $Ids) { & bcdedit.exe /delete $id /f 2>&1 | Out-Null }
-                & schtasks.exe /Delete /TN 'ImagingTool\RemoveImagingBoot' /F 2>&1 | Out-Null
+                foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null }
                 Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
             } | Out-Null
         } catch { }
@@ -728,6 +911,6 @@ function Read-ReimageTargets {
     })
 }
 
-Export-ModuleMember -Function Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
+Export-ModuleMember -Function Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems

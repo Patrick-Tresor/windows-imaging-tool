@@ -135,6 +135,30 @@ $clean = Get-LocalBootCleanupCommand -BootEntry '{l}'
 Assert-Equal $clean 'cmd.exe /c rd /s /q C:\_ImagingBoot & bcdedit /delete {l} /f & schtasks /Delete /TN ImagingTool\RemoveImagingBoot /F' 'the startup task removes WinPE, its boot entry and itself'
 Assert-Equal ($clean.Length -le 261) $true 'the task command fits schtasks /TR'
 $reimage = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
+
+# The restart notice: our own window with Reboot now and Close (Windows' shutdown /t notice has only Close).
+$restartXml = [xml]((Get-ReimageRestartTaskXml).Replace('{START}', '2026-11-22T20:00:00').Replace('{END}', '2026-11-22T21:00:00'))
+Assert-Equal $restartXml.Task.Principals.Principal.UserId 'S-1-5-18' 'the restart task runs as SYSTEM'
+Assert-Equal $restartXml.Task.Triggers.TimeTrigger.StartBoundary '2026-11-22T20:00:00' 'the restart task runs at the time filled on the PC'
+Assert-Equal $restartXml.Task.Settings.DeleteExpiredTaskAfter 'PT0S' 'the restart task deletes itself if Windows comes back'
+Assert-Equal $restartXml.Task.Actions.Exec.Arguments (Get-ReimageRestartCommand) 'the restart task runs the restart command'
+Assert-Equal ((Get-ReimageRestartCommand) -match 'shutdown\.exe /r /t 0 /f') $true 'the restart task restarts at once'
+Assert-Equal ((Get-ReimageRestartCommand) -match 'schtasks /Delete /TN ImagingTool\\ReimageNotice /F') $true 'the restart task closes the notice task'
+$noticeXml = [xml](Get-ReimageNoticeTaskXml)
+Assert-Equal $noticeXml.Task.Principals.Principal.GroupId 'S-1-5-32-545' 'the notice runs in the session of each user signed in'
+Assert-Equal $noticeXml.Task.Principals.Principal.RunLevel 'LeastPrivilege' 'the notice runs with the user''s own rights'
+Assert-Equal ($noticeXml.Task.Actions.Exec.Arguments -match [regex]::Escape('-File C:\_ImagingBoot\Notice\ReimageNotice.ps1')) $true 'the notice task runs the notice script'
+Assert-Equal ((Get-ReimageNoticeFolderAclArgs) -join ' ') 'C:\_ImagingBoot\Notice /grant *S-1-5-32-545:(OI)(CI)RX' 'users can read the notice folder only'
+$noticeScript = Get-ReimageNoticeScript -Message "IT is reinstalling Windows. Don't lose your work."
+$parseErrors = $null
+[void][Management.Automation.Language.Parser]::ParseInput($noticeScript.Replace('{DEADLINE}', '0'), [ref]$null, [ref]$parseErrors)
+Assert-Equal @($parseErrors).Count 0 'the notice script parses (a quote in the message is escaped)'
+Assert-Equal ($noticeScript -match "\.Text = 'Reboot now'") $true 'the notice has Reboot now'
+Assert-Equal ($noticeScript -match "\.Text = 'Close'") $true 'the notice keeps Close'
+Assert-Equal ($noticeScript -match [regex]::Escape("schtasks.exe /Run /TN 'ImagingTool\ReimageRestart'")) $true 'Reboot now runs the restart task'
+Assert-Equal ($noticeScript -match "Don''t lose your work") $true 'the message is in the window'
+Assert-Equal ($reimage -match 'RegisterTask\(''ReimageRestart'', \$xml, 6, \$null, \$null, 5, \$Notice\.RestartSddl\)') $true 'signed-in users may run the restart task'
+Assert-Equal ($reimage -match "if \(-not \`$scheduled\) \{\s+# /d p:4:1") $true 'shutdown /t is only the fallback when the task cannot be made'
 $aclAt = $reimage.IndexOf('& icacls.exe ([string[]]$AclArgs)'); $copyAt = $reimage.IndexOf("Copy-ToRemoteChannel -Channel `$ch -Path `$BootWim")
 Assert-Equal ($aclAt -gt 0 -and $aclAt -lt $copyAt) $true 'the folder is locked before boot.wim is copied in'
 Assert-Equal ($reimage -match "schtasks\.exe /Create /TN 'ImagingTool\\RemoveImagingBoot'") $true 'the cleanup task is created with the boot entry'
