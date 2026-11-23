@@ -57,7 +57,6 @@ try {
     $xml = Get-Content -Raw (Join-Path $repo 'config\answer-files\Default.xml')
     $xml = $xml -replace '<file>Images\\Win11-Enterprise\.wim</file>', '<file>Images\E2E.wim</file>' `
                 -replace '<!-- <application order="1">Dell-Command-Update</application> -->', '<application order="1">E2E-App</application>' `
-                -replace '<disableSystemRestore>true</disableSystemRestore>', '<disableSystemRestore>false</disableSystemRestore>' `
                 -replace '<reboot>true</reboot>', '<reboot>false</reboot>'
     Set-Content -Path (Join-Path $root 'AnswerFiles\E2E.xml') -Value $xml -Encoding utf8
     Set-Content -Path (Join-Path $root 'Images\E2E.wim') -Value 'not a real image: DISM is a stand-in here'

@@ -25,6 +25,7 @@
         <Button x:Name="BtnShowProgress" DockPanel.Dock="Right" Content="Show progress" Margin="20,0,0,0" Visibility="Collapsed"
                 ToolTip="Opens the progress windows again, also the ones you closed while the work goes on."/>
         <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
+        <Button x:Name="BtnOpenRoot" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0" ToolTip="Opens the content root in File Explorer"/>
         <Button x:Name="BtnBrowseRoot" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0"/>
         <TextBox x:Name="TxtRoot" IsReadOnly="True"/>
       </DockPanel>
@@ -56,7 +57,7 @@
       </TabControl.Resources>
 
       <!-- Images -->
-      <TabItem Header="Images">
+      <TabItem x:Name="TabImages" Header="Images">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
@@ -67,8 +68,6 @@
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
             <Button x:Name="BtnImageLog" Content="Open log" ToolTip="The newest capture or update log of the selected image."/>
-            <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
-            <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
           <DataGrid x:Name="GridImages" IsReadOnly="True">
             <DataGrid.Columns>
@@ -86,7 +85,7 @@
       </TabItem>
 
       <!-- Driver library -->
-      <TabItem Header="Driver Library">
+      <TabItem x:Name="TabDrivers" Header="Driver Library">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <DockPanel MinHeight="440" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
@@ -168,8 +167,6 @@
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
-              <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
-              <Button x:Name="BtnDriversOpen" Content="Open folder"/>
             </StackPanel>
 
             <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
@@ -218,15 +215,13 @@
             <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
               <CheckBox x:Name="ChkUsbUpdate" DockPanel.Dock="Top" Margin="0,0,0,8"
                         Content="Update a stick this console built before, without erasing it: new WinPE, and only the files that changed are copied"/>
-              <CheckBox x:Name="ChkCopyContent" DockPanel.Dock="Top" IsChecked="True"
-                        Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
-              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
-                         Text="An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
-              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
+                         Text="The stick gets the answer files checked below, the image each one deploys, drivers, applications and config. An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
+              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
-            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
+            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="Check the packs for the models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
@@ -250,7 +245,7 @@
                 <PasswordBox x:Name="PwdWinPE2" Width="200"/>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
-                         Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm."/>
+                         Text="Required, at least 8 characters. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. Not saved: type it for each build or update."/>
             </StackPanel>
           </Grid>
 
@@ -274,7 +269,7 @@
       </TabItem>
 
       <!-- Answer files -->
-      <TabItem Header="Answer Files">
+      <TabItem x:Name="TabAnswers" Header="Answer Files">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
@@ -282,11 +277,8 @@
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnAnswerImport" Content="Import answer file XML..."/>
             <Button x:Name="BtnAnswerEdit" Content="Edit"/>
             <Button x:Name="BtnAnswerDelete" Content="Delete" ToolTip="Deletes the selected answer file after asking. Its image and applications stay."/>
-            <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
-            <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
           </StackPanel>
           <TextBox x:Name="TxtAnswerIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>
@@ -303,20 +295,19 @@
         </DockPanel>
       </TabItem>
 
-      <!-- Applications -->
-      <TabItem Header="Applications">
+      <!-- Applications and tasks -->
+      <TabItem x:Name="TabLibrary" Header="Apps and Tasks">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications and tasks"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Applications: an installer with its silent command, detection rules and the PCs it is for, installed at first boot. Tasks: scripts to run during or after a deployment (PowerShell, batch or a program) with arguments, timeout and success exit codes; POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Task-&lt;name&gt;.log on the PC. Answer files pick which ones each PC gets."/>
           </StackPanel>
           <WrapPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnAppEdit" Content="Edit"/>
-            <Button x:Name="BtnAppTest" Content="Test detection"/>
-            <Button x:Name="BtnAppDelete" Content="Delete"/>
-            <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
-            <Button x:Name="BtnAppsOpen" Content="Open folder"/>
+            <Button x:Name="BtnAppNew" Content="New application..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnTaskNew" Content="New task..."/>
+            <Button x:Name="BtnLibEdit" Content="Edit"/>
+            <Button x:Name="BtnAppTest" Content="Test detection" ToolTip="Applications: are they installed on this PC, by their detection rules?"/>
+            <Button x:Name="BtnLibDelete" Content="Delete"/>
           </WrapPanel>
           <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
@@ -335,48 +326,17 @@
             <Button x:Name="BtnAppFoundAdd" Grid.Column="4" Content="Add" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                     ToolTip="Adds the application: the PC downloads it from the publisher when it installs it and checks the file's SHA256"/>
           </Grid>
-          <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
+          <TextBox x:Name="TxtLibIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <DataGrid x:Name="GridApps" IsReadOnly="True">
+          <DataGrid x:Name="GridLibrary" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
-              <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="90"/>
-              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
+              <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="90"/>
+              <DataGridTextColumn Header="Runs" Binding="{Binding Runs}" Width="120"/>
+              <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="2*"/>
               <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
-              <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
-              <DataGridTextColumn Header="Download link" Binding="{Binding Download}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
               <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
-            </DataGrid.Columns>
-          </DataGrid>
-        </DockPanel>
-      </TabItem>
-
-      <!-- Tasks -->
-      <TabItem Header="Tasks">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Tasks"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Scripts to run during or after a deployment: PowerShell (.ps1), batch (.cmd, .bat) or a program (.exe), with its arguments, timeout, success exit codes and the PCs it is for. Write the script here or import a file or folder. Answer files pick which tasks run (Tasks page), in order with their other commands. POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Task-&lt;name&gt;.log on the PC, next to Deploy.log and FirstBoot.log."/>
-          </StackPanel>
-          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnTaskEdit" Content="Edit"/>
-            <Button x:Name="BtnTaskDelete" Content="Delete"/>
-            <Button x:Name="BtnTasksRefresh" Content="Refresh"/>
-            <Button x:Name="BtnTasksOpen" Content="Open folder"/>
-          </StackPanel>
-          <TextBox x:Name="TxtTaskIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
-                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <DataGrid x:Name="GridTaskLibrary" IsReadOnly="True">
-            <DataGrid.Columns>
-              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
-              <DataGridTextColumn Header="Script" Binding="{Binding Script}" Width="*"/>
-              <DataGridTextColumn Header="Runs" Binding="{Binding Phase}" Width="100"/>
-              <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
-              <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="2*"/>
-              <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
-              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="120"/>
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>
@@ -490,11 +450,6 @@
                 <ComboBox x:Name="CmbAdOu" Grid.Column="1" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
                 <Label Grid.Column="3" Content="Name or IP" VerticalAlignment="Center"/>
                 <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
-                <Label Grid.Row="2" Content="Also show" VerticalAlignment="Center"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" Orientation="Horizontal" VerticalAlignment="Center">
-                  <CheckBox x:Name="ChkAdServers" Content="Servers" Margin="0,0,24,0"/>
-                  <CheckBox x:Name="ChkAdDisabled" Content="Disabled accounts"/>
-                </StackPanel>
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
@@ -506,13 +461,9 @@
             <GroupBox DockPanel.Dock="Bottom" Header="3. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="0"/><RowDefinition Height="0"/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Answer file" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
-                  <CheckBox x:Name="ChkAdKeepName" IsChecked="True" Margin="0,0,24,0" Content="Keep each PC's name"/>
-                  <CheckBox x:Name="ChkAdKeepOu" IsChecked="True" Content="Join it back into its OU"/>
-                </StackPanel>
                 <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal">
@@ -569,8 +520,6 @@
               </UniformGrid>
             </StackPanel>
             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-              <Button x:Name="BtnDashRefresh" Content="Refresh"/>
-              <CheckBox x:Name="ChkDashAuto" Content="Refresh every 10 s" IsChecked="True" VerticalAlignment="Center" Margin="4,0,16,0"/>
               <Label Content="Show"/>
               <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
                 <ComboBoxItem Content="All"/>

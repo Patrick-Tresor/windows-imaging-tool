@@ -95,9 +95,6 @@ function Show-AnswerEditor {
     $e.RbInteractive.IsChecked = $a.Mode -ne 'Unattended'
     $e.RbUnattended.IsChecked = $a.Mode -eq 'Unattended'
     $e.TxtDelay.Text = $a.UnattendDelay
-    $e.RbShutdown.IsChecked = $a.Shutdown
-    $e.RbReboot.IsChecked = -not $a.Shutdown -and $a.Reboot
-    $e.RbStay.IsChecked = -not $a.Shutdown -and -not $a.Reboot
 
     $e.CmbImage.Text = $a.ImageFile
     & $updateVersions "$($a.ImageVersion)"
@@ -120,7 +117,6 @@ function Show-AnswerEditor {
     # Two languages only; keyboards, formats and locales follow from them (Get-RegionalSettings).
     $e.CmbLanguage.Text = if ($a.UILanguage) { $a.UILanguage } else { $a.SystemLocale }
     $e.CmbFallback.Text = $a.UILanguageFallback
-    $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
@@ -258,8 +254,9 @@ function Show-AnswerEditor {
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
         $a.UnattendDelay = if ([int]::TryParse($e.TxtDelay.Text, [ref]$n)) { $n } else { 10 }
-        $a.Reboot        = [bool]$e.RbReboot.IsChecked
-        $a.Shutdown      = [bool]$e.RbShutdown.IsChecked
+        # The PC always restarts into Windows when the deploy is done (the result screen still has Shut down).
+        $a.Reboot        = $true
+        $a.Shutdown      = $false
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
@@ -272,7 +269,6 @@ function Show-AnswerEditor {
         $a.TimeZone      = $e.CmbTimeZone.Text.Trim()
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
-        $a.DisableSystemRestore = [bool]$e.ChkNoRestore.IsChecked
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
         $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } else { 'WMI' }
         $a.Prefix        = $e.TxtPrefix.Text.Trim()

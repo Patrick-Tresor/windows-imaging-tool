@@ -87,7 +87,6 @@
   </network>
 
   <options>
-    <disableSystemRestore>true</disableSystemRestore>
     <enableAdministrator>false</enableAdministrator>
     <administratorPasswordFile>config\secrets\admin.txt</administratorPasswordFile>
   </options>

@@ -1,5 +1,5 @@
-# Plain-PowerShell tests for answer files: parsing, validation, naming, unattend generation and the
-# deploy wizard answer file import. Run: pwsh -File tests/AnswerFile.Tests.ps1
+# Plain-PowerShell tests for answer files: parsing, validation, naming and unattend generation.
+# Run: pwsh -File tests/AnswerFile.Tests.ps1
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -264,23 +264,6 @@ try {
     $o = Read-AnswerFile -Path $oldPath
     Assert-Equal "$($o.BitLocker.Enabled)" 'False' 'answer files without the bitlocker section still read, with it off'
 
-    # Deploy wizard answer file import.
-    $conv = ConvertFrom-DeployWizardAnswerFile -Path (Join-Path $PSScriptRoot 'fixtures/deploy-wizard-sample.xml')
-    $c = $conv.Answer
-    Assert-Equal "$($c.Mode)|$($c.UnattendDelay)|$($c.ImageFile)" 'Unattended|3|Images\W11_Office_FR_EN.wim' 'deploy wizard mode, delay and image are converted'
-    Assert-Equal ($c.Applications -join ',') 'Dell-Command-Update,Zoom-Latest' 'application packs keep their installation order'
-    Assert-Equal "$($c.InputLocale)|$($c.TimeZone)" 'fr-CA|Eastern Standard Time' 'regional settings are converted to locale tags'
-    Assert-Equal "$($c.Membership)|$($c.Domain)|$($c.JoinUser)|$($c.JoinDomain)" 'Domain|example.local|imaging|EXAMPLE' 'domain join is converted'
-    Assert-Equal "$($c.NamingMode)|$($c.WmiQuery)" 'WMI|SELECT SerialNumber FROM Win32_SystemEnclosure' 'WMI naming is converted'
-    Assert-Equal (($c.Tasks | ForEach-Object { "$($_.Phase)=$($_.Command)" }) -join ';') 'POSTIMAGE=cscript.exe %OSDRIVE%\temp\UpdateInputLocale.vbs;FIRSTLOGON=powershell -file C:\temp\Bitlocker.ps1;FIRSTBOOT=powershell -file C:\temp\Cleanup.ps1' 'tasks keep their phase; POSTIMAGE T: becomes %OSDRIVE%'
-    Assert-Equal (($c.Shares | ForEach-Object LocalName) -join ',') 'V:,Y:' 'share on Z: is moved to a free letter'
-    Assert-Equal "$($c.DisableSystemRestore)|$($c.EnableAdministrator)|$($c.Reboot)" 'True|False|True' 'system properties and completion are converted'
-    Assert-Equal (@($conv.Notes | Where-Object { $_ -like '*PRESERVE_DESKTOP_ICONS*' }).Count) 1 'unsupported settings are listed in the notes'
-
-    $out = Join-Path $tmp 'Imported.xml'
-    Export-AnswerFile -Answer $c -Path $out
-    Assert-Equal ((Get-Content -Raw $out) -match 'DEADBEEF') $false 'no source password reaches the new answer file'
-    Assert-Equal (@(Test-AnswerFile (Read-AnswerFile -Path $out -SkipValidation)).Count) 0 'imported answer file is valid'
 }
 finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

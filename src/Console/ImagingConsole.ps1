@@ -291,6 +291,7 @@ function Update-MediaAnswers {
 }
 
 function Update-Drivers {
+    $script:driversEdited = $false
     $script:drivers.Clear()
     if (Test-ContentRoot $script:root) {
         # The example rows new content roots used to get (Latitude 5440, EliteBook 840 G9...): gone unless they hold drivers.
@@ -408,14 +409,13 @@ function Update-DashboardDetail {
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }
 
-function Update-Apps {
-    $ui.GridApps.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-ApplicationList -ContentRoot $script:root })
-    $ui.TxtAppIssues.Text = ''
-}
-
-function Update-Tasks {
-    $ui.GridTaskLibrary.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-TaskList -ContentRoot $script:root })
-    $ui.TxtTaskIssues.Text = ''
+function Update-Library {
+    # Applications and tasks in one list (Apps and Tasks tab); the selection stays when the row is still there.
+    $keep = $ui.GridLibrary.SelectedItem
+    $rows = @(if (Test-ContentRoot $script:root) { Get-LibraryRows -ContentRoot $script:root })
+    $ui.GridLibrary.ItemsSource = $rows
+    if ($keep) { $ui.GridLibrary.SelectedItem = @($rows | Where-Object { $_.Kind -eq $keep.Kind -and $_.Name -eq $keep.Name })[0] }
+    if (-not $ui.GridLibrary.SelectedItem) { $ui.TxtLibIssues.Text = '' }
 }
 
 function Get-UsbDiskChoices {
@@ -455,17 +455,31 @@ function Update-BootVersionBanner {
 }
 
 function Select-StickForUpdate {
-    # "Update the stick": the Media tab with the old stick's disk picked and "Update a stick" ticked.
+    # "Update the stick", one click: the Media tab with the old stick's disk, "Update a stick" ticked, the answer
+    # files and driver packs the stick already holds checked, and the build started (it still asks before it
+    # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
     Update-UsbDisks
     $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    $item = $null
     if ($old) {
         $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
         $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
         if ($item) { $ui.CmbUsb.SelectedItem = $item }
     }
     $ui.ChkUsbUpdate.IsChecked = $true
-    Set-Status 'Check the answer files and driver packs for the stick, then click Build media.'
+    if (-not $item) { Set-Status 'Pick the stick, check the answer files and driver packs, then click Build media.'; return }
+    $on = Get-StickContentChoice -StickRoot $old[0]
+    $answers = @($ui.LstMediaAnswers.Items | Where-Object { $on.AnswerFiles -contains $_.Name })
+    if ($answers) {
+        $ui.LstMediaAnswers.SelectedItems.Clear()
+        foreach ($a in $answers) { [void]$ui.LstMediaAnswers.SelectedItems.Add($a) }
+    }
+    if ($on.DriverPacks) {
+        $ui.LstMediaPacks.SelectedItems.Clear()
+        foreach ($p in @($ui.LstMediaPacks.Items | Where-Object { $on.DriverPacks -contains $_.Path })) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
+    }
+    $ui.BtnBuild.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
 }
 
 function Update-AdkStatus {
@@ -484,7 +498,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
+    Update-Answers; Update-Images; Update-Library; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
     try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
@@ -494,6 +508,8 @@ function Update-All {
 #region Content root
 
 $ui.BtnShowProgress.Add_Click({ Invoke-Safely { Show-ProgressWindows } })
+
+$ui.BtnOpenRoot.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item $script:root } } })
 
 $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $path = Select-Folder 'Choose the content root: a USB DEPLOY volume, a local folder, or the network share'
@@ -518,7 +534,6 @@ $ui.BtnInitRoot.Add_Click({ Invoke-Safely {
 
 #region Images
 
-$ui.BtnImagesRefresh.Add_Click({ Invoke-Safely { Update-Images; Set-Status 'Images refreshed' } })
 $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
@@ -551,7 +566,6 @@ $ui.BtnImageLog.Add_Click({ Invoke-Safely {
     if (-not $log) { Show-Error "No capture or update log for $($image.Name) yet."; return }
     Invoke-Item $log
 } })
-$ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion
 
@@ -560,11 +574,9 @@ $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item 
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
-    if ($saved) { Update-Answers; Update-Images; Update-Apps; Update-Tasks; Set-Status 'Answer file saved' }
+    if ($saved) { Update-Answers; Update-Images; Update-Library; Set-Status 'Answer file saved' }
 }
 
-$ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
-$ui.BtnAnswerOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'AnswerFiles') } } })
 
 $ui.GridAnswers.Add_SelectionChanged({
     $row = $ui.GridAnswers.SelectedItem
@@ -581,19 +593,6 @@ $ui.BtnAnswerNew.Add_Click({ Invoke-Safely {
     Edit-AnswerFile -NewName $name
 } })
 
-$ui.BtnAnswerImport.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
-    $dlg.Filter = 'Deploy wizard answer file (*.xml)|*.xml'
-    if (-not $dlg.ShowDialog($window)) { return }
-    $result = Import-DeployWizardAnswerFile -ContentRoot $script:root -Path $dlg.FileName
-    Update-Answers; Update-Images
-    $text = "Imported as $($result.Name). Passwords are not carried over: enter them in the editor that opens next.`n`nAlso check:`n" + (($result.Notes | ForEach-Object { "- $_" }) -join "`n")
-    [Windows.MessageBox]::Show($window, $text, 'Answer file import', 'OK', 'Information') | Out-Null
-    Set-Status "Imported $($result.Name) from $($dlg.FileName)"
-    Edit-AnswerFile -Path $result.Path
-} })
-
 $ui.BtnAnswerEdit.Add_Click({ Invoke-Safely {
     $row = $ui.GridAnswers.SelectedItem
     if (-not $row) { Show-Error 'Select an answer file first.'; return }
@@ -606,7 +605,7 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
     $check = Get-AnswerFileDeleteCheck -ContentRoot $script:root -Name $row.Name
     if (-not (Confirm-Action $check.Text)) { return }
     [void](Remove-AnswerFile -ContentRoot $script:root -Name $row.Name)
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks
+    Update-Answers; Update-Images; Update-Library
     Set-Status "Deleted $($row.Name)"
 } })
 
@@ -614,36 +613,54 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
 
 #region Applications and tasks
 
-# The Applications and Tasks tabs delete an item of the library the same way.
-$script:libraryTabs = @{
-    Application = @{ Folder = 'Applications'; Files = 'its installer files'; Update = { Update-Apps } }
-    Task        = @{ Folder = 'Tasks'; Files = 'its script files'; Update = { Update-Tasks } }
+# Delete an application or a task the same way.
+$script:libraryKinds = @{
+    Application = @{ Folder = 'Applications'; Files = 'its installer files' }
+    Task        = @{ Folder = 'Tasks'; Files = 'its script files' }
 }
 
-function Remove-LibraryRow([string]$Kind, $Row) {
+function Remove-LibraryRow($Row) {
     if (-not $Row) { return }
-    $t = $script:libraryTabs[$Kind]
+    $t = $script:libraryKinds[$Row.Kind]
     if (-not (Confirm-Action "Delete $($t.Folder)\$($Row.Name) and $($t.Files)?")) { return }
-    Remove-LibraryItem -Kind $Kind -ContentRoot $script:root -Name $Row.Name
-    & $t.Update
+    Remove-LibraryItem -Kind $Row.Kind -ContentRoot $script:root -Name $Row.Name
+    Update-Library
     Set-Status "Deleted $($Row.Name)"
 }
 
-function Get-SelectedApp {
-    $row = $ui.GridApps.SelectedItem
-    if (-not $row) { Show-Error 'Select an application first.' }
+function Get-SelectedLibraryRow([string]$Kind) {
+    # The selected row; with -Kind only a row of that kind (Test detection is for applications).
+    $row = $ui.GridLibrary.SelectedItem
+    if (-not $row -or ($Kind -and $row.Kind -ne $Kind)) {
+        Show-Error $(if ($Kind -eq 'Application') { 'Select an application first.' } else { 'Select an application or a task first.' })
+        return
+    }
     $row
 }
 
 function Edit-App([string]$Name) {
     $saved = if ($Name) { Show-AppPackEditor -Owner $window -ContentRoot $script:root -Name $Name }
              else { Show-AppPackEditor -Owner $window -ContentRoot $script:root }
-    if ($saved) { Update-Apps; Update-Answers; Set-Status "Application $saved saved" }
+    if ($saved) { Update-Library; Update-Answers; Set-Status "Application $saved saved" }
 }
 
-$ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
-$ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
+function Edit-Task([string]$Name) {
+    $saved = if ($Name) { Show-TaskEditor -Owner $window -ContentRoot $script:root -Name $Name }
+             else { Show-TaskEditor -Owner $window -ContentRoot $script:root }
+    if ($saved) { Update-Library; Update-Answers; Set-Status "Task $saved saved" }
+}
+
+function Edit-LibraryRow($Row) {
+    if (-not $Row) { return }
+    if ($Row.Kind -eq 'Task') { Edit-Task $Row.Name } else { Edit-App $Row.Name }
+}
+
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+$ui.BtnTaskNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-Task } } })
+$ui.BtnLibEdit.Add_Click({ Invoke-Safely { Edit-LibraryRow (Get-SelectedLibraryRow) } })
+$ui.GridLibrary.Add_MouseDoubleClick({ Invoke-Safely { Edit-LibraryRow $ui.GridLibrary.SelectedItem } })
+$ui.BtnLibDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow (Get-SelectedLibraryRow) } })
+
 # Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
 $script:appFound = @()
 function Find-AppOnline {
@@ -671,63 +688,21 @@ $ui.BtnAppFoundAdd.Add_Click({ Invoke-Safely {
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try { $d = New-AppFromWinget -AppRoot (Join-Path $script:root 'Applications') -Id $p.Id -Version $p.Version -DisplayName $p.Name }
     finally { $window.Cursor = $null }
-    Update-Apps; Update-Answers
-    $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $d.name)[0]
+    Update-Library; Update-Answers
+    $ui.GridLibrary.SelectedItem = @($ui.GridLibrary.ItemsSource | Where-Object { $_.Kind -eq 'Application' -and $_.Name -eq $d.name })[0]
     Set-Status "Added $($d.name) $($p.Version): the PC downloads it from the publisher when it installs it"
 } })
-$ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
-$ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
 
-$ui.GridApps.Add_SelectionChanged({
-    $row = $ui.GridApps.SelectedItem
-    $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
+$ui.GridLibrary.Add_SelectionChanged({
+    $row = $ui.GridLibrary.SelectedItem
+    $ui.TxtLibIssues.Text = if (-not $row) { '' } elseif ($row.Kind -eq 'Application') {
         $lines = @("Install: $($row.Command)")
         if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
+        if ($row.Detection) { $lines += "Detection: $($row.Detection)" }
         if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
         $lines += @($row.Issues | ForEach-Object { "- $_" })
         $lines -join "`r`n"
-    }
-})
-
-$ui.BtnAppTest.Add_Click({ Invoke-Safely {
-    $row = Get-SelectedApp
-    if (-not $row -or -not $row.Definition) { return }
-    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
-    $ui.TxtAppIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
-        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
-        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
-    }
-    Set-Status "Detection tested for $($row.Name)"
-} })
-
-$ui.BtnAppDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Application (Get-SelectedApp) } })
-
-function Get-SelectedTask {
-    $row = $ui.GridTaskLibrary.SelectedItem
-    if (-not $row) { Show-Error 'Select a task first.' }
-    $row
-}
-
-function Edit-Task([string]$Name) {
-    $saved = if ($Name) { Show-TaskEditor -Owner $window -ContentRoot $script:root -Name $Name }
-             else { Show-TaskEditor -Owner $window -ContentRoot $script:root }
-    if ($saved) { Update-Tasks; Update-Answers; Set-Status "Task $saved saved" }
-}
-
-$ui.BtnTasksRefresh.Add_Click({ Invoke-Safely { Update-Tasks; Set-Status 'Tasks refreshed' } })
-$ui.BtnTasksOpen.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $dir = Join-Path $script:root 'Tasks'
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    Invoke-Item $dir
-} })
-$ui.BtnTaskNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-Task } } })
-$ui.BtnTaskEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedTask; if ($row) { Edit-Task $row.Name } } })
-$ui.GridTaskLibrary.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridTaskLibrary.SelectedItem; if ($row) { Edit-Task $row.Name } } })
-
-$ui.GridTaskLibrary.Add_SelectionChanged({
-    $row = $ui.GridTaskLibrary.SelectedItem
-    $ui.TxtTaskIssues.Text = if (-not $row) { '' } else {
+    } else {
         $lines = @()
         if ($row.CommandLine) { $lines += "Runs: $($row.CommandLine)" }
         if ($row.Definition) { $lines += "Timeout $($row.Definition.timeoutMinutes) min, success codes $($row.Definition.successCodes -join ', ')$(if ($row.Definition.stopOnFailure) { ', stops the deployment when it fails' })" }
@@ -736,14 +711,21 @@ $ui.GridTaskLibrary.Add_SelectionChanged({
     }
 })
 
-$ui.BtnTaskDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Task (Get-SelectedTask) } })
+$ui.BtnAppTest.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedLibraryRow Application
+    if (-not $row -or -not $row.Definition) { return }
+    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
+    $ui.TxtLibIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
+        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
+        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
+    }
+    Set-Status "Detection tested for $($row.Name)"
+} })
 
 #endregion
 
 #region Driver library
 
-$ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
-$ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
 # Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
 $script:driverFound = @()
 function Find-DriverPackOnline {
@@ -816,8 +798,12 @@ $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
     if ($row -isnot [DriverRow]) { return }
     if (Confirm-Action "Remove the catalog entry for $($row.Maker) $(@($row.Model, $row.Sku, $row.MachineType, $row.ModelPattern) -ne '' | Select-Object -First 1)? The driver files stay on disk. Click Save to keep the change.") {
         [void]$script:drivers.Remove($row)
+        $script:driversEdited = $true
     }
 } })
+
+# Typed in the grid and not saved yet: opening the tab again does not reload (and lose) it.
+$ui.GridDrivers.Add_CellEditEnding({ $script:driversEdited = $true })
 
 $ui.BtnDriversSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1002,7 +988,7 @@ function Search-AdComputers {
             try {
                 $cred = Get-AdCredential
                 $found = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
-                    -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+                    -Credential $cred)
             } catch {
                 # A PC typed by IP can still be reimaged without Active Directory (a laptop outside the domain).
                 if (-not $find.Ip) { throw }
@@ -1156,8 +1142,8 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    if ($ui.ChkAdKeepName.IsChecked) { $runArgs += '-KeepNames' }
-    if ($ui.ChkAdKeepOu.IsChecked) { $runArgs += '-KeepOU' }
+    # Each PC keeps its name and joins back into the OU it is in now.
+    $runArgs += @('-KeepNames', '-KeepOU')
     if ($cred) {
         # For the hidden process: protected with this Windows account (DPAPI), deleted as soon as it is read.
         $credFile = Join-Path $env:TEMP "reimage-$stamp-$tag-cred.xml"
@@ -1206,19 +1192,22 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
     $disk = $ui.CmbUsb.SelectedItem
     if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
-    if ($ui.ChkCopyContent.IsChecked) {
-        # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
-        $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
-        if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-        # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
-        $packArgs = @{}
-        $allPacks = @($ui.LstMediaPacks.Items)
-        $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
-        if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-        $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
-        if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
-        if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-    } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
+    # A stick always has a WinPE password: the answer files' passwords and the key that decrypts them are on it.
+    $pePw = $ui.PwdWinPE.Password
+    if (-not $pePw) { Show-Error 'Type the WinPE password, twice. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
+    if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; [void]$ui.PwdWinPE2.Focus(); return }
+    if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; [void]$ui.PwdWinPE.Focus(); return }
+    # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+    $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+    if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+    # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+    $packArgs = @{}
+    $allPacks = @($ui.LstMediaPacks.Items)
+    $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+    if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+    $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
+    if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+    if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
     if ($ui.ChkUsbUpdate.IsChecked) {
         if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
     } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
@@ -1227,25 +1216,17 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($dashFolder) { Import-StickDashboard $dashFolder }
     $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
     if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
-    if ($ui.ChkCopyContent.IsChecked) {
-        $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
-        if ($packArgs.ContainsKey('DriverPacks')) {
-            if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
-        }
+    $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
+    if ($packArgs.ContainsKey('DriverPacks')) {
+        if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
     }
     $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
     # (a command line argument would show in the process list).
-    $pePw = $ui.PwdWinPE.Password
-    if ($pePw -or $ui.PwdWinPE2.Password) {
-        if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; return }
-        if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; return }
-        $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
-        [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
-        $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.ChkCopyContent.IsChecked) {
-        if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
-    }
+    # Required (checked before anything is asked, see the top of this handler).
+    $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
+    [IO.File]::WriteAllText($pwFile, $ui.PwdWinPE.Password, (New-Object Text.UTF8Encoding($false)))
+    $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
@@ -1323,7 +1304,6 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
 
 #region Dashboard
 
-$ui.BtnDashRefresh.Add_Click({ Invoke-Safely { Update-Dashboard; Set-Status 'Dashboard refreshed' } })
 $ui.CmbDashFilter.Add_SelectionChanged({ Invoke-Safely { Update-Dashboard } })
 $ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
 
@@ -1359,15 +1339,23 @@ $ui.BtnDashOpen.Add_Click({ Invoke-Safely {
 $script:dashTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:dashTimer.Interval = [timespan]::FromSeconds(10)
 $script:dashTimer.Add_Tick({
-    if (-not $ui.ChkDashAuto.IsChecked -or $ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
+    if ($ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
     try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
 })
 $script:dashTimer.Start()
 $ui.Tabs.Add_SelectionChanged({
     param($sender, $e)
     # SelectionChanged bubbles up from the grids and combo boxes inside the tabs; only react to tab switches.
-    if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) {
-        try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
+    # Each tab reloads when it is opened (no Refresh buttons). The Driver Library keeps rows being edited until Save.
+    if ($e.OriginalSource -eq $ui.Tabs -and (Test-ContentRoot $script:root)) {
+        $tab = $ui.Tabs.SelectedItem
+        try {
+            if ($tab -eq $ui.TabDashboard) { Update-Dashboard }
+            elseif ($tab -eq $ui.TabImages) { Update-Images }
+            elseif ($tab -eq $ui.TabAnswers) { Update-Answers }
+            elseif ($tab -eq $ui.TabLibrary) { Update-Library }
+            elseif ($tab -eq $ui.TabDrivers -and -not $script:driversEdited) { Update-Drivers }
+        } catch { Set-Status "Refresh failed: $($_.Exception.Message)" }
     }
     if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not $script:adAutoTried) {
         # Once per console session, after the tab has painted.

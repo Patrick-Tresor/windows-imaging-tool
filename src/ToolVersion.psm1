@@ -131,7 +131,7 @@ function Get-StaleStickMessage {
         else { "The USB stick in $drive was built before this console stamped versions; this console is $($Console.Text)." }
     }
     if (-not $lines) { return $null }
-    (@($lines) -join ' ') + ' Update it so it has the latest fixes: Media tab, tick "Update a stick", Build media.'
+    (@($lines) -join ' ') + ' Click Update the stick so it has the latest fixes.'
 }
 
 function Get-StaleBootImageMessage {

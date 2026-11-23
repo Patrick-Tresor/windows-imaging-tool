@@ -335,8 +335,8 @@ password vault when there is one). In WinPE, `Read-DeployAnswer` decrypts them (
 `Unprotect-AnswerPassword`) and `Get-DeploySecret` uses them before the vault
 or the Passwords page.
 
-`AnswerFile.psm1` holds the parsing, validation, naming, unattend generation and
-deploy wizard answer file import. It has no WinPE dependencies, so it is unit tested and shared
+`AnswerFile.psm1` holds the parsing, validation, naming and unattend
+generation. It has no WinPE dependencies, so it is unit tested and shared
 by the deploy and the console.
 
 ## Driver packs

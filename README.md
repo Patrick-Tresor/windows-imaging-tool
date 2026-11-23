@@ -36,18 +36,16 @@ and click **Create folders** the first time. Then:
   [Image versions and rollback](#image-versions-and-rollback)).
   **Update image...** adds Windows updates to the selected image (see
   [Updating an image](#updating-an-image)).
-- **Answer Files**: create, edit and check deployment profiles, pick the default,
-  **Delete** one (it asks first, and says when it is the default),
-  and **Import answer file XML...** to convert an existing deploy wizard answer file.
+- **Answer Files**: create, edit and check deployment profiles, and
+  **Delete** one (it asks first).
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
-- **Applications**: the application pack builder. Build, edit and test packs
-  (see Applications below).
-- **Tasks**: the task library, scripts to run during or after a deployment
-  (see Tasks below).
+- **Apps and Tasks**: one list of application packs and task scripts, with
+  when each runs. **New application...** opens the pack builder, **New task...**
+  the task editor (see Applications and Tasks below).
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
   driver pack catalogs for a model, SKU or machine type; pick the pack and it
   downloads, checks, extracts and registers it. You can also import a pack you already have
@@ -82,7 +80,8 @@ and click **Create folders** the first time. Then:
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
-  last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
+  last heard from, with the PC's live log underneath. Refreshes every 10 seconds while it is open; every tab
+  reloads when you open it, so there are no Refresh buttons.
   See [Deployment dashboard](#deployment-dashboard). The **History** filter
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.
@@ -120,7 +119,7 @@ on the ones you pick, with nobody at the PCs.
    the domain? Also type a domain controller.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
-   are left out unless ticked. Each row shows the OU, Windows version, last
+   are left out. Each row shows the OU, Windows version, last
    logon and whether the console can reach it now. **Online** (point at it for
    details):
    - **Yes**: PowerShell remoting (WinRM) answers.
@@ -146,8 +145,7 @@ on the ones you pick, with nobody at the PCs.
    of the console says when it is older than the console, with a **Rebuild
    network boot image** button.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
-   **Reimage...**. **Keep each PC's name** and **Join it back into its OU** are
-   on by default.
+   **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
 
 For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
 checks (over PowerShell remoting, or its admin share) that it answers with its own name, starts in
@@ -196,8 +194,10 @@ the console; the format is documented in the commented
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
   applications), `FIRSTLOGON` (when the first user logs on). A task is a
   command or a script from the task library (`<task script="name">`).
-- extra **shares** to map in WinPE, **options** (disable System Restore, enable
-  the built-in Administrator), and reboot or shut down when done.
+- extra **shares** to map in WinPE, **options** (enable
+  the built-in Administrator). The PC restarts into Windows when the deploy is
+  done; the result screen in WinPE still has **Shut down**. (An older answer file
+  with `<shutdown>` or `<reboot>false` keeps doing that until it is saved again.)
 - **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
   the recovery key backed up to AD and/or a share first.
 
@@ -258,15 +258,14 @@ under `config\secrets` is not read, so type it once in the editor. Use a join ac
 restrict who can read `config\secrets`.
 
 How far that protects them, honestly: the answer files on the stick, or a copy
-mailed or left on a share, give nothing away without the key. But without a
-WinPE password the key sits in `boot.wim` on the same stick, so someone who has
-the whole stick and knows where to look can decrypt them. This is still real
-encryption, not the base64 that unattend.xml calls `PlainText=false`, but it is
-only as safe as the stick. Set a **WinPE password** on the Media tab (8
-characters or more) to close that gap: the key then goes
+mailed or left on a share, give nothing away without the key. Every USB stick
+the console builds needs a **WinPE password** (Media tab, 8 characters or
+more, typed for each build): the key goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
-tries or **Shut down**.
+tries or **Shut down**. (The network boot image has no WinPE password, since
+nobody is at the PC to type it; its key sits in `Boot\boot.wim` on the share, so
+keep that folder readable only by the share account.)
 
 If a password can't be found or decrypted (an answer file copied from another
 content root with another key), the deploy wizard shows a **Passwords** page
@@ -284,7 +283,7 @@ restart and the PC would stay out of the domain. If WinPE can't reach the
 domain, the check is skipped and noted in `Deploy.log`.
 
 **Applications** are packs: a folder under `Applications\` with the installer
-(and any files it needs) and an `app.json`. Build them on the **Applications**
+(and any files it needs) and an `app.json`. Build them on the **Apps and Tasks**
 tab, or with **New application...** in the answer file editor:
 
 1. Pick the installer file, or a folder when it needs files next to it.
@@ -344,14 +343,14 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`. An
-To make one, click **New...** on the Applications tab, pick the template,
+To make one, click **New application...** on the Apps and Tasks tab, pick the template,
 leave the installer empty and click **Apply**: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). The **Download
 link** column shows which packs download, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
-**Find an app online** (on the Applications tab) is for any other
+**Find an app online** (on the Apps and Tasks tab) is for any other
 application: type its name (VLC, 7-Zip, Notepad++, Adobe Reader...), press
 Enter or click **Search**, pick the right result and click **Add**. The
 search uses Microsoft's winget catalog, so the console PC needs winget (App
@@ -367,7 +366,7 @@ output); when winget itself fails, the status line says why instead of
 "Nothing found".
 
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
-script (and any files it needs) and a `task.json`. Make them on the **Tasks** tab,
+script (and any files it needs) and a `task.json`. Make them on the **Apps and Tasks** tab (**New task...**),
 or with **New script...** on the answer file editor's Tasks page:
 
 1. Start from a **template** (`config\task-templates.json`): sync the clock,
@@ -409,13 +408,6 @@ are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 same way in every phase (`cmd /c`, exit code 0 is success, 60 minute timeout,
 its own log named after the command); a POSTIMAGE command that fails stops the
 deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
-
-**Importing a deploy wizard answer file** keeps the mode, delay, image name, application
-order, regional settings, naming, domain join, tasks, shares and completion
-options. The source file encrypts its passwords, so they are never carried over; the
-import lists the passwords to type in the editor, the `.spk` application packs to
-rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
-platform packs, unsupported system properties).
 
 ## Image versions and rollback
 
@@ -532,7 +524,7 @@ named. BitLocker and device driver problems are warnings only. The **Deploy
 Settings** tab turns the checks off and lists devices to ignore (wildcards, for
 example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
-The application pack's detection rules (set in the Applications tab) catch
+The application pack's detection rules (set on the Apps and Tasks tab) catch
 installers that exit 0 without installing anything: first boot checks them after
 each install, and the check reports what it found.
 

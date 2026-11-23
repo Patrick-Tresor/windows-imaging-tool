@@ -101,9 +101,7 @@
           <TextBlock Style="{StaticResource Title}" Text="Detection"/>
           <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skip when already there, e.g. in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
           <StackPanel Orientation="Horizontal">
-            <RadioButton x:Name="RbMatchAll" GroupName="Match" Content="All rules must match"/>
-            <RadioButton x:Name="RbMatchAny" GroupName="Match" Content="Any rule is enough"/>
-            <CheckBox x:Name="ChkSkip" Content="Skip the install when already detected" Margin="16,4,0,8"/>
+            <CheckBox x:Name="ChkSkip" Content="Skip the install when already detected (every rule must match)" Margin="0,4,0,8"/>
           </StackPanel>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
