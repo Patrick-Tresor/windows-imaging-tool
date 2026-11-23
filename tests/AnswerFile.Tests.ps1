@@ -14,6 +14,9 @@ try {
     $default = Read-AnswerFile -Path (Join-Path $repo 'config/answer-files/Default.xml')
     Assert-Equal "$($default.Mode)|$($default.ImageFile)|$($default.Membership)|$($default.NamingMode)" 'Interactive|Images\Win11-Enterprise.wim|Workgroup|WMI' 'sample answer file parses'
     Assert-Equal $default.Applications.Count 0 'commented-out applications are ignored'
+    $promptXml = Join-Path $tmp 'Prompt.xml'
+    (Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')) -replace '<naming mode="WMI">', '<naming mode="Prompt">' | Set-Content -LiteralPath $promptXml
+    Assert-Equal (Read-AnswerFile -Path $promptXml).NamingMode 'WMI' 'an older answer file that asked the technician names PCs from the hardware'
 
     # Validation.
     $bad = $default.PSObject.Copy()
@@ -43,8 +46,6 @@ try {
     $n.NamingMode = 'Custom'; $n.Prefix = ''; $n.CustomScheme = 'A####-{SERIAL}'
     $name = Resolve-ComputerName -Answer $n -Serial 'XY9' -Random ([Random]::new(1))
     Assert-Equal ($name -match '^A\d{4}-XY9$') $true "custom scheme fills # with digits and {SERIAL} ($name)"
-    $n.NamingMode = 'Prompt'
-    Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'SER1' -Typed 'kiosk 01') 'KIOSK01' 'typed name wins in prompt mode'
     # Names Windows Setup rejects in the specialize pass are never built.
     $n.NamingMode = 'WMI'; $n.Prefix = ''
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '1.25.0') 'PC-1250' 'an all-digit name gets a PC- prefix'
