@@ -33,13 +33,10 @@ function Show-TaskEditor {
     $folder = if ($isNew) { $null } else { Join-Path $taskRoot $Name }
     # LoadedText: the script text as read, so an unchanged imported file is copied as is and not rewritten.
     $state = @{ Saved = $null; LoadedText = $null }
-    $codes = { param($text) @($text -split '[,; ]+' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
-    $list  = { param($text) @($text -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 
     $e.CmbPhase.ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
     $templates = @(Get-TaskTemplates)
-    $e.CmbTemplate.ItemsSource = @('(none)') + @($templates | ForEach-Object { "$($_.name)$(if ($_.verify) { ' (verify)' })" })
-    $e.CmbTemplate.SelectedIndex = 0
+    Initialize-TemplatePicker -Controls $e -Templates $templates -Note { param($t) "$($t.description). $($t.notes)" }
     $e.TxtName.IsReadOnly = -not $isNew
     $load = {
         param($d)
@@ -51,8 +48,7 @@ function Show-TaskEditor {
         $e.TxtCodes.Text = $d.successCodes -join ', '
         $e.TxtTimeout.Text = $d.timeoutMinutes
         $e.ChkStop.IsChecked = $d.stopOnFailure
-        $e.TxtMakers.Text = @($d.requirements.makers) -join ', '
-        $e.TxtModels.Text = @($d.requirements.models) -join ', '
+        Set-RequirementBoxes -Controls $e -Definition $d
     }
     & $load $def
     if ($folder) {
@@ -115,27 +111,15 @@ function Show-TaskEditor {
         & $loadScript
         & $updateNotes
     }
-    $e.BtnSourceFile.Add_Click({
-        $f = [Microsoft.Win32.OpenFileDialog]::new()
-        $f.Filter = 'Scripts (*.ps1;*.cmd;*.bat;*.exe)|*.ps1;*.cmd;*.bat;*.exe|All files (*.*)|*.*'
-        if ($f.ShowDialog($win)) { $e.TxtSource.Text = $f.FileName; & $afterSource }
-    })
-    $e.BtnSourceFolder.Add_Click({
-        $f = [Windows.Forms.FolderBrowserDialog]::new()
-        $f.Description = 'Folder with the script and the files it needs'
-        if ($f.ShowDialog() -eq 'OK') { $e.TxtSource.Text = $f.SelectedPath; & $afterSource }
-    })
-    $e.CmbTemplate.Add_SelectionChanged({
-        $i = $e.CmbTemplate.SelectedIndex
-        $e.TxtTemplateNote.Text = if ($i -gt 0) { $t = $templates[$i - 1]; "$($t.description). $(if ($t.verify) { 'Best guess, test it on a VM first. ' })$($t.notes)" } else { '' }
-    })
+    Register-SourceBrowse -Controls $e -Owner $win -Filter 'Scripts (*.ps1;*.cmd;*.bat;*.exe)|*.ps1;*.cmd;*.bat;*.exe|All files (*.*)|*.*' `
+        -FolderText 'Folder with the script and the files it needs' -After { & $afterSource }
     $e.BtnTemplate.Add_Click({
-        $i = $e.CmbTemplate.SelectedIndex
-        if ($i -le 0) { return }
+        $t = Get-PickedTemplate -Controls $e -Templates $templates
+        if (-not $t) { return }
         # Editing keeps the task's name; a new task takes the template's unless one was typed.
         $typed = $e.TxtName.Text.Trim()
-        $name = if (-not $isNew) { $Name } elseif ($typed -and $typed -ne 'NewTask') { $typed } else { $templates[$i - 1].name }
-        $made = New-TaskFromTemplate -Template $templates[$i - 1] -Name $name
+        $name = if (-not $isNew) { $Name } elseif ($typed -and $typed -ne 'NewTask') { $typed } else { $t.name }
+        $made = New-TaskFromTemplate -Template $t -Name $name
         & $load $made.Definition
         $e.TxtScript.Text = $made.ScriptText
         & $updateNotes
@@ -154,9 +138,9 @@ function Show-TaskEditor {
             arguments      = $e.TxtArguments.Text.Trim()
             phase          = "$($e.CmbPhase.SelectedItem)"
             timeoutMinutes = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 0 }
-            successCodes   = @(& $codes $e.TxtCodes.Text)
+            successCodes   = @(ConvertFrom-ListText $e.TxtCodes.Text -Numbers)
             stopOnFailure  = [bool]$e.ChkStop.IsChecked
-            requirements   = @{ makers = @(& $list $e.TxtMakers.Text); models = @(& $list $e.TxtModels.Text) }
+            requirements   = Get-RequirementBoxes -Controls $e
         })
     }
 

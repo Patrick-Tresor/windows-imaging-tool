@@ -6,6 +6,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $repo 'src/Console/ConsoleData.psm1') -Force
 Import-Module (Join-Path $repo 'src/AnswerFile.psm1') -Force
 Import-Module (Join-Path $repo 'src/AppPack.psm1') -Force
+Import-Module (Join-Path $repo 'src/LibraryPack.psm1') -Force
 Import-Module (Join-Path $repo 'src/MediaCopy.psm1') -Force
 
 . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
@@ -311,11 +312,11 @@ Installers:
 
     # Requirements: maker and model wildcards.
     $dcu = New-AppDefinitionFromTemplate -Template (Find-AppTemplate -Name 'Dell-Command-Update' -Templates $templates) -Installer 'dcu.exe'
-    Assert-Equal (Test-AppRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440' })) $true 'Dell app is for Dell PCs'
-    Assert-Equal (Test-AppRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad T14' })) $false 'Dell app is skipped on a Lenovo'
+    Assert-Equal (Test-PackRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440' })) $true 'Dell app is for Dell PCs'
+    Assert-Equal (Test-PackRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad T14' })) $false 'Dell app is skipped on a Lenovo'
     $dcu.requirements.models = @('OptiPlex*')
-    Assert-Equal (Test-AppRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440' })) $false 'model wildcard limits further'
-    Assert-Equal (Test-AppRequirement -Definition $vlc -Identity ([pscustomobject]@{ Maker = 'HP'; Model = 'x' })) $true 'no requirement means every PC'
+    Assert-Equal (Test-PackRequirement -Definition $dcu -Identity ([pscustomobject]@{ Maker = 'Dell'; Model = 'Latitude 5440' })) $false 'model wildcard limits further'
+    Assert-Equal (Test-PackRequirement -Definition $vlc -Identity ([pscustomobject]@{ Maker = 'HP'; Model = 'x' })) $true 'no requirement means every PC'
 
     # Detection against a given list of Programs and Features entries, and the file system.
     $entries = @([pscustomobject]@{ KeyName = '{11111111-2222-3333-4444-555555555555}'; DisplayName = 'Zoom Workplace (64-bit)'; DisplayVersion = '6.2.5.1234' })

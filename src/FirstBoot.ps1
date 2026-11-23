@@ -19,7 +19,8 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $log = "$env:WINDIR\Temp\FirstBoot.log"
-function Write-Log([string]$Message) { Add-Content -Path $log -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message) }
+Import-Module (Join-Path $PSScriptRoot 'ScriptLog.psm1') -Force
+function Write-Log([string]$Message) { Write-ScriptLog -Path $log -Message $Message }
 
 $deployDir = $PSScriptRoot
 # Two ways in: SetupComplete.cmd, or the startup task for when Windows skips SetupComplete.cmd (it does with an OEM
@@ -33,7 +34,7 @@ function Get-FirstBootCleanupCommand([string]$Dir, [switch]$KeepScript) {
     # firstboot-progress.json stays as the record that first boot finished.
     $d = $Dir.TrimEnd('\')
     $folders = 'Apps', 'Tasks' | ForEach-Object { "rd /s /q `"$d\$_`"" }
-    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
+    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
     if (-not $KeepScript) { $names = @('FirstBoot.ps1', 'FirstBootState.psm1') + $names }
     $files = $names | ForEach-Object { "del /f /q `"$d\$_`"" }
     (@($folders) + @($files)) -join ' & '
@@ -128,7 +129,7 @@ foreach ($plain in $plan.applications) {
         Start-FirstBootStep -Progress $progress -Step $step; Save-Progress
         Write-Log "Installing $($app.name)"
         Set-Progress "Installing $($app.name) ($n of $total)" (91 + [int](7 * ($n - 1) / [Math]::Max(1, $total)))
-        $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -Log { param($m) Write-Log $m } }
+        $r = try { Invoke-AppInstall -Definition $app -AppFolder $dir -LogPath "$env:WINDIR\Temp\App-$($app.name).log" -Log { param($m) Write-Log $m } }
              catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
     }
     $ok = $r.Status -in 'Installed', 'AlreadyInstalled'

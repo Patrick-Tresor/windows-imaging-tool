@@ -317,7 +317,8 @@ On the PC, apps for another maker or model are skipped in WinPE and never copied
 At first boot each app is skipped when its detection already finds it, runs from
 its folder as SYSTEM, is stopped after its timeout, and is marked
 failed when it exits 0 but detection still can't find it. Results go to
-`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`.
+`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
+each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
 First boot starts from `SetupComplete.cmd`. Windows skips that script when it
 activates with an OEM product key (Dell, HP and Lenovo PCs have one in the
 firmware) on editions other than Enterprise, so the unattend also creates a

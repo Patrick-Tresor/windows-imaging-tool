@@ -34,12 +34,9 @@ function Show-AppPackEditor {
 
     # --- Choices -------------------------------------------------------------------------------------------
     $e.CmbType.ItemsSource = @('msi', 'msix', 'nsis', 'inno', 'installshield', 'burn', 'advancedinstaller', 'squirrel', 'exe', 'script')
-    $e.CmbTemplate.ItemsSource = @('(none)') + @($templates | ForEach-Object { "$($_.name)$(if ($_.verify) { ' (verify)' })" })
-    $e.CmbTemplate.SelectedIndex = 0
+    Initialize-TemplatePicker -Controls $e -Templates $templates
     $e.GridRules.Columns[0].ItemsSource = @('msi', 'uninstall', 'file', 'registry', 'appx', 'script')
     $e.GridRules.Columns[3].ItemsSource = @('exists', '>=', '=')
-    $codes = { param($text) @($text -split '[,; ]+' | Where-Object { $_ } | ForEach-Object { [int]$_ }) }
-    $list  = { param($text) @($text -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 
     $folderFiles = {
         # Installer candidates in the chosen folder (or the saved app folder), for the "Installer to run" list.
@@ -81,8 +78,7 @@ function Show-AppPackEditor {
             $row.Type = $r.type; $row.Target = $r.target; $row.Value = $r.value; $row.Operator = $r.operator; $row.Version = $r.version
             $rules.Add($row)
         }
-        $e.TxtMakers.Text = @($d.requirements.makers) -join ', '
-        $e.TxtModels.Text = @($d.requirements.models) -join ', '
+        Set-RequirementBoxes -Controls $e -Definition $d
         $e.TxtTypeNote.Text = Get-InstallerTypeNote $d.installerType
     }
     & $load $def
@@ -113,10 +109,10 @@ function Show-AppPackEditor {
             installerType    = $e.CmbType.Text.Trim()
             command          = $e.TxtCommand.Text.Trim()
             uninstallCommand = $e.TxtUninstall.Text.Trim()
-            successCodes     = & $codes $e.TxtCodes.Text
-            rebootCodes      = & $codes $e.TxtRebootCodes.Text
+            successCodes     = ConvertFrom-ListText $e.TxtCodes.Text -Numbers
+            rebootCodes      = ConvertFrom-ListText $e.TxtRebootCodes.Text -Numbers
             timeoutMinutes   = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 60 }
-            requirements     = [pscustomobject]@{ makers = & $list $e.TxtMakers.Text; models = & $list $e.TxtModels.Text }
+            requirements     = Get-RequirementBoxes -Controls $e
             detection        = [pscustomobject]@{
                 match = if ($e.RbMatchAny.IsChecked) { 'any' } else { 'all' }
                 rules = @($rules | Where-Object { $_.Type -and $_.Target } | ForEach-Object {
@@ -175,29 +171,13 @@ function Show-AppPackEditor {
         try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message }
     }
 
-    $e.BtnSourceFile.Add_Click({
-        $f = [Microsoft.Win32.OpenFileDialog]::new()
-        $f.Filter = 'Installers (*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat)|*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat|All files (*.*)|*.*'
-        if ($f.ShowDialog($win)) { $e.TxtSource.Text = $f.FileName; & $afterSource }
-    })
-    $e.BtnSourceFolder.Add_Click({
-        $f = [Windows.Forms.FolderBrowserDialog]::new()
-        $f.Description = 'Folder with the installer and the files it needs'
-        if ($f.ShowDialog() -eq 'OK') { $e.TxtSource.Text = $f.SelectedPath; & $afterSource }
-    })
+    Register-SourceBrowse -Controls $e -Owner $win -FolderText 'Folder with the installer and the files it needs' -After { & $afterSource } `
+        -Filter 'Installers (*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat)|*.msi;*.exe;*.msix;*.msixbundle;*.appx;*.ps1;*.cmd;*.bat|All files (*.*)|*.*'
     $e.BtnInspect.Add_Click({ try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message } })
 
-    $e.CmbTemplate.Add_SelectionChanged({
-        $i = $e.CmbTemplate.SelectedIndex
-        if ($i -gt 0) {
-            $t = $templates[$i - 1]
-            $e.TxtTemplateNote.Text = "$(if ($t.verify) { 'Best guess, test it on a VM first. ' })$($t.notes)"
-        } else { $e.TxtTemplateNote.Text = '' }
-    })
     $e.BtnTemplate.Add_Click({
-        $i = $e.CmbTemplate.SelectedIndex
-        if ($i -le 0) { return }
-        $t = $templates[$i - 1]
+        $t = Get-PickedTemplate -Controls $e -Templates $templates
+        if (-not $t) { return }
         $typed = $e.TxtName.Text.Trim()
         $name = if (-not $isNew) { $Name } elseif ($typed -and $typed -ne 'NewApp') { $typed } else { $t.name }
         # No installer picked and the template has a download: the PC downloads it at first boot.

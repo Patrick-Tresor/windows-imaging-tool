@@ -140,6 +140,7 @@ try {
     Assert-Equal (($logonPlan | ForEach-Object name) -join ',') 'Rename,logon.cmd' 'logon-tasks.json holds every FIRSTLOGON task, plain commands too'
     $deployText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
     Assert-Equal ($deployText.Contains('for ($i = 0; $i -lt $logonCount; $i++) { Get-LogonTaskCommand -Index $i }')) $true 'every FIRSTLOGON task goes through Run-LogonTask.ps1'
+    Assert-Equal ($deployText -match "'Run-LogonTask\.ps1'\), \(Join-Path \`$PSScriptRoot 'TaskPack\.psm1'\), \(Join-Path \`$PSScriptRoot 'LibraryPack\.psm1'\) \`$logonDir") $true 'the logon runner gets LibraryPack.psm1, which TaskPack.psm1 imports'
     Assert-Equal ($deployText.Contains("Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', `$t.Command)")) $false 'POSTIMAGE commands run through Invoke-TaskPack too'
     Assert-Equal (Get-LogonTaskCommand -Index 0) 'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\ProgramData\ImagingTool\Tasks\Run-LogonTask.ps1" -Index 0' 'a logon task runs through Run-LogonTask.ps1'
     $runner = Get-Content -Raw (Join-Path $repo 'src/Run-LogonTask.ps1')

@@ -2,7 +2,7 @@
 .SYNOPSIS
     Runs one FIRSTLOGON task (from the task library, or a plain command) when the first user logs on (unattend FirstLogonCommands).
 .DESCRIPTION
-    Deploy-Image.ps1 copies this, TaskPack.psm1, logon-tasks.json and each task's folder to
+    Deploy-Image.ps1 copies this, TaskPack.psm1, LibraryPack.psm1, logon-tasks.json and each task's folder to
     C:\ProgramData\ImagingTool\Tasks. Runs as the user who logs on, with the task's timeout and success codes,
     and logs to C:\Windows\Temp\Task-<name>-<user>.log (the user's %TEMP% when that folder can't be written).
 #>

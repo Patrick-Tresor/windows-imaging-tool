@@ -18,13 +18,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-function Write-Log([string]$Message) {
-    if (-not $LogPath) { return }
-    try {
-        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LogPath))
-        [IO.File]::AppendAllText($LogPath, ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $Message) + [Environment]::NewLine)
-    } catch { }
-}
+Import-Module ([IO.Path]::Combine($PSScriptRoot, 'ScriptLog.psm1')) -Force
+function Write-Log([string]$Message) { Write-ScriptLog -Path $LogPath -Message $Message }
 
 function Get-FolderKey([string]$Path) { "$Path".Trim().TrimEnd('\').ToLowerInvariant() }
 
