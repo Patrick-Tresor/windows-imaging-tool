@@ -29,12 +29,8 @@
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-        <CheckBox x:Name="ChkCleanup" IsChecked="True"
-                  Content="Clean up superseded components after the updates (smaller image, takes longer)"/>
-        <CheckBox x:Name="ChkResetBase" Margin="22,2,0,4"
-                  Content="Also reset the base: smallest image, but these updates can no longer be uninstalled on deployed PCs"/>
         <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0"
-                   Text="The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy. The current version is kept in Images\Previous, so Versions... can roll back to it."/>
+                   Text="Superseded components are cleaned up after the updates (a smaller image; the updates can still be uninstalled on deployed PCs). The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy. The current version is kept in Images\Previous, so Versions... can roll back to it."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0">

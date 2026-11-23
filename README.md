@@ -446,11 +446,12 @@ checkpoint update), then applies it. The catalog has no official interface, so t
 can stop working when Microsoft changes the site: the update then fails before
 touching the image, and the message says to download the `.msu` by hand into
 `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
-downloaded by hand) are applied after it, from top to bottom; move a standalone
-servicing stack update to the top if there is one.
+downloaded by hand) are applied after it, in a fixed order: a standalone
+servicing stack update (`ssu` in its name) first, then Windows, then .NET,
+oldest KB first.
 
 It runs `Update-OfflineImage.ps1` in the background on this PC, with each step in the Progress window. For each edition
-it mounts the image, adds the packages, optionally cleans up the replaced
+it mounts the image, adds the packages, cleans up the replaced
 components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
@@ -460,9 +461,9 @@ with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass
 `-WorkDir`). A package that does not apply to the image is logged and skipped; any
-other failure discards the changes and leaves the image as it was. **Reset base**
-makes the image smallest but means those updates can't be uninstalled on deployed
-PCs. Without the console:
+other failure discards the changes and leaves the image as it was. The console
+never resets the base, so the updates can still be uninstalled on deployed PCs
+(`-ResetBase` from the command line does). Without the console:
 
 ```powershell
 .\src\Update-OfflineImage.ps1 -ImagePath D:\DeployShare\Images\Win11-24H2-Enterprise.wim `
