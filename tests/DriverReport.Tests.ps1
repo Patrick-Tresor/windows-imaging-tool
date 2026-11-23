@@ -141,6 +141,61 @@ try {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Lenovo: the SystemSKU text (LENOVO_MT_20FR_BU_Think_FM_ThinkPad X1 Yoga 1st) is not a catalog ID. Older versions
+# reported it as the SKU and the Unknown models report keyed an inbox row on it: a second row for the X1 Yoga that
+# also beat the downloaded pack at deploy (Patrick, 2026-11-23).
+$oldSku = 'LENOVO_MT_20FR_BU_Think_FM_ThinkPad X1 Yoga 1st'
+$c = ConvertTo-CatalogIdentity (New-Pc Lenovo 'ThinkPad X1 Yoga 1st' $oldSku $null 'SN')
+Assert-Equal "$($c.Sku)|$($c.MachineType)|$($c.Model)" '|20FR|ThinkPad X1 Yoga 1st' 'lenovo id: SystemSKU text becomes the machine type'
+$c = ConvertTo-CatalogIdentity (New-Pc Lenovo 'x' $oldSku '20FQ' 'SN')
+Assert-Equal "$($c.Sku)|$($c.MachineType)" '|20FQ' 'lenovo id: a machine type already there is kept'
+$c = ConvertTo-CatalogIdentity (New-Pc Dell 'Latitude 5521' '0A67' $null 'SN')
+Assert-Equal "$($c.Sku)|$($c.MachineType)" '0A67|' 'lenovo id: other makers unchanged'
+
+$root = Join-Path ([IO.Path]::GetTempPath()) ("driverreport-lenovo-" + [guid]::NewGuid())
+try {
+    Initialize-ContentRoot -Path $root
+    $catalogPath = Join-Path $root 'config/driver-catalog.json'
+    $cat = Get-Content -Raw $catalogPath | ConvertFrom-Json
+    $cat.entries = @(
+        [pscustomobject]@{ maker = 'Lenovo'; model = 'ThinkPad X1 Yoga Type 20FQ 20FR'; machineType = '20FR, 20FQ'; path = 'Lenovo\ThinkPad X1 Yoga Type 20FQ 20FR' }
+        [pscustomobject]@{ maker = 'Lenovo'; sku = $oldSku; path = $null }
+        [pscustomobject]@{ maker = 'Lenovo'; model = 'ThinkPad X13 Yoga Gen 1'; machineType = '20SX, 20SY'; path = 'Lenovo\ThinkPad X13 Yoga Gen 1' }
+        [pscustomobject]@{ maker = 'Lenovo'; sku = 'LENOVO_MT_21HD_BU_Think_FM_ThinkPad T14 Gen 4'; path = $null }
+        [pscustomobject]@{ maker = 'Dell'; model = 'Latitude 5521'; sku = '0A67'; path = 'Dell\Latitude 5521' }
+    )
+    $cat | ConvertTo-Json -Depth 5 | Set-Content -Path $catalogPath -Encoding UTF8
+
+    # Before the merge, the inbox row keyed on the SystemSKU wins at deploy: no drivers for the X1 Yoga.
+    $x1 = New-Pc Lenovo 'ThinkPad X1 Yoga 1st' $oldSku '20FR' 'SN-X1'
+    $raw = Get-Content -Raw $catalogPath | ConvertFrom-Json
+    $m = Find-DriverCatalogMatch -Identity $x1 -Catalog $raw
+    Assert-Equal "$($m.Status) $($m.MatchedBy)" 'Matched machineType' 'lenovo match: the SystemSKU is no longer matched before the machine type'
+
+    Assert-Equal (Merge-LenovoSkuEntries -ContentRoot $root) 2 'lenovo merge: two old rows handled'
+    $after = @((Get-DriverCatalog -ContentRoot $root).entries)
+    Assert-Equal (($after | ForEach-Object { "$($_.maker)|$($_.model)|$($_.sku)|$($_.machineType)|$($_.path)" }) -join ';') (
+        'Lenovo|ThinkPad X1 Yoga Type 20FQ 20FR||20FR, 20FQ|Lenovo\ThinkPad X1 Yoga Type 20FQ 20FR;' +
+        'Lenovo|ThinkPad X13 Yoga Gen 1||20SX, 20SY|Lenovo\ThinkPad X13 Yoga Gen 1;' +
+        'Lenovo|||21HD|;' +
+        'Dell|Latitude 5521|0A67||Dell\Latitude 5521') 'lenovo merge: X1 Yoga is one row, an uncovered inbox row keeps its machine type, others untouched'
+    Assert-Equal (Merge-LenovoSkuEntries -ContentRoot $root) 0 'lenovo merge: nothing left the second time'
+
+    # The Unknown models report reads old status records with the SystemSKU as a machine type, so marking one
+    # inbox only keys the row on the machine type.
+    Set-DeployLogPath -Path (Join-Path $root 'test.log')
+    Start-DeployStatus -Folder (Join-Path $root 'Status') -Identity (New-Pc Lenovo 'ThinkPad T470' 'LENOVO_MT_20JM_BU_Think_FM_ThinkPad T470' $null 'SN-T') -LogPath @() | Out-Null
+    Set-DeployStatus -Fields @{ computerName = 'PC-T'; driverStatus = 'Fallback' }
+    Set-DeployStatus -State Succeeded
+    $u = @(Get-UnknownModels -ContentRoot $root)
+    Assert-Equal "$($u.Count)|$($u[0].Sku)|$($u[0].MachineType)" '1||20JM' 'lenovo report: old record grouped by machine type'
+    Set-UnknownModelInbox -ContentRoot $root -Model $u[0]
+    $first = (Get-DriverCatalog -ContentRoot $root).entries[0]
+    Assert-Equal "$($first.sku)|$($first.machineType)" '|20JM' 'lenovo report: inbox only is keyed on the machine type'
+} finally {
+    Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # Deploy-Image: a DISM error on the WinPE pack fallback warns; on a real driver pack it still stops the deploy.
 $deployText = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 $injectAt = $deployText.IndexOf("Set-DeployStatus -Step 'Injecting drivers'")

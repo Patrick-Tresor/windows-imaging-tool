@@ -776,8 +776,9 @@ function Find-VendorDriverPack {
     .SYNOPSIS
         The catalog packs that match what the admin typed: a model name in any form ("Latitude 5521", "dell 5521",
         "EliteBook 840 G9", "t14 gen 4"), or a SKU / machine type ("0A6B", "21HD"). Every word must be found in the
-        maker, model, SKUs or machine types: a word of digits must match a whole word (5440 is not 15440), other
-        words the start of one. An exact SKU or machine type comes first, then the shortest model names.
+        maker, model, SKUs or machine types. A word with a digit in it (5440, X1, T14) must match a whole word
+        (5440 is not 15440, "X1 Yoga" is not the X13 Yoga), other words the start of one. An exact SKU or machine
+        type comes first, then the shortest model names.
     #>
     param([Parameter(Mandatory)][string]$Query, [object[]]$Packs)
     $words = @($Query.Trim() -split '[\s,;]+' | Where-Object { $_ })
@@ -788,7 +789,7 @@ function Find-VendorDriverPack {
         $all = $true
         foreach ($w in $words) {
             $e = [regex]::Escape($w)
-            $pattern = if ($w -match '^\d+$') { "(?<![0-9A-Za-z])$e(?![0-9A-Za-z])" } else { "(?<![0-9A-Za-z])$e" }
+            $pattern = if ($w -match '\d') { "(?<![0-9A-Za-z])$e(?![0-9A-Za-z])" } else { "(?<![0-9A-Za-z])$e" }
             if ($text -notmatch "(?i)$pattern") { $all = $false; break }
         }
         $all
