@@ -36,9 +36,8 @@ and click **Create folders** the first time. Then:
   [Image versions and rollback](#image-versions-and-rollback)).
   **Update image...** adds Windows updates to the selected image (see
   [Updating an image](#updating-an-image)).
-- **Answer Files**: create, edit and check deployment profiles, pick the default,
-  **Delete** one (it asks first, and says when it is the default),
-  and **Import answer file XML...** to convert an existing deploy wizard answer file.
+- **Answer Files**: create, edit and check deployment profiles, and
+  **Delete** one (it asks first).
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
@@ -408,13 +407,6 @@ are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 same way in every phase (`cmd /c`, exit code 0 is success, 60 minute timeout,
 its own log named after the command); a POSTIMAGE command that fails stops the
 deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
-
-**Importing a deploy wizard answer file** keeps the mode, delay, image name, application
-order, regional settings, naming, domain join, tasks, shares and completion
-options. The source file encrypts its passwords, so they are never carried over; the
-import lists the passwords to type in the editor, the `.spk` application packs to
-rebuild on the Applications tab (templates cover the common ones), and anything it can't convert (static IP, client agent,
-platform packs, unsupported system properties).
 
 ## Image versions and rollback
 

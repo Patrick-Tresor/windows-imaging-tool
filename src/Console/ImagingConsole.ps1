@@ -561,19 +561,6 @@ $ui.BtnAnswerNew.Add_Click({ Invoke-Safely {
     Edit-AnswerFile -NewName $name
 } })
 
-$ui.BtnAnswerImport.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
-    $dlg.Filter = 'Deploy wizard answer file (*.xml)|*.xml'
-    if (-not $dlg.ShowDialog($window)) { return }
-    $result = Import-DeployWizardAnswerFile -ContentRoot $script:root -Path $dlg.FileName
-    Update-Answers; Update-Images
-    $text = "Imported as $($result.Name). Passwords are not carried over: enter them in the editor that opens next.`n`nAlso check:`n" + (($result.Notes | ForEach-Object { "- $_" }) -join "`n")
-    [Windows.MessageBox]::Show($window, $text, 'Answer file import', 'OK', 'Information') | Out-Null
-    Set-Status "Imported $($result.Name) from $($dlg.FileName)"
-    Edit-AnswerFile -Path $result.Path
-} })
-
 $ui.BtnAnswerEdit.Add_Click({ Invoke-Safely {
     $row = $ui.GridAnswers.SelectedItem
     if (-not $row) { Show-Error 'Select an answer file first.'; return }
