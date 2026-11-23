@@ -23,6 +23,14 @@ function Get-StatusId {
     ($s -replace '[\\/:*?"<>|\s]', '_')
 }
 
+function Get-RealSharePath([string]$Path) {
+    # The share from deploy-settings.json, or '' for none or the shipped example (\\deploy-server\Deploy), which
+    # points at no real server: a content root nobody has set up yet keeps its status in <content root>\Status.
+    $p = "$Path".Trim().TrimEnd('\')
+    if ($p -match '^\\\\(deploy-server|server|yourserver)\\') { return '' }
+    $p
+}
+
 function Resolve-StatusTarget {
     # Works out where WinPE writes status and which UNC path, if any, the new Windows can report to at first boot.
     # With a share in the settings every deploy reports to <share>\Status, USB deploys too (mapped as R:; when the
@@ -36,7 +44,8 @@ function Resolve-StatusTarget {
         [string]$ShareDrive = 'Z:\'  # where Find-ContentRoot maps the share
     )
     $onShare = $SharePath -and $ContentRoot.TrimEnd('\') -eq $ShareDrive.TrimEnd('\')
-    if (-not $ReportPath -and $SharePath -and -not $onShare) { $ReportPath = $SharePath.TrimEnd('\') + '\Status' }
+    $realShare = Get-RealSharePath $SharePath
+    if (-not $ReportPath -and $realShare -and -not $onShare) { $ReportPath = $realShare + '\Status' }
     if (-not $ReportPath) {
         return [pscustomobject]@{
             Local = $ContentRoot.TrimEnd('\') + '\Status'   # a WinPE path; string-built so tests run off Windows
@@ -264,7 +273,8 @@ function Get-StatusFolder {
     # an old setup's reporting.path when set, otherwise <content root>\Status.
     param([Parameter(Mandatory)][string]$ContentRoot, $Settings)
     if ($Settings -and $Settings.PSObject.Properties['reporting'] -and $Settings.reporting -and $Settings.reporting.path) { return $Settings.reporting.path }
-    if ($Settings -and $Settings.PSObject.Properties['share'] -and $Settings.share -and $Settings.share.path) { return "$($Settings.share.path)".TrimEnd('\') + '\Status' }
+    $share = if ($Settings -and $Settings.PSObject.Properties['share'] -and $Settings.share) { Get-RealSharePath $Settings.share.path } else { '' }
+    if ($share) { return $share + '\Status' }
     Join-Path $ContentRoot 'Status'
 }
 
