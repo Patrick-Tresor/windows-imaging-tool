@@ -80,7 +80,8 @@ and click **Create folders** the first time. Then:
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
-  last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
+  last heard from, with the PC's live log underneath. Refreshes every 10 seconds while it is open; every tab
+  reloads when you open it, so there are no Refresh buttons.
   See [Deployment dashboard](#deployment-dashboard). The **History** filter
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.

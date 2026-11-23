@@ -271,6 +271,7 @@ function Update-MediaAnswers {
 }
 
 function Update-Drivers {
+    $script:driversEdited = $false
     $script:drivers.Clear()
     if (Test-ContentRoot $script:root) {
         # The example rows new content roots used to get (Latitude 5440, EliteBook 840 G9...): gone unless they hold drivers.
@@ -499,7 +500,6 @@ $ui.BtnInitRoot.Add_Click({ Invoke-Safely {
 
 #region Images
 
-$ui.BtnImagesRefresh.Add_Click({ Invoke-Safely { Update-Images; Set-Status 'Images refreshed' } })
 $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
@@ -543,7 +543,6 @@ function Edit-AnswerFile([string]$Path, [string]$NewName) {
     if ($saved) { Update-Answers; Update-Images; Update-Library; Set-Status 'Answer file saved' }
 }
 
-$ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
 
 $ui.GridAnswers.Add_SelectionChanged({
     $row = $ui.GridAnswers.SelectedItem
@@ -693,7 +692,6 @@ $ui.BtnAppTest.Add_Click({ Invoke-Safely {
 
 #region Driver library
 
-$ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
 # Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
 $script:driverFound = @()
 function Find-DriverPackOnline {
@@ -766,8 +764,12 @@ $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
     if ($row -isnot [DriverRow]) { return }
     if (Confirm-Action "Remove the catalog entry for $($row.Maker) $(@($row.Model, $row.Sku, $row.MachineType, $row.ModelPattern) -ne '' | Select-Object -First 1)? The driver files stay on disk. Click Save to keep the change.") {
         [void]$script:drivers.Remove($row)
+        $script:driversEdited = $true
     }
 } })
+
+# Typed in the grid and not saved yet: opening the tab again does not reload (and lose) it.
+$ui.GridDrivers.Add_CellEditEnding({ $script:driversEdited = $true })
 
 $ui.BtnDriversSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1269,7 +1271,6 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
 
 #region Dashboard
 
-$ui.BtnDashRefresh.Add_Click({ Invoke-Safely { Update-Dashboard; Set-Status 'Dashboard refreshed' } })
 $ui.CmbDashFilter.Add_SelectionChanged({ Invoke-Safely { Update-Dashboard } })
 $ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
 
@@ -1305,15 +1306,23 @@ $ui.BtnDashOpen.Add_Click({ Invoke-Safely {
 $script:dashTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:dashTimer.Interval = [timespan]::FromSeconds(10)
 $script:dashTimer.Add_Tick({
-    if (-not $ui.ChkDashAuto.IsChecked -or $ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
+    if ($ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
     try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
 })
 $script:dashTimer.Start()
 $ui.Tabs.Add_SelectionChanged({
     param($sender, $e)
     # SelectionChanged bubbles up from the grids and combo boxes inside the tabs; only react to tab switches.
-    if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) {
-        try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
+    # Each tab reloads when it is opened (no Refresh buttons). The Driver Library keeps rows being edited until Save.
+    if ($e.OriginalSource -eq $ui.Tabs -and (Test-ContentRoot $script:root)) {
+        $tab = $ui.Tabs.SelectedItem
+        try {
+            if ($tab -eq $ui.TabDashboard) { Update-Dashboard }
+            elseif ($tab -eq $ui.TabImages) { Update-Images }
+            elseif ($tab -eq $ui.TabAnswers) { Update-Answers }
+            elseif ($tab -eq $ui.TabLibrary) { Update-Library }
+            elseif ($tab -eq $ui.TabDrivers -and -not $script:driversEdited) { Update-Drivers }
+        } catch { Set-Status "Refresh failed: $($_.Exception.Message)" }
     }
     if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not $script:adAutoTried) {
         # Once per console session, after the tab has painted.

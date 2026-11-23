@@ -57,7 +57,7 @@
       </TabControl.Resources>
 
       <!-- Images -->
-      <TabItem Header="Images">
+      <TabItem x:Name="TabImages" Header="Images">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Golden images"/>
@@ -68,7 +68,6 @@
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
             <Button x:Name="BtnImageLog" Content="Open log" ToolTip="The newest capture or update log of the selected image."/>
-            <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
           </StackPanel>
           <DataGrid x:Name="GridImages" IsReadOnly="True">
             <DataGrid.Columns>
@@ -86,7 +85,7 @@
       </TabItem>
 
       <!-- Driver library -->
-      <TabItem Header="Driver Library">
+      <TabItem x:Name="TabDrivers" Header="Driver Library">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <DockPanel MinHeight="440" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
@@ -168,7 +167,6 @@
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
-              <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
             </StackPanel>
 
             <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
@@ -271,7 +269,7 @@
       </TabItem>
 
       <!-- Answer files -->
-      <TabItem Header="Answer Files">
+      <TabItem x:Name="TabAnswers" Header="Answer Files">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
@@ -281,7 +279,6 @@
             <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnAnswerEdit" Content="Edit"/>
             <Button x:Name="BtnAnswerDelete" Content="Delete" ToolTip="Deletes the selected answer file after asking. Its image and applications stay."/>
-            <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
           </StackPanel>
           <TextBox x:Name="TxtAnswerIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>
@@ -523,8 +520,6 @@
               </UniformGrid>
             </StackPanel>
             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-              <Button x:Name="BtnDashRefresh" Content="Refresh"/>
-              <CheckBox x:Name="ChkDashAuto" Content="Refresh every 10 s" IsChecked="True" VerticalAlignment="Center" Margin="4,0,16,0"/>
               <Label Content="Show"/>
               <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
                 <ComboBoxItem Content="All"/>
