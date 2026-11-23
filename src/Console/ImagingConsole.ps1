@@ -1146,7 +1146,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
-    # window shows each step; the build's window (Show build window) and its log have every line.
+    # window shows each step; the build's log (Open log) has every line.
     $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)"
     Set-Status 'Media build started. The Build progress window shows each step.'

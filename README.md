@@ -565,8 +565,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    mounting boot.wim, adding components and drivers, configuring WinPE, unmounting, partitioning the
    stick, copying WinPE and the content) with its own bar, elapsed time and a tick when it is complete;
    steps taken from the WinPE build cache say Reused. If a step fails it is marked Failed with one line;
-   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`) and
-   **Show build window** brings up the build's own window. Closing the progress window does not stop the
+   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`); the
+   build's own PowerShell window stays minimized on the taskbar. Closing the progress window does not stop the
    build. From the command line, `-ProgressFile` and `-LogPath` do the same.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).

@@ -210,7 +210,6 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal ($script:ProgressHub.Window -eq $dlg) $true 'window: still one window for two jobs'
         Assert-Equal @($dlg.FindName('LstJobs').ItemsSource).Count 2 'window: two cards'
         Assert-Equal $script:ProgressWindows.Count 2 'window: both jobs listed for Show progress'
-        Assert-Equal $script:ProgressWindows[1].View.CanShowWindow $false 'window: a hidden job has no Show build window'
         Assert-Equal $dlg.FindName('TxtCount').Text '2 running' 'window: count'
 
         # Closing while work runs only hides it; Show progress brings it back.
