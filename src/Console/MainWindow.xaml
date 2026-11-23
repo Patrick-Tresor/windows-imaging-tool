@@ -25,6 +25,7 @@
         <Button x:Name="BtnShowProgress" DockPanel.Dock="Right" Content="Show progress" Margin="20,0,0,0" Visibility="Collapsed"
                 ToolTip="Opens the progress windows again, also the ones you closed while the work goes on."/>
         <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
+        <Button x:Name="BtnOpenRoot" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0" ToolTip="Opens the content root in File Explorer"/>
         <Button x:Name="BtnBrowseRoot" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0"/>
         <TextBox x:Name="TxtRoot" IsReadOnly="True"/>
       </DockPanel>
@@ -68,7 +69,6 @@
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
             <Button x:Name="BtnImageLog" Content="Open log" ToolTip="The newest capture or update log of the selected image."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
-            <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
           <DataGrid x:Name="GridImages" IsReadOnly="True">
             <DataGrid.Columns>
@@ -169,7 +169,6 @@
               <Button x:Name="BtnDriversSave" Content="Save" Style="{StaticResource Primary}"/>
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
               <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
-              <Button x:Name="BtnDriversOpen" Content="Open folder"/>
             </StackPanel>
 
             <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
@@ -283,7 +282,6 @@
             <Button x:Name="BtnAnswerEdit" Content="Edit"/>
             <Button x:Name="BtnAnswerDelete" Content="Delete" ToolTip="Deletes the selected answer file after asking. Its image and applications stay."/>
             <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
-            <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
           </StackPanel>
           <TextBox x:Name="TxtAnswerIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>

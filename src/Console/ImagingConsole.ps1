@@ -474,6 +474,8 @@ function Update-All {
 
 $ui.BtnShowProgress.Add_Click({ Invoke-Safely { Show-ProgressWindows } })
 
+$ui.BtnOpenRoot.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item $script:root } } })
+
 $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $path = Select-Folder 'Choose the content root: a USB DEPLOY volume, a local folder, or the network share'
     if (-not $path) { return }
@@ -530,7 +532,6 @@ $ui.BtnImageLog.Add_Click({ Invoke-Safely {
     if (-not $log) { Show-Error "No capture or update log for $($image.Name) yet."; return }
     Invoke-Item $log
 } })
-$ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
 #endregion
 
@@ -543,7 +544,6 @@ function Edit-AnswerFile([string]$Path, [string]$NewName) {
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
-$ui.BtnAnswerOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'AnswerFiles') } } })
 
 $ui.GridAnswers.Add_SelectionChanged({
     $row = $ui.GridAnswers.SelectedItem
@@ -694,7 +694,6 @@ $ui.BtnAppTest.Add_Click({ Invoke-Safely {
 #region Driver library
 
 $ui.BtnDriversRefresh.Add_Click({ Invoke-Safely { Update-Drivers; Set-Status 'Driver library refreshed' } })
-$ui.BtnDriversOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Drivers') } } })
 # Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
 $script:driverFound = @()
 function Find-DriverPackOnline {
