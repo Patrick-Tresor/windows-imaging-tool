@@ -578,37 +578,135 @@ function Expand-VendorDriverPack {
 }
 
 function Get-VendorExtractSwitches {
-    # The command lines that extract a vendor .exe, tried in order. HP's newer SoftPaq extractor can exit with an
-    # error (1168, "element not found") for /s /e /f; HP's own CMSL extracts with -e -f <folder> -s and ignores the
-    # exit code, so that form is the second try.
-    param([Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination)
+    # The tries that extract a vendor .exe, in order: Arguments for the .exe, the Log it writes (Lenovo) and
+    # FromLog when the files land in the pack's own default folder, which the log names, and are moved from there.
+    # HP's newer SoftPaq extractor can exit with an error (1168, "element not found") for /s /e /f; HP's own CMSL
+    # extracts with -e -f <folder> -s and ignores the exit code, so that form is the second try.
+    # Lenovo SCCM packs are Inno Setup. The X1 Yoga 1st gen 1909 pack (2019) exited 1 ("Setup failed to
+    # initialize") with nothing extracted for /DIR=<folder>: older packs can refuse a folder they were not built
+    # with ("You have changed the extraction location", answered No when message boxes are suppressed). The second
+    # try leaves /DIR out. Each try writes an Inno Setup log so a failure says why.
+    param([Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination, [string]$LogBase)
+    $try = { param($Arguments, $Log, [switch]$FromLog) [pscustomobject]@{ Arguments = $Arguments; Log = $Log; FromLog = [bool]$FromLog } }
     switch ($Maker) {
-        'Dell'   { ,@('/s', "/e=`"$Destination`"") }
-        'HP'     { ,@('/s', '/e', '/f', "`"$Destination`""); ,@('-e', '-f', "`"$Destination`"", '-s') }
-        'Lenovo' { ,@('/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES') }
+        'Dell'   { & $try @('/s', "/e=`"$Destination`"") }
+        'HP'     { & $try @('/s', '/e', '/f', "`"$Destination`""); & $try @('-e', '-f', "`"$Destination`"", '-s') }
+        'Lenovo' {
+            $first = "$LogBase-1.log"; $second = "$LogBase-2.log"
+            & $try @('/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=`"$Destination`"", '/EXTRACT=YES', "/LOG=`"$first`"") $first
+            & $try @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/EXTRACT=YES', "/LOG=`"$second`"") $second -FromLog
+        }
     }
+}
+
+function Remove-InnoLogTime([string]$Line) {
+    # "2026-11-22 20:40:50.123   Log opened." -> "Log opened."
+    ($Line -replace '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d+)?\s+', '').Trim()
+}
+
+function Get-InnoSetupFailure {
+    # One short line from an Inno Setup log on why it stopped: a suppressed message box with its text, then
+    # "InitializeSetup returned False", errors and exceptions. Empty when the log says nothing of the kind.
+    param([string[]]$LogLines)
+    $stamp = '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d'
+    $parts = [Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $LogLines.Count; $i++) {
+        $line = Remove-InnoLogTime $LogLines[$i]
+        if ($line -match '(?i)message box') {
+            # The message text follows on lines without a time stamp.
+            $text = @()
+            while ($i + 1 -lt $LogLines.Count -and $LogLines[$i + 1] -notmatch $stamp) { $i++; if ($LogLines[$i].Trim()) { $text += $LogLines[$i].Trim() } }
+            $parts.Add((@($line) + $text) -join ' ')
+        } elseif ($line -match '(?i)returned False|exception|error|fatal|abort' -and
+                  $line -notmatch '(?i)^(Got EAbort exception|Dest filename|Time stamp|Installing the file|Setup command line|-- )') {
+            $parts.Add($line)
+        }
+    }
+    $out = (@($parts | Select-Object -Unique) -join ' ') -replace '\s+', ' '
+    if ($out.Length -gt 300) { $out = $out.Substring(0, 297) + '...' }
+    $out
+}
+
+function Get-InnoSetupExtractFolder {
+    # The folder an Inno Setup pack extracted into, from its log's "Dest filename:" lines: the deepest folder that
+    # holds every file, leaving out Setup's own files (in its is-XXXXX.tmp temp folder). Empty when no file or only a drive root.
+    param([string[]]$LogLines)
+    $dirs = @(foreach ($l in $LogLines) {
+        if ((Remove-InnoLogTime $l) -match '^Dest filename:\s*(.+)$') {
+            $f = $Matches[1].Trim()
+            if ($f -match '(?i)[\\/]is-[^\\/]+\.tmp[\\/]') { continue }
+            $f -replace '[\\/][^\\/]*$', ''
+        }
+    })
+    if (-not $dirs) { return }
+    $common = @($dirs[0] -split '[\\/]')
+    foreach ($d in $dirs) {
+        $seg = @($d -split '[\\/]')
+        $n = 0
+        while ($n -lt $common.Count -and $n -lt $seg.Count -and $common[$n] -eq $seg[$n]) { $n++ }
+        $common = @($common | Select-Object -First $n)
+    }
+    $common = @($common | Where-Object { $_ -ne '' })
+    # A drive root or a share root is never taken: only a folder the pack made.
+    if ($common.Count -lt 2 -or ($dirs[0] -like '\\*' -and $common.Count -lt 3)) { return }
+    $path = $common -join '\'
+    if ($dirs[0] -like '\\*') { $path = "\\$path" }
+    $path
 }
 
 function Invoke-VendorExtract {
     # Runs the vendor's extractor. A non-zero exit code only fails when nothing usable came out: HP SoftPaqs can
-    # report an error after extracting every file, and the drivers (.inf files) are what counts.
+    # report an error after extracting every file, and the drivers (.inf files) are what counts. The failure
+    # message ends with what the Inno Setup log says (Lenovo); the log's last lines go to the job log.
     param(
         [Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Destination,
-        [scriptblock]$Runner = { param($Exe, $Arguments) (Start-Process -FilePath $Exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden).ExitCode }
+        [scriptblock]$Runner = { param($Exe, $Arguments) (Start-Process -FilePath $Exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden).ExitCode },
+        # Moves a folder's contents into Destination. robocopy copes with the long paths driver packs have.
+        [scriptblock]$Mover = {
+            param($From, $To)
+            $null = & robocopy.exe $From $To /E /MOVE /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+            if ($LASTEXITCODE -ge 8) { throw "Moving the drivers from $From failed (robocopy exit code $LASTEXITCODE)." }
+            if ((Test-Path -LiteralPath $From) -and -not (Get-ChildItem -LiteralPath $From -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                Remove-Item -LiteralPath $From -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
     )
     $name = [IO.Path]::GetFileName($File)
+    $logBase = Join-Path ([IO.Path]::GetTempPath()) ('ImagingConsole-extract-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $hasInf = { param($Dir) [bool](Get-ChildItem -LiteralPath $Dir -Filter *.inf -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1) }
     $codes = @()
-    foreach ($switches in @(Get-VendorExtractSwitches -Maker $Maker -Destination $Destination)) {
-        $code = & $Runner $File $switches
-        $hasInf = [bool](Get-ChildItem -LiteralPath $Destination -Filter *.inf -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($code -eq 0) { return }
-        if ($hasInf) {
-            Write-Host "$name exited with code $code but its drivers were extracted; using them." -ForegroundColor DarkGray
-            return
+    $reason = ''
+    foreach ($try in @(Get-VendorExtractSwitches -Maker $Maker -Destination $Destination -LogBase $logBase)) {
+        if ($try.Log) { Remove-Item -LiteralPath $try.Log -Force -ErrorAction SilentlyContinue }
+        $code = & $Runner $File $try.Arguments
+        $log = @(if ($try.Log -and (Test-Path -LiteralPath $try.Log)) { Get-Content -LiteralPath $try.Log -ErrorAction SilentlyContinue })
+        if ($try.Log) { Remove-Item -LiteralPath $try.Log -Force -ErrorAction SilentlyContinue }
+        if ($try.FromLog) {
+            $from = Get-InnoSetupExtractFolder -LogLines $log
+            if ($from -and (Test-Path -LiteralPath $from) -and (& $hasInf $from)) {
+                Write-Host "$name extracted to $from; moving the drivers into place." -ForegroundColor DarkGray
+                & $Mover $from $Destination
+                return
+            }
+            if ($code -eq 0) { $reason = 'it reported success but its log names no extracted drivers.' }
+        } else {
+            if ($code -eq 0) { return }
+            if (& $hasInf $Destination) {
+                Write-Host "$name exited with code $code but its drivers were extracted; using them." -ForegroundColor DarkGray
+                return
+            }
         }
         $codes += $code
+        $said = Get-InnoSetupFailure -LogLines $log
+        if ($said) { $reason = $said }
+        if ($log) {
+            Write-Host "$name setup log (try $($codes.Count), exit code $code), last lines:" -ForegroundColor DarkGray
+            $log | Select-Object -Last 30 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+        }
     }
-    throw "$name exited with code $($codes -join ', then ') while extracting."
+    $msg = "$name exited with code $($codes -join ', then ') while extracting."
+    if ($reason) { $msg += " Setup said: $reason" }
+    throw $msg
 }
 
 function Install-VendorDriverPack {
@@ -744,7 +842,7 @@ function Format-VendorDriverPack {
 
 #endregion
 
-Export-ModuleMember -Function Invoke-VendorExtract, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
+Export-ModuleMember -Function Invoke-VendorExtract, Get-InnoSetupFailure, Get-InnoSetupExtractFolder, Get-DriverPackCacheDir, ConvertFrom-DellDriverPackCatalog, ConvertFrom-DellWinPEDriverPacks, Save-WinPEDriverPack, Test-VmdDriverPresent, ConvertFrom-HpWinPEPage, Save-HpWinPEDriverPack, ConvertFrom-HpDriverPackCatalog,
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Get-BitsPercent, Resolve-CatalogDownload, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack,
