@@ -195,6 +195,9 @@ try {
     $parsed = [System.Management.Automation.Language.Parser]::ParseInput($decoded, [ref]$null, [ref]$null)
     $cmdAst = $parsed.EndBlock.Statements[0].PipelineElements[0]
     Assert-Equal ($cmdAst.CommandElements[4].Elements.Count) 2 'update command passes the packages as one array'
+    $ua = Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @() -LatestUpdate
+    Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ua[-1]))) "& 'x.ps1' -ImagePath 'y.wim' -LatestUpdate -NoPrompt" 'latest update alone: no package list'
+    Assert-Throws { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @() } '*latest cumulative update*' 'nothing to apply is rejected'
     $threw = $false
     try { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @('a.msu') -ResetBase | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'reset base without cleanup is rejected'

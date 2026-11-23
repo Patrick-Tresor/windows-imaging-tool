@@ -14,6 +14,10 @@
     The work happens in a local folder (-WorkDir), because mounting from a share is slow and
     a mount must be on a local NTFS volume. It needs about three times the image size free.
 
+    -LatestUpdate first finds the newest cumulative update for the image's Windows version in the Microsoft Update
+    Catalog and downloads it into the content root's Updates folder (src/UpdateCatalog.psm1). The catalog has no
+    API, so this can break when Microsoft changes its pages: the error then says to download the .msu by hand.
+
     Order matters: a standalone servicing stack update (SSU) goes before the cumulative
     update, and the .NET cumulative update after it. Windows 11 24H2 "checkpoint" updates
     must all be in the same folder: DISM finds the earlier checkpoint next to the later one.
@@ -24,7 +28,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ImagePath,
-    [Parameter(Mandatory)][string[]]$PackagePath,     # applied in this order
+    [string[]]$PackagePath = @(),                     # applied in this order, after -LatestUpdate's
+    [switch]$LatestUpdate,                            # download the newest cumulative update first
     [int[]]$Index,                                    # default: every edition in the image
     [switch]$Cleanup,                                 # DISM /StartComponentCleanup after the updates
     [switch]$ResetBase,                               # with -Cleanup: smaller, but the updates can no longer be removed
@@ -40,6 +45,8 @@ Import-Module (Join-Path $PSScriptRoot 'DeployCommon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImageVersions.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'UpdateCatalog.psm1') -Force
+if (-not $LatestUpdate -and -not $PackagePath) { throw 'Give -PackagePath, -LatestUpdate or both.' }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -63,9 +70,11 @@ $logDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images' -and (Test-Path (Join-P
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 $logPath = if ($LogPath) { $LogPath } else { Join-Path $WorkDir 'Update-OfflineImage.log' }
 Set-DeployLogPath -Path $logPath -New
-Start-BuildProgress -Path $ProgressFile -Title "Updating $($image.Name)" -LogPath $logPath -Steps @(
+$steps = @()
+if ($LatestUpdate) { $steps += , @('download', 'Downloading the latest cumulative update') }
+Start-BuildProgress -Path $ProgressFile -Title "Updating $($image.Name)" -LogPath $logPath -Steps (@($steps) + @(
     @('copy', 'Copying the image to the work folder'), @('update', 'Adding the updates'),
-    @('export', 'Exporting the updated image'), @('save', 'Saving it in Images'))
+    @('export', 'Exporting the updated image'), @('save', 'Saving it in Images')))
 
 $mountDir = Join-Path $WorkDir 'Mount'
 $scratchDir = Join-Path $WorkDir 'Scratch'
@@ -78,6 +87,33 @@ $status = 'FAILED'
 $results = @()
 
 try {
+    if ($LatestUpdate) {
+        # Before anything is copied: when the catalog fails, the image is not touched.
+        Start-BuildStep 'download'
+        $build = (Get-WindowsImage -ImagePath $image.FullName -Index (@(Get-WindowsImage -ImagePath $image.FullName)[0].ImageIndex)).Version
+        $updatesDir = if ((Split-Path $imagesDir -Leaf) -eq 'Images') { Join-Path $contentRoot 'Updates' } else { Join-Path $WorkDir 'Updates' }
+        try {
+            $latest = Save-LatestCumulativeUpdate -Build $build -Folder $updatesDir -OnFile {
+                param($FileName, $Number, $Count)
+                Write-DeployLog "Downloading $FileName ($Number of $Count)"
+                Set-BuildStepProgress 'download' -Percent (100 * ($Number - 1) / $Count) -Detail $FileName
+            }
+        } catch {
+            $why = "$($_.Exception.Message) Download the cumulative update for this Windows version from the Microsoft Update Catalog into $updatesDir, then use Update image with that file."
+            if (-not $PackagePath) { throw $why }
+            Write-DeployLog $why -Level WARN
+            $latest = $null
+        }
+        if ($latest) {
+            Write-DeployLog "Latest cumulative update for build ${build}: $($latest.Title)"
+            # The downloaded files go first; a package chosen by hand that is the same file is not added twice.
+            $PackagePath = @($latest.Files) + @($PackagePath | Where-Object { [IO.Path]::GetFileName($_) -notin @($latest.Files | ForEach-Object { [IO.Path]::GetFileName($_) }) })
+            Complete-BuildStep 'download' -Detail $latest.Kb
+        } else {
+            Complete-BuildStep 'download' -State failed -Detail 'Not downloaded, only the chosen packages are added'
+        }
+    }
+
     $packages = foreach ($p in $PackagePath) {
         $f = Get-Item -LiteralPath $p
         if ($f.Extension -notin '.msu', '.cab') { throw "$($f.Name) is not an .msu or .cab update package." }

@@ -712,16 +712,19 @@ function Get-ImageUpdateArguments {
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ImagePath,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Packages,
+        [switch]$LatestUpdate,
         [int[]]$Index,
         [switch]$Cleanup,
         [switch]$ResetBase,
         [string]$ProgressFile,
         [string]$LogPath
     )
-    if (-not $Packages) { throw 'Add at least one update package (.msu or .cab).' }
+    if (-not $Packages -and -not $LatestUpdate) { throw 'Tick "Download the latest cumulative update" or add an update package (.msu or .cab).' }
     if ($ResetBase -and -not $Cleanup) { throw 'Reset base needs component cleanup turned on.' }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $cmd = "& $(& $quote $ScriptPath) -ImagePath $(& $quote $ImagePath) -PackagePath " + (($Packages | ForEach-Object { & $quote $_ }) -join ',')
+    $cmd = "& $(& $quote $ScriptPath) -ImagePath $(& $quote $ImagePath)"
+    if ($Packages) { $cmd += ' -PackagePath ' + (($Packages | ForEach-Object { & $quote $_ }) -join ',') }
+    if ($LatestUpdate) { $cmd += ' -LatestUpdate' }
     if ($Index) { $cmd += " -Index $($Index -join ',')" }
     if ($Cleanup) { $cmd += ' -Cleanup' }
     if ($ResetBase) { $cmd += ' -ResetBase' }

@@ -21,7 +21,11 @@
         <TextBlock x:Name="TxtTitle" Style="{StaticResource Title}" Text="Update image"/>
         <TextBlock x:Name="TxtCurrent" Style="{StaticResource Body}" FontFamily="Consolas"/>
         <TextBlock Style="{StaticResource Body}"
-                   Text="Adds Windows updates to the image without a new capture. Download the latest cumulative update for this Windows version (and the .NET cumulative update) from the Microsoft Update Catalog into the content root's Updates folder. They are applied from top to bottom: put a standalone servicing stack update first."/>
+                   Text="Adds Windows updates to the image without a new capture."/>
+        <CheckBox x:Name="ChkLatest" IsChecked="True" Margin="0,0,0,8"
+                  Content="Download the latest cumulative update for this Windows version from the Microsoft Update Catalog"/>
+        <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}"
+                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, from top to bottom."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
