@@ -282,10 +282,8 @@ function Get-AnswerFileIssues {
 
 function Get-AnswerFileRows {
     param([Parameter(Mandatory)][string]$ContentRoot)
-    $default = (Get-DeploySettings -ContentRoot $ContentRoot).defaultAnswerFile
     Get-ChildItem -Path (Join-Path $ContentRoot 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
-        $row = [ordered]@{ IsDefault = ''; Name = $_.BaseName; Mode = ''; Image = ''; Apps = ''; Joins = ''; Status = ''; Issues = @(); FullName = $_.FullName }
-        if ($_.BaseName -eq $default) { $row.IsDefault = 'Yes' }
+        $row = [ordered]@{ Name = $_.BaseName; Mode = ''; Image = ''; Apps = ''; Joins = ''; Status = ''; Issues = @(); FullName = $_.FullName }
         try {
             $a = Read-AnswerFile -Path $_.FullName -SkipValidation
             $issues = @(Get-AnswerFileIssues -ContentRoot $ContentRoot -Answer $a)
@@ -838,29 +836,22 @@ function Get-VMCaptureArguments {
 function Get-AnswerFileDeleteCheck {
     <#
     .SYNOPSIS
-        What deleting AnswerFiles\<name>.xml affects, for the Answer Files tab's Delete: whether it is the default
-        answer file. Text is the confirmation question.
+        What deleting AnswerFiles\<name>.xml affects, for the Answer Files tab's Delete. Text is the confirmation
+        question.
     #>
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
     $path = Get-AnswerFilePath -ContentRoot $ContentRoot -Name $Name
     if (-not (Test-Path -LiteralPath $path)) { throw "There is no answer file named $Name." }
-    $isDefault = "$((Get-DeploySettings -ContentRoot $ContentRoot).defaultAnswerFile)" -eq $Name
     $lines = @("Delete the answer file $Name (AnswerFiles\$Name.xml)? This cannot be undone.")
-    if ($isDefault) { $lines += 'It is the default answer file: no answer file is the default after this, so the deploy asks which one to use. Set another one as default after.' }
     $lines += 'Its image and applications stay. USB sticks keep their copy until you update them.'
-    [pscustomobject]@{ Name = $Name; Path = $path; IsDefault = $isDefault; Text = ($lines -join "`n`n") }
+    [pscustomobject]@{ Name = $Name; Path = $path; Text = ($lines -join "`n`n") }
 }
 
 function Remove-AnswerFile {
-    # Deletes AnswerFiles\<name>.xml and, when it was the default, clears defaultAnswerFile in deploy-settings.json.
+    # Deletes AnswerFiles\<name>.xml.
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$Name)
     $check = Get-AnswerFileDeleteCheck -ContentRoot $ContentRoot -Name $Name
     Remove-Item -LiteralPath $check.Path -Force
-    if ($check.IsDefault) {
-        $s = Get-DeploySettings -ContentRoot $ContentRoot
-        $s.defaultAnswerFile = ''
-        Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
-    }
     $check
 }
 
@@ -875,6 +866,8 @@ function Get-DeploySettings {
 
 function Save-DeploySettings {
     param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)]$Settings)
+    # There is no default answer file any more (each deploy or reimage picks one): drop an older setup's entry.
+    $Settings.PSObject.Properties.Remove('defaultAnswerFile')
     Save-JsonFile -Path (Join-ContentPath $ContentRoot 'config\deploy-settings.json') -InputObject $Settings -Depth 5
 }
 

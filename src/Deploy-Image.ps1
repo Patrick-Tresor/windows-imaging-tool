@@ -17,7 +17,7 @@
 [CmdletBinding()]
 param(
     [string]$SettingsPath = 'X:\Deploy\config\deploy-settings.json',
-    [string]$AnswerFile,        # name in AnswerFiles\ without .xml; defaults to defaultAnswerFile in settings
+    [string]$AnswerFile,        # name in AnswerFiles\ without .xml; otherwise a reimage job's, the only one, or the wizard asks
     [string]$ComputerName,      # overrides the answer file's naming (the wizard still lets the operator change it)
     [switch]$NoPrompt           # no wizard, countdown or confirmation, whatever the answer file's mode
 )
@@ -504,8 +504,8 @@ try {
 
     $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     if (-not $AnswerFile) {
-        if ($settings.defaultAnswerFile -and ($NoPrompt -or $settings.defaultAnswerFile -in $names)) { $AnswerFile = $settings.defaultAnswerFile }
-        elseif ($NoPrompt -or $names.Count -eq 1) { $AnswerFile = $names[0] }
+        if ($names.Count -eq 1) { $AnswerFile = $names[0] }
+        elseif ($NoPrompt) { throw "There are $($names.Count) answer files ($($names -join ', ')): pass -AnswerFile to choose one." }
     }
     $readAnswer  = { param($Name) Read-DeployAnswer -Root $root -Name $Name -JobOU $jobOU }
     $missingSecrets = { param($Answer) Get-MissingDeploySecrets -Root $root -Answer $Answer }

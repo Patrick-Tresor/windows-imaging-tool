@@ -30,7 +30,7 @@ try {
     $rows = @(if (Test-ContentRoot $root) { Get-AnswerFileRows -ContentRoot $root })
     Assert-Equal $rows.Count 1 'one answer file gives one row'
     Assert-Equal (Test-ItemsSource $rows) $true 'one answer file can be shown in the answer file list'
-    Assert-Equal (Test-ItemsSource @($rows.Name)) $true 'one answer file can be shown in the default answer file picker'
+    Assert-Equal (Test-ItemsSource @($rows.Name)) $true 'one answer file can be shown in the Computers tab answer file list'
 
     $none = Join-Path $root 'missing'
     $empty = @(if (Test-ContentRoot $none) { Get-AnswerFileRows -ContentRoot $none })

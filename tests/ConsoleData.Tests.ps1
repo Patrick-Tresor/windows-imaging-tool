@@ -64,18 +64,20 @@ try {
     $log = Get-DeploymentLogs -ContentRoot $root | Select-Object -First 1
     Assert-Equal "$($log.Serial)|$($log.Status)|$($log.When.ToString('yyyy-MM-dd HH:mm'))" 'ABC123|OK|2026-10-22 15:30' 'log name is parsed'
 
-    # Settings round-trip.
+    # Settings round-trip. There is no default answer file: an older setup's entry is dropped on save.
     $s = Get-DeploySettings -ContentRoot $root
-    $s.defaultAnswerFile = 'Lab'
+    $s.reporting.path = '\\server\Deploy\Status'
+    $s | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue 'Lab' -Force
     Save-DeploySettings -ContentRoot $root -Settings $s
-    Assert-Equal (Get-DeploySettings -ContentRoot $root).defaultAnswerFile 'Lab' 'settings round-trip'
-    $s.defaultAnswerFile = 'Default'
+    $back = Get-DeploySettings -ContentRoot $root
+    Assert-Equal "$($back.reporting.path)|$([bool]$back.PSObject.Properties['defaultAnswerFile'])" '\\server\Deploy\Status|False' 'settings round-trip, old defaultAnswerFile dropped'
+    $s.reporting.path = ''
     Save-DeploySettings -ContentRoot $root -Settings $s
 
 
     # Answer files.
     $rows = @(Get-AnswerFileRows -ContentRoot $root)
-    Assert-Equal "$($rows.Name)|$($rows.IsDefault)" 'Default|Yes' 'content root is seeded with the default answer file'
+    Assert-Equal "$($rows.Name)" 'Default' 'content root is seeded with the Default answer file'
     Assert-Equal ($rows[0].Issues -join '') 'Image Images\Win11-Enterprise.wim is not in the content root.' 'missing image is reported'
     Copy-Item (Get-AnswerFilePath -ContentRoot $root -Name 'Default') (Get-AnswerFilePath -ContentRoot $root -Name 'Lab')
 
@@ -239,16 +241,12 @@ try {
     Set-Content (Join-Path $root 'Logs/SERVICE-Win11_20261023-1000_OK.log') 'x'
     Assert-Equal ((Get-DeploymentLogs -ContentRoot $root | Where-Object Serial -like 'SERVICE-*').Status) 'OK' 'update log is parsed'
 
-    # Deleting an answer file (Answer Files tab, Delete): says what it affects, clears the default.
+    # Deleting an answer file (Answer Files tab, Delete): asks first, then the file is gone.
     Set-Content (Join-Path $root 'AnswerFiles/ToDelete.xml') '<x/>'
-    $ds = Get-DeploySettings -ContentRoot $root
-    if ($ds.PSObject.Properties['defaultAnswerFile']) { $ds.defaultAnswerFile = 'ToDelete' } else { $ds | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue 'ToDelete' }
-    Save-DeploySettings -ContentRoot $root -Settings $ds
     $chk = Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete'
-    Assert-Equal $chk.IsDefault $true 'delete check: it is the default'
-    Assert-Equal ($chk.Text -like '*default answer file*') $true 'delete check: the question says so'
+    Assert-Equal ($chk.Text -like '*Delete the answer file ToDelete*') $true 'delete check: the question names it'
     [void](Remove-AnswerFile -ContentRoot $root -Name 'ToDelete')
-    Assert-Equal "$(Test-Path (Join-Path $root 'AnswerFiles/ToDelete.xml'))|[$((Get-DeploySettings -ContentRoot $root).defaultAnswerFile)]" 'False|[]' 'delete: the file is gone and there is no default'
+    Assert-Equal (Test-Path (Join-Path $root 'AnswerFiles/ToDelete.xml')) $false 'delete: the file is gone'
     Assert-Throws { Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete' } '*no answer file named ToDelete*' 'delete: a missing answer file is refused'
 
     # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.

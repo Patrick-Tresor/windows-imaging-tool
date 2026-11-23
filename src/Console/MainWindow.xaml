@@ -273,13 +273,12 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
-            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares. The PC picks one at boot (or uses the default). Passwords are saved in the answer file, encrypted; the key stays in config\secrets."/>
+            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares. The PC picks one at boot, and the Computers tab picks one for each reimage. Passwords are saved in the answer file, encrypted; the key stays in config\secrets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnAnswerImport" Content="Import answer file XML..."/>
             <Button x:Name="BtnAnswerEdit" Content="Edit"/>
-            <Button x:Name="BtnAnswerDefault" Content="Set as default"/>
             <Button x:Name="BtnAnswerDelete" Content="Delete" ToolTip="Deletes the selected answer file after asking. Its image and applications stay."/>
             <Button x:Name="BtnAnswerRefresh" Content="Refresh"/>
             <Button x:Name="BtnAnswerOpen" Content="Open folder"/>
@@ -288,7 +287,6 @@
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Foreground="{DynamicResource ErrorBrush}"/>
           <DataGrid x:Name="GridAnswers" IsReadOnly="True">
             <DataGrid.Columns>
-              <DataGridTextColumn Header="Default" Binding="{Binding IsDefault}" Width="65"/>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
               <DataGridTextColumn Header="Mode" Binding="{Binding Mode}" Width="90"/>
               <DataGridTextColumn Header="Image" Binding="{Binding Image}" Width="2*"/>
@@ -447,11 +445,8 @@
             <TextBlock Style="{StaticResource SettingsHead}" Text="4. Deployments"/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-              <Label Content="Default answer file"/>
-              <ComboBox x:Name="CmbDefaultAnswer" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="Used when nothing else picks one (a reimage job, the wizard)."/>
-              <Label Grid.Row="2" Content="Older image versions to keep"/>
-              <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+              <Label Content="Older image versions to keep"/>
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <TextBox x:Name="TxtVersionsToKeep" Width="80"
                          ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. Versions an answer file is pinned to are never deleted."/>
                 <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/>

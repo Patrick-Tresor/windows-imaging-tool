@@ -71,7 +71,7 @@ and click **Create folders** the first time. Then:
   with: type its password in the console (saved encrypted in
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Where PCs report for
-  the Dashboard. 4) Default answer file and how many older image versions to
+  the Dashboard. 4) How many older image versions to
   keep. 5) Post-deploy checks. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
