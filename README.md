@@ -320,6 +320,8 @@ tab, or with **New application...** in the answer file editor:
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
    code, and fills in the silent command, uninstall command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
+   There is one **Name** box (the folder under `Applications` is made from it);
+   version and publisher come from the installer and are shown, not typed.
 2. Or pick a **template** from `config\app-templates.json` (it fills the form in at once,
    and an installer that matches one picks it by itself). There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),

@@ -33,7 +33,7 @@
       <ScrollViewer x:Name="Sec0" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Installer"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. Inspect reads its type, name, version and MSI product code, and fills in the silent command and a detection rule. A template gives known settings for common applications."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. It is read at once: type, name, version, publisher and MSI product code, then the silent command and a detection rule. A template gives known settings for common applications."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -49,18 +49,19 @@
             <ComboBox x:Name="CmbTemplate" Grid.Row="2" Grid.Column="1" ToolTip="Known silent switches, detection and PC limits for common applications."/>
             <TextBlock x:Name="TxtTemplateNote" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="4" Content="Name"/>
-            <TextBox x:Name="TxtName" Grid.Row="4" Grid.Column="1" ToolTip="Folder name under Applications. Letters, digits, dot, dash and underscore."/>
-            <Label Grid.Row="5" Content="Display name"/>
-            <TextBox x:Name="TxtDisplayName" Grid.Row="5" Grid.Column="1"/>
+            <TextBox x:Name="TxtDisplayName" Grid.Row="4" Grid.Column="1" ToolTip="The name shown in the console and the logs."/>
+            <!-- The folder under Applications: made from the name for a new application, fixed once saved. -->
+            <TextBox x:Name="TxtName" Visibility="Collapsed"/>
+            <TextBlock x:Name="TxtFolderNote" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="6" Content="Version"/>
-            <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left" IsReadOnly="True" Foreground="{DynamicResource MutedBrush}" ToolTip="Read from the installer."/>
             <Label Grid.Row="7" Content="Publisher"/>
-            <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1"/>
+            <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1" IsReadOnly="True" Foreground="{DynamicResource MutedBrush}" ToolTip="Read from the installer."/>
             <Label Grid.Row="8" Content="Download from"/>
             <TextBox x:Name="TxtDownloadUrl" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2"
                      ToolTip="https:// address of the installer. The PC downloads it at first boot (saved as Installer to run) when it is not in the folder, so you can leave the installer file empty."/>
             <TextBlock Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
-                       Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you Apply it with no installer picked."/>
+                       Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you pick it with no installer picked."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

@@ -81,6 +81,14 @@ function Show-AppPackEditor {
     & $load $def
     $e.GridRules.ItemsSource = $rules
     $e.TxtName.IsEnabled = $isNew
+    # One Name box: the folder under Applications follows it for a new application, and stays once saved.
+    $folderNote = { $e.TxtFolderNote.Text = if ($e.TxtName.Text) { "Saved in Applications\$($e.TxtName.Text)" } else { '' } }
+    $e.TxtDisplayName.Add_TextChanged({
+        if ($isNew -and $e.TxtDisplayName.IsKeyboardFocusWithin) { $e.TxtName.Text = ($e.TxtDisplayName.Text -replace '[^A-Za-z0-9._-]+', '-').Trim('-') }
+        & $folderNote
+    })
+    $e.TxtName.Add_TextChanged({ & $folderNote })
+    & $folderNote
     $e.CmbInstaller.ItemsSource = @(& $folderFiles)
     if ($isNew -and $SuggestedName) {
         # Rebuilding an imported .spk pack by name: preselect its template.
