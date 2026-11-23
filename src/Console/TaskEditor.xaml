@@ -32,7 +32,6 @@
           <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Label Content="Template"/>
           <ComboBox x:Name="CmbTemplate" Grid.Column="1" ToolTip="Ready-made scripts from config\task-templates.json."/>
-          <Button x:Name="BtnTemplate" Grid.Column="2" Content="Apply" Margin="8,0,0,8"/>
           <TextBlock x:Name="TxtTemplateNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
           <Label Grid.Row="2" Content="Name"/>
           <TextBox x:Name="TxtName" Grid.Row="2" Grid.Column="1" ToolTip="Folder name under Tasks. Letters, digits, dot, dash and underscore."/>

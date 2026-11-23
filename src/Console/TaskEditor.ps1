@@ -113,7 +113,8 @@ function Show-TaskEditor {
     }
     Register-SourceBrowse -Controls $e -Owner $win -Filter 'Scripts (*.ps1;*.cmd;*.bat;*.exe)|*.ps1;*.cmd;*.bat;*.exe|All files (*.*)|*.*' `
         -FolderText 'Folder with the script and the files it needs' -After { & $afterSource }
-    $e.BtnTemplate.Add_Click({
+    # Picking a template fills the form in at once (no Apply button).
+    $e.CmbTemplate.Add_SelectionChanged({
         $t = Get-PickedTemplate -Controls $e -Templates $templates
         if (-not $t) { return }
         # Editing keeps the task's name; a new task takes the template's unless one was typed.

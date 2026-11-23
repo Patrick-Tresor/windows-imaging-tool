@@ -71,8 +71,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-  Pick the **USB disk**, tick **Update a stick this console built before** to refresh one
-  without erasing it, uncheck the **Driver packs on USB** you don't need, type the
+  Pick the **USB disk** (a stick this tool built before is updated in place, any other
+  is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
   **WinPE password** twice and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
@@ -80,7 +80,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
+  Domain or workgroup, Tasks and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
 - **Apps and Tasks**: one list of application packs and task scripts, with
   when each runs. **New application...** opens the pack builder, **New task...**
@@ -94,7 +94,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Active Directory: the
   **Domain controller** the Computers tab reads, left empty when the console PC
-  is joined to the domain. 4) Checks after deploy: one tick box, and devices to ignore. Save refuses the example values
+  is joined to the domain. 4) Checks after deploy: they always run; only the devices to ignore are set here. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
@@ -320,15 +320,20 @@ tab, or with **New application...** in the answer file editor:
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
    code, and fills in the silent command, uninstall command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
-2. Or apply a **template** from `config\app-templates.json`. There are templates
+   There is one **Name** box (the folder under `Applications` is made from it);
+   version and publisher come from the installer and are shown, not typed.
+2. Or pick a **template** from `config\app-templates.json` (it fills the form in at once,
+   and an installer that matches one picks it by itself). There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
    *verify* are best guesses to test on a VM first.
-3. Check the **install command**, success and restart exit codes, and timeout.
+3. Check the **install command**, success exit codes and timeout (3010 and 1641
+   always mean "installed, restart needed").
 4. Add **detection** rules: MSI product code, program name in Programs and
    Features (wildcards, optional minimum version), file (with version), registry
    key or value, MSIX package, or a `.ps1` that exits 0 when installed. Every
-   rule must match. **Test on this PC** runs them on the admin PC.
+   rule must match; when they all do, the install is skipped (the app is already
+   there). **Test on this PC** runs them on the admin PC.
 5. Limit **which PCs** get it by maker and model (Dell Command Update only on
    Dell, Lenovo System Update only on Lenovo).
 
@@ -379,8 +384,8 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`.
-To make one, click **New application...** on the Apps and Tasks tab, pick the template,
-leave the installer empty and click **Apply**: the pack gets the publisher's
+To make one, click **New application...** on the Apps and Tasks tab and pick the
+template with the installer left empty: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). A pack's details on the Apps and
 Tasks tab show where it downloads from, and the builder's **Download from**
 box takes any other address. When the installer file is
@@ -477,15 +482,16 @@ and write a `VERSION-<name>` log. Each version takes as much space as the image.
 ## Updating an image
 
 Patch Tuesday does not need a new capture. Select the image on the Images tab and
-click **Update image...**. **Download the latest cumulative update** is ticked: the
+click **Update image...**. It always looks for the latest cumulative update first: the
 update reads the image's Windows build, finds the newest x64 cumulative update for
 that version (not a preview) in the
 [Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
 it into the content root's `Updates` folder (both files for a Windows 11 24H2
 checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H2), then applies it. The catalog has no official interface, so this
-can stop working when Microsoft changes the site: the update then fails before
-touching the image, and the message says to download the `.msu` by hand into
-`Updates`. Packages in the dialog's list (the .NET cumulative update, or one
+can stop working when Microsoft changes the site, and it needs internet: when the
+catalog can't be reached, the packages in the list are still added (one warning line
+in the log), and with no packages the update stops before touching the image and
+says to download the `.msu` by hand into `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
 downloaded by hand) are applied after it, in a fixed order: a standalone
 servicing stack update (`ssu` in its name) first, then Windows, then .NET,
 oldest KB first.
@@ -569,8 +575,8 @@ with every check listed under the PC's details):
 | BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
 
 Any failed check turns the deployment into Warning, with the failed checks
-named. BitLocker and device driver problems are warnings only. The **Deploy
-Settings** tab turns the checks off and lists devices to ignore (wildcards, for
+named. BitLocker and device driver problems are warnings only. The checks always
+run; the **Deploy Settings** tab lists devices to ignore (wildcards, for
 example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
 The application pack's detection rules (set on the Apps and Tasks tab) catch
@@ -601,8 +607,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
    pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
-   To refresh a stick you built before without erasing it, tick **Update a stick this console built
-   before** (`-UpdateOnly`): WinPE is replaced, only files whose size or date changed are copied, and
+   A stick you built before (it has WINPE and DEPLOY partitions) is refreshed without erasing it
+   (`-UpdateOnly`); to start one fresh, format it in File Explorer first. WinPE is replaced, only files whose size or date changed are copied, and
    files the new content no longer has are deleted from `AnswerFiles`, `Images`, `Drivers`,
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold

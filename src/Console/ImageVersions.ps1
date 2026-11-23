@@ -1,4 +1,4 @@
-# Image versions window: list, roll back, notes, delete, and the one keep count for every image.
+# Image versions window: list, roll back, delete, and the one keep count for every image.
 # Dot-sourced by ImagingConsole.ps1, which loads WPF, ConsoleData.psm1 and ImageVersions.psm1.
 
 function Show-ImageVersionsDialog {
@@ -36,11 +36,6 @@ function Show-ImageVersionsDialog {
         $win.Close()
     }
 
-    $v.GridVersions.Add_SelectionChanged({
-        $rows = @(& $selected)
-        $v.TxtNote.Text = if ($rows.Count -eq 1) { $rows[0].Note } else { '' }
-    })
-
     $v.BtnRollback.Add_Click({ & $safely {
         $rows = @(& $selected)
         if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version (not Current).' 'Warning'; return }
@@ -50,13 +45,6 @@ function Show-ImageVersionsDialog {
         if (-not (Test-ImageHardLinks -Path (Split-Path $imagePath -Parent))) { $text += "`n`nThis folder can't make hard links, so the rollback copies $($r.SizeGB) GB." }
         if (-not (& $ask $text)) { return }
         & $run $r.Version
-    } })
-
-    $v.BtnNote.Add_Click({ & $safely {
-        $rows = @(& $selected)
-        if ($rows.Count -ne 1 -or -not $rows[0].Version) { & $say 'Select one earlier version to add a note to.' 'Warning'; return }
-        Set-ImageVersionNote -ImagePath $imagePath -Version $rows[0].Version -Note $v.TxtNote.Text.Trim()
-        & $load
     } })
 
     $v.BtnDelete.Add_Click({ & $safely {

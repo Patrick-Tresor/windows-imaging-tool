@@ -319,7 +319,6 @@ function Update-Settings {
     $ui.TxtSettingsProblem.Text = ''
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
-    $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     $ui.TxtAdServer.Text = "$((Get-AdSettings).server)"
     Update-SettingsState
@@ -420,10 +419,14 @@ function Update-Library {
 }
 
 function Get-UsbDiskChoices {
+    # Ours: a stick this tool built (WINPE and DEPLOY partitions), which Build media updates in place.
     Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object {
+        $n = $_.Number
+        $labels = @(try { Get-Partition -DiskNumber $n -ErrorAction Stop | Get-Volume -ErrorAction SilentlyContinue | ForEach-Object FileSystemLabel } catch { })
         [pscustomobject]@{
-            Number = $_.Number
-            Label  = '{0}: {1} ({2:N1} GB)' -f $_.Number, $_.FriendlyName, ($_.Size / 1GB)
+            Number = $n
+            Ours   = Test-ToolStickLabels $labels
+            Label  = '{0}: {1} ({2:N1} GB)' -f $n, $_.FriendlyName, ($_.Size / 1GB)
         }
     }
 }
@@ -431,6 +434,15 @@ function Get-UsbDiskChoices {
 function Update-UsbDisks {
     $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
+    Update-UsbMode
+}
+
+function Update-UsbMode {
+    # Says what Build media will do with the selected stick: update one this tool built, or erase any other.
+    $d = $ui.CmbUsb.SelectedItem
+    $ui.TxtUsbMode.Text = if (-not $d) { '' }
+        elseif ($d.Ours) { 'Built by this tool before: it is updated in place. WinPE is replaced and only the files that changed are copied. To start it fresh, format it in File Explorer and click Refresh.' }
+        else { 'Not built by this tool: everything on it is erased.' }
 }
 
 function Update-StickVersionBanner {
@@ -456,7 +468,7 @@ function Update-BootVersionBanner {
 }
 
 function Select-StickForUpdate {
-    # "Update the stick", one click: the Media tab with the old stick's disk, "Update a stick" ticked, the answer
+    # "Update the stick", one click: the Media tab with the old stick's disk (updated in place, it is ours), the answer
     # files and driver packs the stick already holds checked, and the build started (it still asks before it
     # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
@@ -468,7 +480,6 @@ function Select-StickForUpdate {
         $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
         if ($item) { $ui.CmbUsb.SelectedItem = $item }
     }
-    $ui.ChkUsbUpdate.IsChecked = $true
     if (-not $item) { Set-Status 'Pick the stick, check the answer files and driver packs, then click Build media.'; return }
     $on = Get-StickContentChoice -StickRoot $old[0]
     $answers = @($ui.LstMediaAnswers.Items | Where-Object { $on.AnswerFiles -contains $_.Name })
@@ -1083,6 +1094,7 @@ $ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
 $ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() } })
 $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
+$ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
 
@@ -1111,14 +1123,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
     if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
     if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-    if ($ui.ChkUsbUpdate.IsChecked) {
+    if ($disk.Ours) {
         if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
     } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
     # Deployments the stick holds go to the dashboard first: erasing it would lose them.
     $dashFolder = Get-DashboardFolder
     if ($dashFolder) { Import-StickDashboard $dashFolder }
     $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-    if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
+    if ($disk.Ours) { $buildArgs += '-UpdateOnly' }
     $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
     if ($packArgs.ContainsKey('DriverPacks')) {
         if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
@@ -1190,7 +1202,7 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
         -NewPassword $ui.PwdShare.Password
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
-        enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
+        enabled       = $true
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }

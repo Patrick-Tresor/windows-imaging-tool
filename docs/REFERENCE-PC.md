@@ -129,7 +129,7 @@ Revert the VM to **Before sysprep**, ready for the next image.
 
 ## 10. Test the new image
 
-1. Update the stick (Media tab, **Update a stick this console built before**).
+1. Update the stick (Media tab, **Build media** on the stick you built before; it is updated in place).
 2. Deploy one test PC. On it, in an elevated PowerShell:
 
    ```

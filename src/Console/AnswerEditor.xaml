@@ -17,7 +17,6 @@
         <ListBoxItem Content="Computer name"/>
         <ListBoxItem Content="Domain or workgroup"/>
         <ListBoxItem Content="Tasks"/>
-        <ListBoxItem Content="Network shares"/>
         <ListBoxItem Content="BitLocker"/>
       </ListBox>
     </Border>
@@ -223,31 +222,8 @@
         </Grid>
       </DockPanel>
 
-      <!-- 7 Network shares -->
-      <DockPanel x:Name="Sec7" Visibility="Collapsed">
-        <StackPanel DockPanel.Dock="Top">
-          <TextBlock Style="{StaticResource Title}" Text="Network shares"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Extra shares mapped in WinPE before the deployment, for images, applications or scripts kept on other servers. Drive letters D: to Y:, except R:, S:, W: and X: (the deploy uses them)."/>
-        </StackPanel>
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
-          <Button x:Name="BtnShareAdd" Content="Add"/>
-          <Button x:Name="BtnShareRemove" Content="Remove"/>
-          <TextBlock Text="Password for the selected share:" VerticalAlignment="Center" Margin="12,0,8,0"/>
-          <PasswordBox x:Name="PwdShare" Width="200" Margin="0" VerticalContentAlignment="Center"/>
-          <TextBlock x:Name="TxtSharePwState" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-        </StackPanel>
-        <DataGrid x:Name="GridShares">
-          <DataGrid.Columns>
-            <DataGridTextColumn Header="Drive" Binding="{Binding LocalName}" Width="60"/>
-            <DataGridTextColumn Header="Share (\\server\share)" Binding="{Binding RemoteName}" Width="2*"/>
-            <DataGridTextColumn Header="User" Binding="{Binding Username}" Width="*"/>
-            <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*"/>
-          </DataGrid.Columns>
-        </DataGrid>
-      </DockPanel>
-
-      <!-- 8 BitLocker -->
-      <ScrollViewer x:Name="Sec8" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+      <!-- 7 BitLocker -->
+      <ScrollViewer x:Name="Sec7" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="BitLocker"/>
           <TextBlock Style="{StaticResource Hint}" Text="Turned on at first boot, after the applications and tasks. The recovery password is backed up before anything is encrypted. The PC needs a TPM that is turned on in its firmware settings."/>

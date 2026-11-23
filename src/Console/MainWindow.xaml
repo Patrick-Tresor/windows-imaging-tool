@@ -208,8 +208,7 @@
 
             <Label Grid.Row="2" Content="Copy content to USB" VerticalAlignment="Top"/>
             <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
-              <CheckBox x:Name="ChkUsbUpdate" DockPanel.Dock="Top" Margin="0,0,0,8"
-                        Content="Update a stick this console built before, without erasing it: new WinPE, and only the files that changed are copied"/>
+              <TextBlock x:Name="TxtUsbMode" DockPanel.Dock="Top" Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold"/>
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="The stick gets the answer files checked below, the image each one deploys, drivers, applications and config. An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
               <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
@@ -388,8 +387,8 @@
 
             <!-- 4. Checks -->
             <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
-            <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
-                      Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,8"
+                       Text="At the end of first boot, every PC checks its name, domain join, applications, device drivers and BitLocker, and the result shows on the Dashboard (BitLocker and driver problems are warnings)."/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Ignore devices"/>
