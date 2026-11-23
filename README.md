@@ -120,7 +120,7 @@ on the ones you pick, with nobody at the PCs.
    the domain? Also type a domain controller.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
-   are left out unless ticked. Each row shows the OU, Windows version, last
+   are left out. Each row shows the OU, Windows version, last
    logon and whether the console can reach it now. **Online** (point at it for
    details):
    - **Yes**: PowerShell remoting (WinRM) answers.
@@ -146,8 +146,7 @@ on the ones you pick, with nobody at the PCs.
    of the console says when it is older than the console, with a **Rebuild
    network boot image** button.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
-   **Reimage...**. **Keep each PC's name** and **Join it back into its OU** are
-   on by default.
+   **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
 
 For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
 checks (over PowerShell remoting, or its admin share) that it answers with its own name, starts in

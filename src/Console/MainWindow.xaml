@@ -488,11 +488,6 @@
                 <ComboBox x:Name="CmbAdOu" Grid.Column="1" DisplayMemberPath="Path" ToolTip="The OU to list, with the OUs under it."/>
                 <Label Grid.Column="3" Content="Name or IP" VerticalAlignment="Center"/>
                 <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
-                <Label Grid.Row="2" Content="Also show" VerticalAlignment="Center"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" Orientation="Horizontal" VerticalAlignment="Center">
-                  <CheckBox x:Name="ChkAdServers" Content="Servers" Margin="0,0,24,0"/>
-                  <CheckBox x:Name="ChkAdDisabled" Content="Disabled accounts"/>
-                </StackPanel>
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
@@ -504,13 +499,9 @@
             <GroupBox DockPanel.Dock="Bottom" Header="3. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="0"/><RowDefinition Height="0"/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Answer file" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
-                  <CheckBox x:Name="ChkAdKeepName" IsChecked="True" Margin="0,0,24,0" Content="Keep each PC's name"/>
-                  <CheckBox x:Name="ChkAdKeepOu" IsChecked="True" Content="Join it back into its OU"/>
-                </StackPanel>
                 <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal">

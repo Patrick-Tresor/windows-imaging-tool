@@ -982,7 +982,7 @@ function Search-AdComputers {
             try {
                 $cred = Get-AdCredential
                 $found = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
-                    -IncludeDisabled:([bool]$ui.ChkAdDisabled.IsChecked) -IncludeServers:([bool]$ui.ChkAdServers.IsChecked) -Credential $cred)
+                    -Credential $cred)
             } catch {
                 # A PC typed by IP can still be reimaged without Active Directory (a laptop outside the domain).
                 if (-not $find.Ip) { throw }
@@ -1136,8 +1136,8 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    if ($ui.ChkAdKeepName.IsChecked) { $runArgs += '-KeepNames' }
-    if ($ui.ChkAdKeepOu.IsChecked) { $runArgs += '-KeepOU' }
+    # Each PC keeps its name and joins back into the OU it is in now.
+    $runArgs += @('-KeepNames', '-KeepOU')
     if ($cred) {
         # For the hidden process: protected with this Windows account (DPAPI), deleted as soon as it is read.
         $credFile = Join-Path $env:TEMP "reimage-$stamp-$tag-cred.xml"
