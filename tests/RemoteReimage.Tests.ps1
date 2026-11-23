@@ -202,6 +202,50 @@ try {
     $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['localhost.pc-that-does-not-exist.invalid'].Address 'localhost' 'a full name that does not resolve is tried by its short name'
 } finally { $winrm.Stop(); $smb.Stop() }
+# Name and IP agree: DNS can give an old address where another PC answers now (Patrick, 2026-11-23).
+function New-TestNbstatAnswer([string]$Name) {
+    $b = [Collections.Generic.List[byte]]::new()
+    $b.AddRange([byte[]]@(0x49, 0x54, 0x84, 0x00, 0, 0, 0, 1, 0, 0, 0, 0, 0x20))
+    $b.AddRange([byte[]](@(0x43, 0x4B) + @(0x41) * 30)); $b.Add(0)
+    $b.AddRange([byte[]]@(0, 0x21, 0, 1, 0, 0, 0, 0, 0, 37, 2))
+    foreach ($e in @(@('CORP', 0x84), @($Name, 0x04))) {
+        $b.AddRange([Text.Encoding]::ASCII.GetBytes($e[0].PadRight(15))); $b.Add(0); $b.Add([byte]$e[1]); $b.Add(0)
+    }
+    , $b.ToArray()
+}
+$req = New-NbstatRequest
+Assert-Equal $req.Length 50 'the node status request is 50 bytes'
+Assert-Equal ([Text.Encoding]::ASCII.GetString($req, 13, 4)) 'CKAA' 'the request asks for the * name'
+Assert-Equal (ConvertFrom-NbstatResponse (New-TestNbstatAnswer 'GWHZLG3')) 'GWHZLG3' 'the computer name is the unique <00> name, not the domain group'
+Assert-Equal (ConvertFrom-NbstatResponse ([byte[]]@(1, 2, 3))) '' 'a short answer names nobody'
+$pick = Select-ComputerAddress -Name 'gwhzlg3.corp.local' -Candidates '10.1.2.33', '10.1.2.34' -Names @{ '10.1.2.33' = 'LAB-07'; '10.1.2.34' = 'GWHZLG3' }
+Assert-Equal $pick.Ip '10.1.2.34' 'the address that answers with the name wins over the first DNS address'
+Assert-Equal "$($pick.OldIp) $($pick.OtherName)" '10.1.2.33 LAB-07' 'the old address and who has it now are kept for the detail'
+$pick = Select-ComputerAddress -Name 'GWHZLG3' -Candidates '10.1.2.33' -Names @{ '10.1.2.33' = 'LAB-07' }
+Assert-Equal "$($pick.Ip)" '' 'an address where another PC answers is never used'
+$pick = Select-ComputerAddress -Name 'GWHZLG3' -Candidates '10.1.2.33', '10.1.2.40' -Names @{ '10.1.2.33' = 'LAB-07' }
+Assert-Equal $pick.Ip '10.1.2.40' 'an address that does not say its name is kept when the other is someone else'
+$pick = Select-ComputerAddress -Name 'GWHZLG3' -Candidates '10.1.2.33' -Names @{}
+Assert-Equal $pick.Ip '10.1.2.33' 'no NetBIOS answer (firewall): the DNS address is kept'
+Assert-Equal (Select-ComputerAddress -Name 'A-VERY-LONG-PC-NAME' -Candidates '10.0.0.1' -Names @{ '10.0.0.1' = 'A-VERY-LONG-PC-' }).OtherName '' 'NetBIOS names are compared on 15 characters'
+# A local UDP listener stands in for the PC's port 137.
+$nbUdp = [Net.Sockets.UdpClient]::new([Net.IPEndPoint]::new([Net.IPAddress]::Loopback, 0))
+try {
+    $nbPort = $nbUdp.Client.LocalEndPoint.Port
+    $recv = $nbUdp.ReceiveAsync()
+    $ask = [powershell]::Create().AddScript({ param($m, $p) Import-Module $m; (Get-NetBiosComputerNames -Address '127.0.0.1' -Port $p -TimeoutMs 3000)['127.0.0.1'] }).AddArgument((Join-Path $repo 'src/RemoteReimage.psm1')).AddArgument($nbPort)
+    $run = $ask.BeginInvoke()
+    Assert-Equal ($recv.Wait(3000)) $true 'the node status request reaches the PC'
+    $answer = New-TestNbstatAnswer 'PC-42'
+    [void]$nbUdp.Send($answer, $answer.Length, $recv.Result.RemoteEndPoint)
+    $got = @($ask.EndInvoke($run))[0]
+    Assert-Equal $got 'PC-42' 'each address is asked for its name over UDP'
+    $ask.Dispose()
+} finally { $nbUdp.Close() }
+Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS' })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
+$rr = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
+Assert-Equal ($rr -match "State -eq 'Old DNS'\) \{ Stop-Pc") $true 'a reimage never goes to the old DNS address'
+
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
 Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Not found' }, [pscustomobject]@{ Name = 'PC2'; State = 'Not found' })
