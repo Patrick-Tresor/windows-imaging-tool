@@ -46,6 +46,10 @@ try {
     $json = Get-Content -Raw (Join-Path $taskRoot 'Cleanup/task.json') | ConvertFrom-Json
     Assert-Equal "$($json.successCodes -join ',')|$($json.requirements.makers -join ',')|$(@($json.requirements.models).Count)|$($json.PSObject.Properties['name'] -eq $null)" '0,1|Dell|0|True' 'task.json keeps lists as lists and leaves out the name'
 
+    # The Apps and Tasks tab lists both kinds in one list, applications first.
+    $lib = @(Get-LibraryRows -ContentRoot $root)
+    Assert-Equal (($lib | Where-Object Kind -eq 'Task' | ForEach-Object { "$($_.Name)=$($_.Runs)" }) -join ',') 'Cleanup=POSTIMAGE,Wallpaper=FIRSTBOOT' 'tasks are listed with when they run'
+
     # Importing a script file instead of typing it.
     $srcDir = Join-Path $root 'src'
     New-Item -ItemType Directory -Path $srcDir | Out-Null

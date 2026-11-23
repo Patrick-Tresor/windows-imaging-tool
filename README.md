@@ -43,10 +43,9 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
-- **Applications**: the application pack builder. Build, edit and test packs
-  (see Applications below).
-- **Tasks**: the task library, scripts to run during or after a deployment
-  (see Tasks below).
+- **Apps and Tasks**: one list of application packs and task scripts, with
+  when each runs. **New application...** opens the pack builder, **New task...**
+  the task editor (see Applications and Tasks below).
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
   driver pack catalogs for a model, SKU or machine type; pick the pack and it
   downloads, checks, extracts and registers it. You can also import a pack you already have
@@ -282,7 +281,7 @@ restart and the PC would stay out of the domain. If WinPE can't reach the
 domain, the check is skipped and noted in `Deploy.log`.
 
 **Applications** are packs: a folder under `Applications\` with the installer
-(and any files it needs) and an `app.json`. Build them on the **Applications**
+(and any files it needs) and an `app.json`. Build them on the **Apps and Tasks**
 tab, or with **New application...** in the answer file editor:
 
 1. Pick the installer file, or a folder when it needs files next to it.
@@ -342,14 +341,14 @@ Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`. An
-To make one, click **New...** on the Applications tab, pick the template,
+To make one, click **New application...** on the Apps and Tasks tab, pick the template,
 leave the installer empty and click **Apply**: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). The **Download
 link** column shows which packs download, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
-**Find an app online** (on the Applications tab) is for any other
+**Find an app online** (on the Apps and Tasks tab) is for any other
 application: type its name (VLC, 7-Zip, Notepad++, Adobe Reader...), press
 Enter or click **Search**, pick the right result and click **Add**. The
 search uses Microsoft's winget catalog, so the console PC needs winget (App
@@ -365,7 +364,7 @@ output); when winget itself fails, the status line says why instead of
 "Nothing found".
 
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
-script (and any files it needs) and a `task.json`. Make them on the **Tasks** tab,
+script (and any files it needs) and a `task.json`. Make them on the **Apps and Tasks** tab (**New task...**),
 or with **New script...** on the answer file editor's Tasks page:
 
 1. Start from a **template** (`config\task-templates.json`): sync the clock,
@@ -523,7 +522,7 @@ named. BitLocker and device driver problems are warnings only. The **Deploy
 Settings** tab turns the checks off and lists devices to ignore (wildcards, for
 example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
-The application pack's detection rules (set in the Applications tab) catch
+The application pack's detection rules (set on the Apps and Tasks tab) catch
 installers that exit 0 without installing anything: first boot checks them after
 each install, and the check reports what it found.
 

@@ -1,4 +1,4 @@
-# Task editor window: a script for the task library (Tasks tab), typed here or imported, with when it runs,
+# Task editor window: a script for the task library (Apps and Tasks tab), typed here or imported, with when it runs,
 # its arguments, timeout, success codes and which PCs get it.
 # Dot-sourced by ImagingConsole.ps1; loads its window with New-ConsoleWindow (XamlWindow.psm1) and uses TaskPack.psm1 and ConsoleData.psm1.
 

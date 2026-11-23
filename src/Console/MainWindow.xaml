@@ -300,20 +300,19 @@
         </DockPanel>
       </TabItem>
 
-      <!-- Applications -->
-      <TabItem Header="Applications">
+      <!-- Applications and tasks -->
+      <TabItem x:Name="TabLibrary" Header="Apps and Tasks">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Application packs: an installer with its silent command, detection rules and the PCs it is for. Answer files pick which ones to install at first boot. Export a pack to a .zip to copy it to another content root."/>
+            <TextBlock Style="{StaticResource SectionTitle}" Text="Applications and tasks"/>
+            <TextBlock Style="{StaticResource Hint}" Text="Applications: an installer with its silent command, detection rules and the PCs it is for, installed at first boot. Tasks: scripts to run during or after a deployment (PowerShell, batch or a program) with arguments, timeout and success exit codes; POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Task-&lt;name&gt;.log on the PC. Answer files pick which ones each PC gets."/>
           </StackPanel>
           <WrapPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnAppEdit" Content="Edit"/>
-            <Button x:Name="BtnAppTest" Content="Test detection"/>
-            <Button x:Name="BtnAppDelete" Content="Delete"/>
-            <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
-            <Button x:Name="BtnAppsOpen" Content="Open folder"/>
+            <Button x:Name="BtnAppNew" Content="New application..." Style="{StaticResource Primary}"/>
+            <Button x:Name="BtnTaskNew" Content="New task..."/>
+            <Button x:Name="BtnLibEdit" Content="Edit"/>
+            <Button x:Name="BtnAppTest" Content="Test detection" ToolTip="Applications: are they installed on this PC, by their detection rules?"/>
+            <Button x:Name="BtnLibDelete" Content="Delete"/>
           </WrapPanel>
           <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
@@ -332,48 +331,17 @@
             <Button x:Name="BtnAppFoundAdd" Grid.Column="4" Content="Add" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                     ToolTip="Adds the application: the PC downloads it from the publisher when it installs it and checks the file's SHA256"/>
           </Grid>
-          <TextBox x:Name="TxtAppIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
+          <TextBox x:Name="TxtLibIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
                    TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <DataGrid x:Name="GridApps" IsReadOnly="True">
+          <DataGrid x:Name="GridLibrary" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
-              <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="90"/>
-              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/>
+              <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="90"/>
+              <DataGridTextColumn Header="Runs" Binding="{Binding Runs}" Width="120"/>
+              <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="2*"/>
               <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
-              <DataGridTextColumn Header="Detection" Binding="{Binding Detection}" Width="2*"/>
-              <DataGridTextColumn Header="Download link" Binding="{Binding Download}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
               <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="130"/>
-            </DataGrid.Columns>
-          </DataGrid>
-        </DockPanel>
-      </TabItem>
-
-      <!-- Tasks -->
-      <TabItem Header="Tasks">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Tasks"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Scripts to run during or after a deployment: PowerShell (.ps1), batch (.cmd, .bat) or a program (.exe), with its arguments, timeout, success exit codes and the PCs it is for. Write the script here or import a file or folder. Answer files pick which tasks run (Tasks page), in order with their other commands. POSTIMAGE and FIRSTBOOT runs are logged in C:\Windows\Temp\Task-&lt;name&gt;.log on the PC, next to Deploy.log and FirstBoot.log."/>
-          </StackPanel>
-          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>
-            <Button x:Name="BtnTaskEdit" Content="Edit"/>
-            <Button x:Name="BtnTaskDelete" Content="Delete"/>
-            <Button x:Name="BtnTasksRefresh" Content="Refresh"/>
-            <Button x:Name="BtnTasksOpen" Content="Open folder"/>
-          </StackPanel>
-          <TextBox x:Name="TxtTaskIssues" DockPanel.Dock="Bottom" Height="90" Margin="0,10,0,0" IsReadOnly="True"
-                   TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
-          <DataGrid x:Name="GridTaskLibrary" IsReadOnly="True">
-            <DataGrid.Columns>
-              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
-              <DataGridTextColumn Header="Script" Binding="{Binding Script}" Width="*"/>
-              <DataGridTextColumn Header="Runs" Binding="{Binding Phase}" Width="100"/>
-              <DataGridTextColumn Header="For" Binding="{Binding For}" Width="*"/>
-              <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="2*"/>
-              <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="*"/>
-              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="120"/>
             </DataGrid.Columns>
           </DataGrid>
         </DockPanel>

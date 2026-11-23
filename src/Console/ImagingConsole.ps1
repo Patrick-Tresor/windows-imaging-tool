@@ -388,14 +388,13 @@ function Update-DashboardDetail {
     if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
 }
 
-function Update-Apps {
-    $ui.GridApps.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-ApplicationList -ContentRoot $script:root })
-    $ui.TxtAppIssues.Text = ''
-}
-
-function Update-Tasks {
-    $ui.GridTaskLibrary.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-TaskList -ContentRoot $script:root })
-    $ui.TxtTaskIssues.Text = ''
+function Update-Library {
+    # Applications and tasks in one list (Apps and Tasks tab); the selection stays when the row is still there.
+    $keep = $ui.GridLibrary.SelectedItem
+    $rows = @(if (Test-ContentRoot $script:root) { Get-LibraryRows -ContentRoot $script:root })
+    $ui.GridLibrary.ItemsSource = $rows
+    if ($keep) { $ui.GridLibrary.SelectedItem = @($rows | Where-Object { $_.Kind -eq $keep.Kind -and $_.Name -eq $keep.Name })[0] }
+    if (-not $ui.GridLibrary.SelectedItem) { $ui.TxtLibIssues.Text = '' }
 }
 
 function Get-UsbDiskChoices {
@@ -464,7 +463,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
+    Update-Answers; Update-Images; Update-Library; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
     try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
@@ -540,7 +539,7 @@ $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item 
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
-    if ($saved) { Update-Answers; Update-Images; Update-Apps; Update-Tasks; Set-Status 'Answer file saved' }
+    if ($saved) { Update-Answers; Update-Images; Update-Library; Set-Status 'Answer file saved' }
 }
 
 $ui.BtnAnswerRefresh.Add_Click({ Invoke-Safely { Update-Answers; Update-Images; Set-Status 'Answer files refreshed' } })
@@ -573,7 +572,7 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
     $check = Get-AnswerFileDeleteCheck -ContentRoot $script:root -Name $row.Name
     if (-not (Confirm-Action $check.Text)) { return }
     [void](Remove-AnswerFile -ContentRoot $script:root -Name $row.Name)
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks
+    Update-Answers; Update-Images; Update-Library
     Set-Status "Deleted $($row.Name)"
 } })
 
@@ -581,36 +580,54 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
 
 #region Applications and tasks
 
-# The Applications and Tasks tabs delete an item of the library the same way.
-$script:libraryTabs = @{
-    Application = @{ Folder = 'Applications'; Files = 'its installer files'; Update = { Update-Apps } }
-    Task        = @{ Folder = 'Tasks'; Files = 'its script files'; Update = { Update-Tasks } }
+# Delete an application or a task the same way.
+$script:libraryKinds = @{
+    Application = @{ Folder = 'Applications'; Files = 'its installer files' }
+    Task        = @{ Folder = 'Tasks'; Files = 'its script files' }
 }
 
-function Remove-LibraryRow([string]$Kind, $Row) {
+function Remove-LibraryRow($Row) {
     if (-not $Row) { return }
-    $t = $script:libraryTabs[$Kind]
+    $t = $script:libraryKinds[$Row.Kind]
     if (-not (Confirm-Action "Delete $($t.Folder)\$($Row.Name) and $($t.Files)?")) { return }
-    Remove-LibraryItem -Kind $Kind -ContentRoot $script:root -Name $Row.Name
-    & $t.Update
+    Remove-LibraryItem -Kind $Row.Kind -ContentRoot $script:root -Name $Row.Name
+    Update-Library
     Set-Status "Deleted $($Row.Name)"
 }
 
-function Get-SelectedApp {
-    $row = $ui.GridApps.SelectedItem
-    if (-not $row) { Show-Error 'Select an application first.' }
+function Get-SelectedLibraryRow([string]$Kind) {
+    # The selected row; with -Kind only a row of that kind (Test detection is for applications).
+    $row = $ui.GridLibrary.SelectedItem
+    if (-not $row -or ($Kind -and $row.Kind -ne $Kind)) {
+        Show-Error $(if ($Kind -eq 'Application') { 'Select an application first.' } else { 'Select an application or a task first.' })
+        return
+    }
     $row
 }
 
 function Edit-App([string]$Name) {
     $saved = if ($Name) { Show-AppPackEditor -Owner $window -ContentRoot $script:root -Name $Name }
              else { Show-AppPackEditor -Owner $window -ContentRoot $script:root }
-    if ($saved) { Update-Apps; Update-Answers; Set-Status "Application $saved saved" }
+    if ($saved) { Update-Library; Update-Answers; Set-Status "Application $saved saved" }
 }
 
-$ui.BtnAppsRefresh.Add_Click({ Invoke-Safely { Update-Apps; Set-Status 'Applications refreshed' } })
-$ui.BtnAppsOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Applications') } } })
+function Edit-Task([string]$Name) {
+    $saved = if ($Name) { Show-TaskEditor -Owner $window -ContentRoot $script:root -Name $Name }
+             else { Show-TaskEditor -Owner $window -ContentRoot $script:root }
+    if ($saved) { Update-Library; Update-Answers; Set-Status "Task $saved saved" }
+}
+
+function Edit-LibraryRow($Row) {
+    if (-not $Row) { return }
+    if ($Row.Kind -eq 'Task') { Edit-Task $Row.Name } else { Edit-App $Row.Name }
+}
+
 $ui.BtnAppNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-App } } })
+$ui.BtnTaskNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-Task } } })
+$ui.BtnLibEdit.Add_Click({ Invoke-Safely { Edit-LibraryRow (Get-SelectedLibraryRow) } })
+$ui.GridLibrary.Add_MouseDoubleClick({ Invoke-Safely { Edit-LibraryRow $ui.GridLibrary.SelectedItem } })
+$ui.BtnLibDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow (Get-SelectedLibraryRow) } })
+
 # Find an app online: winget's catalog gives the publisher's download address and the file's SHA256.
 $script:appFound = @()
 function Find-AppOnline {
@@ -638,63 +655,21 @@ $ui.BtnAppFoundAdd.Add_Click({ Invoke-Safely {
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try { $d = New-AppFromWinget -AppRoot (Join-Path $script:root 'Applications') -Id $p.Id -Version $p.Version -DisplayName $p.Name }
     finally { $window.Cursor = $null }
-    Update-Apps; Update-Answers
-    $ui.GridApps.SelectedItem = @($ui.GridApps.ItemsSource | Where-Object Name -eq $d.name)[0]
+    Update-Library; Update-Answers
+    $ui.GridLibrary.SelectedItem = @($ui.GridLibrary.ItemsSource | Where-Object { $_.Kind -eq 'Application' -and $_.Name -eq $d.name })[0]
     Set-Status "Added $($d.name) $($p.Version): the PC downloads it from the publisher when it installs it"
 } })
-$ui.BtnAppEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedApp; if ($row) { Edit-App $row.Name } } })
-$ui.GridApps.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridApps.SelectedItem; if ($row) { Edit-App $row.Name } } })
 
-$ui.GridApps.Add_SelectionChanged({
-    $row = $ui.GridApps.SelectedItem
-    $ui.TxtAppIssues.Text = if (-not $row) { '' } else {
+$ui.GridLibrary.Add_SelectionChanged({
+    $row = $ui.GridLibrary.SelectedItem
+    $ui.TxtLibIssues.Text = if (-not $row) { '' } elseif ($row.Kind -eq 'Application') {
         $lines = @("Install: $($row.Command)")
         if ($row.Download) { $lines += "Downloaded at install from: $($row.Download)" }
+        if ($row.Detection) { $lines += "Detection: $($row.Detection)" }
         if ($row.Definition -and $row.Definition.notes) { $lines += "Notes: $($row.Definition.notes)" }
         $lines += @($row.Issues | ForEach-Object { "- $_" })
         $lines -join "`r`n"
-    }
-})
-
-$ui.BtnAppTest.Add_Click({ Invoke-Safely {
-    $row = Get-SelectedApp
-    if (-not $row -or -not $row.Definition) { return }
-    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
-    $ui.TxtAppIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
-        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
-        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
-    }
-    Set-Status "Detection tested for $($row.Name)"
-} })
-
-$ui.BtnAppDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Application (Get-SelectedApp) } })
-
-function Get-SelectedTask {
-    $row = $ui.GridTaskLibrary.SelectedItem
-    if (-not $row) { Show-Error 'Select a task first.' }
-    $row
-}
-
-function Edit-Task([string]$Name) {
-    $saved = if ($Name) { Show-TaskEditor -Owner $window -ContentRoot $script:root -Name $Name }
-             else { Show-TaskEditor -Owner $window -ContentRoot $script:root }
-    if ($saved) { Update-Tasks; Update-Answers; Set-Status "Task $saved saved" }
-}
-
-$ui.BtnTasksRefresh.Add_Click({ Invoke-Safely { Update-Tasks; Set-Status 'Tasks refreshed' } })
-$ui.BtnTasksOpen.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $dir = Join-Path $script:root 'Tasks'
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    Invoke-Item $dir
-} })
-$ui.BtnTaskNew.Add_Click({ Invoke-Safely { if (Test-RootReady) { Edit-Task } } })
-$ui.BtnTaskEdit.Add_Click({ Invoke-Safely { $row = Get-SelectedTask; if ($row) { Edit-Task $row.Name } } })
-$ui.GridTaskLibrary.Add_MouseDoubleClick({ Invoke-Safely { $row = $ui.GridTaskLibrary.SelectedItem; if ($row) { Edit-Task $row.Name } } })
-
-$ui.GridTaskLibrary.Add_SelectionChanged({
-    $row = $ui.GridTaskLibrary.SelectedItem
-    $ui.TxtTaskIssues.Text = if (-not $row) { '' } else {
+    } else {
         $lines = @()
         if ($row.CommandLine) { $lines += "Runs: $($row.CommandLine)" }
         if ($row.Definition) { $lines += "Timeout $($row.Definition.timeoutMinutes) min, success codes $($row.Definition.successCodes -join ', ')$(if ($row.Definition.stopOnFailure) { ', stops the deployment when it fails' })" }
@@ -703,7 +678,16 @@ $ui.GridTaskLibrary.Add_SelectionChanged({
     }
 })
 
-$ui.BtnTaskDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Task (Get-SelectedTask) } })
+$ui.BtnAppTest.Add_Click({ Invoke-Safely {
+    $row = Get-SelectedLibraryRow Application
+    if (-not $row -or -not $row.Definition) { return }
+    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
+    $ui.TxtLibIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
+        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
+        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
+    }
+    Set-Status "Detection tested for $($row.Name)"
+} })
 
 #endregion
 

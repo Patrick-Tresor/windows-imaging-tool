@@ -442,7 +442,7 @@ function Get-ApplicationUsage {
 }
 
 function Get-ApplicationList {
-    # Applications\<name>\app.json folders, for the Applications tab and the answer file editor's picker.
+    # Applications\<name>\app.json folders, for the Apps and Tasks tab and the answer file editor's picker.
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Applications'
     $usage = Get-ApplicationUsage -ContentRoot $ContentRoot
@@ -500,7 +500,7 @@ function Get-TaskUsage {
 }
 
 function Get-TaskList {
-    # Tasks\<name>\task.json folders, for the Tasks tab and the answer file editor's picker.
+    # Tasks\<name>\task.json folders, for the Apps and Tasks tab and the answer file editor's picker.
     param([Parameter(Mandatory)][string]$ContentRoot)
     $root = Join-Path $ContentRoot 'Tasks'
     $usage = Get-TaskUsage -ContentRoot $ContentRoot
@@ -519,6 +519,22 @@ function Get-TaskList {
             if ($row.Issues) { $row.Status = "$($row.Issues.Count) problem(s)" }
         } catch { $row.Status = $_.Exception.Message; $row.Issues = @($_.Exception.Message) }
         [pscustomobject]$row
+    }
+}
+
+function Get-LibraryRows {
+    # The Applications and tasks tab: one list, applications first. Each row keeps its own list's fields and adds
+    # Kind (Application or Task), Runs (when it runs) and Detail (installer type and version, or the script).
+    param([Parameter(Mandatory)][string]$ContentRoot)
+    foreach ($r in @(Get-ApplicationList -ContentRoot $ContentRoot)) {
+        $r | Add-Member -NotePropertyName Kind -NotePropertyValue 'Application' -PassThru |
+            Add-Member -NotePropertyName Runs -NotePropertyValue 'FIRSTBOOT (app)' -PassThru |
+            Add-Member -NotePropertyName Detail -NotePropertyValue ((@($r.Type, $r.Version) | Where-Object { $_ }) -join ' ') -PassThru
+    }
+    foreach ($r in @(Get-TaskList -ContentRoot $ContentRoot)) {
+        $r | Add-Member -NotePropertyName Kind -NotePropertyValue 'Task' -PassThru |
+            Add-Member -NotePropertyName Runs -NotePropertyValue $r.Phase -PassThru |
+            Add-Member -NotePropertyName Detail -NotePropertyValue (@($r.Script, $r.Description) | Where-Object { $_ } | Select-Object -First 1) -PassThru
     }
 }
 
@@ -1125,7 +1141,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
-    Get-TaskUsage, Get-TaskList, Save-Task, Remove-LibraryItem,
+    Get-TaskUsage, Get-TaskList, Get-LibraryRows, Save-Task, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,
