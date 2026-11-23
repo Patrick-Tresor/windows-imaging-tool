@@ -23,4 +23,19 @@ Assert-Equal ($text -match "(?s)trap \{.*?console-error\.log.*?MessageBox\]::Sho
 $trapAt = $text.IndexOf('trap {'); $windowAt = $text.IndexOf("MainWindow.xaml")
 Assert-Equal ($trapAt -gt 0 -and $trapAt -lt $windowAt) $true 'the error trap is set before the main window loads'
 
+# The crash log keeps the real cause: every inner exception with its stack, and the PowerShell stack.
+Assert-Equal ($text -match '(?s)function Write-ConsoleErrorLog.*?InnerException.*?ScriptStackTrace') $true 'the crash log records inner exceptions and the PowerShell stack'
+Assert-Equal ($text -match '(?s)trap \{.*?Write-ConsoleErrorLog') $true 'the error trap writes through Write-ConsoleErrorLog'
+Assert-Equal ($text -match 'Dispatcher\.Add_UnhandledException') $true 'an error in a queued UI callback is logged and the console stays open'
+
+# Dispatcher.BeginInvoke has no (action, priority) overload: BeginInvoke([action]{...}, 'Background') passes the
+# priority to the action as an argument and WPF stops the console with 'Parameter count mismatch' (Computers tab,
+# 2026-11-22). The priority goes first.
+$bad = @(Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Recurse -Include *.ps1, *.psm1 | ForEach-Object {
+    $file = $_
+    [regex]::Matches((Get-Content -Raw -LiteralPath $file.FullName), '(?is)BeginInvoke\(\s*\[action\]\s*\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}(?:\.GetNewClosure\(\))?\s*,') |
+        ForEach-Object { "$($file.Name): $($_.Value.Substring(0, [Math]::Min(60, $_.Value.Length)))" }
+})
+Assert-Equal ($bad -join '; ') '' 'no BeginInvoke passes a priority (or anything else) after the action'
+
 Complete-Tests 'All tests passed'
