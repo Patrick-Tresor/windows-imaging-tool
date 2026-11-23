@@ -81,7 +81,7 @@ finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyCon
 # The script and the window use it.
 $script = Get-Content -Raw (Join-Path $repo 'src/Update-OfflineImage.ps1')
 Assert-Equal ($script -match 'Save-LatestCumulativeUpdate') $true 'Update-OfflineImage -LatestUpdate downloads the update'
-$xaml = Get-Content -Raw (Join-Path $repo 'src/Console/UpdateImage.xaml')
-Assert-Equal ($xaml -match 'x:Name="ChkLatest" IsChecked="True"') $true 'Update image ticks "Download the latest cumulative update" by default'
+$window = Get-Content -Raw (Join-Path $repo 'src/Console/UpdateImage.ps1')
+Assert-Equal ($window -match '\$latest = \$true') $true 'Update image always looks for the latest cumulative update'
 
 Complete-Tests

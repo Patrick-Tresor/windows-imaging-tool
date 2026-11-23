@@ -477,15 +477,16 @@ and write a `VERSION-<name>` log. Each version takes as much space as the image.
 ## Updating an image
 
 Patch Tuesday does not need a new capture. Select the image on the Images tab and
-click **Update image...**. **Download the latest cumulative update** is ticked: the
+click **Update image...**. It always looks for the latest cumulative update first: the
 update reads the image's Windows build, finds the newest x64 cumulative update for
 that version (not a preview) in the
 [Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
 it into the content root's `Updates` folder (both files for a Windows 11 24H2
 checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H2), then applies it. The catalog has no official interface, so this
-can stop working when Microsoft changes the site: the update then fails before
-touching the image, and the message says to download the `.msu` by hand into
-`Updates`. Packages in the dialog's list (the .NET cumulative update, or one
+can stop working when Microsoft changes the site, and it needs internet: when the
+catalog can't be reached, the packages in the list are still added (one warning line
+in the log), and with no packages the update stops before touching the image and
+says to download the `.msu` by hand into `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
 downloaded by hand) are applied after it, in a fixed order: a standalone
 servicing stack update (`ssu` in its name) first, then Windows, then .NET,
 oldest KB first.

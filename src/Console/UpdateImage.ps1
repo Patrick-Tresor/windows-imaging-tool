@@ -51,7 +51,8 @@ function Show-UpdateImageDialog {
 
     $d.BtnStart.Add_Click({
         try {
-            $latest = [bool]$d.ChkLatest.IsChecked
+            # The latest cumulative update is always looked for; when the catalog fails, the packages below still go in.
+            $latest = $true
             # Checked now, so a mistake shows here; the job builds the same command with its progress file and log.
             $getArgs = {
                 param($ProgressFile, $LogPath)
