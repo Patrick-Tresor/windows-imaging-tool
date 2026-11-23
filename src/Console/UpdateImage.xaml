@@ -25,7 +25,7 @@
         <CheckBox x:Name="ChkLatest" IsChecked="True" Margin="0,0,0,8"
                   Content="Download the latest cumulative update for this Windows version from the Microsoft Update Catalog"/>
         <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}"
-                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, from top to bottom."/>
+                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, in the order listed: a servicing stack update first, then Windows, then .NET, oldest KB first."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
@@ -41,8 +41,6 @@
         <Button x:Name="BtnAddFiles" Content="Add files..." Margin="0,0,0,6"/>
         <Button x:Name="BtnAddFolder" Content="Add folder..." Margin="0,0,0,6"/>
         <Button x:Name="BtnRemove" Content="Remove" Margin="0,0,0,18"/>
-        <Button x:Name="BtnUp" Content="Move up" Margin="0,0,0,6"/>
-        <Button x:Name="BtnDown" Content="Move down" Margin="0,0,0,18"/>
         <Button x:Name="BtnOpenUpdates" Content="Open Updates folder" Margin="0"/>
       </StackPanel>
 

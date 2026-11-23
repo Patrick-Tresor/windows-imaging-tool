@@ -167,6 +167,9 @@ try {
     Assert-Equal ($pk.KB -join ',') 'KB5043080,KB5044284,KB5045934,' 'updates are ordered Windows, .NET, other, oldest KB first'
     Assert-Equal ($pk.Kind -join ',') 'Windows,Windows,.NET,Other' 'update kind is guessed from the catalog file name'
     Assert-Equal (@(Get-UpdatePackageRows -Path @($upd, $pk[0].FullName)).Count) 4 'a file listed twice is added once'
+    Set-Content (Join-Path $upd 'ssu-19041.3570-x64.cab') 'x'
+    Assert-Equal ((@(Get-UpdatePackageRows -Path @($upd))[0]).Kind) 'SSU' 'a standalone servicing stack update goes first'
+    Remove-Item (Join-Path $upd 'ssu-19041.3570-x64.cab')
 
     $wimPath = Join-Path $root 'Images/Win11.wim'
     Assert-Equal (@(Get-ImageServicingHistory -ImagePath $wimPath).Count) 0 'a captured image has no update history'
