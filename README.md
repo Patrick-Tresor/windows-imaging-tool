@@ -9,15 +9,16 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ImagingConsole.cmd   double-click to open the admin console
-src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-VMImage.ps1,
-                     Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
-                     Get-DriverPacks.ps1, UpdateCatalog.psm1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
-                     PostDeployChecks.psm1, DeployWizard.psm1,
-                     DeployProgress.psm1, DeployProgressWindow.ps1
-src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
-                     *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
-config/              default deploy-settings.json, driver-catalog.json,
-                     answer-files/Default.xml (commented sample)
+src/                 the scripts and modules that run in WinPE, at first boot and behind the console:
+                     Deploy-Image.ps1 (deploy), FirstBoot.ps1 (first start), New-DeploymentMedia.ps1 (USB stick
+                     and network boot image), Capture-VMImage.ps1 + Prepare-Reference.ps1 (capture),
+                     Update-OfflineImage.ps1, Start-RemoteReimage.ps1, Invoke-SysprepAtDeploy.ps1,
+                     Get-DriverPacks.ps1, Test-Deployment.ps1, and their *.psm1 modules; Assets\ (logo)
+src/Console/         ImagingConsole.ps1 (WPF GUI, MainWindow.xaml), the capture wizard, answer file, application
+                     and task editors, Update image, Versions and Progress windows, ConsoleData.psm1,
+                     DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
+config/              default deploy-settings.json, driver-catalog.json, app-templates.json, task-templates.json,
+                     office-configuration.xml, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
 tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 ```
@@ -27,8 +28,14 @@ tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin rights). Only the console window
 opens: the PowerShell window behind it stays hidden. If the console stops on an error, a message says so and
 the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
+The header shows the tool's version, `v1.NN`, where NN counts the pull requests merged since v1.00
+(from `src\version.txt` in a downloaded zip, or git in a clone). The same number is written on every
+stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
+plugged-in stick or the network boot image is older than the console, with **Update the stick** or
+**Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
+one **Progress** window; **Show progress** in the header opens it again after you close it.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
-and click **Create folders** the first time. Then:
+with **Browse...**; a new folder gets the content folders right away. Then:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
@@ -51,11 +58,14 @@ and click **Create folders** the first time. Then:
   downloads, checks, extracts and registers it. You can also import a pack you already have
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
+  To import, type the model (Latitude 5521, HP EliteBook 840 G8): the maker is
+  read from the model or the pack's name. Lenovo PCs are matched by machine type
+  (the first four letters of the model, `20FR`), one row per model.
   **Deployed without a driver pack** shows, on the same page and only when there
   are any, the models that were deployed without their pack: they got the maker
   fallback, inbox drivers only, or a catalog entry whose folder is missing, with
-  how many PCs and which ones. **Find selected online** puts each model's packs
-  in the Find a model online list, ready for **Download**. **Use inbox drivers**
+  how many PCs and which ones. **Find its pack** puts the selected model's pack
+  in the Find a model online list, ready for **Download**. **No pack needed**
   marks a model (a VM, say) as needing no pack.
 - **Media**: build a USB stick in one click (the ISO is made with the network
   boot image, on the Computers tab). The tab shows
@@ -65,14 +75,15 @@ and click **Create folders** the first time. Then:
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-- **Deploy Settings**: three short sections. 1) The network share, left empty
+- **Deploy Settings**: four short sections. 1) The network share, left empty
   for USB sticks only (needed for ISO boot and the Computers tab; with a share,
   every PC, USB ones too, reports to its `Status` folder for the Dashboard).
   2) The Active Directory account WinPE signs in
   with: type its password in the console (saved encrypted in
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
-  that the Dashboard's `Status` folder can be written. 3) Post-deploy checks:
-  one tick box, and devices to ignore. Save refuses the example values
+  that the Dashboard's `Status` folder can be written. 3) Active Directory: the
+  **Domain controller** the Computers tab reads, left empty when the console PC
+  is joined to the domain. 4) Checks after deploy: one tick box, and devices to ignore. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
@@ -80,7 +91,8 @@ and click **Create folders** the first time. Then:
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
-  last heard from, with the PC's live log underneath. Refreshes every 10 seconds while it is open; every tab
+  last heard from, with the PC's live log underneath. At the end, the **Result**
+  column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open; every tab
   reloads when you open it, so there are no Refresh buttons.
   See [Deployment dashboard](#deployment-dashboard). The **History** filter
   lists the final log of each deployment cleared from the Dashboard; capture and
@@ -89,9 +101,8 @@ and click **Create folders** the first time. Then:
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
 ```
-Images\        Win11-24H2-Enterprise.wim
+Images\        Win11-24H2-Enterprise.wim or .esd (+ .updates.json history)
                Previous\Win11-24H2-Enterprise_20261015-1430\  (earlier versions)
-Images\        Win11-24H2-Enterprise.wim (+ .updates.json history), Previous\ (versions before an update)
 Updates\       .msu / .cab packages from the Microsoft Update Catalog
 Drivers\       Dell\Latitude 5440\...  HP\EliteBook 840 G9\...  Lenovo\ThinkPad T14 Gen 4\...
 AnswerFiles\   Default.xml, W11-Office-FR.xml, ...
@@ -113,14 +124,19 @@ on the ones you pick, with nobody at the PCs.
 1. The tab connects by itself the first time you open it, with the account
    and saved password from the Deploy Settings tab (or your own sign-in when
    none is set there). Not joined to the domain? Type a **Domain controller**
-   in Deploy Settings, section 3. The domain comes from the domain controller's
+   in Deploy Settings, section 3 (Active Directory). The domain comes from the domain controller's
    full name (`dc01.corp.local`), the account (`user@corp.local`) or the
    console PC. If it could not connect, the first **Search** tries again.
-2. Optionally type part of a name (`LAB` or `LAB-*`) or an IP address, and
+2. Optionally type part of a name (`LAB` or `LAB-*`), an IP address, or a name
+   and its IP (`GWHZLG3 10.1.2.34`) when DNS has an old address, and
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
-   are left out. Each row shows the OU, Windows version, last
+   are left out. Each row shows the IP address, OU, Windows version, last
    logon and whether the console can reach it, checked on every Search (Search again
-   to check again). **Online** (point at it for
+   to check again). The IP is where that PC really answers: each DNS address is
+   asked for its computer name, and one that names another PC is dropped (Online
+   then says **Old DNS** and a reimage never goes there). A PC typed by IP that is
+   not in Active Directory (a laptop outside the domain) is listed too, and
+   **Reimage...** asks for its local administrator account. **Online** (point at it for
    details):
    - **Yes**: PowerShell remoting (WinRM) answers.
    - **Yes (SMB)**: remoting is off, but file sharing answers. The console
@@ -152,7 +168,8 @@ checks (over PowerShell remoting, or its admin share) that it answers with its o
 UEFI mode and has a BIOS serial of its own; writes `Reimage\<serial>.json` on
 the share; copies the network boot image to `C:\_ImagingBoot`, adds a one-time
 boot entry for it (no PXE or WDS needed), suspends BitLocker for that one
-restart and restarts the PC after a 60 second warning. WinPE maps the share,
+restart and restarts the PC after a 60 second warning (a window with a countdown,
+**Reboot now** and **Close** for whoever is signed in). WinPE maps the share,
 takes the job for its serial (and UUID), and deploys that answer file with the
 PC's name and OU after a 15 second countdown (a key there opens the wizard).
 At the end it restarts into Windows. The progress window lists each PC until
@@ -198,16 +215,16 @@ the console; the format is documented in the commented
   the built-in Administrator). The PC restarts into Windows when the deploy is
   done; the result screen in WinPE still has **Shut down**. (An older answer file
   with `<shutdown>` or `<reboot>false` keeps doing that until it is saved again.)
-- **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
-  the recovery key backed up to AD and/or a share first.
+- **BitLocker** on the Windows drive at first boot (TPM only, XTS-AES 256, used
+  space only), with the recovery key backed up to AD and/or a share first.
 
 **BitLocker** needs a TPM that is on and ready, or it is skipped (see
 `C:\Windows\Temp\FirstBoot.log`). Backing the recovery key up to Active
 Directory needs a domain join; on most domains the computer can write its own
 key without extra setup. A recovery key folder (`\\server\share\BitLocker`)
-needs write access for Domain Computers and tight read access. With **leave
-BitLocker off if no backup worked** (the default), no PC is encrypted without a
-saved key. A startup PIN is the same for every PC deployed with that answer file.
+needs write access for Domain Computers and tight read access. BitLocker always
+stays off when no backup worked, so no PC is encrypted without a saved key.
+There is no startup PIN: the TPM unlocks the drive.
 
 ### Windows on any PC, and the target disk
 
@@ -246,8 +263,8 @@ the stick or share, loaded with drvload when WinPE starts, so a new storage
 driver can be added without rebuilding WinPE.
 
 
-**Passwords are kept in the answer file, encrypted.** The join account, share,
-local Administrator and BitLocker PIN passwords typed in the answer file editor
+**Passwords are kept in the answer file, encrypted.** The join account, share
+and local Administrator passwords typed in the answer file editor
 are saved in the XML as `aes256:<key id>:<base64>` (AES-256-CBC with an
 HMAC-SHA256, next to each `passwordFile`, which now only names the password). The
 key is random, made once in `config\secrets\answer-key.txt` on the content root,
@@ -298,8 +315,8 @@ tab, or with **New application...** in the answer file editor:
 3. Check the **install command**, success and restart exit codes, and timeout.
 4. Add **detection** rules: MSI product code, program name in Programs and
    Features (wildcards, optional minimum version), file (with version), registry
-   key or value, MSIX package, or a `.ps1` that exits 0 when installed.
-   **Test on this PC** runs them on the admin PC.
+   key or value, MSIX package, or a `.ps1` that exits 0 when installed. Every
+   rule must match. **Test on this PC** runs them on the admin PC.
 5. Limit **which PCs** get it by maker and model (Dell Command Update only on
    Dell, Lenovo System Update only on Lenovo).
 
@@ -343,7 +360,7 @@ Some applications are ready to download with nothing to get first, because
 Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
 The PC needs internet at first boot; it tries for about five minutes, and a
-failed download marks the application failed in `FirstBoot.log`. An
+failed download marks the application failed in `FirstBoot.log`.
 To make one, click **New application...** on the Apps and Tasks tab, pick the template,
 leave the installer empty and click **Apply**: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). The **Download
@@ -358,9 +375,11 @@ search uses Microsoft's winget catalog, so the console PC needs winget (App
 Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
 the publisher's download address, the silent switches and the file's SHA256
 from the catalog; nothing big is downloaded when you add it. The PC downloads
-the installer at first boot and refuses it if its SHA256 changed (the
-publisher replaced the file): add the application again to get the new
-version. Packs whose catalog entry gives no silent switch say so in their
+the installer at first boot and checks its SHA256. A "latest" link whose file
+the publisher has since replaced (Office's `setup.exe`) gives another SHA256:
+the file is kept when it is signed by the pack's publisher, and the log says so;
+otherwise it is refused at once, with the hash and the signer in the log. Add
+the application again to save the new SHA256. Packs whose catalog entry gives no silent switch say so in their
 notes; test those on a VM first. Every search is written to
 `%LOCALAPPDATA%\ImagingConsole\winget-search.log` (winget's exit code and full
 output); when winget itself fails, the status line says why instead of
@@ -368,7 +387,7 @@ output); when winget itself fails, the status line says why instead of
 
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
 script (and any files it needs) and a `task.json`. Make them on the **Apps and Tasks** tab (**New task...**),
-or with **New script...** on the answer file editor's Tasks page:
+or with **New task...** on the answer file editor's Tasks page:
 
 1. Start from a **template** (`config\task-templates.json`): sync the clock,
    turn on Remote Desktop, no sleep on mains power, remove consumer Store apps,
@@ -394,9 +413,11 @@ or with **New script...** on the answer file editor's Tasks page:
 }
 ```
 
-In the answer file editor's **Tasks** page, pick a task and **Add script**: it
-goes in the list with the other commands, in order, and its **Command** column
-takes extra arguments for that answer file. A missing or broken task stops the
+In the answer file editor's **Tasks** page, pick a task under **Available** and
+**Add >** (or double-click it): it goes in the **Run order**, where you set when it
+runs, its order (**Up**/**Down**) and, in **Arguments**, extra arguments for that
+answer file. A plain command saved by an older version still runs and shows as
+**Command**; for a new one, make a task. A missing or broken task stops the
 deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
 the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
@@ -415,22 +436,22 @@ deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
 Earlier copies of an image are kept in `Images\Previous\<name>_<yyyyMMdd-HHmm>\`,
 so a bad capture or update never leaves you without a working image:
 
-- **Recapture** under the same name: the old image moves to `Previous` only once
-  the new capture has succeeded.
+- **Recapture** under the same name: the old image always moves to `Previous`,
+  only once the new capture has succeeded.
 - **Offline updates** keep the image they replace in the same place.
 - **Roll back to selected** makes an earlier version current again for every
   answer file that doesn't name a version. It links the file rather than copying
   it, so it is quick and uses no extra space. The image you roll away from is kept
   as a version too, so a rollback can itself be undone.
-- **Earlier versions to keep** (in the Versions window, for every image) deletes
+- **Earlier versions to keep** (in the Versions window, one number for every image) deletes
   the oldest unpinned versions after a rollback, a capture or an update, keeping
   the newest N. 0 keeps every version, which is the default. The version you
   just rolled back to is never deleted by this.
 - **Pin an answer file** to a version on its *Image and disk* page (the
   `<image><version>` element). Use it to keep a lab or a pilot group on a
   known-good build while the current image moves on, or the other way round.
-- **Delete selected** and **Delete older** (keep the newest N) free space. Both
-  refuse versions an answer file is pinned to.
+- **Delete selected** frees space. It refuses a version an answer file is
+  pinned to.
 
 Rollbacks run in their own window (`src\Invoke-ImageVersion.ps1`)
 and write a `VERSION-<name>` log. Each version takes as much space as the image.
@@ -456,8 +477,9 @@ it mounts the image, adds the packages, cleans up the replaced
 components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
-name, so answer files pick it up without changes. Split images (`.swm`) are joined,
-updated and split again. The Images tab shows when each image was last updated and
+name, so answer files pick it up without changes. An `.esd` image is exported to a
+.wim, updated and exported back. Split images (`.swm`) from older captures are
+joined, updated and split again (new captures are never split). The Images tab shows when each image was last updated and
 with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass
@@ -485,7 +507,7 @@ in order, with what a pass looks like.
 Each PC writes `Status\<serial>.json` (and a live copy of its log) at every step:
 checking the answer file, partitioning, applying the image (with DISM's
 percentage, updated every 15 seconds), drivers, settings, applications, boot
-files. The console reads the folder and shows:
+files. The console reads the folder and shows (the window refreshes every 10 seconds):
 
 | State | Meaning |
 |---|---|
@@ -495,6 +517,13 @@ files. The console reads the folder and shows:
 | Failed | Stopped with an error; the error and the log are shown underneath. |
 | Cancelled | The operator cancelled at the prompt. |
 | Stalled | Running, but nothing heard for 45 minutes: powered off, network lost, hung, or (at first boot) unable to reach the share. |
+
+At the end of first boot each PC gets one **Result**: Ready, Ready with warnings,
+Not ready or Failed, with one line each for the image, drivers (pack, drivers
+added, device errors), applications, tasks, computer name, domain join,
+BitLocker, total time and tool version. The Dashboard's Result column and the
+PC's details show it, and the PC keeps it in `C:\Windows\Temp\DeployResult.txt`
+(and `FirstBoot.log`).
 
 After WinPE the PC restarts into Windows, and `FirstBoot.ps1` carries on from
 90 % while the applications install, then marks it Succeeded. That part needs
@@ -539,9 +568,8 @@ the warning clears when everything passes:
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deployment.ps1
 ```
 
-**Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; finished PCs also leave by themselves 7 days
-after their last report. Their final logs stay under the **History** filter. A PC
+**Remove** takes one PC off the dashboard; succeeded, warning and cancelled PCs
+leave by themselves 7 days after their last report. Their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
@@ -561,13 +589,13 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
    Volume down while it starts.
-   From the console, a **Build progress** window lists every step (checking the content, copying WinPE,
+   From the console, the build is a card in the **Progress** window: it lists every step (checking the content, copying WinPE,
    mounting boot.wim, adding components and drivers, configuring WinPE, unmounting, partitioning the
    stick, copying WinPE and the content) with its own bar, elapsed time and a tick when it is complete;
    steps taken from the WinPE build cache say Reused. If a step fails it is marked Failed with one line;
-   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`) and
-   **Show build window** brings up the build's own window. Closing the progress window does not stop the
-   build. From the command line, `-ProgressFile` and `-LogPath` do the same.
+   **Open log** shows the whole build (`%LOCALAPPDATA%\ImagingConsole\Logs\media-build-*.log`); the
+   build's own PowerShell window stays minimized on the taskbar. Closing the Progress window does not stop the
+   build (**Show progress** brings it back). From the command line, `-ProgressFile` and `-LogPath` do the same.
    In WinPE, **Copy logs** (wizard and progress window) saves Deploy.log, DISM's log and, once Windows is
    on the disk, its Panther and NetSetup logs to `Logs\<serial>-<date>` on the stick (or the share).
 2. **Build the reference** in a VM (VMware Workstation, VirtualBox, Hyper-V or others): install Windows,
@@ -587,7 +615,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
       and shows its edition, version, size and whether sysprep has run. Next stays off until every
       line has a tick, so a disk that was not generalized is caught here, not after the capture
       started. A VMDK is copied to a temporary VHD for this; the capture reuses that copy.
-   4. Name the image, choose compression and **Save to**: the content root's
+   4. Name the image, choose compression (**Maximum**, or **Smallest**: an `.esd` about a quarter
+      smaller, slower to capture) and **Save to**: the content root's
       `Images` folder by default (**Default** puts it back), or **Browse...** to any folder on this PC
       or a server share (`\\server\share\Images`). An image saved outside the open content root
       shows on the Images tab when the console opens that folder's content root.
@@ -633,6 +662,11 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 
 ## Status
 
-Untested first draft. It has not yet been run on real hardware or in a VM.
-The console's data layer and the driver matching have automated tests; the
-WPF window itself has only been checked for syntax and XAML validity.
+Version 1 is in use on a Dell Latitude 5521 (Intel VMD): USB deploys, the
+NVMe disk, domain join, the OOBE account, applications (including downloads at
+first boot) and tasks have worked there. Many newer features have not yet been
+tried on real hardware; [docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md) lists
+them in order. Every pull request runs the automated tests on Windows, in
+Windows PowerShell 5.1 and PowerShell 7 (`tests\Run-All.ps1`): they parse every
+script, load every window and run the data, matching, deploy and WinPE layout
+tests, but CI has no real WinPE, USB stick, network or laptop.

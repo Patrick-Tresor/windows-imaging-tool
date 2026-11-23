@@ -30,6 +30,16 @@ try {
     Assert-Equal $hp.Status '1 drivers' 'catalog row shows the driver count'
     Assert-Equal (($rows | Where-Object Model -eq 'Latitude 5440').Status) 'Missing folder' 'catalog row flags a missing folder'
 
+    # The import reads the maker from the model or the pack's name.
+    Assert-Equal (Get-DriverPackMaker -Model 'Latitude 5521') 'Dell' 'maker: Dell product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'EliteBook 840 G8') 'HP' 'maker: HP product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'ThinkPad T14 Gen 4') 'Lenovo' 'maker: Lenovo product line'
+    Assert-Equal (Get-DriverPackMaker -Model 'HP 250 G9') 'HP' 'maker: maker word in the model'
+    Assert-Equal (Get-DriverPackMaker -Model '5521' -Source 'C:\Packs\Latitude-5521-WIN11-A05-XXXX.CAB') 'Dell' 'maker: from the file name'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\sp173204.exe') 'HP' 'maker: HP SoftPaq file'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\tp_t14_gen4_w11_202310.exe') 'Lenovo' 'maker: Lenovo pack file'
+    Assert-Equal (Get-DriverPackMaker -Model 'Model 1' -Source 'C:\Packs\drivers') '' 'maker: unknown stays empty'
+
     # Saving drops empty fields and keeps fallbacks.
     Save-DriverCatalog -ContentRoot $root -Rows ($rows | Where-Object Maker -ne 'Dell')
     $catalog = Get-DriverCatalog -ContentRoot $root
@@ -148,14 +158,11 @@ try {
     Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true).Control 'TxtJoinDomain' 'an account domain with a backslash points at the account domain box'
     $j.JoinDomain = 'CORP'
     $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
-    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null
-    $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
-    Assert-Equal $msg 'The BitLocker startup PIN must be 6 to 20 digits.' 'editor save rejects a PIN that is not digits'
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -IsNew
+    $ed.BitLocker.Enabled = $true
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew
     $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
-    Assert-Equal (Unprotect-AnswerPassword -Value $back.BitLocker.PinEncrypted -Key (Get-AnswerKey -ContentRoot $root)) '246810' 'the PIN is saved encrypted in the answer file'
-    Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file in plain text'
+    Assert-Equal "$($back.BitLocker.Enabled)|$($back.BitLocker.Protector)|$($back.BitLocker.EncryptionMethod)" 'True|Tpm|XtsAes256' 'editor save: BitLocker is TPM only, XTS-AES 256'
+    Assert-Equal ((Get-Content -Raw $saved) -match 'pinFile|encryptedPin|protector|encryptionMethod') $false 'editor save writes no PIN, protector or method'
 
     # Offline image updates.
     Assert-Equal (Test-Path (Join-Path $root 'Updates')) $true 'content root gets an Updates folder'

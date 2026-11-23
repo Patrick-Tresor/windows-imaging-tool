@@ -145,6 +145,35 @@ function Test-ReservedStorageInUse {
     $false
 }
 
+function Get-SysprepBlockingPackages {
+    <#
+    .SYNOPSIS
+        The Store app packages a failed sysprep run named as installed for a user but not provisioned for all users
+        (hr 0x80073cf2), from setupact.log / setuperr.log lines written at or after $Since. Sysprep stops at the first
+        one, so this is usually one package per run.
+    #>
+    param([string[]]$Lines, [datetime]$Since = [datetime]::MinValue)
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $time = $null
+    $found = [Collections.Generic.List[string]]::new()
+    foreach ($line in @($Lines)) {
+        if ("$line" -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})') {
+            $time = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $culture)
+        }
+        if ($time -and $time -lt $Since) { continue }
+        if ("$line" -match '\bSYSPRP Package (\S+) was installed for a user, but not provisioned for all users') {
+            if (-not $found.Contains($Matches[1])) { $found.Add($Matches[1]) }
+        }
+    }
+    @($found)
+}
+
+function Get-AppxPackageNameFromFullName {
+    # Microsoft.BingSearch_1.1.33.0_x64__8wekyb3d8bbwe -> Microsoft.BingSearch
+    param([string]$FullName)
+    ("$FullName" -split '_')[0]
+}
+
 function Test-SysprepHookDone {
     # Whether the hook can stop waiting for the Run stage: it finished, failed, or Windows is restarting.
     param([string]$State)
@@ -160,4 +189,5 @@ function Test-SysprepTaskNeverStarted {
 
 Export-ModuleMember -Function Test-SysprepTaskNeverStarted, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
     Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
-    Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone, Test-ReservedStorageInUse
+    Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone, Test-ReservedStorageInUse,
+    Get-SysprepBlockingPackages, Get-AppxPackageNameFromFullName

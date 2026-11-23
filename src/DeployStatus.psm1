@@ -362,7 +362,7 @@ function Remove-DeploymentStatus {
 
 function Get-ExpiredDeployments {
     # Finished PCs (Succeeded, Warning, Cancelled) not heard from for -Days: the console moves them off the Dashboard
-    # by itself, so nobody has to click Clear finished. Their final log stays under Show: History.
+    # by itself (there is no Clear finished button). Their final log stays under Show: History.
     param([AllowEmptyCollection()][object[]]$Rows, [int]$Days = 7, [datetime]$Now = (Get-Date))
     @($Rows | Where-Object { $_.State -in 'Succeeded', 'Warning', 'Cancelled' -and $_.Updated -and $_.Updated -lt $Now.AddDays(-$Days) })
 }

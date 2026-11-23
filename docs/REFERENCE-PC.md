@@ -1,7 +1,7 @@
 # Prepare and capture the reference PC
 
 Step by step, from an empty VM to a new image on the Images tab. The reference is a VM
-(VMware Workstation here) captured with the wizard's **A VM's disk file on this PC** choice.
+(VMware Workstation here) captured from its disk file with the console's capture wizard.
 
 ## Why the Store went missing
 
@@ -38,7 +38,7 @@ The Store updating Windows apps for a user is what breaks sysprep and the image.
 ## 3. Update and set up Windows
 
 1. Run Windows Update until it finds nothing, rebooting each time.
-2. Install only what must be in the image. Applications are better as app packs (Applications
+2. Install only what must be in the image. Applications are better as app packs (Apps and Tasks
    tab): they install at first boot and you never recapture to update them.
 3. No OEM drivers: the deploy injects the right pack for each model.
 
@@ -82,7 +82,7 @@ no longer be generalized.
 If the VM does not shut down and sysprep shows an error, the next `-CheckOnly` run shows the first
 error line from `C:\Windows\System32\Sysprep\Panther\setuperr.log`.
 
-### Or: sysprep on each PC instead (optional, untested on hardware)
+### Or: sysprep on each PC instead (optional, tried on a Dell Latitude 5521)
 
 On the capture wizard's second page, **Skip sysprep here: each PC runs sysprep at its first start**
 lets you capture the VM without sysprep. Run `shutdown /s /t 0` in the VM instead (the Start menu's
@@ -96,6 +96,10 @@ Each PC deployed from that image then:
    deploy's answer file, as SYSTEM;
 4. restarts into Windows setup: name, domain join, account, apps and tasks as with a sysprepped image.
 
+When sysprep stops on a Store app installed for a user but not provisioned (error 0x80073cf2, for
+example an optional package such as Microsoft.OneDrive.Photos), that package is removed for every user
+and sysprep runs again; the provisioned copy stays.
+
 It costs 5-10 minutes and one restart per PC. If the checks or sysprep fail, the PC stays a copy of
 the reference VM and its logon screen says why; the full log is `C:\Windows\Temp\SysprepAtDeploy.log`.
 Fix the VM, capture again and redeploy. Try a new image on one PC of each model before using it widely.
@@ -104,12 +108,13 @@ Fix the VM, capture again and redeploy. Try a new image on one PC of each model 
 
 On the admin PC, in the console: **Images > Capture new image...**
 
-1. **A VM's disk file on this PC**, and the VM's .vmdk (the newest snapshot is read).
+1. **The VM's disk file on this PC**: pick the VM's .vmdk (the newest snapshot is read).
 2. Tick that the prepare command has run.
 3. **Check the disk**: wait until every line has a tick. A cross on "Sysprep has run" means the VM
    was not generalized: boot it, run the prepare command again, and click **Check again**.
-4. Name the image. To replace the current image, keep the same name and tick
-   **capture it as a new version**: the old one is kept in `Images\Previous`.
+4. Name the image and pick the compression (**Maximum**, or **Smallest** for an `.esd` about a
+   quarter smaller but slower to capture). To replace the current image, keep the same name: the
+   old one is always kept in `Images\Previous`.
 5. Start. The progress window shows each step and the time left. DISM first scans every file at 0%,
    so the time left shows once the percent starts moving. It is faster when Microsoft Defender
    skips the build folders: the console adds them to Defender's folder exclusions itself when it

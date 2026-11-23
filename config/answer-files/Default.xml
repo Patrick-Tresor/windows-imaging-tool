@@ -3,7 +3,7 @@
   Answer file: everything one deployment needs.
   Paths are relative to the content root unless absolute (Y:\..., \\server\share\...).
   Passwords: type them in the console's answer file editor. They are saved here encrypted
-  (encryptedPassword, administratorEncryptedPassword, encryptedPin) with the key in
+  (encryptedPassword, administratorEncryptedPassword) with the key in
   config\secrets\answer-key.txt, which the media build puts in boot.wim. Each *PasswordFile only names the
   password (no file is read or written there). Use a join account that can only join computers to one OU.
 -->
@@ -115,15 +115,12 @@
 
   <!-- BitLocker on the OS drive, turned on at first boot as SYSTEM after the applications and FIRSTBOOT tasks.
        The recovery password is backed up first; with requireBackup, BitLocker stays off if no backup worked.
-       protector: Tpm, or TpmPin (startup PIN read from pinFile). encryptionMethod: XtsAes128, XtsAes256, Aes128, Aes256.
+       Always TPM only (no startup PIN) and XTS-AES 256.
        backupToAD: store the recovery password on the computer object (domain only).
        recoveryKeyFolder: \\server\share folder that Domain Computers can write to; one text file per PC. -->
   <bitlocker>
     <enabled>false</enabled>
-    <encryptionMethod>XtsAes256</encryptionMethod>
     <usedSpaceOnly>true</usedSpaceOnly>
-    <protector>Tpm</protector>
-    <pinFile>config\secrets\bitlocker-pin.txt</pinFile>
     <backupToAD>true</backupToAD>
     <recoveryKeyFolder></recoveryKeyFolder>
     <requireBackup>true</requireBackup>

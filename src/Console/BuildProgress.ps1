@@ -30,31 +30,19 @@ namespace ImagingTool {
     // One card in the Progress window: a build, capture, download or reimage.
     public class BuildJobView : INotifyPropertyChanged {
         public event PropertyChangedEventHandler PropertyChanged;
-        string title, elapsed, summary, summaryState; bool hasLog, canShowWindow, finished; object rows;
+        string title, elapsed, summary, summaryState; bool hasLog, finished; object rows;
         void Changed(string p) { var h = PropertyChanged; if (h != null) h(this, new PropertyChangedEventArgs(p)); }
         public string Title { get { return title; } set { if (title != value) { title = value; Changed("Title"); } } }
         public string Elapsed { get { return elapsed; } set { if (elapsed != value) { elapsed = value; Changed("Elapsed"); } } }
         public string Summary { get { return summary; } set { if (summary != value) { summary = value; Changed("Summary"); } } }
         public string SummaryState { get { return summaryState; } set { if (summaryState != value) { summaryState = value; Changed("SummaryState"); } } }
         public bool HasLog { get { return hasLog; } set { if (hasLog != value) { hasLog = value; Changed("HasLog"); } } }
-        public bool CanShowWindow { get { return canShowWindow; } set { if (canShowWindow != value) { canShowWindow = value; Changed("CanShowWindow"); } } }
         public bool Finished { get { return finished; } set { if (finished != value) { finished = value; Changed("Finished"); } } }
         public object Rows { get { return rows; } set { rows = value; Changed("Rows"); } }
     }
 }
 '@
 }
-
-$script:BuildWindowNative = @'
-using System;
-using System.Runtime.InteropServices;
-namespace ImagingTool {
-    public static class BuildWindow {
-        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    }
-}
-'@
 
 
 function Update-BuildStepRows {
@@ -112,11 +100,11 @@ function Get-ProgressHub {
     $b.LstJobs.ItemsSource = $jobs
     $hub = @{ Window = $dlg; B = $b; Jobs = $jobs }
     $dlg.Tag = $hub
-    # The buttons on each card (Tag log, window or remove) find their job by the card's view.
+    # The buttons on each card (Tag log or remove) find their job by the card's view.
     $dlg.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{
         param($sender, $e)
         $btn = $e.OriginalSource
-        if (-not ($btn -is [Windows.Controls.Button]) -or "$($btn.Tag)" -notin 'log', 'window', 'remove') { return }
+        if (-not ($btn -is [Windows.Controls.Button]) -or "$($btn.Tag)" -notin 'log', 'remove') { return }
         $c = @($script:ProgressWindows | Where-Object { $_.View -eq $btn.DataContext })[0]
         if ($c) { Invoke-ProgressJobButton -Ctx $c -Action "$($btn.Tag)" }
     })
@@ -145,18 +133,19 @@ function Show-BuildProgress {
         [Parameter(Mandatory)]$Owner,
         [Parameter(Mandatory)][string]$ProgressFile,
         [string]$LogPath,
-        # The job's powershell.exe (Start-Process -PassThru), to bring its window up and notice it closing.
+        # The job's powershell.exe (Start-Process -PassThru), to notice it closing.
         $Process,
         [string]$Title = 'Building media',
         # What runs, for the card's wording: 'build' (media), 'download' (driver packs), 'reimage'.
         [string]$Noun = 'build',
-        # The process runs hidden (driver pack downloads): no Show build window button.
+        # The process runs hidden (driver pack downloads): no window of its own on the taskbar.
         [switch]$Hidden,
         # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
         [scriptblock]$OnFinished,
-        # A job that worked takes its card off after this many seconds (driver downloads, Patrick 2026-11-11: gone
-        # by itself when done). A failed one stays, for its log. 0: stays until Remove.
-        [int]$RemoveWhenDoneSeconds = 0
+        # A job that worked takes its card off after this many seconds, and the window closes once no card is left
+        # (Patrick 2026-11-11 for downloads, 2026-11-23 for everything: it closes itself when done). A failed one
+        # stays, for its log. 0: stays until Remove.
+        [int]$RemoveWhenDoneSeconds = 10
     )
     $hub = Get-ProgressHub -Owner $Owner
     $view = New-Object ImagingTool.BuildJobView
@@ -164,7 +153,6 @@ function Show-BuildProgress {
     $view.Summary = 'Starting...'
     $view.SummaryState = 'muted'
     $view.HasLog = [bool]$LogPath
-    $view.CanShowWindow = -not $Hidden
     $rows = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildStepRow]'
     $view.Rows = $rows
     $timer = New-Object Windows.Threading.DispatcherTimer
@@ -189,20 +177,10 @@ function Show-BuildProgress {
 }
 
 function Invoke-ProgressJobButton {
-    # A card's button: Open log, Show build window, or Remove (a finished job only).
+    # A card's button: Open log or Remove (a finished job only).
     param([Parameter(Mandatory)]$Ctx, [Parameter(Mandatory)][string]$Action)
     switch ($Action) {
         'log' { if ($Ctx.LogPath -and (Test-Path -LiteralPath $Ctx.LogPath)) { Start-Process notepad.exe -ArgumentList "`"$($Ctx.LogPath)`"" } }
-        'window' {
-            try {
-                $p = $Ctx.Process
-                if (-not $p -or $p.HasExited) { return }
-                if (-not ('ImagingTool.BuildWindow' -as [type])) { Add-Type -TypeDefinition $script:BuildWindowNative }
-                $p.Refresh()
-                $h = $p.MainWindowHandle
-                if ($h -ne [IntPtr]::Zero) { [void][ImagingTool.BuildWindow]::ShowWindow($h, 9); [void][ImagingTool.BuildWindow]::SetForegroundWindow($h) }   # 9 = SW_RESTORE
-            } catch { }
-        }
         'remove' { Remove-ProgressJob -Ctx $Ctx }
     }
 }
@@ -332,7 +310,7 @@ function Update-BuildProgressWindow {
             $gone = $proc -and $proc.HasExited
             $n = $Ctx.Noun
             $v.Summary = if ($gone) { $(if ($Ctx.Hidden) { "The $n stopped before it started. Click Open log to see why." } else { "The $n window closed before the $n started." }) }
-                elseif (([DateTime]::UtcNow - $Ctx.Started).TotalSeconds -gt 60) { $(if ($Ctx.Hidden) { "The $n has not started. Click Open log to see why." } else { "The $n has not started. Click Show build window to see why." }) }
+                elseif (([DateTime]::UtcNow - $Ctx.Started).TotalSeconds -gt 60) { $(if ($Ctx.Hidden) { "The $n has not started. Click Open log to see why." } else { ("The $n has not started. Click Open log, or open its PowerShell window on the taskbar, to see why.") }) }
                 else { 'Starting...' }
             if ($gone) { $v.SummaryState = 'error'; Stop-ProgressJob $Ctx }
             return

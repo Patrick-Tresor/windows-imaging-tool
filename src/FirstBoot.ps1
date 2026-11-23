@@ -159,7 +159,7 @@ if (-not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'options
 }
 
 function Enable-DeployBitLocker($cfg) {
-    # Recovery password first and backed up before anything is encrypted, then the TPM (or TPM + PIN) protector.
+    # Recovery password first and backed up before anything is encrypted, then the TPM protector.
     $mount = $env:SystemDrive
     $vol = Get-BitLockerVolume -MountPoint $mount
     if ($vol.VolumeStatus -ne 'FullyDecrypted') { Write-Log "BitLocker: $mount is already $($vol.VolumeStatus); left as is"; return }
@@ -168,15 +168,6 @@ function Enable-DeployBitLocker($cfg) {
         Write-Log "BitLocker NOT enabled: TPM present $($tpm.TpmPresent), ready $($tpm.TpmReady). Turn the TPM on (BIOS settings) and redeploy."
         return
     }
-    if ($cfg.protector -eq 'TpmPin') {
-        # Same as the "Require additional authentication at startup" policy with a TPM startup PIN allowed.
-        $fve = 'HKLM:\SOFTWARE\Policies\Microsoft\FVE'
-        New-Item -Path $fve -Force | Out-Null
-        foreach ($v in @(('UseAdvancedStartup', 1), ('EnableBDEWithNoTPM', 0), ('UseTPM', 2), ('UseTPMPIN', 2), ('UseTPMKey', 2), ('UseTPMKeyPIN', 2))) {
-            Set-ItemProperty -Path $fve -Name $v[0] -Value $v[1] -Type DWord
-        }
-    }
-
     $vol = Add-BitLockerKeyProtector -MountPoint $mount -RecoveryPasswordProtector -WarningAction SilentlyContinue
     $rp = $vol.KeyProtector | Where-Object KeyProtectorType -eq 'RecoveryPassword' | Select-Object -Last 1
     $saved = @()
@@ -205,13 +196,8 @@ function Enable-DeployBitLocker($cfg) {
         return
     }
 
-    $enable = @{ MountPoint = $mount; EncryptionMethod = $cfg.encryptionMethod; UsedSpaceOnly = [bool]$cfg.usedSpaceOnly; SkipHardwareTest = $true }
-    if ($cfg.protector -eq 'TpmPin') {
-        Enable-BitLocker @enable -TpmAndPinProtector -Pin (ConvertTo-SecureString $cfg.pin -AsPlainText -Force) | Out-Null
-    } else {
-        Enable-BitLocker @enable -TpmProtector | Out-Null
-    }
-    Write-Log "BitLocker enabled on $mount ($($cfg.protector), $($cfg.encryptionMethod)); encryption continues in the background"
+    Enable-BitLocker -MountPoint $mount -EncryptionMethod XtsAes256 -UsedSpaceOnly:([bool]$cfg.usedSpaceOnly) -SkipHardwareTest -TpmProtector | Out-Null
+    Write-Log "BitLocker enabled on $mount (TPM, XtsAes256); encryption continues in the background"
 }
 
 # FIRSTBOOT tasks in the answer file's order, all through Invoke-TaskPack: library tasks (Tasks tab) from
