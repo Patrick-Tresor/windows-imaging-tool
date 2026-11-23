@@ -93,6 +93,7 @@ try {
                 Write-Host 'Use a domain controller as this PC''s DNS server (or connect it to the domain network or VPN), then try again.'
                 Stop-Pc $p "Not reimaged: $($p.Address) is not found in this PC's DNS (see the log)"; continue
             }
+            if ($check -and $check.State -eq 'Old DNS') { Stop-Pc $p "Not reimaged: DNS gives an old address for $($p.Name); search it by its IP address (see the log)"; continue }
             Write-Host 'The console needs one of: PowerShell remoting (Enable-PSRemoting -Force, or the Group Policy Computer Configuration > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the firewall rule Windows Remote Management (HTTP-In)), or file sharing (firewall rule File and Printer Sharing (SMB-In)).'
             Stop-Pc $p $(if ($check -and $check.State -eq 'No access') { 'Not reimaged: it is on, but its firewall blocks PowerShell remoting and file sharing (see the log)' }
                          else { "Not reimaged: no answer from $($p.Address): it is off or asleep (see the log)" }); continue

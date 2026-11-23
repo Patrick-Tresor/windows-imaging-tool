@@ -195,6 +195,100 @@ function Find-ReimageJobByName {
 
 #region Reaching the PCs
 
+function New-NbstatRequest {
+    # A NetBIOS node status request, what `nbtstat -A <ip>` sends to UDP port 137: asks a PC for its own names.
+    param([int]$Id = 0x4954)
+    $b = [Collections.Generic.List[byte]]::new()
+    $b.AddRange([byte[]]@((($Id -shr 8) -band 0xFF), ($Id -band 0xFF), 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x20))
+    foreach ($c in [byte[]](@(0x2A) + @(0) * 15)) { $b.Add([byte](0x41 + ($c -shr 4))); $b.Add([byte](0x41 + ($c -band 0x0F))) }
+    $b.AddRange([byte[]]@(0, 0, 0x21, 0, 1))
+    , $b.ToArray()
+}
+
+function ConvertFrom-NbstatResponse {
+    # The computer name in a node status answer: its first unique <00> name (a <00> GROUP name is the domain).
+    # Empty when the answer holds none.
+    param([byte[]]$Bytes)
+    try {
+        if (-not $Bytes -or $Bytes.Length -lt 57) { return '' }
+        $i = 12
+        if (($Bytes[$i] -band 0xC0) -eq 0xC0) { $i += 2 }
+        else { while ($i -lt $Bytes.Length -and $Bytes[$i] -ne 0) { $i += $Bytes[$i] + 1 }; $i++ }
+        $i += 10   # type, class, TTL, data length
+        $count = [int]$Bytes[$i]; $i++
+        for ($n = 0; $n -lt $count -and $i + 18 -le $Bytes.Length; $n++) {
+            if ($Bytes[$i + 15] -eq 0 -and -not ($Bytes[$i + 16] -band 0x80)) {
+                return [Text.Encoding]::ASCII.GetString($Bytes, $i, 15).Trim([char[]]@([char]' ', [char]0)).ToUpperInvariant()
+            }
+            $i += 18
+        }
+    } catch { }
+    ''
+}
+
+function Get-NetBiosComputerNames {
+    # Asks each IPv4 address for its computer name (NetBIOS node status, UDP 137), all at once. Hashtable
+    # ip -> NAME for those that answered; a PC whose firewall blocks file and printer sharing names itself to nobody.
+    param([AllowEmptyCollection()][string[]]$Address, [int]$TimeoutMs = 1500, [int]$Port = 137)
+    $names = @{}
+    $ips = @($Address | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -Unique)
+    if (-not $ips) { return $names }
+    $udp = $null
+    try {
+        $udp = [Net.Sockets.UdpClient]::new(0)
+        # Windows: an ICMP 'port unreachable' from one PC would otherwise fail every receive after it.
+        try { [void]$udp.Client.IOControl(-1744830452, [byte[]]@(0, 0, 0, 0), $null) } catch { }
+        $req = New-NbstatRequest
+        foreach ($ip in $ips) { try { [void]$udp.Send($req, $req.Length, $ip, $Port) } catch { } }
+        $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+        while ($names.Count -lt $ips.Count) {
+            $left = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+            if ($left -le 0) { break }
+            try {
+                $t = $udp.ReceiveAsync()
+                if (-not $t.Wait($left)) { break }
+                $from = $t.Result.RemoteEndPoint.Address
+                if ($from.IsIPv4MappedToIPv6) { $from = $from.MapToIPv4() }
+                $from = "$from"
+                if ($ips -contains $from -and -not $names.ContainsKey($from)) {
+                    $n = ConvertFrom-NbstatResponse $t.Result.Buffer
+                    if ($n) { $names[$from] = $n }
+                }
+            } catch { }
+        }
+    } catch { } finally { if ($udp) { $udp.Close() } }
+    $names
+}
+
+function Select-ComputerAddress {
+    # Which of a name's DNS addresses is really that PC: the first that answers with that name. One that answers
+    # with another name is an old address (OldIp, OtherName); one that does not answer is kept, in DNS order.
+    # Ip is empty when every address named another PC.
+    param([string]$Name, [AllowEmptyCollection()][string[]]$Candidates, [hashtable]$Names)
+    $want = ("$Name" -split '\.')[0].ToUpperInvariant()
+    if ($want.Length -gt 15) { $want = $want.Substring(0, 15) }   # NetBIOS names are 15 characters at most
+    $oldIp = ''; $other = ''; $quiet = ''
+    foreach ($c in @($Candidates)) {
+        $n = if ($Names) { "$($Names[$c])" } else { '' }
+        if ($n -eq $want) { return [pscustomobject]@{ Ip = $c; OldIp = $oldIp; OtherName = $other; Want = $want } }
+        if ($n -and -not $other) { $oldIp = $c; $other = $n }
+        if (-not $n -and -not $quiet) { $quiet = $c }
+    }
+    [pscustomobject]@{ Ip = $quiet; OldIp = $oldIp; OtherName = $other; Want = $want }
+}
+
+function Find-ComputerOnLocalNetwork {
+    # A PC's IPv4 addresses as the PC itself gives them on the local network (LLMNR, then NetBIOS), skipping DNS.
+    # Empty when it does not answer (another subnet, off) or this is not Windows.
+    param([Parameter(Mandatory)][string]$Name)
+    if (-not (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) { return @() }
+    try {
+        @(Resolve-DnsName -Name $Name -Type A -LlmnrNetbiosOnly -QuickTimeout -ErrorAction Stop |
+            Where-Object { $_.PSObject.Properties['IPAddress'] -and "$($_.IPAddress)" -match '^\d{1,3}(\.\d{1,3}){3}$' } |
+            ForEach-Object { "$($_.IPAddress)" } | Select-Object -Unique)
+    } catch { @() }
+}
+
 function Get-RemoteOnlineState {
     <#
     .SYNOPSIS
@@ -205,10 +299,13 @@ function Get-RemoteOnlineState {
         Method: 'WinRM' (PowerShell remoting answers), 'Smb' (remoting is off but the admin share answers: the
         console copies its files there and runs them with a one-time service), or '' when neither answers.
         State: 'Yes', 'Yes (SMB)', 'No access' (on, but neither WinRM nor file sharing answers), 'Not found' (the
-        name does not resolve from this PC) or 'No answer' (off, asleep, or a firewall drops everything).
+        name does not resolve from this PC), 'Old DNS' (DNS gives an address where another PC answers now, and the
+        PC was not found on the local network by its name) or 'No answer' (off, asleep, or a firewall drops everything).
+        Ip is the address where the PC answers with its own name (NetBIOS) when it says it; Address is that IP when
+        the name would lead to another, old address.
     #>
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
-        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389))
+        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck)
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
     $allPorts = @(@($Port, $SmbPort) + $OtherPorts | Where-Object { $_ -gt 0 } | Select-Object -Unique)
@@ -224,18 +321,49 @@ function Get-RemoteOnlineState {
         $tasks = @($lookups | ForEach-Object { $_.Task; $_.AltTask } | Where-Object { $_ })
         if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
         $resolved = foreach ($l in $lookups) {
-            $ip = $null; $used = $l.Name
+            $cands = [Collections.Generic.List[Net.IPAddress]]::new(); $used = $l.Name
             foreach ($pair in @(@($l.Task, $l.Name), @($l.AltTask, $l.Alt))) {
                 $t = $pair[0]
-                if ($ip -or -not $t -or $t.Status -ne 'RanToCompletion') { continue }
+                if (-not $t -or $t.Status -ne 'RanToCompletion') { continue }
                 # IPv4 first: a .NET Framework TcpClient connects over the address's own family.
                 $a = @($t.Result | Sort-Object { if ($_.AddressFamily -eq 'InterNetwork') { 0 } else { 1 } } | Where-Object { -not [Net.IPAddress]::IsLoopback($_) -or $pair[1] -match '(?i)^localhost$|^127\.' })
-                if ($a) { $ip = $a[0]; $used = $pair[1] }
+                if ($a -and -not $cands.Count) { $used = $pair[1] }
+                # Every address DNS gives, not only the first: one of them may be old.
+                foreach ($x in $a) { if (-not $cands.Contains($x)) { $cands.Add($x) } }
             }
-            [pscustomobject]@{ Name = $l.Name; Ip = $ip; Used = $used }
+            [pscustomobject]@{ Name = $l.Name; Ip = $(if ($cands.Count) { $cands[0] } else { $null }); Used = $used; Candidates = @($cands); Moved = ''; OldDns = $null }
         }
 
-        # 2. WinRM, file sharing, and the ports any Windows PC that is on answers on.
+        # 2. Which address is really that PC. DNS can still hold an old address (DHCP gave the PC a new one and its
+        # record was not updated yet), and another PC may have that address now: searching by name then showed the
+        # wrong IP while searching by IP found the right PC (Patrick, 2026-11-23). Each address is asked for its
+        # computer name (NetBIOS, as nbtstat -A does). One that names another PC is dropped, and the PC is looked
+        # for on the local network by its name (LLMNR/NetBIOS, answered by the PC itself).
+        $byName = @($resolved | Where-Object { $_.Candidates.Count -and $_.Name -notmatch '^\d+(\.\d+){3}$' })
+        if (-not $NoNameCheck -and $byName) {
+            $v4 = @($byName | ForEach-Object { $_.Candidates } | Where-Object { $_.AddressFamily -eq 'InterNetwork' -and -not [Net.IPAddress]::IsLoopback($_) } | ForEach-Object { "$_" })
+            $nb = Get-NetBiosComputerNames -Address $v4 -TimeoutMs ([Math]::Min($TimeoutMs, 1500))
+            foreach ($r in $byName) {
+                $pick = Select-ComputerAddress -Name $r.Used -Candidates @($r.Candidates | ForEach-Object { "$_" }) -Names $nb
+                if ($pick.OtherName) {
+                    $local = @(Find-ComputerOnLocalNetwork -Name $pick.Want | Where-Object { $_ -ne $pick.OldIp })
+                    if ($local) {
+                        $more = Get-NetBiosComputerNames -Address $local -TimeoutMs ([Math]::Min($TimeoutMs, 1500))
+                        $ok = @($local | Where-Object { -not $more[$_] -or $more[$_] -eq $pick.Want })
+                        if ($ok) { $pick = [pscustomobject]@{ Ip = $ok[0]; OldIp = $pick.OldIp; OtherName = $pick.OtherName; Want = $pick.Want } }
+                    }
+                }
+                if (-not $pick.Ip) { $r.Ip = $null; $r.OldDns = $pick; continue }
+                if ($pick.OtherName) { $r.Moved = "DNS still gives the old address $($pick.OldIp), where $($pick.OtherName) answers now" }
+                if ($pick.Ip -ne "$($r.Candidates[0])") {
+                    # The name would lead to the old address: the PC is reached by its real one.
+                    $r.Ip = [Net.IPAddress]::Parse($pick.Ip)
+                    $r.Used = $pick.Ip
+                }
+            }
+        }
+
+        # 3. WinRM, file sharing, and the ports any Windows PC that is on answers on.
         $probes = foreach ($r in @($resolved | Where-Object Ip)) {
             foreach ($p in $allPorts) {
                 $tcp = [Net.Sockets.TcpClient]::new($r.Ip.AddressFamily)
@@ -255,14 +383,16 @@ function Get-RemoteOnlineState {
             $smb = [bool]$open["$($r.Name)|$SmbPort"]
             $other = @($OtherPorts | Where-Object { $open["$($r.Name)|$_"] })
             $method = if ($winrm) { 'WinRM' } elseif ($smb) { 'Smb' } else { '' }
-            $state = if (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($other) { 'No access' } else { 'No answer' }
+            $state = if ($r.OldDns) { 'Old DNS' } elseif (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($other) { 'No access' } else { 'No answer' }
             $detail = switch ($state) {
+                'Old DNS'   { "is not at $($r.OldDns.OldIp), the address DNS gives for it: $($r.OldDns.OtherName) answers there now, so the DNS record is old, and $($r.Name) did not answer by name on this network. Search it by its IP address, or wait for DNS to update" }
                 'Not found' { "$($r.Name) does not resolve from this PC: it is not in the DNS this PC uses (this PC on another network, or the PC's DNS record is old)" }
                 'Yes'       { "answers on PowerShell remoting (WinRM, port $Port) at $($r.Ip)" }
                 'Yes (SMB)' { "is on at $($r.Ip): PowerShell remoting is off, so the reimage goes through its admin share (C$, port $SmbPort) and a one-time service" }
                 'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port) nor file sharing (port $SmbPort) answers: turn one on, or allow it in its firewall" }
                 default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
             }
+            if ($r.Moved -and $state -ne 'Old DNS') { $detail = "$detail ($($r.Moved))" }
             $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
         }
     }
@@ -278,7 +408,9 @@ function Get-OnlineSummaryText {
     $names = { param($list) "$($list[0].Name)$(if ($list.Count -gt 1) { " and $($list.Count - 1) more" })" }
     $blocked = @($rows | Where-Object State -eq 'No access')
     $lost = @($rows | Where-Object State -eq 'Not found')
-    if ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing. Allow one of them (README)." }
+    $old = @($rows | Where-Object State -eq 'Old DNS')
+    if ($old) { $text += " $(& $names $old): DNS gives an old address, where another PC answers now. Search it by its IP address." }
+    elseif ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing. Allow one of them (README)." }
     elseif ($lost) { $text += " $(& $names $lost): name not found in this PC's DNS. Use a domain controller as this PC's DNS server." }
     elseif ($rows.Count -gt $on) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Online for details.' }
     $text
@@ -912,5 +1044,6 @@ function Read-ReimageTargets {
 }
 
 Export-ModuleMember -Function Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
-    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
+    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
+    Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems
