@@ -319,7 +319,6 @@ function Update-Settings {
     $ui.TxtSettingsProblem.Text = ''
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
-    $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     $ui.TxtAdServer.Text = "$((Get-AdSettings).server)"
     Update-SettingsState
@@ -1203,7 +1202,7 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
         -NewPassword $ui.PwdShare.Password
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
-        enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
+        enabled       = $true
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }

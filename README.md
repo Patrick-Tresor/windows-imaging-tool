@@ -94,7 +94,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Active Directory: the
   **Domain controller** the Computers tab reads, left empty when the console PC
-  is joined to the domain. 4) Checks after deploy: one tick box, and devices to ignore. Save refuses the example values
+  is joined to the domain. 4) Checks after deploy: they always run; only the devices to ignore are set here. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
@@ -575,8 +575,8 @@ with every check listed under the PC's details):
 | BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
 
 Any failed check turns the deployment into Warning, with the failed checks
-named. BitLocker and device driver problems are warnings only. The **Deploy
-Settings** tab turns the checks off and lists devices to ignore (wildcards, for
+named. BitLocker and device driver problems are warnings only. The checks always
+run; the **Deploy Settings** tab lists devices to ignore (wildcards, for
 example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
 The application pack's detection rules (set on the Apps and Tasks tab) catch

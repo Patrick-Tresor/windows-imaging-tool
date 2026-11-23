@@ -22,7 +22,7 @@ Assert-Equal ($plan.applications.name -join ',') 'Chrome,Zoom' 'plan lists the a
 $bl = [pscustomobject]@{ Name = 'Lab'; Membership = 'Workgroup'; Workgroup = 'LAB'; BitLocker = [pscustomobject]@{ Enabled = $true } }
 Assert-Equal (New-PostDeployCheckPlan -Answer $bl).bitLocker 'Report' 'BitLocker is reported even when the answer file turns it on'
 $off = [pscustomobject]@{ checks = [pscustomobject]@{ enabled = $false } }
-Assert-Equal ($null -eq (New-PostDeployCheckPlan -Answer $answer -Settings $off)) $true 'checks can be turned off in deploy settings'
+Assert-Equal ($null -ne (New-PostDeployCheckPlan -Answer $answer -Settings $off)) $true 'the checks always run, an older enabled: false is ignored'
 $tuned = [pscustomobject]@{ checks = [pscustomobject]@{ bitLocker = 'Off'; deviceErrors = 'Report'; ignoreDevices = @('*Smart Card*') } }
 $p2 = New-PostDeployCheckPlan -Answer $answer -Settings $tuned -AppDefinitions $apps
 Assert-Equal "$($p2.bitLocker)|$($p2.deviceErrors)|$($p2.ignoreDevices -join ',')" 'Report|Report|*Smart Card*' 'old bitLocker/deviceErrors values are ignored; ignored devices still apply'

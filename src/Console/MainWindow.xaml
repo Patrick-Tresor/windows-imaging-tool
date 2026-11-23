@@ -387,8 +387,8 @@
 
             <!-- 4. Checks -->
             <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
-            <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
-                      Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,8"
+                       Text="At the end of first boot, every PC checks its name, domain join, applications, device drivers and BitLocker, and the result shows on the Dashboard (BitLocker and driver problems are warnings)."/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Ignore devices"/>

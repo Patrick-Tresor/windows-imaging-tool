@@ -7,8 +7,8 @@
 
 function New-PostDeployCheckPlan {
     # What the deployed PC should look like, written into firstboot.json by Deploy-Image.ps1.
-    # Settings come from deploy-settings.json "checks": enabled (missing = on) and ignoreDevices (wildcards matched
-    # against device names and ids). BitLocker and device driver problems are always reported as warnings, never a
+    # Settings come from deploy-settings.json "checks": ignoreDevices (wildcards matched against device names and
+    # ids). The checks always run: an older "enabled": false is ignored. BitLocker and device driver problems are always reported as warnings, never a
     # failed deploy; older settings' bitLocker / deviceErrors values are ignored.
     param(
         [Parameter(Mandatory)]$Answer,
@@ -18,7 +18,6 @@ function New-PostDeployCheckPlan {
     )
     $c = if ($Settings -and $Settings.PSObject.Properties['checks']) { $Settings.checks } else { $null }
     $get = { param($name, $default) if ($c -and $c.PSObject.Properties[$name] -and $null -ne $c.$name -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
-    if (-not (ConvertTo-CheckBool (& $get 'enabled' $true))) { return $null }
 
     [pscustomobject]@{
         computerName  = $ComputerName
@@ -32,11 +31,6 @@ function New-PostDeployCheckPlan {
             [pscustomobject]@{ name = $_.name; detect = if ($_.PSObject.Properties['detect']) { $_.detect } else { $null } }
         })
     }
-}
-
-function ConvertTo-CheckBool($Value) {
-    if ($Value -is [bool]) { return $Value }
-    "$Value" -notmatch '^(false|0|no|off)$'
 }
 
 #endregion
