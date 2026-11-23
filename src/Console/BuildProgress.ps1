@@ -142,9 +142,10 @@ function Show-BuildProgress {
         [switch]$Hidden,
         # Run once when it finishes (OK or failed), in the console: the driver download refreshes the library.
         [scriptblock]$OnFinished,
-        # A job that worked takes its card off after this many seconds (driver downloads, Patrick 2026-11-11: gone
-        # by itself when done). A failed one stays, for its log. 0: stays until Remove.
-        [int]$RemoveWhenDoneSeconds = 0
+        # A job that worked takes its card off after this many seconds, and the window closes once no card is left
+        # (Patrick 2026-11-11 for downloads, 2026-11-23 for everything: it closes itself when done). A failed one
+        # stays, for its log. 0: stays until Remove.
+        [int]$RemoveWhenDoneSeconds = 10
     )
     $hub = Get-ProgressHub -Owner $Owner
     $view = New-Object ImagingTool.BuildJobView

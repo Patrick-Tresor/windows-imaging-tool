@@ -45,7 +45,7 @@
     <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
       <Button x:Name="BtnClose" DockPanel.Dock="Right" Content="Close"/>
       <TextBlock x:Name="TxtNote" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"
-                 Text="Closing this window does not stop what runs. Show progress brings it back."/>
+                 Text="Closing this window does not stop what runs. Show progress brings it back. It closes by itself once everything is done."/>
     </DockPanel>
 
     <ScrollViewer x:Name="ScrollJobs" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
