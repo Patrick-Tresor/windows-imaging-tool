@@ -33,7 +33,9 @@ The header shows the tool's version, `v1.NN`, where NN counts the pull requests 
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
 plugged-in stick or the network boot image is older than the console, with **Update the stick** or
 **Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
-one **Progress** window; **Show progress** in the header opens it again after you close it.
+one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
+by itself once nothing is left; a failed job stays, with its log. **Show progress** in the header opens
+it again after you close it.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
 with **Browse...**; a new folder gets the content folders right away. Then:
 
@@ -332,7 +334,8 @@ tab, or with **New application...** in the answer file editor:
 
 On the PC, apps for another maker or model are skipped in WinPE and never copied.
 At first boot each app is skipped when its detection already finds it, runs from
-its folder as SYSTEM, is stopped after its timeout, and is marked
+its folder as SYSTEM, is stopped after its timeout (real time, so a PC that
+slept does not stretch it; the PC is kept awake until first boot ends), and is marked
 failed when it exits 0 but detection still can't find it. Results go to
 `C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
@@ -348,9 +351,14 @@ Two installers need more than a silent switch:
 - **Microsoft 365 Apps (Office).** `OfficeSetup.exe` from office.com exits 0
   without installing anything. Use the Office Deployment Tool's `setup.exe`
   with a `configuration.xml` next to it (template `Microsoft-365-Apps`, sample in
-  `config\office-configuration.xml`). It downloads Office at first boot unless
-  you run `setup.exe /download configuration.xml` first and keep the files
-  in the pack.
+  `config\office-configuration.xml`). Each USB build and each reimage first
+  downloads the Office files into the pack on the console PC (`setup.exe
+  /download`, refreshed every 14 days or when `configuration.xml` changes, older
+  versions removed), so every PC installs Office from its own copy instead of
+  downloading 2-3 GB from Microsoft; the internet stays as a backup. On the PC,
+  the pack's own `configuration.xml` is used (found by name in the pack folder),
+  made silent (no Office window, EULA accepted), and a `SourcePath` the PC can't
+  reach is dropped. Office gets at least 60 minutes.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
   before Dell Command | Update in the answer file.
@@ -363,8 +371,8 @@ The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`.
 To make one, click **New application...** on the Apps and Tasks tab, pick the template,
 leave the installer empty and click **Apply**: the pack gets the publisher's
-link (and, for Office, `configuration.xml`). The **Download
-link** column shows which packs download, and the builder's **Download from**
+link (and, for Office, `configuration.xml`). A pack's details on the Apps and
+Tasks tab show where it downloads from, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
@@ -464,7 +472,7 @@ update reads the image's Windows build, finds the newest x64 cumulative update f
 that version (not a preview) in the
 [Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
 it into the content root's `Updates` folder (both files for a Windows 11 24H2
-checkpoint update), then applies it. The catalog has no official interface, so this
+checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H2), then applies it. The catalog has no official interface, so this
 can stop working when Microsoft changes the site: the update then fails before
 touching the image, and the message says to download the `.msu` by hand into
 `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
@@ -637,10 +645,10 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    .vmdk you pick, and the capture refuses to start while VMware still has the VM open. No
    password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
-   on it. Untested on Windows, including every conversion.
+   on it. VMDK capture from VMware Workstation has worked; the other conversions are untested.
 4. **Add drivers** in the console's Driver Library tab (**Find a model online**).
    After deploying, the same tab lists the models that had no pack, and **Find
-   selected online** finds theirs. You can also extract a pack into
+   its pack** finds theirs. You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, run **Update image...** to add the latest cumulative update instead of
