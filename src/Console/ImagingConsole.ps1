@@ -435,17 +435,31 @@ function Update-BootVersionBanner {
 }
 
 function Select-StickForUpdate {
-    # "Update the stick": the Media tab with the old stick's disk picked and "Update a stick" ticked.
+    # "Update the stick", one click: the Media tab with the old stick's disk, "Update a stick" ticked, the answer
+    # files and driver packs the stick already holds checked, and the build started (it still asks before it
+    # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
     Update-UsbDisks
     $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    $item = $null
     if ($old) {
         $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
         $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
         if ($item) { $ui.CmbUsb.SelectedItem = $item }
     }
     $ui.ChkUsbUpdate.IsChecked = $true
-    Set-Status 'Check the answer files and driver packs for the stick, then click Build media.'
+    if (-not $item) { Set-Status 'Pick the stick, check the answer files and driver packs, then click Build media.'; return }
+    $on = Get-StickContentChoice -StickRoot $old[0]
+    $answers = @($ui.LstMediaAnswers.Items | Where-Object { $on.AnswerFiles -contains $_.Name })
+    if ($answers) {
+        $ui.LstMediaAnswers.SelectedItems.Clear()
+        foreach ($a in $answers) { [void]$ui.LstMediaAnswers.SelectedItems.Add($a) }
+    }
+    if ($on.DriverPacks) {
+        $ui.LstMediaPacks.SelectedItems.Clear()
+        foreach ($p in @($ui.LstMediaPacks.Items | Where-Object { $on.DriverPacks -contains $_.Path })) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
+    }
+    $ui.BtnBuild.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
 }
 
 function Update-AdkStatus {

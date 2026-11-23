@@ -140,6 +140,17 @@ try {
     Assert-Equal ($choices[1].Label -like 'Lab  ->  Images\Lab.swm*') $true 'Media tab shows the image each one deploys'
     Remove-Item (Join-Path $answers '*.xml')
     Assert-Equal ((Get-MediaContent -ContentRoot $root).Problems[0] -like 'There are no answer files*') $true 'no answer files at all'
+
+    # Update the stick: what an old stick holds (answer files, driver packs as folders or one .wim each).
+    $stick = Join-Path $root 'stick'
+    New-Item -ItemType Directory -Path (Join-Path $stick 'AnswerFiles'), (Join-Path $stick 'Drivers/Dell/Latitude 5521'), (Join-Path $stick 'Drivers/HP') -Force | Out-Null
+    Set-Content (Join-Path $stick 'AnswerFiles/Staff.xml') '<deployment/>'
+    Set-Content (Join-Path $stick 'AnswerFiles/Lab.xml') '<deployment/>'
+    Set-Content (Join-Path $stick 'Drivers/HP/EliteBook 840 G9.wim') 'x'
+    $on = Get-StickContentChoice -StickRoot $stick
+    Assert-Equal ($on.AnswerFiles -join ',') 'Lab,Staff' 'old stick: its answer files'
+    Assert-Equal ($on.DriverPacks -join ';') 'Dell\Latitude 5521;HP\EliteBook 840 G9' 'old stick: its driver packs, folder or .wim'
+    Assert-Equal "$((Get-StickContentChoice -StickRoot (Join-Path $root 'nothing')).AnswerFiles.Count)" '0' 'a stick without the folders: empty lists'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 

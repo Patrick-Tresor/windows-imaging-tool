@@ -241,4 +241,27 @@ function Get-MediaDriverPacks {
     }
 }
 
-Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks
+function Get-StickContentChoice {
+    <#
+    .SYNOPSIS
+        What a stick this tool built holds, to update it with the same content: the answer file names in its
+        AnswerFiles folder, and the driver pack paths (Maker\Model) in its Drivers folder, as a folder or as the
+        one-file <Model>.wim. $null for a list that can't be read.
+    #>
+    param([Parameter(Mandatory)][string]$StickRoot)
+    $answers = [IO.Path]::Combine($StickRoot, 'AnswerFiles')
+    $names = @(if ([IO.Directory]::Exists($answers)) {
+        [IO.Directory]::GetFiles($answers, '*.xml') | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) } | Sort-Object
+    })
+    $drivers = [IO.Path]::Combine($StickRoot, 'Drivers')
+    $packs = @(if ([IO.Directory]::Exists($drivers)) {
+        foreach ($maker in [IO.Directory]::GetDirectories($drivers)) {
+            $m = [IO.Path]::GetFileName($maker)
+            foreach ($d in [IO.Directory]::GetDirectories($maker)) { "$m\$([IO.Path]::GetFileName($d))" }
+            foreach ($w in [IO.Directory]::GetFiles($maker, '*.wim')) { "$m\$([IO.Path]::GetFileNameWithoutExtension($w))" }
+        }
+    })
+    [pscustomobject]@{ AnswerFiles = $names; DriverPacks = @($packs | Sort-Object -Unique) }
+}
+
+Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks, Get-StickContentChoice

@@ -61,7 +61,7 @@ try {
     Save-JsonFile -Path (Join-Path $stickB 'tool-version.json') -InputObject (ConvertTo-ToolVersionRecord -Version $console -Target Usb)
     Assert-Equal (Get-StaleStickMessage -Console $console -StickRoots @($stickB)) $null 'an up-to-date stick: no banner'
     $msg = Get-StaleStickMessage -Console $console -StickRoots @($stickA, $stickB)
-    Assert-Equal ($msg -like "*$stickA*1111111*2026-11-11 12:00*2222222*Update a stick*") $true 'an old stick: banner names it, both versions and how to update'
+    Assert-Equal ($msg -like "*$stickA*1111111*2026-11-11 12:00*2222222*Update the stick*") $true 'an old stick: banner names it, both versions and how to update'
     $msg = Get-StaleStickMessage -Console $console -StickRoots @($stickC)
     Assert-Equal ($msg -like '*built before this console stamped versions*') $true 'a stick from before versions: banner too'
 
