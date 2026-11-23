@@ -69,8 +69,6 @@ function Show-AppPackEditor {
         $e.TxtCodes.Text = $d.successCodes -join ', '
         $e.TxtRebootCodes.Text = $d.rebootCodes -join ', '
         $e.TxtTimeout.Text = $d.timeoutMinutes
-        $e.RbMatchAny.IsChecked = $d.detection.match -eq 'any'
-        $e.RbMatchAll.IsChecked = $d.detection.match -ne 'any'
         $e.ChkSkip.IsChecked = $d.skipIfDetected
         $rules.Clear()
         foreach ($r in $d.detection.rules) {
@@ -114,7 +112,7 @@ function Show-AppPackEditor {
             timeoutMinutes   = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 60 }
             requirements     = Get-RequirementBoxes -Controls $e
             detection        = [pscustomobject]@{
-                match = if ($e.RbMatchAny.IsChecked) { 'any' } else { 'all' }
+                match = 'all'
                 rules = @($rules | Where-Object { $_.Type -and $_.Target } | ForEach-Object {
                     [pscustomobject]@{ type = $_.Type; target = $_.Target.Trim(); value = "$($_.Value)".Trim(); operator = $_.Operator; version = "$($_.Version)".Trim() } })
             }
