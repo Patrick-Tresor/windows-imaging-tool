@@ -102,6 +102,7 @@ Import-Module (Join-Path $srcDir 'MediaContent.psm1') -Force
 Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $srcDir 'ImagingAgent.psm1') -Force
 Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
@@ -354,6 +355,19 @@ function Import-StickDashboard([string]$Folder) {
     }
 }
 
+$script:agentCache = $null
+function Get-ConsoleAgentCheckIns {
+    # Every agent's last check-in (Status\Agents on the share); none when it can't be read. Read again at most every
+    # 30 seconds: the Dashboard refreshes often, and the agents check in every few minutes.
+    $folder = Get-DashboardFolder
+    if (-not $folder) { return @() }
+    $c = $script:agentCache
+    if ($c -and $c.Folder -eq $folder -and ((Get-Date) - $c.At).TotalSeconds -lt 30) { return $c.Rows }
+    $rows = try { @(Get-AgentCheckIns -StatusFolder $folder) } catch { @() }
+    $script:agentCache = [pscustomobject]@{ Folder = $folder; At = Get-Date; Rows = $rows }
+    $rows
+}
+
 function Update-Dashboard {
     $folder = Get-DashboardFolder
     if ($folder) { Import-StickDashboard $folder }
@@ -382,6 +396,14 @@ function Update-Dashboard {
             3 { 'Succeeded', 'Warning', 'Cancelled' }
         })
         if ($states) { $rows = @($rows | Where-Object State -in $states) }
+    }
+
+    # The agent's last check-in (by serial): when the PC was last on, and the address it has now.
+    $checkIns = Get-ConsoleAgentCheckIns
+    foreach ($r in $rows) {
+        $a = if ($checkIns -and $r.Serial) { Find-AgentCheckIn -CheckIns $checkIns -Serial "$($r.Serial)" } else { $null }
+        $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue $(if ($a) { $a.LastSeenText } else { '' }) -Force
+        if ($a -and $a.Online -and $a.ipAddress) { $r | Add-Member -NotePropertyName IpAddress -NotePropertyValue "$($a.ipAddress)" -Force }
     }
 
     # Keep the selected PC selected across refreshes.
@@ -898,13 +920,19 @@ function Show-AdRows {
         $share = Get-ReimageShare
         if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
     }
+    $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
-        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $(if ($check) { $check.State } else { '' }) -Force
-        # The address the online check reached; a PC found by IP shows that IP before any check.
-        $ip = if ($check -and $check.Ip) { $check.Ip } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
+        $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
+        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name
+        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $view.Online -Force
+        # The address the online check reached, else the one the agent reported; a PC found by IP shows that IP.
+        $ip = if ($check -and $check.Ip) { $check.Ip } elseif ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
         $_ | Add-Member -NotePropertyName IpAddress -NotePropertyValue $ip -Force
-        $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $(if ($check) { "$($_.Name) $($check.Detail)" } else { $null }) -Force
+        $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $view.OnlineDetail -Force
+        $_ | Add-Member -NotePropertyName Agent -NotePropertyValue $view.Agent -Force
+        $_ | Add-Member -NotePropertyName AgentDetail -NotePropertyValue $view.AgentDetail -Force
+        $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
 }
@@ -1016,7 +1044,7 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
     }
-    $off = @($rows | Where-Object { $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address].Online })
+    $off = @($rows | Where-Object { -not $_.HasAgent -and $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address].Online })
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
     if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
@@ -1037,6 +1065,7 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
         $c | Export-Clixml -Path $f
         $localCreds[$r.Address] = $f
     }
+    # Also for PCs with an agent: the network is the way in when the agent does not take its job.
     $cred = if (@($rows | Where-Object { -not $localCreds.ContainsKey($_.Address) })) { Get-AdCredential } else { $null }
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
     Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object {
@@ -1046,6 +1075,10 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
+    # PCs with an agent go through it: it checks in to the Dashboard's folder, and jobs are signed with this content
+    # root's key.
+    $statusFolder = Get-DashboardFolder
+    if ($statusFolder) { $runArgs += @('-StatusFolder', (ConvertTo-Arg $statusFolder), '-KeyRoot', (ConvertTo-Arg $script:root)) }
     # Each PC keeps its name and joins back into the OU it is in now.
     $runArgs += @('-KeepNames', '-KeepOU')
     if ($cred) {
@@ -1069,10 +1102,44 @@ $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
     $n = 0
     foreach ($r in $rows) {
         $job = Find-ReimageJobByName -ContentRoot $share -ComputerName $r.Name
-        if ($job) { Remove-ReimageJob -ContentRoot $share -Serial $job.serial; $n++ }
+        if ($job) {
+            Remove-ReimageJob -ContentRoot $share -Serial $job.serial; $n++
+            $statusFolder = Get-DashboardFolder
+            if ($statusFolder) { try { Remove-AgentJob -StatusFolder $statusFolder -Serial $job.serial } catch { } }
+        }
     }
     Show-AdRows
     Set-Status "Cancelled $n waiting reimage(s). A PC already restarting into WinPE then waits for someone at its screen."
+} })
+
+$ui.BtnAdAgent.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = @($ui.GridAd.SelectedItems)
+    if (-not $rows) { Show-Error 'Select the PCs to put the agent on (Ctrl+click or Shift+click for several).'; return }
+    $statusFolder = Get-DashboardFolder
+    if (-not (Get-ReimageShare) -or -not $statusFolder -or $statusFolder -notlike '\\*') {
+        Show-Error 'Set Network share on the Deploy Settings tab first: the agents check in to its Status folder.'; return
+    }
+    $local = @($rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })
+    if ($local) { Show-Error "$($local[0].Name) is not in the domain: the agent checks in as the computer account, so it only works on domain PCs."; return }
+    # The key pair is made the first time: the PCs get the public key, the jobs are signed with the private one.
+    $null = Get-AgentPublicKey -ContentRoot $script:root -Create
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $targetsFile = Join-Path $env:TEMP "agent-$stamp-$tag-targets.json"
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = ''; local = $false; credentialFile = '' } })
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Install-RemoteAgent.ps1"),
+        '-ContentRoot', (ConvertTo-Arg $script:root), '-StatusFolder', (ConvertTo-Arg $statusFolder), '-TargetsFile', (ConvertTo-Arg $targetsFile))
+    $cred = Get-AdCredential
+    if ($cred) {
+        $credFile = Join-Path $env:TEMP "agent-$stamp-$tag-cred.xml"
+        $cred | Export-Clixml -Path $credFile
+        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
+    }
+    $job = Start-ConsoleJob -Name 'agent' -ArgumentList $runArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Installing the agent on $($rows.Count) PC(s)" `
+        -Noun 'install' -Hidden -OnFinished { try { Show-AdRows } catch { } }
+    Set-Status "Installing the agent on $($rows.Count) PC(s). Each one checks in within a few minutes."
 } })
 
 #endregion

@@ -299,6 +299,13 @@ if (Test-Path $unattend) {
         Write-Log 'Copy of unattend.xml without passwords kept in C:\Windows\Temp\unattend-deployed.xml'
     } catch { Write-Log "Could not keep a copy of unattend.xml: $($_.Exception.Message)" }
 }
+# The agent (staged by Deploy-Image.ps1 when the PC reports to a network status folder): its SYSTEM task tells the
+# console this PC is on, from now on, and takes the jobs the console signs (reimage). Its log: ImagingAgent.log.
+$agentScript = "$env:ProgramData\ImagingTool\Agent\ImagingAgent.ps1"
+if (Test-Path $agentScript) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentScript -Register
+    Write-Log "Agent task ImagingTool\Agent made and started: exit $LASTEXITCODE"
+}
 # First boot is over: the startup task is no longer needed.
 & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
 $taskDeleted = $LASTEXITCODE -eq 0

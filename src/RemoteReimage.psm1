@@ -502,9 +502,12 @@ function Get-RemoteServiceArgs {
 }
 
 function Open-RemoteChannel {
-    # A way to run commands and copy files on a PC: Method 'WinRM' (a PowerShell session) or 'Smb'.
-    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
+    # A way to run commands and copy files on a PC: Method 'WinRM' (a PowerShell session) or 'Smb'. 'Local' runs
+    # them on this PC itself: the agent on an imaged PC (ImagingAgent.ps1, as SYSTEM) restarts itself into WinPE
+    # with the same steps the console uses over the network.
+    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb', 'Local')][string]$Method = 'WinRM')
     $ch = [pscustomobject]@{ ComputerName = $ComputerName; Method = $Method; Credential = $Credential; Session = $null; Connected = @() }
+    if ($Method -eq 'Local') { return $ch }
     if ($Method -eq 'WinRM') {
         $credArgs = @{}
         if ($Credential) { $credArgs.Credential = $Credential }
@@ -545,6 +548,11 @@ function Invoke-RemoteChannel {
     if ($Channel.Method -eq 'WinRM') {
         return Invoke-Command -Session $Channel.Session -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -ErrorAction Stop
     }
+    if ($Channel.Method -eq 'Local') {
+        # In a new scope, as remoting would; errors stop it as they do there.
+        $ErrorActionPreference = 'Stop'
+        return & $ScriptBlock @ArgumentList
+    }
     $pc = $Channel.ComputerName
     $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
     $local = "C:\Windows\Temp\ImagingTool-$id"
@@ -581,6 +589,8 @@ function Copy-ToRemoteChannel {
     param([Parameter(Mandatory)]$Channel, [Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Destination)
     if ($Channel.Method -eq 'WinRM') {
         Copy-Item -LiteralPath $Path -Destination $Destination -ToSession $Channel.Session -Force
+    } elseif ($Channel.Method -eq 'Local') {
+        [IO.File]::Copy($Path, $Destination, $true)
     } else {
         [IO.File]::Copy($Path, (ConvertTo-AdminSharePath -ComputerName $Channel.ComputerName -Path $Destination), $true)
     }
@@ -831,7 +841,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 function Remove-LocalDiskBoot {
     # Takes WinPE off a PC that is back in Windows without being reimaged: the folder, the boot entry and the task.
-    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
+    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb', 'Local')][string]$Method = 'WinRM')
     $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
     try {
         Invoke-RemoteChannel -Channel $ch -ArgumentList "$BootEntry" -ScriptBlock {
@@ -855,7 +865,7 @@ function Invoke-LocalDiskBoot {
         [Parameter(Mandatory)][string]$ComputerName,
         [Parameter(Mandatory)][string]$BootWim,
         [pscredential]$Credential,
-        [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM',
+        [ValidateSet('WinRM', 'Smb', 'Local')][string]$Method = 'WinRM',
         [int]$DelaySeconds = 60,
         [string]$Message = 'IT is reinstalling Windows on this PC. Save your work: it restarts shortly.',
         [scriptblock]$OnStage = { }

@@ -114,6 +114,7 @@ Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ImagingAgent.psm1') -Force
 
 # The version of the tool this build puts on the media: shown in the WinPE wizard, written in every Deploy.log, and
 # read back by the console to say a stick is older than the console.
@@ -405,6 +406,13 @@ try {
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
     $answerKey = Get-AnswerKey -ContentRoot $secretRoot
+    # The console's public key: the agent on each PC this WinPE deploys takes only the jobs signed with the console's
+    # private key (config\secrets\agent-key.xml, made here the first time; it never goes on a stick).
+    try {
+        $agentKey = Get-AgentPublicKey -ContentRoot $secretRoot -Create
+        [IO.File]::WriteAllText("$deployDir\config\agent-public-key.xml", $agentKey, [Text.Encoding]::ASCII)
+        Write-Host "Agent key $(Get-AgentKeyId $agentKey) is in boot.wim: the PCs it deploys take reimage jobs from this console." -ForegroundColor Green
+    } catch { Write-Warning "No agent key in boot.wim, so the PCs it deploys take no jobs from the console: $($_.Exception.Message)" }
     if ($winPEPassword) {
         # The answer file key, encrypted with the WinPE password, inside boot.wim. WinPE asks for it at start; the key
         # then decrypts the passwords in the answer files and the share password in the settings.
