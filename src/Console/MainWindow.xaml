@@ -220,18 +220,9 @@
             <Button x:Name="BtnOutput" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
             <Label Grid.Row="8" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
+            <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
             <Button x:Name="BtnPeDrivers" Grid.Row="8" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
-            <Label Grid.Row="10" Content="WinPE driver packs"/>
-            <StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2">
-              <StackPanel Orientation="Horizontal">
-                <CheckBox x:Name="ChkPeDell" Content="Dell" IsChecked="True" Margin="0,0,16,0"/>
-                <CheckBox x:Name="ChkPeHp" Content="HP" IsChecked="True"/>
-              </StackPanel>
-              <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
-                         Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Models with no driver pack get these drivers in Windows too. Each pack makes WinPE bigger and the build a few minutes longer."/>
-            </StackPanel>
 
             <Label Grid.Row="12" Content="WinPE password" VerticalAlignment="Top"/>
             <StackPanel Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2">
@@ -243,10 +234,6 @@
               <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
                          Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm."/>
             </StackPanel>
-
-            <Label Grid.Row="14" Content="Online apps on USB"/>
-            <CheckBox x:Name="ChkAppDownloads" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="True" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
-                      Content="Download the applications that install from the internet (Find an app online, or New... from a template) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
 

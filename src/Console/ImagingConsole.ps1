@@ -143,11 +143,10 @@ function ConvertTo-Arg([string]$Value) {
 }
 
 function Get-WinPEDriverArgs {
-    # The Media tab's WinPE driver choices as build arguments: the USB/ISO build and the network boot image use the same.
+    # The Media tab's extra WinPE drivers as build arguments: the USB build and the network boot image use the same.
+    # Dell's and HP's WinPE driver packs always go in (New-DeploymentMedia's default).
     $a = @()
     if ($ui.TxtPeDrivers.Text) { $a += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
-    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
-    if ($peVendors) { $a += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $a += '-NoVendorWinPEDrivers' }
     $a
 }
 
@@ -1230,7 +1229,6 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked) {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
-    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkAppDownloads.IsChecked) { $buildArgs += '-NoAppDownloads' }
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
