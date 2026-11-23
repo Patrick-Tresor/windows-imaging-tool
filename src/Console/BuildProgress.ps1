@@ -282,12 +282,14 @@ function Invoke-BuildFinished {
 
 function Stop-ProgressJob {
     # The job is over (done, failed or its process gone): stop reading, offer Remove, run OnFinished. A job that
-    # worked and has RemoveWhenDoneSeconds takes its card off after that long.
+    # worked and has RemoveWhenDoneSeconds takes its card off after that long. A job that ended but has a failed row
+    # (an Office download on a reimage, an update download) keeps its card too, so that row is seen.
     param([Parameter(Mandatory)]$Ctx)
     $Ctx.Timer.Stop()
     $Ctx.View.Finished = $true
     Update-ProgressHubCount
-    if ($Ctx.RemoveWhenDoneSeconds -gt 0 -and $Ctx.View.SummaryState -eq 'success' -and -not $Ctx.RemoveTimer) {
+    $rowFailed = @($Ctx.Rows | Where-Object { $_.State -eq 'failed' }).Count -gt 0
+    if ($Ctx.RemoveWhenDoneSeconds -gt 0 -and $Ctx.View.SummaryState -eq 'success' -and -not $rowFailed -and -not $Ctx.RemoveTimer) {
         $t = New-Object Windows.Threading.DispatcherTimer
         $t.Interval = [TimeSpan]::FromSeconds($Ctx.RemoveWhenDoneSeconds)
         $t.Tag = $Ctx
