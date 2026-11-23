@@ -120,7 +120,8 @@ on the ones you pick, with nobody at the PCs.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
    are left out. Each row shows the OU, Windows version, last
-   logon and whether the console can reach it now. **Online** (point at it for
+   logon and whether the console can reach it, checked on every Search (Search again
+   to check again). **Online** (point at it for
    details):
    - **Yes**: PowerShell remoting (WinRM) answers.
    - **Yes (SMB)**: remoting is off, but file sharing answers. The console

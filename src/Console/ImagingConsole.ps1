@@ -1066,14 +1066,6 @@ $ui.ChkAdUseShare.Add_Click({ Invoke-Safely {
 $ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
 $ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke-Safely { Search-AdComputers } } })
 
-$ui.BtnAdOnline.Add_Click({ Invoke-Safely {
-    if (-not $script:adRows) { Show-Error 'Click Connect or Search first.'; return }
-    $window.Cursor = 'Wait'
-    try { Update-AdOnline } finally { $window.Cursor = $null }
-    Show-AdRows
-    Set-Status (Get-AdOnlineSummary)
-} })
-
 $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $adk = Update-AdkStatus

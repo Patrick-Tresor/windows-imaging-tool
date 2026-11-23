@@ -447,7 +447,6 @@
                 <TextBox x:Name="TxtAdName" Grid.Column="4" ToolTip="Part of a name (LAB), a pattern (LAB-*), an IP address (10.1.2.34), or a name and its IP (GWHZLG3 10.1.2.34) when DNS has an old address. Empty = all."/>
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
-                  <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
                   <Button x:Name="BtnAdShowConnect" Content="Connection..." Margin="10,0,0,0" Visibility="Collapsed"
                           ToolTip="The domain, domain controller and account this tab connected with"/>
                 </StackPanel>
