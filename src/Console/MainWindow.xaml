@@ -232,10 +232,6 @@
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
-            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
-            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
-
 
             <Label Grid.Row="8" Content="WinPE password" VerticalAlignment="Top"/>
             <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">

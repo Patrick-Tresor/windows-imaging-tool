@@ -161,14 +161,6 @@ function ConvertTo-Arg([string]$Value) {
     '"' + ($Value -replace '\\$', '\\') + '"'
 }
 
-function Get-WinPEDriverArgs {
-    # The Media tab's extra WinPE drivers as build arguments: the USB build and the network boot image use the same.
-    # Dell's and HP's WinPE driver packs always go in (New-DeploymentMedia's default).
-    $a = @()
-    if ($ui.TxtPeDrivers.Text) { $a += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
-    $a
-}
-
 function Invoke-Safely([scriptblock]$Action) {
     # Every button runs through here so one failure shows a message instead of closing the console.
     try { & $Action } catch { Show-Error $_.Exception.Message }
@@ -1092,7 +1084,6 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
     $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
-    $buildArgs += Get-WinPEDriverArgs
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
     Set-Status 'Network boot image build started.'
@@ -1181,7 +1172,6 @@ $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll(
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
-$ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1220,7 +1210,6 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($packArgs.ContainsKey('DriverPacks')) {
         if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
     }
-    $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
     # (a command line argument would show in the process list).
     # Required (checked before anything is asked, see the top of this handler).
