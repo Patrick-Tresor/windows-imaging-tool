@@ -252,6 +252,18 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Show-BuildProgress -Owner $owner -ProgressFile $file3 -Title 'Downloading the HP driver pack' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5
         $ctx3 = $script:ProgressWindows[0]
         Assert-Equal "$($ctx3.View.SummaryState)|$($null -eq $ctx3.RemoveTimer)" 'error|True' 'window: a failed download stays listed'
+
+        # A job that ended without an error but with a failed row (reimage: Office not downloaded) stays listed too.
+        $file4 = Join-Path $dir 'partial.json'
+        Start-BuildProgress -Path $file4 -Title 'x' -Steps @(@('office', 'Office files'), @('pc1', 'PC-01'))
+        Start-BuildStep 'office'; Complete-BuildStep 'office' -State failed -Detail 'Not downloaded'
+        Start-BuildStep 'pc1'; Complete-BuildStep 'pc1'
+        Stop-BuildProgress
+        Show-BuildProgress -Owner $owner -ProgressFile $file4 -Title 'Reimaging 1 PC(s)'
+        $ctx4 = @($script:ProgressWindows | Where-Object { $_.ProgressFile -eq $file4 })[0]
+        Update-BuildProgressWindow $ctx4
+        Assert-Equal "$($ctx4.View.SummaryState)|$($null -eq $ctx4.RemoveTimer)" 'success|True' 'window: a finished job with a failed row keeps its card'
+        Remove-ProgressJob -Ctx $ctx4
         Remove-ProgressJob -Ctx $ctx3
         Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: Remove on the last card closes the window'
     } finally {

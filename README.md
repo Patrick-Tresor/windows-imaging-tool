@@ -34,7 +34,7 @@ stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow 
 plugged-in stick or the network boot image is older than the console, with **Update the stick** or
 **Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
-by itself once nothing is left; a failed job stays, with its log. **Show progress** in the header opens
+by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens
 it again after you close it.
 
 The window has a header bar at the top (logo, version, the **content root** with **Browse...**
