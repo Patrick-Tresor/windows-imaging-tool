@@ -539,9 +539,8 @@ the warning clears when everything passes:
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deployment.ps1
 ```
 
-**Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; finished PCs also leave by themselves 7 days
-after their last report. Their final logs stay under the **History** filter. A PC
+**Remove** takes one PC off the dashboard; succeeded, warning and cancelled PCs
+leave by themselves 7 days after their last report. Their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 

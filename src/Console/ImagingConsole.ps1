@@ -1236,17 +1236,6 @@ $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     Set-Status "Removed $($r.Serial) from the dashboard. Show: History has its final log."
 } })
 
-$ui.BtnDashClear.Add_Click({ Invoke-Safely {
-    $folder = Get-DashboardFolder
-    if (-not $folder) { return }
-    $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
-    if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. Their final logs stay under Show: History.")) { return }
-    Remove-DeploymentStatus -Rows $done
-    Update-Dashboard
-    Set-Status "Cleared $($done.Count) finished deployment(s)"
-} })
-
 $ui.BtnDashOpen.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $folder = Get-DashboardFolder

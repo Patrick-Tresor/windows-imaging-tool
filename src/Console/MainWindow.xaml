@@ -502,7 +502,6 @@
                 <ComboBoxItem Content="History"/>
               </ComboBox>
               <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
-              <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
               <Button x:Name="BtnDashRemove" DockPanel.Dock="Right" Content="Remove" Margin="8,0,0,0"/>
               <TextBlock/>
             </DockPanel>
