@@ -50,15 +50,35 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
 # With the console window hidden, an error that stops the console before (or after) its window opens would leave
-# nothing on screen. Show it in a message box and keep it in %LOCALAPPDATA%\ImagingConsole\console-error.log.
-trap {
-    $msg = "$($_.Exception.Message)"
-    $where = "$($_.InvocationInfo.PositionMessage)"
+# nothing on screen. Show it in a message box and keep it in %LOCALAPPDATA%\ImagingConsole\console-error.log, with
+# every inner exception (type, message, .NET stack) and the PowerShell stack, so the real cause is in the log and
+# not only the line that opened the window.
+function Write-ConsoleErrorLog($ErrorRecord) {
     $log = [IO.Path]::Combine($env:LOCALAPPDATA, 'ImagingConsole', 'console-error.log')
+    $nl = [Environment]::NewLine
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add(('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $ErrorRecord.Exception.Message))
+    $where = "$($ErrorRecord.InvocationInfo.PositionMessage)"
+    if ($where) { $lines.Add($where) }
+    $ex = $ErrorRecord.Exception; $depth = 0
+    while ($ex -and $depth -lt 10) {
+        $lines.Add(('{0}{1}: {2}' -f ('  ' * $depth), $ex.GetType().FullName, $ex.Message))
+        if ($ex.ErrorRecord -and $ex.ErrorRecord.InvocationInfo -and $ex.ErrorRecord -ne $ErrorRecord) {
+            $lines.Add("$($ex.ErrorRecord.InvocationInfo.PositionMessage)")
+        }
+        if ($ex.StackTrace) { $lines.Add("$($ex.StackTrace)") }
+        $ex = $ex.InnerException; $depth++
+    }
+    if ($ErrorRecord.ScriptStackTrace) { $lines.Add('PowerShell stack:'); $lines.Add("$($ErrorRecord.ScriptStackTrace)") }
     try {
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($log))
-        [IO.File]::AppendAllText($log, ('{0:yyyy-MM-dd HH:mm:ss} {1}{2}{3}{2}{2}' -f (Get-Date), $msg, [Environment]::NewLine, $where))
+        [IO.File]::AppendAllText($log, (($lines -join $nl) + $nl + $nl))
     } catch { }
+    $log
+}
+trap {
+    $msg = "$($_.Exception.Message)"
+    $log = Write-ConsoleErrorLog $_
     try { [void][Windows.MessageBox]::Show("The imaging console stopped: $msg`n`nDetails: $log", 'Imaging Console', 'OK', 'Error') } catch { }
     break
 }
@@ -1352,8 +1372,21 @@ $ui.Tabs.Add_SelectionChanged({
     if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not $script:adAutoTried) {
         # Once per console session, after the tab has painted.
         $script:adAutoTried = $true
-        [void]$window.Dispatcher.BeginInvoke([action]{ Invoke-AdAutoConnect }, 'Background')
+        # Priority first: BeginInvoke(action, 'Background') passes 'Background' as an argument to the action, which
+        # takes none, and WPF then stops the console with 'Parameter count mismatch'.
+        [void]$window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Background, [action]{
+            try { Invoke-AdAutoConnect } catch { Set-Status "Could not connect to Active Directory by itself: $($_.Exception.Message)" }
+        })
     }
+})
+# An error in a timer or a queued UI callback (not a button, which runs through Invoke-Safely) would otherwise
+# stop the whole console at ShowDialog: log it in full, show one line, and keep the console open.
+$window.Dispatcher.Add_UnhandledException({
+    param($sender, $e)
+    $rec = [Management.Automation.ErrorRecord]::new($e.Exception, 'ConsoleUnhandled', 'NotSpecified', $null)
+    $log = Write-ConsoleErrorLog $rec
+    $e.Handled = $true
+    try { Show-Error "$($e.Exception.Message) (details in $log)" } catch { }
 })
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
 $window.Add_Closing({ $script:ConsoleClosing = $true })
