@@ -17,25 +17,21 @@ Assert-Equal (Test-ExampleShare '\\SRV01\Deploy') $false 'a real server is not a
 Assert-Equal (Get-ShareErrorText 1326) 'wrong user name or password' 'net use 1326 in words'
 
 # Checks before saving: one short sentence per problem.
-$p = @(Get-DeploySettingsProblems -Mode Usb)
-Assert-Equal $p.Count 0 'USB only with nothing else: nothing to fix'
-$p = @(Get-DeploySettingsProblems -Mode Share -SharePath '\\deploy-server\Deploy' -ShareUser 'DOMAIN\svc-deploy' -PasswordSaved $true)
+$p = @(Get-DeploySettingsProblems)
+Assert-Equal $p.Count 0 'no share (USB only) with nothing else: nothing to fix'
+$p = @(Get-DeploySettingsProblems -SharePath '\\deploy-server\Deploy' -ShareUser 'DOMAIN\svc-deploy' -PasswordSaved $true)
 Assert-Equal $p.Count 2 'the example share and account are both refused'
 Assert-Equal ($p[0] -like '*example value*') $true 'and called the example value'
-$p = @(Get-DeploySettingsProblems -Mode Share -SharePath 'SRV01\Deploy')
+$p = @(Get-DeploySettingsProblems -SharePath 'SRV01\Deploy')
 Assert-Equal ($p[0] -like '*must look like \\SERVER01\Deploy*') $true 'a share without \\ is refused'
-$p = @(Get-DeploySettingsProblems -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'svc-deploy')
+$p = @(Get-DeploySettingsProblems -SharePath '\\SRV01\Deploy' -ShareUser 'svc-deploy')
 Assert-Equal ($p[0] -like '*DOMAIN\user or user@domain.com*') $true 'an account without a domain is refused'
-$p = @(Get-DeploySettingsProblems -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy')
+$p = @(Get-DeploySettingsProblems -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy')
 Assert-Equal ($p[0]) 'Type the password of CORP\svc-deploy.' 'an account with no password saved needs one'
-$p = @(Get-DeploySettingsProblems -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'svc-deploy@corp.example.com' -NewPassword 'x')
+$p = @(Get-DeploySettingsProblems -SharePath '\\SRV01\Deploy' -ShareUser 'svc-deploy@corp.example.com' -NewPassword 'x')
 Assert-Equal $p.Count 0 'a UPN account with a typed password is fine'
-$p = @(Get-DeploySettingsProblems -Mode Usb -ReportElsewhere $true -ReportPath '')
-Assert-Equal ($p[0] -like 'Type the share PCs report to*') $true 'a Dashboard share must be typed when chosen'
-$p = @(Get-DeploySettingsProblems -Mode Usb -ShareUser 'DOMAIN\x')
-Assert-Equal $p.Count 0 'USB only ignores the account'
-$p = @(Get-DeploySettingsProblems -Mode Usb -VersionsToKeep 'two')
-Assert-Equal ($p[0] -like 'Older image versions*') $true 'versions to keep must be a number'
+$p = @(Get-DeploySettingsProblems -ShareUser 'DOMAIN\x')
+Assert-Equal $p.Count 0 'no share ignores the account'
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("imaging-settings-" + [guid]::NewGuid())
 try {
@@ -53,7 +49,7 @@ try {
     Set-Content -LiteralPath (Join-ContentPath $root 'config\share.cred') -Value 'Plain-Pass' -NoNewline
     Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $false 'a password in an old plain file does not count as saved'
     Assert-Equal ($null -eq (Get-SharePassword -ContentRoot $root)) $true 'and is not read'
-    $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -NewPassword 'Old-Pass1' -VersionsToKeep 3
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy\' -ShareUser 'CORP\svc-deploy' -NewPassword 'Old-Pass1'
     $s = Get-DeploySettings -ContentRoot $root
     Assert-Equal $s.share.path '\\SRV01\Deploy' 'share saved without the trailing backslash'
     Assert-Equal ($null -eq $s.share.PSObject.Properties['passwordFile']) $true 'no passwordFile in the settings any more'
@@ -62,13 +58,12 @@ try {
     Assert-Equal ((Get-Content -Raw $settingsFile) -like '*Old-Pass1*') $false 'never as plain text'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'and decrypts to the same password'
     Assert-Equal (Get-DeploySettingsView -ContentRoot $root).PasswordSaved $true 'the page shows it as saved'
-    Assert-Equal $s.versionsToKeep 3 'versions to keep saved'
     Assert-Equal $r.MediaOutOfDate $true 'a new share means the stick needs updating'
 
-    $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -VersionsToKeep 2
-    Assert-Equal $r.MediaOutOfDate $false 'only the versions changed: the stick is still up to date'
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy'
+    Assert-Equal $r.MediaOutOfDate $false 'nothing WinPE reads changed: the stick is still up to date'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'saving again keeps the password'
-    $r = Save-DeploySettingsPage -ContentRoot $root -Mode Share -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!' -VersionsToKeep 2
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!'
     Assert-Equal $r.MediaOutOfDate $true 'a new password means the stick needs updating'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'N3w-Pass!' 'the typed password is saved'
 
@@ -78,17 +73,21 @@ try {
     $cred = Get-ShareCredential -SettingsPath $settingsFile -Decrypt { param($v) Unprotect-AnswerPassword -Value $v -Key $key }
     Assert-Equal "$($cred.User)|$($cred.Password)" 'CORP\svc-deploy|N3w-Pass!' 'WinPE decrypts the share password from the settings'
 
-    # USB only: no share, no account; the encrypted password stays so switching back finds it.
-    $null = Save-DeploySettingsPage -ContentRoot $root -Mode Usb -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy'
+    # USB only (share emptied): no account; the encrypted password stays so typing the share again finds it.
+    $null = Save-DeploySettingsPage -ContentRoot $root -SharePath '' -ShareUser 'CORP\svc-deploy'
     $s = Get-DeploySettings -ContentRoot $root
     Assert-Equal "$($s.share.path)|$($s.share.user)" '|' 'USB only clears the share and account'
     $v = Get-DeploySettingsView -ContentRoot $root
     Assert-Equal "$($v.Mode) $($v.PasswordSaved)" 'Usb True' 'and reads back as USB only, password still there'
 
-    # USB deploys that report to a server keep the account for the Status share.
-    $null = Save-DeploySettingsPage -ContentRoot $root -Mode Usb -ShareUser 'CORP\svc-deploy' -ReportPath '\\SRV01\Deploy\Status'
+    # An old setup's separate Dashboard folder (reporting.path) is dropped on save: every deploy reports to the share.
     $s = Get-DeploySettings -ContentRoot $root
-    Assert-Equal "$($s.share.path)|$($s.share.user)|$($s.reporting.path)" '|CORP\svc-deploy|\\SRV01\Deploy\Status' 'USB with a Dashboard share keeps the account'
+    $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '\\SRV01\Deploy\Status' }) -Force
+    Save-DeploySettings -ContentRoot $root -Settings $s
+    $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy'
+    $s = Get-DeploySettings -ContentRoot $root
+    Assert-Equal "$($s.share.path)|$($s.share.user)|$([bool]$s.PSObject.Properties['reporting'])" '\\SRV01\Deploy|CORP\svc-deploy|False' 'the share is saved and the old reporting.path dropped'
+    Assert-Equal $r.MediaOutOfDate $true 'which WinPE reads, so the stick needs updating'
 
     if ($onWindows) {
         # The connection test on a local folder (no account): the Status folder is created and written.
@@ -117,9 +116,10 @@ $names = @([regex]::Matches($xamlText, 'x:Name="([^"]+)"') | ForEach-Object { $_
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
 $used = @([regex]::Matches($consoleText, '\$ui\.([A-Za-z0-9_]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
 Assert-Equal (@($used | Where-Object { $_ -notin $names }) -join ', ') '' 'every $ui control exists in MainWindow.xaml'
-foreach ($n in 'RbSettingsUsb', 'RbSettingsShare', 'PwdShare', 'BtnShareTest', 'RbReportShare', 'BdrSettingsStale') {
+foreach ($n in 'TxtSharePath', 'PwdShare', 'BtnShareTest', 'BdrSettingsStale') {
     Assert-Equal ($n -in $names) $true "Deploy Settings has $n"
 }
 Assert-Equal ($names -contains 'TxtSharePwFile') $false 'no password file box any more'
+Assert-Equal (@('RbSettingsUsb', 'RbSettingsShare', 'RbReportShare', 'TxtReportPath') | Where-Object { $_ -in $names }).Count 0 'no USB/share or Dashboard folder choice any more'
 
 Complete-Tests 'All tests passed'

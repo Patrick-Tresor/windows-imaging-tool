@@ -7,9 +7,9 @@
 
 function New-PostDeployCheckPlan {
     # What the deployed PC should look like, written into firstboot.json by Deploy-Image.ps1.
-    # Settings come from deploy-settings.json "checks"; missing settings mean every check is on.
-    #   bitLocker: Auto (Required when the answer file turns BitLocker on, Report otherwise), Required, Report or Off.
-    #   deviceErrors: Required, Report or Off. ignoreDevices: wildcards matched against device names and ids.
+    # Settings come from deploy-settings.json "checks": enabled (missing = on) and ignoreDevices (wildcards matched
+    # against device names and ids). BitLocker and device driver problems are always reported as warnings, never a
+    # failed deploy; older settings' bitLocker / deviceErrors values are ignored.
     param(
         [Parameter(Mandatory)]$Answer,
         [string]$ComputerName,
@@ -20,19 +20,13 @@ function New-PostDeployCheckPlan {
     $get = { param($name, $default) if ($c -and $c.PSObject.Properties[$name] -and $null -ne $c.$name -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     if (-not (ConvertTo-CheckBool (& $get 'enabled' $true))) { return $null }
 
-    $bitLocker = & $get 'bitLocker' 'Auto'
-    if ($bitLocker -eq 'Auto') {
-        # The answer file's <bitlocker> section, when present, decides whether encryption is expected.
-        $encrypts = $Answer.PSObject.Properties['BitLocker'] -and $Answer.BitLocker -and $Answer.BitLocker.Enabled
-        $bitLocker = if ($encrypts) { 'Required' } else { 'Report' }
-    }
     [pscustomobject]@{
         computerName  = $ComputerName
         membership    = $Answer.Membership
         domain        = if ($Answer.Membership -eq 'Domain') { $Answer.Domain } else { $null }
         workgroup     = if ($Answer.Membership -ne 'Domain') { $Answer.Workgroup } else { $null }
-        bitLocker     = $bitLocker
-        deviceErrors  = & $get 'deviceErrors' 'Required'
+        bitLocker     = 'Report'
+        deviceErrors  = 'Report'
         ignoreDevices = @(& $get 'ignoreDevices' @())
         applications  = @($AppDefinitions | ForEach-Object {
             [pscustomobject]@{ name = $_.name; detect = if ($_.PSObject.Properties['detect']) { $_.detect } else { $null } }

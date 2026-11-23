@@ -17,15 +17,15 @@ $apps = @(
 
 # Plan
 $plan = New-PostDeployCheckPlan -Answer $answer -ComputerName 'LAB-5CG1234567890' -AppDefinitions $apps
-Assert-Equal "$($plan.membership)|$($plan.domain)|$($plan.bitLocker)|$($plan.deviceErrors)" 'Domain|corp.example.com|Report|Required' 'defaults: devices required, BitLocker reported without an answer file BitLocker section'
+Assert-Equal "$($plan.membership)|$($plan.domain)|$($plan.bitLocker)|$($plan.deviceErrors)" 'Domain|corp.example.com|Report|Report' 'BitLocker and devices are reported, never required'
 Assert-Equal ($plan.applications.name -join ',') 'Chrome,Zoom' 'plan lists the applications'
 $bl = [pscustomobject]@{ Name = 'Lab'; Membership = 'Workgroup'; Workgroup = 'LAB'; BitLocker = [pscustomobject]@{ Enabled = $true } }
-Assert-Equal (New-PostDeployCheckPlan -Answer $bl).bitLocker 'Required' 'Auto requires BitLocker when the answer file turns it on'
+Assert-Equal (New-PostDeployCheckPlan -Answer $bl).bitLocker 'Report' 'BitLocker is reported even when the answer file turns it on'
 $off = [pscustomobject]@{ checks = [pscustomobject]@{ enabled = $false } }
 Assert-Equal ($null -eq (New-PostDeployCheckPlan -Answer $answer -Settings $off)) $true 'checks can be turned off in deploy settings'
 $tuned = [pscustomobject]@{ checks = [pscustomobject]@{ bitLocker = 'Off'; deviceErrors = 'Report'; ignoreDevices = @('*Smart Card*') } }
 $p2 = New-PostDeployCheckPlan -Answer $answer -Settings $tuned -AppDefinitions $apps
-Assert-Equal "$($p2.bitLocker)|$($p2.deviceErrors)|$($p2.ignoreDevices -join ',')" 'Off|Report|*Smart Card*' 'deploy settings tune the checks'
+Assert-Equal "$($p2.bitLocker)|$($p2.deviceErrors)|$($p2.ignoreDevices -join ',')" 'Report|Report|*Smart Card*' 'old bitLocker/deviceErrors values are ignored; ignored devices still apply'
 
 # A healthy PC
 $good = [pscustomobject]@{
@@ -60,14 +60,14 @@ Assert-Equal (Get-Result $r 'App: Chrome') 'Failed' 'exit code 0 but not install
 Assert-Equal (($r | Where-Object name -eq 'App: Zoom').detail) 'Installer exit code 1603' 'a failed installer fails its check'
 Assert-Equal (Get-Result $r 'BitLocker') 'Warning' 'BitLocker off is a warning when only reported'
 $sum = Get-PostDeployCheckSummary -Results $r
-Assert-Equal $sum.Text 'Failed 0/6: Computer name, Domain join, Device drivers, App: Chrome, App: Zoom, BitLocker' 'summary names failed then warned checks'
+Assert-Equal $sum.Text 'Failed 0/6: Computer name, Domain join, App: Chrome, App: Zoom, Device drivers, BitLocker' 'summary names failed then warned checks'
 Assert-Equal (ConvertTo-CheckWarning $sum) "Post-deploy checks: $($sum.Text)" 'failed checks become a deployment warning'
 
 $p2.computerName = $null
 $r = Invoke-PostDeployCheck -Plan $p2 -Facts $bad -AppResults @($runs[0])
 Assert-Equal (Get-Result $r 'Device drivers') 'Warning' 'Report mode turns device errors into a warning'
 Assert-Equal (($r | Where-Object name -eq 'Device drivers').detail) '1 device(s) with errors: PCI Simple Communications Controller (code 28)' 'ignored devices are left out'
-Assert-Equal ($null -eq ($r | Where-Object name -eq 'BitLocker')) $true 'BitLocker Off skips the check'
+Assert-Equal (Get-Result $r 'BitLocker') 'Warning' 'BitLocker is always checked, as a warning'
 Assert-Equal ($null -eq ($r | Where-Object name -eq 'Computer name')) $true 'no expected name, no name check'
 Assert-Equal (Get-Result $r 'App: Zoom') 'Failed' 'an app with no run result did not run'
 

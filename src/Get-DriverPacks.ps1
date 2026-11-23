@@ -2,7 +2,7 @@
 .SYNOPSIS
     Downloads Dell, HP and Lenovo driver packs into the driver library, for the admin console.
 .DESCRIPTION
-    The console (Find a model online, Unknown models...) picks the packs from the vendors' catalogs and writes them
+    The console (Find a model online on the Driver Library page) picks the packs from the vendors' catalogs and writes them
     to a job file; this script runs hidden, downloads each pack, checks its hash and signature, extracts it to
     <ContentRoot>\Drivers\<Maker>\<Model> and adds catalog entries for its SKUs or machine types and model name.
     Progress goes to ProgressFile, shown as a card in the console's Progress window.

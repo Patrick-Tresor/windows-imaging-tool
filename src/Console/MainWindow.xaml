@@ -30,11 +30,12 @@
       </DockPanel>
     </Border>
 
-    <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
+    <!-- Shown when a USB stick plugged into this PC, or the network boot image, was built with an older version of the tool. -->
     <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
+          <Button x:Name="BtnBootOldRebuild" Content="Rebuild network boot image" Margin="8,0,0,0" Visibility="Collapsed"/>
           <Button x:Name="BtnStickOldHide" Content="Not now" Margin="8,0,0,0"/>
         </StackPanel>
         <TextBlock x:Name="TxtStickOld" TextWrapping="Wrap" VerticalAlignment="Center"/>
@@ -65,6 +66,7 @@
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
+            <Button x:Name="BtnImageLog" Content="Open log" ToolTip="The newest capture or update log of the selected image."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
@@ -109,6 +111,28 @@
                 <Button x:Name="BtnDriverFoundDownload" Grid.Column="5" Content="Download" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                         ToolTip="Downloads the pack from the vendor, checks it, extracts it to Drivers\Maker\Model and adds it to the library"/>
               </Grid>
+              <!-- Models deployed without their driver pack (from the Dashboard's status records). Hidden when there are none. -->
+              <Border x:Name="BdrUnknown" Visibility="Collapsed" Margin="0,0,0,10" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
+                <DockPanel>
+                  <TextBlock x:Name="TxtUnknown" DockPanel.Dock="Top" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                  <StackPanel DockPanel.Dock="Right" Margin="10,0,0,0" VerticalAlignment="Top">
+                    <Button x:Name="BtnUnknownFind" Content="Find its pack" Margin="0,0,0,6"
+                            ToolTip="Looks up the selected model's pack in its maker's catalog (by SKU or machine type first) and puts it in the box above, ready to Download"/>
+                    <Button x:Name="BtnUnknownInbox" Content="No pack needed" Margin="0"
+                            ToolTip="For the selected models (a VM, say): a catalog entry with no folder, so they leave this list and deploy with Windows inbox drivers without a warning"/>
+                  </StackPanel>
+                  <DataGrid x:Name="GridUnknown" IsReadOnly="True" MaxHeight="150" SelectionMode="Extended">
+                    <DataGrid.Columns>
+                      <DataGridTextColumn Header="Maker" Binding="{Binding Maker}" Width="80"/>
+                      <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="2*"/>
+                      <DataGridTextColumn Header="SKU / type" Binding="{Binding Ids}" Width="90"/>
+                      <DataGridTextColumn Header="PCs" Binding="{Binding PCs}" Width="45"/>
+                      <DataGridTextColumn Header="Computers" Binding="{Binding Computers}" Width="*"/>
+                      <DataGridTextColumn Header="Got" Binding="{Binding Drivers}" Width="110"/>
+                    </DataGrid.Columns>
+                  </DataGrid>
+                </DockPanel>
+              </Border>
             </StackPanel>
 
             <GroupBox DockPanel.Dock="Bottom" Header="Import a driver pack" Margin="0,12,0,0" Padding="10">
@@ -146,7 +170,6 @@
               <Button x:Name="BtnDriversRemove" Content="Remove row"/>
               <Button x:Name="BtnDriversRefresh" Content="Refresh"/>
               <Button x:Name="BtnDriversOpen" Content="Open folder"/>
-              <Button x:Name="BtnDriversUnknown" Content="Unknown models..." ToolTip="Deployed PCs that got no driver pack, with the vendor pack for each model"/>
             </StackPanel>
 
             <DataGrid x:Name="GridDrivers" CanUserAddRows="True">
@@ -181,12 +204,11 @@
             </DockPanel>
           </Border>
 
-          <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus answer files, their images and drivers)" IsChecked="True" Margin="0,4"/>
-          <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
+          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Build network boot image on the Computers tab also makes Boot\Deploy-WinPE.iso, which loads everything from the share."/>
 
-          <Grid Margin="0,16,0,0">
+          <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -215,26 +237,13 @@
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
-            <Label Grid.Row="6" Content="Output folder (ISO)"/>
-            <TextBox x:Name="TxtOutput" Grid.Row="6" Grid.Column="1"/>
-            <Button x:Name="BtnOutput" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
+            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
+            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
-            <Label Grid.Row="8" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware."/>
-            <Button x:Name="BtnPeDrivers" Grid.Row="8" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
-            <Label Grid.Row="10" Content="WinPE driver packs"/>
-            <StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2">
-              <StackPanel Orientation="Horizontal">
-                <CheckBox x:Name="ChkPeDell" Content="Dell" IsChecked="True" Margin="0,0,16,0"/>
-                <CheckBox x:Name="ChkPeHp" Content="HP" IsChecked="True"/>
-              </StackPanel>
-              <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
-                         Text="Storage and network drivers WinPE needs to see the disk and network (Intel RST/VMD). Downloaded once, then reused. Dell's Intel drivers also cover Lenovo and other PCs. Models with no driver pack get these drivers in Windows too. Each pack makes WinPE bigger and the build a few minutes longer."/>
-            </StackPanel>
-
-            <Label Grid.Row="12" Content="WinPE password" VerticalAlignment="Top"/>
-            <StackPanel Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2">
+            <Label Grid.Row="8" Content="WinPE password" VerticalAlignment="Top"/>
+            <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">
               <StackPanel Orientation="Horizontal">
                 <PasswordBox x:Name="PwdWinPE" Width="200"/>
                 <TextBlock Text="Again" VerticalAlignment="Center" Margin="12,0,8,0"/>
@@ -243,10 +252,6 @@
               <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
                          Text="Recommended. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. At least 8 characters. Leave empty and the deploy wizard has a Passwords page where the operator types each password the answer file needs, once, before Confirm."/>
             </StackPanel>
-
-            <Label Grid.Row="14" Content="Online apps on USB"/>
-            <CheckBox x:Name="ChkAppDownloads" Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="True" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}"
-                      Content="Download the applications that install from the internet (Find an app online, or New... from a template) onto the stick during the build, so PCs install them without internet. Reused for a week."/>
           </Grid>
 
 
@@ -309,8 +314,6 @@
             <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnAppEdit" Content="Edit"/>
             <Button x:Name="BtnAppTest" Content="Test detection"/>
-            <Button x:Name="BtnAppExport" Content="Export..."/>
-            <Button x:Name="BtnAppImport" Content="Import..."/>
             <Button x:Name="BtnAppDelete" Content="Delete"/>
             <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
             <Button x:Name="BtnAppsOpen" Content="Open folder"/>
@@ -359,8 +362,6 @@
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnTaskEdit" Content="Edit"/>
-            <Button x:Name="BtnTaskExport" Content="Export..."/>
-            <Button x:Name="BtnTaskImport" Content="Import..."/>
             <Button x:Name="BtnTaskDelete" Content="Delete"/>
             <Button x:Name="BtnTasksRefresh" Content="Refresh"/>
             <Button x:Name="BtnTasksOpen" Content="Open folder"/>
@@ -396,16 +397,14 @@
             <TextBlock Style="{StaticResource Hint}" Text="How PCs reach the deployment, where they report, and what they check at the end. Everything else about a deployment is in the answer files."/>
 
             <!-- 1. Where the deployment comes from -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="1. Where PCs get the deployment"/>
-            <RadioButton x:Name="RbSettingsUsb" GroupName="SettingsMode" Margin="0,4"
-                         Content="USB stick only. Everything is on the stick; no network needed."/>
-            <RadioButton x:Name="RbSettingsShare" GroupName="SettingsMode" Margin="0,4"
-                         Content="Network share. Needed for ISO boot and the Computers tab. A USB stick still deploys from the stick first."/>
-            <Grid x:Name="PnlSharePath" Margin="22,6,0,0">
+            <TextBlock Style="{StaticResource SettingsHead}" Text="1. Network share"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="The content root on your server. Network boot and the Computers tab load from it, and every PC reports its progress to its Status folder for the Dashboard (a USB stick still deploys from the stick). Leave it empty to use USB sticks only."/>
+            <Grid x:Name="PnlSharePath">
               <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Share"/>
-              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="The content root on your server, for example \\SERVER01\Deploy."/>
+              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="For example \\SERVER01\Deploy."/>
             </Grid>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="After the restart, Windows reports as the computer account: give Domain Computers Modify on the share's Status folder, or the PC shows Stalled after first boot."/>
 
             <!-- 2. The account -->
             <StackPanel x:Name="PnlShareAccount">
@@ -428,50 +427,14 @@
               </Grid>
             </StackPanel>
 
-            <!-- 3. Dashboard -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Where PCs report progress (Dashboard)"/>
-            <RadioButton x:Name="RbReportDefault" GroupName="SettingsReport" Margin="0,4"
-                         Content="Same place as the deployment: the share's Status folder, or the stick's for USB deploys (they show on the Dashboard when the stick is plugged into this PC)."/>
-            <RadioButton x:Name="RbReportShare" GroupName="SettingsReport" Margin="0,4"
-                         Content="A network folder, so USB deploys show up live too:"/>
-            <Grid Margin="22,6,0,0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Label Content="Status folder"/>
-              <TextBox x:Name="TxtReportPath" Grid.Column="1" ToolTip="For example \\SERVER01\Deploy\Status. WinPE maps it with the account above."/>
-            </Grid>
-            <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="After the restart, Windows reports as the computer account: give Domain Computers Modify on the Status folder, or the PC shows Stalled after first boot."/>
-
-            <!-- 4. Deployments -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Deployments"/>
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Label Content="Older image versions to keep"/>
-              <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <TextBox x:Name="TxtVersionsToKeep" Width="80"
-                         ToolTip="Keep the newest N earlier versions of each image; older ones are deleted after a copy or rollback. Versions an answer file is pinned to are never deleted."/>
-                <TextBlock Text="0 keeps all of them" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/>
-              </StackPanel>
-            </Grid>
-
-            <!-- 5. Checks -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="5. Checks after deploy"/>
+            <!-- 3. Checks -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Checks after deploy"/>
             <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
-                      Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and show pass or fail on the Dashboard"/>
+                      Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-              <Label Content="BitLocker check"/>
-              <ComboBox x:Name="CmbCheckBitLocker" Grid.Column="1" Width="320" HorizontalAlignment="Left"
-                        ToolTip="Auto: required when the answer file turns BitLocker on, otherwise only reported. Report: a warning, never a failure.">
-                <ComboBoxItem Content="Auto"/><ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
-              </ComboBox>
-              <Label Grid.Row="2" Content="Device driver check"/>
-              <ComboBox x:Name="CmbCheckDevices" Grid.Row="2" Grid.Column="1" Width="320" HorizontalAlignment="Left"
-                        ToolTip="Any device with an error in Device Manager (no driver, cannot start). Disabled devices are ignored.">
-                <ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
-              </ComboBox>
-              <Label Grid.Row="4" Content="Ignore devices"/>
-              <TextBox x:Name="TxtCheckIgnore" Grid.Row="4" Grid.Column="1"
+              <Label Content="Ignore devices"/>
+              <TextBox x:Name="TxtCheckIgnore" Grid.Column="1"
                        ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
 
@@ -497,7 +460,8 @@
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
               <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab."/>
             </StackPanel>
-            <GroupBox DockPanel.Dock="Top" Header="1. Connect to Active Directory" Padding="12,10" Margin="0,4,0,12">
+            <!-- Hidden once the tab connects by itself with the Deploy Settings account; Connection... shows it again. -->
+            <GroupBox x:Name="GrpAdConnect" DockPanel.Dock="Top" Header="1. Connect to Active Directory" Padding="12,10" Margin="0,4,0,12">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
@@ -534,6 +498,8 @@
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
+                  <Button x:Name="BtnAdShowConnect" Content="Connection..." Margin="10,0,0,0" Visibility="Collapsed"
+                          ToolTip="The domain, domain controller and account this tab connected with"/>
                 </StackPanel>
               </Grid>
             </GroupBox>
@@ -553,7 +519,7 @@
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,0" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
                   <Button x:Name="BtnAdBuildBoot" Content="Build network boot image"
-                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
+                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root: boot.wim for reimaging, and Deploy-WinPE.iso of the same WinPE to boot a VM or a PC without a stick. Rebuild it after updating the tool or the share settings."/>
                 </StackPanel>
               </Grid>
             </GroupBox>
@@ -583,7 +549,7 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick with no network folder to report to show up here when you plug the stick into this PC; their first boot (applications, checks) is only reported with a network folder (Deploy Settings, section 3)."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Show: History lists deployments removed or cleared from here, with their final log."/>
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
@@ -611,6 +577,7 @@
                 <ComboBoxItem Content="Deploying"/>
                 <ComboBoxItem Content="Failed or stalled"/>
                 <ComboBoxItem Content="Finished"/>
+                <ComboBoxItem Content="History"/>
               </ComboBox>
               <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
               <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
@@ -675,89 +642,6 @@
         </ScrollViewer>
       </TabItem>
 
-      <!-- Logs -->
-      <TabItem Header="Logs">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Logs"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Captures, image updates, and deployments no longer on the Dashboard. A PC on the Dashboard shows its log there."/>
-          </StackPanel>
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-            <Button x:Name="BtnLogsRefresh" Content="Refresh"/>
-          </StackPanel>
-          <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="440"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <DataGrid x:Name="GridLogs" IsReadOnly="True">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="When" Binding="{Binding When, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
-                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="90"/>
-                <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="*"/>
-                <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="70"/>
-              </DataGrid.Columns>
-            </DataGrid>
-            <TextBox x:Name="TxtLog" Grid.Column="2" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
-          </Grid>
-        </DockPanel>
-      </TabItem>
-
-      <!-- Hardware tests: docs\HARDWARE-TESTS.md with a result per test (config\hardware-tests.json) -->
-      <TabItem x:Name="TabHwTests" Header="Hardware Tests">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Hardware tests"/>
-            <TextBlock Style="{StaticResource Hint}" Text="What has been proven on a real PC, stick and network. Pick a test, try it, then mark it Passed or Failed and attach the latest log. A pass made with an older version of the tool is shown as such, so you know what to test again after an update. Results are saved in config\hardware-tests.json on the content root."/>
-            <DockPanel Margin="0,0,0,8">
-              <Label Content="Show"/>
-              <ComboBox x:Name="CmbHwFilter" Width="170" SelectedIndex="0" VerticalContentAlignment="Center">
-                <ComboBoxItem Content="All"/>
-                <ComboBoxItem Content="Not tested or older"/>
-                <ComboBoxItem Content="Failed"/>
-                <ComboBoxItem Content="Passed"/>
-              </ComboBox>
-              <TextBlock x:Name="TxtHwSummary" Margin="14,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
-            </DockPanel>
-          </StackPanel>
-          <Border DockPanel.Dock="Bottom" Margin="0,10,0,0" Padding="12,10" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8">
-            <StackPanel>
-              <TextBlock x:Name="TxtHwTest" FontWeight="SemiBold" TextWrapping="Wrap" Text="Pick a test in the list."/>
-              <TextBlock x:Name="TxtHwPassWhen" TextWrapping="Wrap" Margin="0,4,0,8" Foreground="{DynamicResource BodyBrush}"/>
-              <DockPanel>
-                <Label Content="Note"/>
-                <TextBox x:Name="TxtHwNote" ToolTip="What you saw, the PC model, anything to remember. Saved with the result."/>
-              </DockPanel>
-              <DockPanel Margin="0,8,0,0">
-                <Button x:Name="BtnHwPassed" Content="Passed" Style="{StaticResource Primary}"/>
-                <Button x:Name="BtnHwFailed" Content="Failed" Margin="8,0,0,0"/>
-                <Button x:Name="BtnHwSkipped" Content="Skip" Margin="8,0,0,0"/>
-                <Button x:Name="BtnHwClear" Content="Not tested" Margin="8,0,0,0"/>
-                <Button x:Name="BtnHwOpenLog" DockPanel.Dock="Right" Content="Open log" Margin="8,0,0,0"/>
-                <Button x:Name="BtnHwAttach" DockPanel.Dock="Right" Content="Attach the latest log" Margin="8,0,0,0"/>
-                <TextBlock x:Name="TxtHwLog" Margin="12,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}"/>
-              </DockPanel>
-            </StackPanel>
-          </Border>
-          <DataGrid x:Name="GridHwTests" IsReadOnly="True">
-            <DataGrid.RowStyle>
-              <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding Result}" Value="Failed"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
-                  <DataTrigger Binding="{Binding Status}" Value="Passed"><Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/></DataTrigger>
-                  <DataTrigger Binding="{Binding Status}" Value="Passed (older version)"><Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/></DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </DataGrid.RowStyle>
-            <DataGrid.Columns>
-              <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50"/>
-              <DataGridTextColumn Header="Area" Binding="{Binding Section}" Width="130"/>
-              <DataGridTextColumn Header="Test" Binding="{Binding Test}" Width="3*"/>
-              <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="150"/>
-              <DataGridTextColumn Header="Date" Binding="{Binding Date}" Width="85"/>
-              <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*"/>
-            </DataGrid.Columns>
-          </DataGrid>
-        </DockPanel>
-      </TabItem>
     </TabControl>
   </DockPanel>
 </Window>

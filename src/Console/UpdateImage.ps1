@@ -1,4 +1,5 @@
-# Update image dialog: picks .msu/.cab packages for an image and runs Update-OfflineImage.ps1.
+# Update image dialog: the latest cumulative update (downloaded by the job) and/or .msu/.cab packages for an image,
+# applied by Update-OfflineImage.ps1.
 # Dot-sourced by ImagingConsole.ps1, which provides the ConsoleData module.
 
 function Show-UpdateImageDialog {
@@ -63,16 +64,17 @@ function Show-UpdateImageDialog {
 
     $d.BtnStart.Add_Click({
         try {
-            if (-not $packages.Count) { Show-WindowMessage $dlg 'Update Image' 'Add at least one update package (.msu or .cab).'; return }
+            $latest = [bool]$d.ChkLatest.IsChecked
             # Checked now, so a mistake shows here; the job builds the same command with its progress file and log.
             $getArgs = {
                 param($ProgressFile, $LogPath)
                 Get-ImageUpdateArguments -ScriptPath (Join-Path $SrcDir 'Update-OfflineImage.ps1') -ImagePath $Image.FullName `
-                    -Packages @($packages | ForEach-Object FullName) -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
-                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -NoBackup:(-not $d.ChkBackup.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
+                    -Packages @($packages | ForEach-Object FullName) -LatestUpdate:$latest -Cleanup:([bool]$d.ChkCleanup.IsChecked) `
+                    -ResetBase:([bool]$d.ChkResetBase.IsChecked) -ProgressFile $ProgressFile -LogPath $LogPath
             }
             [void](& $getArgs '' '')
-            $text = "Apply $($packages.Count) update(s) to $($Image.Name)?`n`n" + (($packages | ForEach-Object { "- $($_.Name)" }) -join "`n") +
+            $lines = @(if ($latest) { '- The latest cumulative update (downloaded first)' }) + @($packages | ForEach-Object { "- $($_.Name)" })
+            $text = "Update $($Image.Name) with:`n`n" + ($lines -join "`n") +
                 "`n`nDo not deploy this image until the Progress window says it is done."
             if ([Windows.MessageBox]::Show($dlg, $text, 'Update Image', 'YesNo', 'Question') -ne 'Yes') { return }
             # Hidden, in its own process: servicing takes 20 minutes or more per edition and must not freeze the

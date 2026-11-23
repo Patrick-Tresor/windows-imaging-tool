@@ -114,12 +114,11 @@
       <ScrollViewer x:Name="Page3" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Image details"/>
-          <TextBlock x:Name="TxtDetailsIntro" Style="{StaticResource Body}" Text="Name the image and choose where to save it."/>
+          <TextBlock x:Name="TxtDetailsIntro" Style="{StaticResource Body}" Text="Name the image and choose where to save it. An image with the same name is replaced once the capture succeeds; the old one is kept as an earlier version."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
               <RowDefinition/><RowDefinition Height="10"/><RowDefinition/><RowDefinition Height="10"/><RowDefinition/>
-              <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/>
               <RowDefinition Height="16"/><RowDefinition/><RowDefinition Height="4"/><RowDefinition/>
             </Grid.RowDefinitions>
             <Label Content="Name"/>
@@ -129,23 +128,17 @@
             <Label Grid.Row="4" Content="Compression"/>
             <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
               <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
-              <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
               <ComboBoxItem Content="Smallest (.esd, slowest capture)" Tag="recovery"
-                            ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer. Cannot be split for FAT32."/>
+                            ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer."/>
             </ComboBox>
-            <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
-                      Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
-            <CheckBox x:Name="ChkNewVersion" Grid.Row="8" Grid.Column="1"
-                      Content="If an image with this name exists, replace it and keep the old one as an earlier version"
-                      ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>
-            <Label x:Name="LblSaveTo" Grid.Row="10" Content="Save to"/>
-            <DockPanel x:Name="PnlSaveTo" Grid.Row="10" Grid.Column="1">
+            <Label x:Name="LblSaveTo" Grid.Row="6" Content="Save to"/>
+            <DockPanel x:Name="PnlSaveTo" Grid.Row="6" Grid.Column="1">
               <Button x:Name="BtnSaveToDefault" DockPanel.Dock="Right" Content="Default" Margin="6,0,0,0"
                       ToolTip="The Images folder of the content root"/>
               <Button x:Name="BtnSaveTo" DockPanel.Dock="Right" Content="Browse..."/>
               <TextBox x:Name="TxtSaveTo" ToolTip="A folder on this PC or a server share, like \\server\share\Images"/>
             </DockPanel>
-            <TextBlock x:Name="TxtSaveToHint" Grid.Row="12" Grid.Column="1" Style="{StaticResource Body}" Margin="0"/>
+            <TextBlock x:Name="TxtSaveToHint" Grid.Row="8" Grid.Column="1" Style="{StaticResource Body}" Margin="0"/>
           </Grid>
         </StackPanel>
       </ScrollViewer>
