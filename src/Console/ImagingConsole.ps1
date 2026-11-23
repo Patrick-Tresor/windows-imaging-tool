@@ -1186,19 +1186,17 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
 
     $disk = $ui.CmbUsb.SelectedItem
     if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
-    if ($ui.ChkCopyContent.IsChecked) {
-        # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
-        $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
-        if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-        # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
-        $packArgs = @{}
-        $allPacks = @($ui.LstMediaPacks.Items)
-        $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
-        if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-        $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
-        if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
-        if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-    } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
+    # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+    $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+    if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+    # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+    $packArgs = @{}
+    $allPacks = @($ui.LstMediaPacks.Items)
+    $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+    if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+    $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
+    if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+    if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
     if ($ui.ChkUsbUpdate.IsChecked) {
         if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
     } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
@@ -1207,11 +1205,9 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if ($dashFolder) { Import-StickDashboard $dashFolder }
     $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
     if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
-    if ($ui.ChkCopyContent.IsChecked) {
-        $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
-        if ($packArgs.ContainsKey('DriverPacks')) {
-            if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
-        }
+    $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
+    if ($packArgs.ContainsKey('DriverPacks')) {
+        if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
     }
     $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
@@ -1223,7 +1219,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.ChkCopyContent.IsChecked) {
+    } else {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
 

@@ -218,15 +218,13 @@
             <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
               <CheckBox x:Name="ChkUsbUpdate" DockPanel.Dock="Top" Margin="0,0,0,8"
                         Content="Update a stick this console built before, without erasing it: new WinPE, and only the files that changed are copied"/>
-              <CheckBox x:Name="ChkCopyContent" DockPanel.Dock="Top" IsChecked="True"
-                        Content="The answer files checked below, the image each one deploys, drivers, applications and config (needed for offline use)"/>
-              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,6,0,4"
-                         Text="An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
-              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
+              <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
+                         Text="The stick gets the answer files checked below, the image each one deploys, drivers, applications and config. An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
+              <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
-            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" IsEnabled="{Binding IsChecked, ElementName=ChkCopyContent}">
+            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="Check the packs for the models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
