@@ -1006,7 +1006,8 @@ function Get-AdOnlineSummary {
         [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
 }
 
-$ui.BtnAdConnect.Add_Click({ Invoke-Safely {
+function Connect-AdDirectory {
+    # Reads the OUs and lists the computers. Connect runs it, and so does opening the tab (Invoke-AdAutoConnect).
     $cred = Get-AdCredential
     $window.Cursor = 'Wait'
     try {
@@ -1019,7 +1020,31 @@ $ui.BtnAdConnect.Add_Click({ Invoke-Safely {
     $sel = @($items | Where-Object { $_.DN -eq $keep })
     $ui.CmbAdOu.SelectedItem = if ($sel) { $sel[0] } else { $items[0] }
     Search-AdComputers
-} })
+}
+
+function Invoke-AdAutoConnect {
+    # The first time the Computers tab opens: connect by itself when nothing has to be typed (the Deploy Settings
+    # account with its saved password, or this PC's own sign-in), and fold the Connect box away. A failure leaves
+    # the box open with one line in the status bar.
+    if (-not (Test-ContentRoot $script:root)) { return }
+    if ($ui.ChkAdUseShare.IsChecked) {
+        if (-not (Get-ShareAccount) -or -not (Get-SharePassword -ContentRoot $script:root)) { return }
+    } elseif ($ui.TxtAdUser.Text.Trim() -and -not ($script:adCredential -and $script:adCredentialUser -eq $ui.TxtAdUser.Text.Trim())) { return }
+    try {
+        Connect-AdDirectory
+        $ui.GrpAdConnect.Visibility = 'Collapsed'
+        $ui.BtnAdShowConnect.Visibility = 'Visible'
+    } catch {
+        $window.Cursor = $null
+        Set-Status "Could not connect to Active Directory by itself: $($_.Exception.Message)"
+    }
+}
+
+$ui.BtnAdConnect.Add_Click({ Invoke-Safely { Connect-AdDirectory } })
+$ui.BtnAdShowConnect.Add_Click({
+    $ui.GrpAdConnect.Visibility = 'Visible'
+    $ui.BtnAdShowConnect.Visibility = 'Collapsed'
+})
 
 $ui.ChkAdUseShare.Add_Click({ Invoke-Safely {
     # Turned on: keep what was typed in the box, to show it again when turned off.
@@ -1311,6 +1336,11 @@ $ui.Tabs.Add_SelectionChanged({
     # SelectionChanged bubbles up from the grids and combo boxes inside the tabs; only react to tab switches.
     if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) {
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
+    }
+    if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not $script:adAutoTried) {
+        # Once per console session, after the tab has painted.
+        $script:adAutoTried = $true
+        [void]$window.Dispatcher.BeginInvoke([action]{ Invoke-AdAutoConnect }, 'Background')
     }
 })
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.

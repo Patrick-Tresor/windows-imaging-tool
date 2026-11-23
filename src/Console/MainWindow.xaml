@@ -459,7 +459,8 @@
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
               <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain, or in one OU. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. The PCs need PowerShell remoting (WinRM) on, with your account as administrator; the image comes from the network share on the Deploy Settings tab."/>
             </StackPanel>
-            <GroupBox DockPanel.Dock="Top" Header="1. Connect to Active Directory" Padding="12,10" Margin="0,4,0,12">
+            <!-- Hidden once the tab connects by itself with the Deploy Settings account; Connection... shows it again. -->
+            <GroupBox x:Name="GrpAdConnect" DockPanel.Dock="Top" Header="1. Connect to Active Directory" Padding="12,10" Margin="0,4,0,12">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="120"/><ColumnDefinition Width="240"/><ColumnDefinition Width="24"/>
@@ -496,6 +497,8 @@
                 <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="16,0,0,0">
                   <Button x:Name="BtnAdSearch" MinWidth="120" Content="Search" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdOnline" MinWidth="120" Content="Check online" ToolTip="Which PCs answer on PowerShell remoting (WinRM) now."/>
+                  <Button x:Name="BtnAdShowConnect" Content="Connection..." Margin="10,0,0,0" Visibility="Collapsed"
+                          ToolTip="The domain, domain controller and account this tab connected with"/>
                 </StackPanel>
               </Grid>
             </GroupBox>
