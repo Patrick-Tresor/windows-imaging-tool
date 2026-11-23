@@ -29,17 +29,10 @@ function Get-ExistingImageFiles {
 }
 
 function Get-ImageFileExtension {
-    # The extension a capture ends up with: .swm when split, .esd with the Smallest (recovery) compression, else .wim.
-    param([string]$Compression, [int]$SplitSizeMB)
-    if ($SplitSizeMB -gt 0) { '.swm' } elseif ($Compression -eq 'recovery') { '.esd' } else { '.wim' }
-}
-
-function Assert-CaptureCompression {
-    # Smallest (recovery) makes an .esd, which DISM cannot split for FAT32.
-    param([string]$Compression, [int]$SplitSizeMB)
-    if ($Compression -eq 'recovery' -and $SplitSizeMB -gt 0) {
-        throw 'The Smallest compression makes an .esd file, which cannot be split for FAT32. Pick Maximum to split, or do not split (the stick''s DEPLOY partition is NTFS).'
-    }
+    # The extension a capture ends up with: .esd with the Smallest (recovery) compression, else .wim.
+    # Captures are no longer split (the stick and the share are NTFS); older split images (.swm) still deploy.
+    param([string]$Compression)
+    if ($Compression -eq 'recovery') { '.esd' } else { '.wim' }
 }
 
 function Get-CaptureImageArgs {
@@ -56,15 +49,6 @@ function Get-CaptureImageArgs {
         "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
     if ($Description) { $a += "/Description:$Description" }
     $a
-}
-
-function Split-CapturedImage {
-    # Splits a captured .wim into Name.swm, Name2.swm... of SplitSizeMB each (FAT32) and deletes the .wim.
-    # Needs DeployCommon.psm1 (Invoke-Native) imported by the caller.
-    param([Parameter(Mandatory)][string]$WimPath, [Parameter(Mandatory)][int]$SplitSizeMB)
-    $swm = [IO.Path]::ChangeExtension($WimPath, '.swm')
-    Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Split-Image', "/ImageFile:$WimPath", "/SWMFile:$swm", "/FileSize:$SplitSizeMB")
-    [IO.File]::Delete($WimPath)
 }
 
 function Convert-ImageToEsd {
@@ -357,7 +341,6 @@ function Publish-CapturedImage {
         [Parameter(Mandatory)][string]$Staging,
         [Parameter(Mandatory)][string]$ImagesDir,
         [Parameter(Mandatory)][string]$Name,
-        [int]$SplitSizeMB,
         [string]$Compression,
         [string[]]$Existing,
         [string]$ContentRoot,
@@ -374,7 +357,7 @@ function Publish-CapturedImage {
         Get-ChildItem -LiteralPath $Staging -File | Move-Item -Destination $ImagesDir
         Remove-Item -LiteralPath $Staging -Recurse -Force
     }
-    $newLeaf = $Name + (Get-ImageFileExtension -Compression $Compression -SplitSizeMB $SplitSizeMB)
+    $newLeaf = $Name + (Get-ImageFileExtension -Compression $Compression)
     if ($Existing) {
         if ($Existing | Where-Object { (Split-Path $_ -Leaf) -ne $newLeaf }) {
             Write-DeployLog "The new version is $newLeaf but the old one was $(($Existing | ForEach-Object { Split-Path $_ -Leaf }) -join ', '). Point answer files at Images\$newLeaf." -Level WARN
@@ -389,7 +372,7 @@ function Publish-CapturedImage {
     $newLeaf
 }
 
-Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Assert-CaptureCompression, Get-CaptureImageArgs, Split-CapturedImage, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Set-ImageVersionNote, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-ImageVersionLimit, Set-ImageVersionLimit, Get-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

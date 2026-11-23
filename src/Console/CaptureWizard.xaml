@@ -131,10 +131,8 @@
               <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
               <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
               <ComboBoxItem Content="Smallest (.esd, slowest capture)" Tag="recovery"
-                            ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer. Cannot be split for FAT32."/>
+                            ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer."/>
             </ComboBox>
-            <CheckBox x:Name="ChkSplit" Grid.Row="6" Grid.Column="1"
-                      Content="Split into 3.8 GB parts (only needed to store the image on a FAT32 drive)"/>
             <CheckBox x:Name="ChkNewVersion" Grid.Row="8" Grid.Column="1"
                       Content="If an image with this name exists, replace it and keep the old one as an earlier version"
                       ToolTip="The old image moves to Images\Previous only after the new capture succeeds. Answer files pinned to a version are not affected."/>

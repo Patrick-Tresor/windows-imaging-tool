@@ -98,9 +98,9 @@ try {
     Assert-Equal @(Get-VMwareInventory -AppData (Join-Path $root 'none')).Count 0 'no Workstation settings, no VMs'
 
     # The console's command line for a VMware capture.
-    $dc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff' -Split
+    $dc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff'
     $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($dc[-1]))
-    Assert-Equal $decoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff' -ContentRoot 'D:\Deploy' -Compression max -SplitSizeMB 3800 -NoPrompt" 'disk file capture command passes the disk path'
+    Assert-Equal $decoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'C:\VMs\Staff\Staff-000002.vmdk' -Name 'Win11-Staff' -ContentRoot 'D:\Deploy' -Compression max -NoPrompt" 'disk file capture command passes the disk path'
 
     # Prepare-Reference.ps1 goes to the content root's Tools folder; the old capture agent no longer does.
     $content = Join-Path $root 'content'

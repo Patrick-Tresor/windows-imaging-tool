@@ -806,7 +806,6 @@ function Get-VMCaptureArguments {
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
         [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
-        [switch]$Split,
         [switch]$NewVersion,
         [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,
@@ -819,7 +818,6 @@ function Get-VMCaptureArguments {
     $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($ImagesDir) { $cmd += " -ImagesDir $(& $quote $ImagesDir)" }
-    if ($Split) { $cmd += ' -SplitSizeMB 3800' }
     if ($NewVersion) { $cmd += ' -NewVersion' }
     if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
     if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }

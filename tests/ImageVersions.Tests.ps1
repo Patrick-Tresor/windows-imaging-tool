@@ -148,10 +148,8 @@ try {
     Assert-Equal @(Get-ImageVersions -ImagePath (Join-Path $pubDir 'Pub.wim')).Count 1 'the replaced image is kept as a version'
 
     # Smallest compression: an .esd, listed and replaced like a .wim, never split.
-    Assert-Equal (Get-ImageFileExtension -Compression recovery -SplitSizeMB 0) '.esd' 'Smallest makes an .esd'
-    Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 3800) '.swm' 'a split makes .swm parts'
-    Assert-Equal (Get-ImageFileExtension -Compression max -SplitSizeMB 0) '.wim' 'Maximum makes a .wim'
-    Assert-Throws { Assert-CaptureCompression -Compression recovery -SplitSizeMB 3800 } '*cannot be split*' 'Smallest with a FAT32 split is refused'
+    Assert-Equal (Get-ImageFileExtension -Compression recovery) '.esd' 'Smallest makes an .esd'
+    Assert-Equal (Get-ImageFileExtension -Compression max) '.wim' 'Maximum makes a .wim'
     Assert-Equal ((Get-CaptureImageArgs -WimPath 'D:\S\W.wim' -CaptureDir 'C:\' -Name 'W' -Compression recovery -Description 'Ref') -join ' ') '/Capture-Image /ImageFile:D:\S\W.wim /CaptureDir:C:\ /Name:W /Compress:max /CheckIntegrity /Description:Ref' 'Smallest captures with max first'
     Assert-Equal ((Get-CaptureImageArgs -WimPath 'W.wim' -CaptureDir 'V:\' -Name 'W' -Compression fast) -join ' ') '/Capture-Image /ImageFile:W.wim /CaptureDir:V:\ /Name:W /Compress:fast /CheckIntegrity' 'VM capture: no /Verify'
     Set-Content (Join-Path $pubDir 'Small.esd') 'old esd'

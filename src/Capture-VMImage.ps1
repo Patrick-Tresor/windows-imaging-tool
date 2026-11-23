@@ -30,7 +30,6 @@ param(
     [string]$ContentRoot,
     [string]$Description,
     [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',   # recovery = Smallest: an .esd about a quarter smaller than max
-    [int]$SplitSizeMB = 0,       # e.g. 3800 to fit a FAT32 USB; 0 = no split
     [switch]$NewVersion,         # replace an existing image, keeping the old one as a version
     [switch]$NoPrompt,
     [switch]$CheckOnly,          # only read the disk and write what was found to -ResultPath
@@ -315,14 +314,10 @@ $captureSteps = @(
     , @('capture', 'Capturing the image')
 )
 if ($Compression -eq 'recovery') { $captureSteps += , @('compress', 'Compressing to the smallest size (.esd)') }
-$captureSteps += @(
-    , @('split', 'Splitting into 3.8 GB parts')
-    , @('save', 'Saving to the Images folder')
-)
+$captureSteps += , @('save', 'Saving to the Images folder')
 Start-BuildProgress -Path $ProgressFile -Title "Capturing $Name" -LogPath $logPath -Steps $captureSteps
 
 try {
-    Assert-CaptureCompression -Compression $Compression -SplitSizeMB $SplitSizeMB
     $existing = @(Get-ExistingImageFiles -ImagesDir $imagesDir -Name $Name)
     if ($existing -and -not $NewVersion) {
         throw "An image named $Name already exists in $imagesDir. Pick another name, or capture it as a new version."
@@ -438,14 +433,9 @@ try {
         Write-DeployLog ("Compressed to {0} (.esd, {1}% of the .wim) in {2:hh\:mm\:ss}." -f (Format-ByteSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)), $compressClock.Elapsed)
         Complete-BuildStep 'compress' -Detail ("{0}, {1}% of Maximum" -f (Format-ByteSize $esdSize), [int](100 * $esdSize / [Math]::Max(1, $wimSize)))
     }
-    if ($SplitSizeMB -gt 0) {
-        Start-BuildStep 'split'
-        Split-CapturedImage -WimPath $wim -SplitSizeMB $SplitSizeMB
-        Complete-BuildStep 'split'
-    }
     Start-BuildStep 'save' -Detail $(if ($staging -notlike "$imagesDir*") { 'Copying the image from the PC''s disk' } else { '' })
 
-    $newLeaf = Publish-CapturedImage -Staging $staging -ImagesDir $imagesDir -Name $Name -SplitSizeMB $SplitSizeMB -Compression $Compression -Existing $existing -ContentRoot $ContentRoot -State $swap
+    $newLeaf = Publish-CapturedImage -Staging $staging -ImagesDir $imagesDir -Name $Name -Compression $Compression -Existing $existing -ContentRoot $ContentRoot -State $swap
 
     Write-DeployLog "Captured the disk to $imagesDir\$newLeaf"
     Complete-BuildStep 'save' -Detail "Images\$newLeaf"
