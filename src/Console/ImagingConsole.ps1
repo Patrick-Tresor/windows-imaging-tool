@@ -625,13 +625,9 @@ function Remove-LibraryRow($Row) {
     Set-Status "Deleted $($Row.Name)"
 }
 
-function Get-SelectedLibraryRow([string]$Kind) {
-    # The selected row; with -Kind only a row of that kind (Test detection is for applications).
+function Get-SelectedLibraryRow {
     $row = $ui.GridLibrary.SelectedItem
-    if (-not $row -or ($Kind -and $row.Kind -ne $Kind)) {
-        Show-Error $(if ($Kind -eq 'Application') { 'Select an application first.' } else { 'Select an application or a task first.' })
-        return
-    }
+    if (-not $row) { Show-Error 'Select an application or a task first.'; return }
     $row
 }
 
@@ -707,17 +703,6 @@ $ui.GridLibrary.Add_SelectionChanged({
         $lines -join "`r`n"
     }
 })
-
-$ui.BtnAppTest.Add_Click({ Invoke-Safely {
-    $row = Get-SelectedLibraryRow Application
-    if (-not $row -or -not $row.Definition) { return }
-    $res = Test-AppDetection -Definition $row.Definition -AppFolder $row.FullName
-    $ui.TxtLibIssues.Text = if (-not $res.HasRules) { "$($row.Name) has no detection rules." } else {
-        "$($row.Name) on this PC: $(if ($res.Detected) { 'installed' } else { 'not installed' })`r`n" +
-        (($res.Details | ForEach-Object { "$(if ($_.Found) { 'found' } else { 'not found' }): $($_.Rule) ($($_.Detail))" }) -join "`r`n")
-    }
-    Set-Status "Detection tested for $($row.Name)"
-} })
 
 #endregion
 

@@ -297,7 +297,6 @@
             <Button x:Name="BtnAppNew" Content="New application..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnTaskNew" Content="New task..."/>
             <Button x:Name="BtnLibEdit" Content="Edit"/>
-            <Button x:Name="BtnAppTest" Content="Test detection" ToolTip="Applications: are they installed on this PC, by their detection rules?"/>
             <Button x:Name="BtnLibDelete" Content="Delete"/>
           </WrapPanel>
           <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
