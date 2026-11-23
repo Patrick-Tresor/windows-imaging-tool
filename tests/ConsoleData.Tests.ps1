@@ -66,13 +66,11 @@ try {
 
     # Settings round-trip. There is no default answer file: an older setup's entry is dropped on save.
     $s = Get-DeploySettings -ContentRoot $root
-    $s.reporting.path = '\\server\Deploy\Status'
+    $s.share.path = '\\server\Deploy'
     $s | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue 'Lab' -Force
     Save-DeploySettings -ContentRoot $root -Settings $s
     $back = Get-DeploySettings -ContentRoot $root
-    Assert-Equal "$($back.reporting.path)|$([bool]$back.PSObject.Properties['defaultAnswerFile'])" '\\server\Deploy\Status|False' 'settings round-trip, old defaultAnswerFile dropped'
-    $s.reporting.path = ''
-    Save-DeploySettings -ContentRoot $root -Settings $s
+    Assert-Equal "$($back.share.path)|$([bool]$back.PSObject.Properties['defaultAnswerFile'])" '\\server\Deploy|False' 'settings round-trip, old defaultAnswerFile dropped'
 
 
     # Answer files.

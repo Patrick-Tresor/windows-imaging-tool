@@ -296,17 +296,12 @@ function Update-Settings {
     if (-not (Test-ContentRoot $script:root)) { return }
     $s = Get-DeploySettings -ContentRoot $script:root
     $v = Get-DeploySettingsView -ContentRoot $script:root
-    $ui.RbSettingsShare.IsChecked = $v.Mode -eq 'Share'
-    $ui.RbSettingsUsb.IsChecked   = $v.Mode -ne 'Share'
     $ui.TxtSharePath.Text = $v.SharePath
     $ui.TxtShareUser.Text = $v.ShareUser
     $ui.PwdShare.Password = ''
     $script:sharePwSaved = $v.PasswordSaved
     $ui.TxtShareTest.Text = ''
     $ui.TxtSettingsProblem.Text = ''
-    $ui.RbReportShare.IsChecked   = [bool]$v.ReportPath
-    $ui.RbReportDefault.IsChecked = -not $v.ReportPath
-    $ui.TxtReportPath.Text = $v.ReportPath
     $ui.TxtVersionsToKeep.Text = $v.VersionsToKeep
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
@@ -318,13 +313,10 @@ function Update-Settings {
 }
 
 function Update-SettingsState {
-    # Greys out what the chosen options don't use, and says whether the share password is saved.
-    $share = [bool]$ui.RbSettingsShare.IsChecked
-    $report = [bool]$ui.RbReportShare.IsChecked
-    $ui.PnlSharePath.IsEnabled = $share
-    $ui.TxtReportPath.IsEnabled = $report
-    $ui.PnlShareAccount.IsEnabled = $share -or $report
-    $ui.PnlShareAccount.Opacity = if ($share -or $report) { 1 } else { 0.5 }
+    # Greys out the account without a share, and says whether the share password is saved.
+    $share = [bool]$ui.TxtSharePath.Text.Trim()
+    $ui.PnlShareAccount.IsEnabled = $share
+    $ui.PnlShareAccount.Opacity = if ($share) { 1 } else { 0.5 }
     $ui.TxtSharePwState.Text = if ($ui.PwdShare.Password) { 'New password, saved when you click Save.' }
                                elseif ($script:sharePwSaved) { 'Password saved.' }
                                elseif ($ui.TxtShareUser.Text.Trim()) { 'No password saved yet.' }
@@ -1263,16 +1255,12 @@ function Set-ShareTestText([string]$Text, [string]$Brush) {
     $ui.TxtShareTest.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Brush)
     $ui.TxtShareTest.Text = $Text
 }
-foreach ($rb in 'RbSettingsUsb', 'RbSettingsShare', 'RbReportDefault', 'RbReportShare') {
-    $ui[$rb].Add_Checked({ Invoke-Safely { Update-SettingsState } })
-}
+$ui.TxtSharePath.Add_TextChanged({ Update-SettingsState })
 $ui.PwdShare.Add_PasswordChanged({ Update-SettingsState })
 $ui.TxtShareUser.Add_TextChanged({ Update-SettingsState })
 
 $ui.BtnShareTest.Add_Click({ Invoke-Safely {
-    $share = if ($ui.RbSettingsShare.IsChecked) { $ui.TxtSharePath.Text.Trim() } else { '' }
-    $report = if ($ui.RbReportShare.IsChecked) { $ui.TxtReportPath.Text.Trim() } else { '' }
-    $target = if ($share) { $share } elseif ($report) { $report } else { '' }
+    $target = $ui.TxtSharePath.Text.Trim()
     if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' 'ErrorBrush'; return }
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
@@ -1281,7 +1269,7 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
         $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks
-        $r = Test-ShareConnection -SharePath $target -User $user -Password $pw -StatusPath $report -StatusOnly:(-not $share)
+        $r = Test-ShareConnection -SharePath $target -User $user -Password $pw
     } finally { $window.Cursor = $null; $pw = $null }
     Set-ShareTestText $r.Message $(if ($r.Ok) { 'SuccessBrush' } else { 'ErrorBrush' })
     Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
@@ -1305,16 +1293,12 @@ $ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
 
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $mode = if ($ui.RbSettingsShare.IsChecked) { 'Share' } else { 'Usb' }
-    $reportElsewhere = [bool]$ui.RbReportShare.IsChecked
-    $problems = @(Get-DeploySettingsProblems -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password -ReportPath $ui.TxtReportPath.Text `
-        -ReportElsewhere $reportElsewhere -VersionsToKeep $ui.TxtVersionsToKeep.Text)
+    $problems = @(Get-DeploySettingsProblems -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password -VersionsToKeep $ui.TxtVersionsToKeep.Text)
     if ($problems) { $ui.TxtSettingsProblem.Text = $problems[0]; Set-Status "Not saved: $($problems[0])"; return }
     $ui.TxtSettingsProblem.Text = ''
-    $r = Save-DeploySettingsPage -ContentRoot $script:root -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -NewPassword $ui.PwdShare.Password -ReportPath $(if ($reportElsewhere) { $ui.TxtReportPath.Text } else { '' }) `
-        -VersionsToKeep ([int]$ui.TxtVersionsToKeep.Text.Trim())
+    $r = Save-DeploySettingsPage -ContentRoot $script:root -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -NewPassword $ui.PwdShare.Password -VersionsToKeep ([int]$ui.TxtVersionsToKeep.Text.Trim())
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
         enabled       = [bool]$ui.ChkChecksEnabled.IsChecked

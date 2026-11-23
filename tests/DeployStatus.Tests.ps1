@@ -17,8 +17,10 @@ try {
     Assert-Equal (Get-StatusId -Serial 'AB/12 34') 'AB_12_34' 'unsafe file name characters are replaced'
 
     # Where status goes
+    $t = Resolve-StatusTarget -ContentRoot 'E:\'
+    Assert-Equal "$($t.Local)|$($t.Map)|$($t.Unc)" 'E:\Status||' 'USB without a share: status on the stick, no first-boot reporting'
     $t = Resolve-StatusTarget -ContentRoot 'E:\' -SharePath '\\srv\Deploy'
-    Assert-Equal "$($t.Map)|$($t.Unc)" '|' 'USB without a status share: no mapping, no first-boot reporting'
+    Assert-Equal "$($t.Local)|$($t.Map)|$($t.Unc)" 'R:\|\\srv\Deploy\Status|\\srv\Deploy\Status' 'USB with a share: reports to the share Status folder'
     $t = Resolve-StatusTarget -ContentRoot 'Z:\' -SharePath '\\srv\Deploy\'
     Assert-Equal "$($t.Map)|$($t.Unc)" '|\\srv\Deploy\Status' 'network root: first boot reports to the share Status folder'
     $t = Resolve-StatusTarget -ContentRoot 'Z:\' -SharePath '\\srv\Deploy' -ReportPath '\\SRV\deploy\Reports\Status'
@@ -103,6 +105,7 @@ try {
     $s = [pscustomobject]@{ reporting = [pscustomobject]@{ path = '\\srv\Status' } }
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings $s) '\\srv\Status' 'console reads the status share when set'
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings ([pscustomobject]@{ share = @{} })) (Join-Path $root 'Status') 'console defaults to the content root Status folder'
+    Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } })) '\\srv\Deploy\Status' 'console reads the share Status folder when a share is set'
 }
 finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue

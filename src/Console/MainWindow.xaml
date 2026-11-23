@@ -396,16 +396,14 @@
             <TextBlock Style="{StaticResource Hint}" Text="How PCs reach the deployment, where they report, and what they check at the end. Everything else about a deployment is in the answer files."/>
 
             <!-- 1. Where the deployment comes from -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="1. Where PCs get the deployment"/>
-            <RadioButton x:Name="RbSettingsUsb" GroupName="SettingsMode" Margin="0,4"
-                         Content="USB stick only. Everything is on the stick; no network needed."/>
-            <RadioButton x:Name="RbSettingsShare" GroupName="SettingsMode" Margin="0,4"
-                         Content="Network share. Needed for ISO boot and the Computers tab. A USB stick still deploys from the stick first."/>
-            <Grid x:Name="PnlSharePath" Margin="22,6,0,0">
+            <TextBlock Style="{StaticResource SettingsHead}" Text="1. Network share"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="The content root on your server. Network boot and the Computers tab load from it, and every PC reports its progress to its Status folder for the Dashboard (a USB stick still deploys from the stick). Leave it empty to use USB sticks only."/>
+            <Grid x:Name="PnlSharePath">
               <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Share"/>
-              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="The content root on your server, for example \\SERVER01\Deploy."/>
+              <TextBox x:Name="TxtSharePath" Grid.Column="1" ToolTip="For example \\SERVER01\Deploy."/>
             </Grid>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="After the restart, Windows reports as the computer account: give Domain Computers Modify on the share's Status folder, or the PC shows Stalled after first boot."/>
 
             <!-- 2. The account -->
             <StackPanel x:Name="PnlShareAccount">
@@ -428,21 +426,8 @@
               </Grid>
             </StackPanel>
 
-            <!-- 3. Dashboard -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Where PCs report progress (Dashboard)"/>
-            <RadioButton x:Name="RbReportDefault" GroupName="SettingsReport" Margin="0,4"
-                         Content="Same place as the deployment: the share's Status folder, or the stick's for USB deploys (they show on the Dashboard when the stick is plugged into this PC)."/>
-            <RadioButton x:Name="RbReportShare" GroupName="SettingsReport" Margin="0,4"
-                         Content="A network folder, so USB deploys show up live too:"/>
-            <Grid Margin="22,6,0,0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Label Content="Status folder"/>
-              <TextBox x:Name="TxtReportPath" Grid.Column="1" ToolTip="For example \\SERVER01\Deploy\Status. WinPE maps it with the account above."/>
-            </Grid>
-            <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="After the restart, Windows reports as the computer account: give Domain Computers Modify on the Status folder, or the PC shows Stalled after first boot."/>
-
-            <!-- 4. Deployments -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Deployments"/>
+            <!-- 3. Deployments -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="3. Deployments"/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Label Content="Older image versions to keep"/>
@@ -453,8 +438,8 @@
               </StackPanel>
             </Grid>
 
-            <!-- 5. Checks -->
-            <TextBlock Style="{StaticResource SettingsHead}" Text="5. Checks after deploy"/>
+            <!-- 4. Checks -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
             <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
                       Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and show pass or fail on the Dashboard"/>
             <Grid>
