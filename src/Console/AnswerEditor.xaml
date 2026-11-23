@@ -246,25 +246,13 @@
           <CheckBox x:Name="ChkBitLocker" Content="Encrypt the Windows drive with BitLocker"/>
           <Grid Margin="0,6,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-            <Label Content="Encryption"/>
-            <ComboBox x:Name="CmbBlMethod" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-            <Label Grid.Row="2" Content="Unlock at startup"/>
-            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
-              <RadioButton x:Name="RbBlTpm" GroupName="BlProt" Content="TPM only"/>
-              <RadioButton x:Name="RbBlTpmPin" GroupName="BlProt" Content="TPM and a startup PIN"/>
-            </StackPanel>
-            <Label Grid.Row="3" Content="Startup PIN"/>
-            <StackPanel Grid.Row="3" Grid.Column="1">
-              <PasswordBox x:Name="PwdBlPin" Width="260" HorizontalAlignment="Left" ToolTip="6 to 20 digits. Every PC deployed with this answer file gets the same PIN; users can change it later."/>
-              <TextBlock x:Name="TxtBlPinState" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"/>
-            </StackPanel>
-            <Label Grid.Row="4" Content="Recovery key backup"/>
-            <CheckBox x:Name="ChkBlAD" Grid.Row="4" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>
-            <Label Grid.Row="5" Content="Also save to folder"/>
-            <TextBox x:Name="TxtBlFolder" Grid.Row="5" Grid.Column="1" ToolTip="\\server\share\BitLocker. One text file per PC. Domain Computers need write access; restrict who can read it."/>
-            <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Hint}" Margin="0,4,0,0"
-                       Text="Only the used space is encrypted (the disk was just wiped), and BitLocker stays off when no recovery key backup worked."/>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Recovery key backup"/>
+            <CheckBox x:Name="ChkBlAD" Grid.Column="1" Content="Active Directory (on the computer object; domain join only)"/>
+            <Label Grid.Row="1" Content="Also save to folder"/>
+            <TextBox x:Name="TxtBlFolder" Grid.Row="1" Grid.Column="1" ToolTip="\\server\share\BitLocker. One text file per PC. Domain Computers need write access; restrict who can read it."/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Hint}" Margin="0,4,0,0"
+                       Text="The TPM unlocks the drive at startup (no PIN) and XTS-AES 256 is used. Only the used space is encrypted (the disk was just wiped), and BitLocker stays off when no recovery key backup worked."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

@@ -53,7 +53,6 @@ function Show-AnswerEditor {
         $used = @($tasks | Where-Object Script | ForEach-Object Script)
         $e.GridTasks.Columns[1].ItemsSource = @(@('') + @($library | ForEach-Object Name) + $used | Select-Object -Unique)
     }
-    $e.CmbBlMethod.ItemsSource = @('XtsAes256', 'XtsAes128', 'Aes256', 'Aes128')
 
     $updateIndexes = {
         # Editions from the selected image, as "index: name". A pinned version lists that copy's editions.
@@ -157,10 +156,6 @@ function Show-AnswerEditor {
 
     $bl = $a.BitLocker
     $e.ChkBitLocker.IsChecked = $bl.Enabled
-    $e.CmbBlMethod.SelectedItem = $bl.EncryptionMethod
-    $e.RbBlTpm.IsChecked = $bl.Protector -ne 'TpmPin'
-    $e.RbBlTpmPin.IsChecked = $bl.Protector -eq 'TpmPin'
-    $e.TxtBlPinState.Text = & $pwState $bl.PinFile $bl.PinEncrypted
     $e.ChkBlAD.IsChecked = $bl.BackupToAD
     $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
 
@@ -177,13 +172,12 @@ function Show-AnswerEditor {
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
         $on = [bool]$e.ChkBitLocker.IsChecked
-        foreach ($c in 'CmbBlMethod', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder') { $e[$c].IsEnabled = $on }
-        $e.PwdBlPin.IsEnabled = $on -and $e.RbBlTpmPin.IsChecked
+        $e.TxtBlFolder.IsEnabled = $on
         # Recovery keys only go to AD from a domain-joined PC.
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbDomain', 'RbWorkgroup') { $e[$c].Add_Checked($syncEnabled) }
     foreach ($c in 'ChkAdmin', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
@@ -286,9 +280,7 @@ function Show-AnswerEditor {
                                Username = $_.Username; Domain = $_.Domain; PasswordFile = $_.PasswordFile; PasswordEncrypted = $_.PasswordEncrypted }
         })
         $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
-        $a.BitLocker.EncryptionMethod  = "$($e.CmbBlMethod.SelectedItem)"
         $a.BitLocker.UsedSpaceOnly     = $true
-        $a.BitLocker.Protector         = if ($e.RbBlTpmPin.IsChecked) { 'TpmPin' } else { 'Tpm' }
         $a.BitLocker.BackupToAD        = [bool]$e.ChkBlAD.IsChecked
         $a.BitLocker.RecoveryKeyFolder = $e.TxtBlFolder.Text.Trim()
         $a.BitLocker.RequireBackup     = $true
@@ -329,12 +321,8 @@ function Show-AnswerEditor {
             if ($a.EnableAdministrator -and -not $e.PwdAdmin.Password -and -not (Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.AdminPasswordFile -Encrypted $a.AdminPasswordEncrypted)) {
                 throw 'Enter the Administrator password (Windows settings).'
             }
-            if ($a.BitLocker.Enabled -and $a.BitLocker.Protector -eq 'TpmPin' -and -not $e.PwdBlPin.Password -and -not (Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $a.BitLocker.PinFile -Encrypted $a.BitLocker.PinEncrypted)) {
-                throw 'Enter the BitLocker startup PIN (BitLocker).'
-            }
             Save-AnswerFromEditor -ContentRoot $ContentRoot -Answer $a -JoinPassword $e.PwdJoin.Password `
-                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords `
-                -BitLockerPin $e.PwdBlPin.Password -IsNew:$isNew | Out-Null
+                -AdminPassword $e.PwdAdmin.Password -SharePasswords $state.SharePasswords -IsNew:$isNew | Out-Null
             $state.Saved = $true
             $win.Close()
         } catch {

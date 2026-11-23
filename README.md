@@ -198,7 +198,7 @@ the console; the format is documented in the commented
   the built-in Administrator). The PC restarts into Windows when the deploy is
   done; the result screen in WinPE still has **Shut down**. (An older answer file
   with `<shutdown>` or `<reboot>false` keeps doing that until it is saved again.)
-- **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
+- **BitLocker** on the Windows drive at first boot (TPM only, XTS-AES 256), with
   the recovery key backed up to AD and/or a share first.
 
 **BitLocker** needs a TPM that is on and ready, or it is skipped (see
@@ -207,7 +207,7 @@ Directory needs a domain join; on most domains the computer can write its own
 key without extra setup. A recovery key folder (`\\server\share\BitLocker`)
 needs write access for Domain Computers and tight read access. With **leave
 BitLocker off if no backup worked** (the default), no PC is encrypted without a
-saved key. A startup PIN is the same for every PC deployed with that answer file.
+saved key. There is no startup PIN: the TPM unlocks the drive.
 
 ### Windows on any PC, and the target disk
 

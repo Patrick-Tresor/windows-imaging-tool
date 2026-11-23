@@ -158,14 +158,11 @@ try {
     Assert-Equal (Get-DomainJoinProblem -Answer $j -PasswordSaved $true).Control 'TxtJoinDomain' 'an account domain with a backslash points at the account domain box'
     $j.JoinDomain = 'CORP'
     $ed.Name = 'Secure'; $ed.Domain = 'corp.example.com'
-    $ed.BitLocker.Enabled = $true; $ed.BitLocker.Protector = 'TpmPin'; $ed.BitLocker.PinFile = $null
-    $msg = try { Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '12ab' -IsNew | Out-Null; '' } catch { $_.Exception.Message }
-    Assert-Equal $msg 'The BitLocker startup PIN must be 6 to 20 digits.' 'editor save rejects a PIN that is not digits'
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -BitLockerPin '246810' -IsNew
+    $ed.BitLocker.Enabled = $true
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -IsNew
     $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.BitLocker.PinFile)" 'config\secrets\Secure-bitlocker-pin.txt' 'editor save names the PIN file'
-    Assert-Equal (Unprotect-AnswerPassword -Value $back.BitLocker.PinEncrypted -Key (Get-AnswerKey -ContentRoot $root)) '246810' 'the PIN is saved encrypted in the answer file'
-    Assert-Equal ((Get-Content -Raw $saved) -match '246810') $false 'the PIN is not in the answer file in plain text'
+    Assert-Equal "$($back.BitLocker.Enabled)|$($back.BitLocker.Protector)|$($back.BitLocker.EncryptionMethod)" 'True|Tpm|XtsAes256' 'editor save: BitLocker is TPM only, XTS-AES 256'
+    Assert-Equal ((Get-Content -Raw $saved) -match 'pinFile|encryptedPin|protector|encryptionMethod') $false 'editor save writes no PIN, protector or method'
 
     # Offline image updates.
     Assert-Equal (Test-Path (Join-Path $root 'Updates')) $true 'content root gets an Updates folder'

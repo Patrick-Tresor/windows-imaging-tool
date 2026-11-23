@@ -131,7 +131,6 @@ function Get-AnswerSecrets {
         & $add $share.PasswordFile "Password for $($share.RemoteName)$(if ($share.Username) { " ($($share.Username))" })" $share.LocalName (& $enc $share 'PasswordEncrypted')
     }
     $bl = $Answer.BitLocker
-    if ($bl -and $bl.Enabled -and $bl.Protector -eq 'TpmPin') { & $add $bl.PinFile 'BitLocker PIN' '' (& $enc $bl 'PinEncrypted') }
     $list.ToArray()
 }
 

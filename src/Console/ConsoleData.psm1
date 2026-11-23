@@ -366,7 +366,6 @@ function Get-NewAnswer {
     $a.Path = $null
     $a.JoinPasswordFile = "config\secrets\$Name-join.txt"
     $a.AdminPasswordFile = "config\secrets\$Name-admin.txt"
-    $a.BitLocker.PinFile = "config\secrets\$Name-bitlocker-pin.txt"
     $a
 }
 
@@ -436,7 +435,6 @@ function Save-AnswerFromEditor {
         [string]$JoinPassword,
         [string]$AdminPassword,
         [hashtable]$SharePasswords = @{},   # local name (Y:) -> password
-        [string]$BitLockerPin,
         [switch]$IsNew
     )
     $a = $Answer
@@ -446,8 +444,6 @@ function Save-AnswerFromEditor {
 
     if (-not $a.JoinPasswordFile) { $a.JoinPasswordFile = "config\secrets\$($a.Name)-join.txt" }
     if (-not $a.AdminPasswordFile) { $a.AdminPasswordFile = "config\secrets\$($a.Name)-admin.txt" }
-    if (-not $a.BitLocker.PinFile) { $a.BitLocker.PinFile = "config\secrets\$($a.Name)-bitlocker-pin.txt" }
-    if ($BitLockerPin -and $BitLockerPin -notmatch '^\d{6,20}$') { throw 'The BitLocker startup PIN must be 6 to 20 digits.' }
     foreach ($sh in $a.Shares) {
         if (-not $sh.PasswordFile -and $sh.Username) { $sh.PasswordFile = "config\secrets\$($a.Name)-share-$($sh.LocalName.TrimEnd(':').ToLowerInvariant()).txt" }
     }
@@ -455,7 +451,7 @@ function Save-AnswerFromEditor {
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Can't save yet:`n - " + ($problems -join "`n - ") }
 
-    $typed = @($JoinPassword, $AdminPassword, $BitLockerPin) + @($SharePasswords.Values) | Where-Object { $_ }
+    $typed = @($JoinPassword, $AdminPassword) + @($SharePasswords.Values) | Where-Object { $_ }
     $key = if ($typed) { Get-AnswerKey -ContentRoot $ContentRoot -Create } else { $null }
     $protect = {
         param($Object, [string]$Property, [string]$Password)
@@ -464,7 +460,6 @@ function Save-AnswerFromEditor {
     }
     & $protect $a 'JoinPasswordEncrypted' $JoinPassword
     & $protect $a 'AdminPasswordEncrypted' $AdminPassword
-    & $protect $a.BitLocker 'PinEncrypted' $BitLockerPin
     foreach ($sh in $a.Shares) { & $protect $sh 'PasswordEncrypted' $SharePasswords[$sh.LocalName] }
     Export-AnswerFile -Answer $a -Path $dest
     $dest

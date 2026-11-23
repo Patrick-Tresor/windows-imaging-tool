@@ -192,7 +192,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     # Extra summary lines, shown before ERASE in the wizard and on the console.
     $bl = $Answer.BitLocker
     $details = @(
-        "BitLocker:    $(if ($bl.Enabled) { "$($bl.Protector), $($bl.EncryptionMethod), at first boot" } else { 'off' })"
+        "BitLocker:    $(if ($bl.Enabled) { "TPM, XtsAes256, at first boot" } else { 'off' })"
     )
 
     [pscustomobject]@{
@@ -274,7 +274,7 @@ function Save-TypedSecrets([hashtable]$Values, [object[]]$Secrets) {
 
 function Protect-StagedItem([string]$Path, [switch]$Folder) {
     # Administrators and SYSTEM only (Get-AdminOnlyAclArgs): C:\Temp lets every signed-in user change what is in it,
-    # and first boot keeps the BitLocker PIN there and runs the installers as SYSTEM. A failure only warns.
+    # and first boot runs the installers there as SYSTEM. A failure only warns.
     $out = & icacls.exe @(Get-AdminOnlyAclArgs -Path $Path -Folder:$Folder) 2>&1
     if ($LASTEXITCODE -ne 0) { Write-DeployLog "Could not limit $Path to administrators (icacls exit $LASTEXITCODE): $(@($out) -join ' ')" -Level WARN }
 }
@@ -594,8 +594,6 @@ try {
         if ($joinNote) { Write-DeployLog $joinNote -Level WARN }
     }
     $adminPassword = if ($answer.EnableAdministrator) { Get-DeploySecret -Root $root -RelativePath $answer.AdminPasswordFile -Answer $answer -Label 'local Administrator password' } else { $null }
-    $bl = $answer.BitLocker
-    $bitLockerPin  = if ($bl.Enabled -and $bl.Protector -eq 'TpmPin') { Get-DeploySecret -Root $root -RelativePath $bl.PinFile -Answer $answer -Label 'BitLocker PIN' } else { $null }
 
     # The unattend is built and checked now, before the disk is wiped: a setting Windows Setup rejects would only show
     # after the restart, as "could not parse or process the unattend answer file" at Getting ready.
@@ -732,7 +730,7 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'Clear-UnattendPasswords.ps1'), (Join-Path $PSScriptRoot 'ScriptLog.psm1') 'W:\ProgramData\ImagingTool\' -Force
     Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1'
     Protect-StagedItem -Path 'W:\ProgramData\ImagingTool\ScriptLog.psm1'
-    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -BitLockerPin $bitLockerPin -Tasks $deployTasks
+    $plan = New-FirstBootPlan -Answer $answer -AppDefinitions $apps -Tasks $deployTasks
     # What the post-deploy checks expect at the end of first boot (deploy-settings "checks" turns them off or tunes them).
     $checks = New-PostDeployCheckPlan -Answer $answer -ComputerName $ComputerName -AppDefinitions $apps -Settings $settings
     if ($checks) { $plan | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
