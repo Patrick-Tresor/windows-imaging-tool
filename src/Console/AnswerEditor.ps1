@@ -156,13 +156,11 @@ function Show-AnswerEditor {
     $bl = $a.BitLocker
     $e.ChkBitLocker.IsChecked = $bl.Enabled
     $e.CmbBlMethod.SelectedItem = $bl.EncryptionMethod
-    $e.ChkBlUsedSpace.IsChecked = $bl.UsedSpaceOnly
     $e.RbBlTpm.IsChecked = $bl.Protector -ne 'TpmPin'
     $e.RbBlTpmPin.IsChecked = $bl.Protector -eq 'TpmPin'
     $e.TxtBlPinState.Text = & $pwState $bl.PinFile $bl.PinEncrypted
     $e.ChkBlAD.IsChecked = $bl.BackupToAD
     $e.TxtBlFolder.Text = $bl.RecoveryKeyFolder
-    $e.ChkBlRequire.IsChecked = $bl.RequireBackup
 
     # --- Behaviour -------------------------------------------------------------------------------------------
     $e.LstSections.Add_SelectionChanged({
@@ -179,7 +177,7 @@ function Show-AnswerEditor {
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
         $on = [bool]$e.ChkBitLocker.IsChecked
-        foreach ($c in 'CmbBlMethod', 'ChkBlUsedSpace', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder', 'ChkBlRequire') { $e[$c].IsEnabled = $on }
+        foreach ($c in 'CmbBlMethod', 'RbBlTpm', 'RbBlTpmPin', 'TxtBlFolder') { $e[$c].IsEnabled = $on }
         $e.PwdBlPin.IsEnabled = $on -and $e.RbBlTpmPin.IsChecked
         # Recovery keys only go to AD from a domain-joined PC.
         $e.ChkBlAD.IsEnabled = $on -and $dom
@@ -288,11 +286,11 @@ function Show-AnswerEditor {
         })
         $a.BitLocker.Enabled           = [bool]$e.ChkBitLocker.IsChecked
         $a.BitLocker.EncryptionMethod  = "$($e.CmbBlMethod.SelectedItem)"
-        $a.BitLocker.UsedSpaceOnly     = [bool]$e.ChkBlUsedSpace.IsChecked
+        $a.BitLocker.UsedSpaceOnly     = $true
         $a.BitLocker.Protector         = if ($e.RbBlTpmPin.IsChecked) { 'TpmPin' } else { 'Tpm' }
         $a.BitLocker.BackupToAD        = [bool]$e.ChkBlAD.IsChecked
         $a.BitLocker.RecoveryKeyFolder = $e.TxtBlFolder.Text.Trim()
-        $a.BitLocker.RequireBackup     = [bool]$e.ChkBlRequire.IsChecked
+        $a.BitLocker.RequireBackup     = $true
     }
 
     $e.BtnNamePreview.Add_Click({
