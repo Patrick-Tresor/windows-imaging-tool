@@ -66,13 +66,11 @@ try {
 
     # Settings round-trip. There is no default answer file: an older setup's entry is dropped on save.
     $s = Get-DeploySettings -ContentRoot $root
-    $s.reporting.path = '\\server\Deploy\Status'
+    $s.share.path = '\\server\Deploy'
     $s | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue 'Lab' -Force
     Save-DeploySettings -ContentRoot $root -Settings $s
     $back = Get-DeploySettings -ContentRoot $root
-    Assert-Equal "$($back.reporting.path)|$([bool]$back.PSObject.Properties['defaultAnswerFile'])" '\\server\Deploy\Status|False' 'settings round-trip, old defaultAnswerFile dropped'
-    $s.reporting.path = ''
-    Save-DeploySettings -ContentRoot $root -Settings $s
+    Assert-Equal "$($back.share.path)|$([bool]$back.PSObject.Properties['defaultAnswerFile'])" '\\server\Deploy|False' 'settings round-trip, old defaultAnswerFile dropped'
 
 
     # Answer files.
@@ -191,20 +189,23 @@ try {
     Assert-Equal (@(Get-ImageList -ContentRoot $root).Name -contains 'Win11.updates.json') $false 'history file is not listed as an image'
 
     $ua = Get-ImageUpdateArguments -ScriptPath 'C:\Imaging Tool\src\Update-OfflineImage.ps1' -ImagePath "\\srv\Deploy\Images\O'Brien.wim" `
-        -Packages @('D:\Up dates\a.msu', 'D:\b.msu') -Cleanup -NoBackup
+        -Packages @('D:\Up dates\a.msu', 'D:\b.msu') -Cleanup
     $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ua[-1]))
-    Assert-Equal $decoded "& 'C:\Imaging Tool\src\Update-OfflineImage.ps1' -ImagePath '\\srv\Deploy\Images\O''Brien.wim' -PackagePath 'D:\Up dates\a.msu','D:\b.msu' -Cleanup -NoBackup -NoPrompt" 'update command quotes paths and lists packages in order'
+    Assert-Equal $decoded "& 'C:\Imaging Tool\src\Update-OfflineImage.ps1' -ImagePath '\\srv\Deploy\Images\O''Brien.wim' -PackagePath 'D:\Up dates\a.msu','D:\b.msu' -Cleanup -NoPrompt" 'update command quotes paths and lists packages in order'
     $parsed = [System.Management.Automation.Language.Parser]::ParseInput($decoded, [ref]$null, [ref]$null)
     $cmdAst = $parsed.EndBlock.Statements[0].PipelineElements[0]
     Assert-Equal ($cmdAst.CommandElements[4].Elements.Count) 2 'update command passes the packages as one array'
+    $ua = Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @() -LatestUpdate
+    Assert-Equal ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ua[-1]))) "& 'x.ps1' -ImagePath 'y.wim' -LatestUpdate -NoPrompt" 'latest update alone: no package list'
+    Assert-Throws { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @() } '*latest cumulative update*' 'nothing to apply is rejected'
     $threw = $false
     try { Get-ImageUpdateArguments -ScriptPath 'x.ps1' -ImagePath 'y.wim' -Packages @('a.msu') -ResetBase | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'reset base without cleanup is rejected'
 
     $vc = Get-VMCaptureArguments -ScriptPath 'C:\Imaging Tool\src\Capture-VMImage.ps1' -ContentRoot 'D:\Deploy Share' -DiskPath "D:\VMs\Win11's Ref\Ref.vmdk" `
-        -Name 'Win11-24H2' -Description 'Lab build' -Split -NewVersion
+        -Name 'Win11-24H2' -Description 'Lab build'
     $vcDecoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($vc[-1]))
-    Assert-Equal $vcDecoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'D:\VMs\Win11''s Ref\Ref.vmdk' -Name 'Win11-24H2' -ContentRoot 'D:\Deploy Share' -Compression max -Description 'Lab build' -SplitSizeMB 3800 -NewVersion -NoPrompt" 'VM capture command quotes the disk path and adds the options'
+    Assert-Equal $vcDecoded "& 'C:\Imaging Tool\src\Capture-VMImage.ps1' -DiskPath 'D:\VMs\Win11''s Ref\Ref.vmdk' -Name 'Win11-24H2' -ContentRoot 'D:\Deploy Share' -Compression max -Description 'Lab build' -NoPrompt" 'VM capture command quotes the disk path and adds the options'
     $threw = $false
     try { Get-VMCaptureArguments -ScriptPath 'x.ps1' -ContentRoot 'y' -DiskPath 'v.vmdk' -Name 'bad name' | Out-Null } catch { $threw = $true }
     Assert-Equal $threw $true 'VM capture rejects an image name with spaces'
@@ -249,12 +250,17 @@ try {
     Assert-Equal (Test-Path (Join-Path $root 'AnswerFiles/ToDelete.xml')) $false 'delete: the file is gone'
     Assert-Throws { Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete' } '*no answer file named ToDelete*' 'delete: a missing answer file is refused'
 
-    # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.
-    $tab = @(Get-LogTabRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
-    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Count) 0 'Logs tab hides a deployment that is on the Dashboard'
-    Assert-Equal ((@($tab | ForEach-Object Kind) | Sort-Object) -join ',') 'Capture,Image update' 'Logs tab keeps capture and image update logs'
-    $tab = @(Get-LogTabRows -ContentRoot $root)
-    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Kind) 'Deployment' 'Logs tab lists a deployment cleared from the Dashboard'
+    # Dashboard History: deployments no longer on the Dashboard, never captures or image updates.
+    $tab = @(Get-DeploymentHistoryRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
+    Assert-Equal $tab.Count 0 'History hides a deployment that is still on the Dashboard, and has no capture or update logs'
+    $tab = @(Get-DeploymentHistoryRows -ContentRoot $root)
+    Assert-Equal "$($tab.Serial)|$($tab.State)|$($tab.IsHistory)" 'ABC123|Succeeded|True' 'History lists a deployment cleared from the Dashboard as a Dashboard row'
+
+    # Images tab, Open log: the newest capture or update log of that image only.
+    Set-Content (Join-Path $root 'Logs/CAPTURE-VM-Win11_20261024-0900_OK.log') 'x'
+    Set-Content (Join-Path $root 'Logs/CAPTURE-VM-Win11_Ref_20261025-0900_OK.log') 'x'
+    Assert-Equal ([IO.Path]::GetFileName((Get-ImageLogPath -ContentRoot $root -ImageName 'Win11'))) 'CAPTURE-VM-Win11_20261024-0900_OK.log' 'image log: newest of its capture and update logs'
+    Assert-Equal ($null -eq (Get-ImageLogPath -ContentRoot $root -ImageName 'Other')) $true 'image log: none for an image never captured here'
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

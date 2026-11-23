@@ -97,20 +97,11 @@ function Show-CaptureWizard {
     })
     & $prefillDiskFile
 
-    # Smallest makes an .esd, which DISM cannot split: no FAT32 split with it.
-    $w.CmbCompression.Add_SelectionChanged({
-        $esd = "$($w.CmbCompression.SelectedItem.Tag)" -eq 'recovery'
-        if ($esd) { $w.ChkSplit.IsChecked = $false }
-        $w.ChkSplit.IsEnabled = -not $esd
-    })
-
     $getChoice = {
         [pscustomobject]@{
             Name        = $w.TxtName.Text.Trim()
             Description = $w.TxtDescription.Text.Trim()
             Compression = $w.CmbCompression.SelectedItem.Tag
-            Split       = [bool]$w.ChkSplit.IsChecked
-            NewVersion  = [bool]$w.ChkNewVersion.IsChecked
             SysprepAtDeploy = [bool]$w.ChkSysprepAtDeploy.IsChecked
             DiskFile    = $w.TxtDiskFile.Text.Trim().Trim('"')
             SaveTo      = $w.TxtSaveTo.Text.Trim().Trim('"').TrimEnd('\')
@@ -222,9 +213,6 @@ function Show-CaptureWizard {
             3 {
                 if (-not (Test-ImageName $c.Name)) { 'The name may only contain letters, digits, dot, dash and underscore.' }
                 elseif ($saveProblem = Get-CaptureSaveFolderProblem -Path $c.SaveTo) { $saveProblem }
-                elseif (-not $c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
-                    "An image named $($c.Name) already exists in $($c.SaveTo). Pick another name, or tick the box to capture it as a new version."
-                }
             }
         }
     }
@@ -238,10 +226,10 @@ function Show-CaptureWizard {
                 "`r`nWindows:       $($state.Result.windowsName), $(Format-ByteSize ([double]$state.Result.usedBytes)) used, $(if ($state.Result.generalized -eq $true) { 'generalized' } else { 'not sysprepped' })" }) +
             $(if ($c.SysprepAtDeploy -and -not ($state.Result -and $state.Result.generalized -eq $true)) { "`r`nSysprep:       on each PC at its first start (5-10 minutes and one restart more)" })
         $w.TxtSummary.Text = @(
-            "Image name:    $($c.Name).$(if ($c.Split) { 'swm (split)' } else { 'wim' })"
+            "Image name:    $($c.Name).$(if ($c.Compression -eq 'recovery') { 'esd' } else { 'wim' })"
             "Description:   $(if ($c.Description) { $c.Description } else { '(none)' })"
             "Compression:   $($c.Compression)"
-            $(if ($c.NewVersion -and @(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
+            $(if (@(Get-ExistingImageFiles -ImagesDir $c.SaveTo -Name $c.Name).Count) {
                 "Existing image: replaced after the capture succeeds; the old one is kept in Previous next to it" })
             ''
             "Media:         $target"
@@ -271,7 +259,7 @@ function Show-CaptureWizard {
             param($progressFile, $logPath)
             Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
-                -Split:$c.Split -NewVersion:$c.NewVersion -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
+                -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
         }
         $state.HandedOver = $true
         Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"

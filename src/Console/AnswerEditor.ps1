@@ -127,7 +127,6 @@ function Show-AnswerEditor {
 
     $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
     $e.RbNameCustom.IsChecked = $a.NamingMode -eq 'Custom'
-    $e.RbNamePrompt.IsChecked = $a.NamingMode -eq 'Prompt'
     $e.TxtPrefix.Text = $a.Prefix
     $e.CmbWmi.Text = $a.WmiQuery
     $e.TxtScheme.Text = $a.CustomScheme
@@ -191,7 +190,7 @@ function Show-AnswerEditor {
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbDomain', 'RbWorkgroup', 'RbBlTpm', 'RbBlTpmPin') { $e[$c].Add_Checked($syncEnabled) }
     foreach ($c in 'ChkAdmin', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
@@ -275,7 +274,7 @@ function Show-AnswerEditor {
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.DisableSystemRestore = [bool]$e.ChkNoRestore.IsChecked
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
-        $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } elseif ($e.RbNamePrompt.IsChecked) { 'Prompt' } else { 'WMI' }
+        $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } else { 'WMI' }
         $a.Prefix        = $e.TxtPrefix.Text.Trim()
         $a.WmiQuery      = $e.CmbWmi.Text.Trim()
         $a.CustomScheme  = $e.TxtScheme.Text.Trim()

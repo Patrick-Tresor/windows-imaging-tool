@@ -65,10 +65,22 @@ try {
     $msg = Get-StaleStickMessage -Console $console -StickRoots @($stickC)
     Assert-Equal ($msg -like '*built before this console stamped versions*') $true 'a stick from before versions: banner too'
 
+    # The network boot image (<root>\Boot) gets a banner too when it is older than the console.
+    $root = Join-Path $tmp 'root'; $boot = Join-Path $root 'Boot'
+    New-Item -ItemType Directory -Path $boot | Out-Null
+    Assert-Equal (Get-StaleBootImageMessage -Console $console -ContentRoot $root) $null 'no network boot image: no banner'
+    Set-Content -LiteralPath (Join-Path $boot 'boot.wim') -Value 'x'
+    Assert-Equal ((Get-StaleBootImageMessage -Console $console -ContentRoot $root) -like '*network boot image was built before*') $true 'boot image without a version: banner'
+    Save-JsonFile -Path (Join-Path $boot 'tool-version.json') -InputObject (ConvertTo-ToolVersionRecord -Version $older -Target Wim)
+    Assert-Equal ((Get-StaleBootImageMessage -Console $console -ContentRoot $root) -like '*1111111*2222222*Rebuild*') $true 'older boot image: banner names both versions'
+    Save-JsonFile -Path (Join-Path $boot 'tool-version.json') -InputObject (ConvertTo-ToolVersionRecord -Version $console -Target Wim)
+    Assert-Equal (Get-StaleBootImageMessage -Console $console -ContentRoot $root) $null 'up-to-date boot image: no banner'
+
     # The media build writes the version into boot.wim and onto the stick; WinPE logs it.
     $build = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
     Assert-Equal ($build -match 'config\\tool-version\.json') $true 'build puts tool-version.json into boot.wim'
     Assert-Equal ($build -match '\$\{dataLetter\}:\\tool-version\.json') $true 'build puts tool-version.json on the DEPLOY partition'
+    Assert-Equal ($build -match "OutputPath 'tool-version\.json'") $true 'network boot build writes Boot\tool-version.json'
     $deploy = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
     Assert-Equal ($deploy -match 'Imaging tool version') $true 'Deploy.log starts with the version'
 }

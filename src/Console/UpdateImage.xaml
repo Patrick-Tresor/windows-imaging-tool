@@ -21,7 +21,11 @@
         <TextBlock x:Name="TxtTitle" Style="{StaticResource Title}" Text="Update image"/>
         <TextBlock x:Name="TxtCurrent" Style="{StaticResource Body}" FontFamily="Consolas"/>
         <TextBlock Style="{StaticResource Body}"
-                   Text="Adds Windows updates to the image without a new capture. Download the latest cumulative update for this Windows version (and the .NET cumulative update) from the Microsoft Update Catalog into the content root's Updates folder. They are applied from top to bottom: put a standalone servicing stack update first."/>
+                   Text="Adds Windows updates to the image without a new capture."/>
+        <CheckBox x:Name="ChkLatest" IsChecked="True" Margin="0,0,0,8"
+                  Content="Download the latest cumulative update for this Windows version from the Microsoft Update Catalog"/>
+        <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}"
+                   Text="Other packages (the .NET cumulative update, or a cumulative update downloaded by hand when the catalog download fails) go in the list below, from the content root's Updates folder. They are applied after it, from top to bottom."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
@@ -29,10 +33,8 @@
                   Content="Clean up superseded components after the updates (smaller image, takes longer)"/>
         <CheckBox x:Name="ChkResetBase" Margin="22,2,0,4"
                   Content="Also reset the base: smallest image, but these updates can no longer be uninstalled on deployed PCs"/>
-        <CheckBox x:Name="ChkBackup" IsChecked="True"
-                  Content="Keep the current version in Images\Previous so it can be restored"/>
         <TextBlock Style="{StaticResource Body}" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0"
-                   Text="The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy."/>
+                   Text="The update runs in the background, shown in the Progress window, and needs about three times the image size free on this PC's system drive. Answer files that use this image get the updated version on the next deploy. The current version is kept in Images\Previous, so Versions... can roll back to it."/>
       </StackPanel>
 
       <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0">

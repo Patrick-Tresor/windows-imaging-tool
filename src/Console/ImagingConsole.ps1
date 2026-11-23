@@ -83,13 +83,11 @@ Import-Module (Join-Path $srcDir 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $srcDir 'ActiveDirectory.psm1') -Force
 Import-Module (Join-Path $srcDir 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'HardwareTests.psm1') -Force
 . (Join-Path $PSScriptRoot 'CaptureWizard.ps1')
 . (Join-Path $PSScriptRoot 'AnswerEditor.ps1')
 . (Join-Path $PSScriptRoot 'ImageVersions.ps1')
 . (Join-Path $PSScriptRoot 'UpdateImage.ps1')
 . (Join-Path $PSScriptRoot 'DriverDownloader.ps1')
-. (Join-Path $PSScriptRoot 'UnknownModels.ps1')
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
 . (Join-Path $PSScriptRoot 'BuildProgress.ps1')
@@ -113,6 +111,7 @@ $ui = $form.Controls
 $script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
 $ui.TxtToolVersion.Text = "version $($script:toolVersion.Text)"
 $script:stickOldHidden = ''
+$script:bootOldMsg = $null
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -143,11 +142,10 @@ function ConvertTo-Arg([string]$Value) {
 }
 
 function Get-WinPEDriverArgs {
-    # The Media tab's WinPE driver choices as build arguments: the USB/ISO build and the network boot image use the same.
+    # The Media tab's extra WinPE drivers as build arguments: the USB build and the network boot image use the same.
+    # Dell's and HP's WinPE driver packs always go in (New-DeploymentMedia's default).
     $a = @()
     if ($ui.TxtPeDrivers.Text) { $a += @('-WinPEDrivers', (ConvertTo-Arg $ui.TxtPeDrivers.Text)) }
-    $peVendors = @(@(if ($ui.ChkPeDell.IsChecked) { 'Dell' }) + @(if ($ui.ChkPeHp.IsChecked) { 'HP' }))
-    if ($peVendors) { $a += @('-WinPEDriverVendors', ($peVendors -join ',')) } else { $a += '-NoVendorWinPEDrivers' }
     $a
 }
 
@@ -285,55 +283,41 @@ function Update-Drivers {
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
     Update-MediaPacks
-    # The count on the button is the nudge to open the report.
-    $unknown = 0
-    if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root).Count } catch { } }
-    $ui.BtnDriversUnknown.Content = if ($unknown) { "Unknown models ($unknown)..." } else { 'Unknown models...' }
-    $ui.BtnDriversUnknown.FontWeight = if ($unknown) { 'SemiBold' } else { 'Normal' }
+    # Models deployed without their driver pack, above the library; hidden when every deployed PC got its pack.
+    $unknown = @()
+    if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root) } catch { } }
+    $ui.GridUnknown.ItemsSource = $unknown
+    $pcs = ($unknown | Measure-Object PCs -Sum).Sum
+    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) deployed without their driver pack. Select one and click Find its pack, then Download."
+    $ui.BdrUnknown.Visibility = if ($unknown) { 'Visible' } else { 'Collapsed' }
 }
 
 function Update-Settings {
     if (-not (Test-ContentRoot $script:root)) { return }
     $s = Get-DeploySettings -ContentRoot $script:root
     $v = Get-DeploySettingsView -ContentRoot $script:root
-    $ui.RbSettingsShare.IsChecked = $v.Mode -eq 'Share'
-    $ui.RbSettingsUsb.IsChecked   = $v.Mode -ne 'Share'
     $ui.TxtSharePath.Text = $v.SharePath
     $ui.TxtShareUser.Text = $v.ShareUser
     $ui.PwdShare.Password = ''
     $script:sharePwSaved = $v.PasswordSaved
     $ui.TxtShareTest.Text = ''
     $ui.TxtSettingsProblem.Text = ''
-    $ui.RbReportShare.IsChecked   = [bool]$v.ReportPath
-    $ui.RbReportDefault.IsChecked = -not $v.ReportPath
-    $ui.TxtReportPath.Text = $v.ReportPath
-    $ui.TxtVersionsToKeep.Text = $v.VersionsToKeep
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
-    Select-ComboText $ui.CmbCheckBitLocker (& $get 'bitLocker' 'Auto')
-    Select-ComboText $ui.CmbCheckDevices (& $get 'deviceErrors' 'Required')
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     Update-SettingsState
 }
 
 function Update-SettingsState {
-    # Greys out what the chosen options don't use, and says whether the share password is saved.
-    $share = [bool]$ui.RbSettingsShare.IsChecked
-    $report = [bool]$ui.RbReportShare.IsChecked
-    $ui.PnlSharePath.IsEnabled = $share
-    $ui.TxtReportPath.IsEnabled = $report
-    $ui.PnlShareAccount.IsEnabled = $share -or $report
-    $ui.PnlShareAccount.Opacity = if ($share -or $report) { 1 } else { 0.5 }
+    # Greys out the account without a share, and says whether the share password is saved.
+    $share = [bool]$ui.TxtSharePath.Text.Trim()
+    $ui.PnlShareAccount.IsEnabled = $share
+    $ui.PnlShareAccount.Opacity = if ($share) { 1 } else { 0.5 }
     $ui.TxtSharePwState.Text = if ($ui.PwdShare.Password) { 'New password, saved when you click Save.' }
                                elseif ($script:sharePwSaved) { 'Password saved.' }
                                elseif ($ui.TxtShareUser.Text.Trim()) { 'No password saved yet.' }
                                else { '' }
-}
-
-function Select-ComboText($Combo, [string]$Text) {
-    $Combo.SelectedItem = @($Combo.Items | Where-Object { "$($_.Content)" -eq $Text })[0]
-    if (-not $Combo.SelectedItem) { $Combo.SelectedIndex = 0 }
 }
 
 function Get-DashboardFolder {
@@ -351,7 +335,6 @@ function Import-StickDashboard([string]$Folder) {
     }
     if ($n) {
         Set-Status "Added $n deployment(s) from the USB stick to the dashboard"
-        try { Update-Logs } catch { }
     }
 }
 
@@ -366,12 +349,18 @@ function Update-Dashboard {
     $ui.TxtDashFailed.Text    = $sum.Failed
     $ui.TxtDashTotal.Text     = $sum.Total
 
-    $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
-        1 { 'Running' }
-        2 { 'Failed', 'Stalled' }
-        3 { 'Succeeded', 'Warning', 'Cancelled' }
-    })
-    if ($states) { $rows = @($rows | Where-Object State -in $states) }
+    if ($ui.CmbDashFilter.SelectedIndex -eq 4) {
+        # History: deployments removed or cleared from the Dashboard, from their final log in Logs\.
+        $onDash = @($rows | ForEach-Object LogFile)
+        $rows = @(if (Test-ContentRoot $script:root) { Get-DeploymentHistoryRows -ContentRoot $script:root -DashboardLogFiles $onDash })
+    } else {
+        $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
+            1 { 'Running' }
+            2 { 'Failed', 'Stalled' }
+            3 { 'Succeeded', 'Warning', 'Cancelled' }
+        })
+        if ($states) { $rows = @($rows | Where-Object State -in $states) }
+    }
 
     # Keep the selected PC selected across refreshes.
     $selectedId = if ($ui.GridDash.SelectedItem) { $ui.GridDash.SelectedItem.Id } else { $null }
@@ -383,6 +372,12 @@ function Update-Dashboard {
 function Update-DashboardDetail {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
+    if ($r.PSObject.Properties['IsHistory']) {
+        $ui.TxtDashDetail.Text = "Final log of $($r.Serial), $($r.State), $($r.Started.ToString('yyyy-MM-dd HH:mm'))"
+        $text = try { [IO.File]::ReadAllText($r.LogPath) } catch { '' }
+        if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
+        return
+    }
     # The deployment's result first (one line each: drivers, applications, tasks, join, BitLocker, time), then the rest.
     $parts = @("MAC: $($r.MacAddress)", "Phase: $($r.Phase)", "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })")
     if ($r.Message)  { $parts += "Error: $($r.Message)" }
@@ -403,55 +398,6 @@ function Update-Tasks {
     $ui.TxtTaskIssues.Text = ''
 }
 
-function Update-HwTests {
-    # The Hardware Tests tab: the doc's tests with their saved results, filtered, the same test kept selected.
-    $doc = [IO.Path]::Combine((Split-Path $srcDir -Parent), 'docs', 'HARDWARE-TESTS.md')
-    $rows = @(Get-HardwareTestRows -DocPath $doc -ContentRoot $(if (Test-ContentRoot $script:root) { $script:root }) -CurrentVersion $script:toolVersion.Text)
-    $ui.TxtHwSummary.Text = (Get-HardwareTestSummary -Rows $rows).Text
-    $shown = @(switch ($ui.CmbHwFilter.SelectedIndex) {
-        1 { $rows | Where-Object { $_.Status -in 'Not tested', 'Passed (older version)' } }
-        2 { $rows | Where-Object Result -eq 'Failed' }
-        3 { $rows | Where-Object Result -eq 'Passed' }
-        default { $rows }
-    })
-    $selectedId = if ($ui.GridHwTests.SelectedItem) { $ui.GridHwTests.SelectedItem.Id } else { $null }
-    $ui.GridHwTests.ItemsSource = $shown
-    if ($selectedId) { $ui.GridHwTests.SelectedItem = @($shown | Where-Object Id -eq $selectedId)[0] }
-}
-
-function Update-HwTestDetail {
-    $t = $ui.GridHwTests.SelectedItem
-    $ui.TxtHwTest.Text = if ($t) { "$($t.Id)  $($t.Test)" } else { 'Pick a test in the list.' }
-    $ui.TxtHwPassWhen.Text = if ($t) { "Passes when: $($t.PassWhen)" } else { '' }
-    $ui.TxtHwNote.Text = if ($t) { $t.Note } else { '' }
-    $ui.TxtHwLog.Text = if ($t -and $t.Log) { "Log: $($t.Log)" } elseif ($t -and $t.Version) { "Tested with version $($t.Version)" } else { '' }
-    if ($t -and $t.Log -and $t.Version) { $ui.TxtHwLog.Text += ", version $($t.Version)" }
-    foreach ($b in 'BtnHwPassed', 'BtnHwFailed', 'BtnHwSkipped', 'BtnHwClear', 'BtnHwAttach') { $ui.$b.IsEnabled = [bool]$t }
-    $ui.BtnHwOpenLog.IsEnabled = [bool]($t -and $t.Log)
-}
-
-function Save-HwTest([string]$Result, [switch]$KeepResult, [string]$Log) {
-    # Saves the selected test with the note in the box; -KeepResult only changes the note or log.
-    if (-not (Test-RootReady)) { return }
-    $t = $ui.GridHwTests.SelectedItem
-    if (-not $t) { return }
-    $resultArgs = @{ ContentRoot = $script:root; Id = $t.Id; Note = $ui.TxtHwNote.Text.Trim() }
-    if ($KeepResult) { $resultArgs.Result = $t.Result; $resultArgs.Version = $t.Version } else { $resultArgs.Result = $Result; $resultArgs.Version = $script:toolVersion.Text }
-    if ($PSBoundParameters.ContainsKey('Log')) { $resultArgs.Log = $Log }
-    Set-HardwareTestResult @resultArgs
-    Update-HwTests
-    Update-HwTestDetail
-    Set-Status $(if ($KeepResult) { "Test $($t.Id) saved" } elseif ($Result) { "Test $($t.Id): $Result" } else { "Test $($t.Id): not tested" })
-}
-
-function Update-Logs {
-    # Deployments still on the Dashboard show their log there; this tab lists everything else.
-    $onDash = @()
-    try { $folder = Get-DashboardFolder; if ($folder) { $onDash = @(Get-DeploymentStatus -Folder $folder | ForEach-Object LogFile) } } catch { }
-    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-LogTabRows -ContentRoot $script:root -DashboardLogFiles $onDash })
-    $ui.TxtLog.Text = ''
-}
-
 function Get-UsbDiskChoices {
     Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object {
         [pscustomobject]@{
@@ -469,13 +415,23 @@ function Update-UsbDisks {
 function Update-StickVersionBanner {
     # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
     # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
-    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    # The network boot image gets the same banner, with a Rebuild button (checked on refresh, not on the timer).
+    $stick = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    $msg = (@($stick, $script:bootOldMsg) | Where-Object { $_ }) -join ' '
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
+        $ui.BtnStickOldUpdate.Visibility = if ($stick) { 'Visible' } else { 'Collapsed' }
+        $ui.BtnBootOldRebuild.Visibility = if ($script:bootOldMsg) { 'Visible' } else { 'Collapsed' }
         $ui.BdrStickOld.Visibility = 'Visible'
     } else {
         $ui.BdrStickOld.Visibility = 'Collapsed'
     }
+}
+
+function Update-BootVersionBanner {
+    # Is <content root>\Boot\boot.wim older than this console? Then the banner says so (Update-StickVersionBanner).
+    $script:bootOldMsg = if ($script:root) { try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null } }
+    Update-StickVersionBanner
 }
 
 function Select-StickForUpdate {
@@ -508,8 +464,8 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard; Update-Logs
-    Update-HwTests
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
+    try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -564,8 +520,16 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name). The Progress window shows each step; its log appears on the Logs tab when it finishes."
+        Set-Status "Updating $($image.Name). The Progress window shows each step; Open log shows its log when it finishes."
     }
+} })
+$ui.BtnImageLog.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    $log = Get-ImageLogPath -ContentRoot $script:root -ImageName ([IO.Path]::GetFileNameWithoutExtension($image.Name))
+    if (-not $log) { Show-Error "No capture or update log for $($image.Name) yet."; return }
+    Invoke-Item $log
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
@@ -630,34 +594,10 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
 
 #region Applications and tasks
 
-# The Applications and Tasks tabs work the same way: export, import and delete an item of the library.
+# The Applications and Tasks tabs delete an item of the library the same way.
 $script:libraryTabs = @{
-    Application = @{ Folder = 'Applications'; Filter = 'Application pack (*.zip)|*.zip'; Files = 'its installer files'; Update = { Update-Apps } }
-    Task        = @{ Folder = 'Tasks'; Filter = 'Task (*.zip)|*.zip'; Files = 'its script files'; Update = { Update-Tasks } }
-}
-
-function Export-LibraryRow([string]$Kind, $Row) {
-    if (-not $Row) { return }
-    $t = $script:libraryTabs[$Kind]
-    $dlg = [Microsoft.Win32.SaveFileDialog]::new()
-    $dlg.Filter = $t.Filter
-    $dlg.FileName = "$($Row.Name).zip"
-    if (-not $dlg.ShowDialog($window)) { return }
-    $window.Cursor = 'Wait'
-    try { Export-LibraryItem -Kind $Kind -Root (Join-Path $script:root $t.Folder) -Name $Row.Name -Path $dlg.FileName | Out-Null } finally { $window.Cursor = $null }
-    Set-Status "Exported $($Row.Name) to $($dlg.FileName)"
-}
-
-function Import-LibraryZip([string]$Kind) {
-    if (-not (Test-RootReady)) { return }
-    $t = $script:libraryTabs[$Kind]
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
-    $dlg.Filter = $t.Filter
-    if (-not $dlg.ShowDialog($window)) { return }
-    $window.Cursor = 'Wait'
-    try { $dest = Import-LibraryItem -Kind $Kind -Root (Join-Path $script:root $t.Folder) -Path $dlg.FileName } finally { $window.Cursor = $null }
-    & $t.Update
-    Set-Status "Imported $(Split-Path $dest -Leaf)"
+    Application = @{ Folder = 'Applications'; Files = 'its installer files'; Update = { Update-Apps } }
+    Task        = @{ Folder = 'Tasks'; Files = 'its script files'; Update = { Update-Tasks } }
 }
 
 function Remove-LibraryRow([string]$Kind, $Row) {
@@ -740,8 +680,6 @@ $ui.BtnAppTest.Add_Click({ Invoke-Safely {
     Set-Status "Detection tested for $($row.Name)"
 } })
 
-$ui.BtnAppExport.Add_Click({ Invoke-Safely { Export-LibraryRow Application (Get-SelectedApp) } })
-$ui.BtnAppImport.Add_Click({ Invoke-Safely { Import-LibraryZip Application } })
 $ui.BtnAppDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Application (Get-SelectedApp) } })
 
 function Get-SelectedTask {
@@ -778,8 +716,6 @@ $ui.GridTaskLibrary.Add_SelectionChanged({
     }
 })
 
-$ui.BtnTaskExport.Add_Click({ Invoke-Safely { Export-LibraryRow Task (Get-SelectedTask) } })
-$ui.BtnTaskImport.Add_Click({ Invoke-Safely { Import-LibraryZip Task } })
 $ui.BtnTaskDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Task (Get-SelectedTask) } })
 
 #endregion
@@ -821,12 +757,38 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The Progress window shows it; the library refreshes when it is done."
 } })
 
-$ui.BtnDriversUnknown.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    if (Show-UnknownModels -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Update-Drivers
-        Set-Status 'Driver library updated. A download that started refreshes it again when it is done.'
+function Show-DriverPacksFound([object[]]$Packs) {
+    # Puts packs in the Find a model online box, the first one picked, ready for Download.
+    $ui.CmbDriverFound.Items.Clear()
+    $script:driverFound = @($Packs)
+    foreach ($p in $script:driverFound) { [void]$ui.CmbDriverFound.Items.Add((Format-VendorDriverPack $p)) }
+    $ui.CmbDriverFound.SelectedIndex = 0; $ui.CmbDriverFound.IsEnabled = $true; $ui.BtnDriverFoundDownload.IsEnabled = $true
+}
+$ui.BtnUnknownFind.Add_Click({ Invoke-Safely {
+    $m = $ui.GridUnknown.SelectedItem
+    if (-not $m) { Set-Status 'Select a model in the list first.'; return }
+    # Its maker's catalog by SKU or machine type first (exact), then a search by name.
+    Set-Status "Looking up the $($m.Maker) $($m.Model) pack..."
+    $window.Cursor = [Windows.Input.Cursors]::Wait
+    $window.Dispatcher.Invoke([action]{}, 'Background')
+    try { $hit = @(Add-UnknownModelPacks -Models @($m.PSObject.Copy()) 3>$null)[0] } finally { $window.Cursor = $null }
+    $ui.TxtDriverFind.Text = if ($m.Sku) { $m.Sku } elseif ($m.MachineType) { $m.MachineType } else { $m.Model }
+    if ($hit.Pack) {
+        Show-DriverPacksFound @($hit.Pack)
+        Set-Status "Found $($hit.PackText). Click Download."
+    } else {
+        $ui.TxtDriverFind.Text = $m.Model
+        Find-DriverPackOnline
     }
+} })
+$ui.BtnUnknownInbox.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $rows = @($ui.GridUnknown.SelectedItems)
+    if (-not $rows) { Set-Status 'Select the models that need no driver pack first.'; return }
+    if (-not (Confirm-Action ("Deploy these with Windows inbox drivers only, without a warning?`n`n" + (($rows | ForEach-Object { "$($_.Maker) $($_.Model)" }) -join "`n")))) { return }
+    foreach ($r in $rows) { Set-UnknownModelInbox -ContentRoot $script:root -Model $r }
+    Update-Drivers
+    Set-Status "$($rows.Count) model(s) set to Windows inbox drivers"
 } })
 
 $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
@@ -957,7 +919,7 @@ function Update-AdBootStatus {
     if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share)." }
+    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
     $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
 }
 
@@ -1056,7 +1018,8 @@ function Get-AdOnlineSummary {
         [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
 }
 
-$ui.BtnAdConnect.Add_Click({ Invoke-Safely {
+function Connect-AdDirectory {
+    # Reads the OUs and lists the computers. Connect runs it, and so does opening the tab (Invoke-AdAutoConnect).
     $cred = Get-AdCredential
     $window.Cursor = 'Wait'
     try {
@@ -1069,7 +1032,31 @@ $ui.BtnAdConnect.Add_Click({ Invoke-Safely {
     $sel = @($items | Where-Object { $_.DN -eq $keep })
     $ui.CmbAdOu.SelectedItem = if ($sel) { $sel[0] } else { $items[0] }
     Search-AdComputers
-} })
+}
+
+function Invoke-AdAutoConnect {
+    # The first time the Computers tab opens: connect by itself when nothing has to be typed (the Deploy Settings
+    # account with its saved password, or this PC's own sign-in), and fold the Connect box away. A failure leaves
+    # the box open with one line in the status bar.
+    if (-not (Test-ContentRoot $script:root)) { return }
+    if ($ui.ChkAdUseShare.IsChecked) {
+        if (-not (Get-ShareAccount) -or -not (Get-SharePassword -ContentRoot $script:root)) { return }
+    } elseif ($ui.TxtAdUser.Text.Trim() -and -not ($script:adCredential -and $script:adCredentialUser -eq $ui.TxtAdUser.Text.Trim())) { return }
+    try {
+        Connect-AdDirectory
+        $ui.GrpAdConnect.Visibility = 'Collapsed'
+        $ui.BtnAdShowConnect.Visibility = 'Visible'
+    } catch {
+        $window.Cursor = $null
+        Set-Status "Could not connect to Active Directory by itself: $($_.Exception.Message)"
+    }
+}
+
+$ui.BtnAdConnect.Add_Click({ Invoke-Safely { Connect-AdDirectory } })
+$ui.BtnAdShowConnect.Add_Click({
+    $ui.GrpAdConnect.Visibility = 'Visible'
+    $ui.BtnAdShowConnect.Visibility = 'Collapsed'
+})
 
 $ui.ChkAdUseShare.Add_Click({ Invoke-Safely {
     # Turned on: keep what was typed in the box, to show it again when turned off.
@@ -1101,7 +1088,7 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
     $buildArgs += Get-WinPEDriverArgs
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus } catch { } }
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
     Set-Status 'Network boot image build started.'
 } })
 
@@ -1188,7 +1175,6 @@ $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll(
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
-$ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO'; if ($p) { $ui.TxtOutput.Text = $p } })
 $ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
@@ -1198,39 +1184,34 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $settingsPath = Join-Path $script:root 'config\deploy-settings.json'
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"), '-SettingsPath', (ConvertTo-Arg $settingsPath))
 
-    if ($ui.RbUsb.IsChecked) {
-        $disk = $ui.CmbUsb.SelectedItem
-        if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
-        if ($ui.ChkCopyContent.IsChecked) {
-            # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
-            $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
-            if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-            # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
-            $packArgs = @{}
-            $allPacks = @($ui.LstMediaPacks.Items)
-            $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
-            if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
-            if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
-            if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-        } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
-        if ($ui.ChkUsbUpdate.IsChecked) {
-            if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
-        } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
-        # Deployments the stick holds go to the dashboard first: erasing it would lose them.
-        $dashFolder = Get-DashboardFolder
-        if ($dashFolder) { Import-StickDashboard $dashFolder }
-        $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-        if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
-        if ($ui.ChkCopyContent.IsChecked) {
-            $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
-            if ($packArgs.ContainsKey('DriverPacks')) {
-                if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
-            }
+    $disk = $ui.CmbUsb.SelectedItem
+    if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
+    if ($ui.ChkCopyContent.IsChecked) {
+        # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+        $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+        if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+        # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+        $packArgs = @{}
+        $allPacks = @($ui.LstMediaPacks.Items)
+        $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+        if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+        $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
+        if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+        if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
+    } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
+    if ($ui.ChkUsbUpdate.IsChecked) {
+        if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
+    } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+    # Deployments the stick holds go to the dashboard first: erasing it would lose them.
+    $dashFolder = Get-DashboardFolder
+    if ($dashFolder) { Import-StickDashboard $dashFolder }
+    $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
+    if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
+    if ($ui.ChkCopyContent.IsChecked) {
+        $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
+        if ($packArgs.ContainsKey('DriverPacks')) {
+            if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
         }
-    } else {
-        if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
-        $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
     }
     $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
@@ -1242,16 +1223,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked) {
+    } elseif ($ui.ChkCopyContent.IsChecked) {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
-    if ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked -and -not $ui.ChkAppDownloads.IsChecked) { $buildArgs += '-NoAppDownloads' }
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
     $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
-    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } else { 'ISO' }
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building $what"
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)"
     Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 
@@ -1263,16 +1242,12 @@ function Set-ShareTestText([string]$Text, [string]$Brush) {
     $ui.TxtShareTest.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Brush)
     $ui.TxtShareTest.Text = $Text
 }
-foreach ($rb in 'RbSettingsUsb', 'RbSettingsShare', 'RbReportDefault', 'RbReportShare') {
-    $ui[$rb].Add_Checked({ Invoke-Safely { Update-SettingsState } })
-}
+$ui.TxtSharePath.Add_TextChanged({ Update-SettingsState })
 $ui.PwdShare.Add_PasswordChanged({ Update-SettingsState })
 $ui.TxtShareUser.Add_TextChanged({ Update-SettingsState })
 
 $ui.BtnShareTest.Add_Click({ Invoke-Safely {
-    $share = if ($ui.RbSettingsShare.IsChecked) { $ui.TxtSharePath.Text.Trim() } else { '' }
-    $report = if ($ui.RbReportShare.IsChecked) { $ui.TxtReportPath.Text.Trim() } else { '' }
-    $target = if ($share) { $share } elseif ($report) { $report } else { '' }
+    $target = $ui.TxtSharePath.Text.Trim()
     if (-not (Get-UncRoot $target)) { Set-ShareTestText 'Type a share like \\SERVER01\Deploy first.' 'ErrorBrush'; return }
     $user = $ui.TxtShareUser.Text.Trim()
     $pw = $ui.PwdShare.Password
@@ -1281,7 +1256,7 @@ $ui.BtnShareTest.Add_Click({ Invoke-Safely {
     $window.Cursor = [Windows.Input.Cursors]::Wait
     try {
         $window.Dispatcher.Invoke([action]{}, 'Background')   # let the line paint before net use blocks
-        $r = Test-ShareConnection -SharePath $target -User $user -Password $pw -StatusPath $report -StatusOnly:(-not $share)
+        $r = Test-ShareConnection -SharePath $target -User $user -Password $pw
     } finally { $window.Cursor = $null; $pw = $null }
     Set-ShareTestText $r.Message $(if ($r.Ok) { 'SuccessBrush' } else { 'ErrorBrush' })
     Set-Status $(if ($r.Ok) { 'Share connection works' } else { 'Share connection failed' })
@@ -1305,21 +1280,15 @@ $ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
 
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
-    $mode = if ($ui.RbSettingsShare.IsChecked) { 'Share' } else { 'Usb' }
-    $reportElsewhere = [bool]$ui.RbReportShare.IsChecked
-    $problems = @(Get-DeploySettingsProblems -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password -ReportPath $ui.TxtReportPath.Text `
-        -ReportElsewhere $reportElsewhere -VersionsToKeep $ui.TxtVersionsToKeep.Text)
+    $problems = @(Get-DeploySettingsProblems -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password)
     if ($problems) { $ui.TxtSettingsProblem.Text = $problems[0]; Set-Status "Not saved: $($problems[0])"; return }
     $ui.TxtSettingsProblem.Text = ''
-    $r = Save-DeploySettingsPage -ContentRoot $script:root -Mode $mode -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
-        -NewPassword $ui.PwdShare.Password -ReportPath $(if ($reportElsewhere) { $ui.TxtReportPath.Text } else { '' }) `
-        -VersionsToKeep ([int]$ui.TxtVersionsToKeep.Text.Trim())
+    $r = Save-DeploySettingsPage -ContentRoot $script:root -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
+        -NewPassword $ui.PwdShare.Password
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
         enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
-        bitLocker     = "$($ui.CmbCheckBitLocker.SelectedItem.Content)"
-        deviceErrors  = "$($ui.CmbCheckDevices.SelectedItem.Content)"
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
@@ -1341,11 +1310,11 @@ $ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
 $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { Show-Error 'Select a PC first.'; return }
+    if ($r.PSObject.Properties['IsHistory']) { Show-Error 'This deployment is already off the Dashboard.'; return }
     if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
-    Update-Logs
-    Set-Status "Removed $($r.Serial) from the dashboard. Its final log is now on the Logs tab."
+    Set-Status "Removed $($r.Serial) from the dashboard. Show: History has its final log."
 } })
 
 $ui.BtnDashClear.Add_Click({ Invoke-Safely {
@@ -1353,10 +1322,9 @@ $ui.BtnDashClear.Add_Click({ Invoke-Safely {
     if (-not $folder) { return }
     $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
     if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. The cleared PCs' final logs move to the Logs tab.")) { return }
+    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. Their final logs stay under Show: History.")) { return }
     Remove-DeploymentStatus -Rows $done
     Update-Dashboard
-    Update-Logs
     Set-Status "Cleared $($done.Count) finished deployment(s)"
 } })
 
@@ -1381,6 +1349,11 @@ $ui.Tabs.Add_SelectionChanged({
     if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) {
         try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
     }
+    if ($e.OriginalSource -eq $ui.Tabs -and $ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not $script:adAutoTried) {
+        # Once per console session, after the tab has painted.
+        $script:adAutoTried = $true
+        [void]$window.Dispatcher.BeginInvoke([action]{ Invoke-AdAutoConnect }, 'Background')
+    }
 })
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
 $window.Add_Closing({ $script:ConsoleClosing = $true })
@@ -1388,6 +1361,7 @@ $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
+$ui.BtnBootOldRebuild.Add_Click({ $ui.BtnAdBuildBoot.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) })
 $ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
 $script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:stickTimer.Interval = [timespan]::FromSeconds(5)
@@ -1396,44 +1370,8 @@ $script:stickTimer.Start()
 
 #endregion
 
-#region Hardware tests
-
-$ui.CmbHwFilter.Add_SelectionChanged({ Invoke-Safely { Update-HwTests } })
-$ui.GridHwTests.Add_SelectionChanged({ Invoke-Safely { Update-HwTestDetail } })
-$ui.BtnHwPassed.Add_Click({ Invoke-Safely { Save-HwTest 'Passed' } })
-$ui.BtnHwFailed.Add_Click({ Invoke-Safely { Save-HwTest 'Failed' } })
-$ui.BtnHwSkipped.Add_Click({ Invoke-Safely { Save-HwTest 'Skipped' } })
-$ui.BtnHwClear.Add_Click({ Invoke-Safely { Save-HwTest '' } })
-$ui.TxtHwNote.Add_LostFocus({ Invoke-Safely {
-    $t = $ui.GridHwTests.SelectedItem
-    if ($t -and $ui.TxtHwNote.Text.Trim() -ne $t.Note) { Save-HwTest -KeepResult }
-} })
-$ui.BtnHwAttach.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
-    $log = Find-LatestDeployLog -ContentRoot $script:root
-    if (-not $log) { Show-Error 'No log in the Logs folder of the content root yet. Deploy a PC, or use Copy logs in WinPE.'; return }
-    Save-HwTest -KeepResult -Log $log
-} })
-$ui.BtnHwOpenLog.Add_Click({ Invoke-Safely {
-    $t = $ui.GridHwTests.SelectedItem
-    if ($t -and $t.Log) { Invoke-Item ([IO.Path]::Combine($script:root, $t.Log)) }
-} })
-Update-HwTestDetail
-
-#endregion
-
-#region Logs
-
-$ui.BtnLogsRefresh.Add_Click({ Invoke-Safely { Update-Logs; Set-Status 'Logs refreshed' } })
-$ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
-    $log = $ui.GridLogs.SelectedItem
-    $ui.TxtLog.Text = if ($log) { Get-Content -Raw $log.FullName } else { '' }
-} })
-
-#endregion
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
-Invoke-Safely { Update-StickVersionBanner }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

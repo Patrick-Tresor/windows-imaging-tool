@@ -426,52 +426,10 @@ function Save-AnswerFromEditor {
 
 #region Library folders (Applications\<name>, Tasks\<name>)
 
-# What differs between an application pack and a task: its folder, its json file and how it is read and checked.
+# What differs between an application pack and a task: its folder and its json file.
 $script:LibraryKinds = @{
-    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application'; Suffix = '.apppack'
-        Check = { param($Name, $Dir)
-            $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'app.json') | ConvertFrom-Json)
-            @(Test-AppPack -Definition $def -Folder $Dir | Where-Object { $_ -notlike 'Warning:*' }) } }
-    Task = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task'; Suffix = ''
-        Check = { param($Name, $Dir)
-            $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'task.json') | ConvertFrom-Json)
-            @(Test-TaskPack -Definition $def -Folder $Dir) } }
-}
-
-function Export-LibraryItem {
-    # Zips <Root>\<name> (installer or script, its json, other files) into one file to copy to another content root.
-    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
-    $k = $script:LibraryKinds[$Kind]
-    $src = Join-Path $Root $Name
-    if (-not (Test-Path (Join-Path $src $k.Json))) { throw "$Name has no $($k.Json) in $src." }
-    if (Test-Path $Path) { Remove-Item $Path -Force }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
-    $Path
-}
-
-function Import-LibraryItem {
-    # Unzips an exported pack into <Root>\<name>; the name comes from the file unless -Name is given.
-    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
-    $k = $script:LibraryKinds[$Kind]
-    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path); if ($k.Suffix) { $Name = $Name -replace "$([regex]::Escape($k.Suffix))$", '' } }
-    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "The $($k.What) name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $dest = Join-Path $Root $Name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "The $($k.What) $Name already exists." }
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("libraryitem-" + [guid]::NewGuid())
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    try {
-        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
-        if (-not (Test-Path (Join-Path $tmp $k.Json))) { throw "$Path is not an exported $($k.What) (no $($k.Json) at the top)." }
-        $problems = @(& $k.Check $Name $tmp)
-        if ($problems) { throw ($problems -join "`n") }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        New-Item -ItemType Directory -Path $Root -Force | Out-Null
-        Move-Item $tmp $dest
-    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
-    $dest
+    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application' }
+    Task        = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task' }
 }
 
 function Remove-LibraryItem {
@@ -665,22 +623,18 @@ function Get-ImageEditions {
 }
 
 function Get-ImageVersionArguments {
-    # Command line for Invoke-ImageVersion.ps1 (keep a copy, or roll back), run by the console hidden, with a card in
+    # Command line for Invoke-ImageVersion.ps1 (roll back), run by the console hidden, with a card in
     # the Progress window (Start-ConsoleJob adds -ProgressFile and -LogPath), because copying an image takes minutes.
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$ImageName,
-        [Parameter(Mandatory)][ValidateSet('Keep', 'Rollback')][string]$Action,
-        [string]$Version,
-        [string]$Note
+        [string]$Version
     )
-    if ($Action -eq 'Rollback' -and -not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
+    if (-not (Test-ImageVersionName $Version)) { throw 'Select an earlier version to roll back to.' }
     $q = { param($v) '"' + ($v -replace '"', "'") + '"' }
     $cmd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $ScriptPath),
-        '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Action', $Action, '-NoPrompt')
-    if ($Version) { $cmd += @('-Version', $Version) }
-    if ($Note) { $cmd += @('-Note', (& $q $Note)) }
+        '-ImagePath', (& $q (Join-ContentPath $ContentRoot "Images\$ImageName")), '-Version', $Version, '-NoPrompt')
     $cmd
 }
 
@@ -758,21 +712,22 @@ function Get-ImageUpdateArguments {
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$ImagePath,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Packages,
+        [switch]$LatestUpdate,
         [int[]]$Index,
         [switch]$Cleanup,
         [switch]$ResetBase,
-        [switch]$NoBackup,
         [string]$ProgressFile,
         [string]$LogPath
     )
-    if (-not $Packages) { throw 'Add at least one update package (.msu or .cab).' }
+    if (-not $Packages -and -not $LatestUpdate) { throw 'Tick "Download the latest cumulative update" or add an update package (.msu or .cab).' }
     if ($ResetBase -and -not $Cleanup) { throw 'Reset base needs component cleanup turned on.' }
     $quote = { param($v) "'" + ($v -replace "'", "''") + "'" }
-    $cmd = "& $(& $quote $ScriptPath) -ImagePath $(& $quote $ImagePath) -PackagePath " + (($Packages | ForEach-Object { & $quote $_ }) -join ',')
+    $cmd = "& $(& $quote $ScriptPath) -ImagePath $(& $quote $ImagePath)"
+    if ($Packages) { $cmd += ' -PackagePath ' + (($Packages | ForEach-Object { & $quote $_ }) -join ',') }
+    if ($LatestUpdate) { $cmd += ' -LatestUpdate' }
     if ($Index) { $cmd += " -Index $($Index -join ',')" }
     if ($Cleanup) { $cmd += ' -Cleanup' }
     if ($ResetBase) { $cmd += ' -ResetBase' }
-    if ($NoBackup) { $cmd += ' -NoBackup' }
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
     if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
@@ -805,9 +760,7 @@ function Get-VMCaptureArguments {
         [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
-        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
-        [switch]$Split,
-        [switch]$NewVersion,
+        [ValidateSet('max', 'recovery')][string]$Compression = 'max',
         [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,
         [string]$ProgressFile,
@@ -819,8 +772,6 @@ function Get-VMCaptureArguments {
     $cmd = "& $(& $quote $ScriptPath) -DiskPath $(& $quote $DiskPath) -Name $(& $quote $Name) -ContentRoot $(& $quote $ContentRoot) -Compression $Compression"
     if ($Description) { $cmd += " -Description $(& $quote $Description)" }
     if ($ImagesDir) { $cmd += " -ImagesDir $(& $quote $ImagesDir)" }
-    if ($Split) { $cmd += ' -SplitSizeMB 3800' }
-    if ($NewVersion) { $cmd += ' -NewVersion' }
     if ($SysprepAtDeploy) { $cmd += ' -SysprepAtDeploy' }
     if ($ReuseConvertedDisk) { $cmd += " -ReuseConvertedDisk $(& $quote $ReuseConvertedDisk)" }
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
@@ -957,22 +908,19 @@ function Test-ExampleShare([string]$Path) {
 function Get-DeploySettingsView {
     <#
     .SYNOPSIS
-        The Deploy Settings page's view of config\deploy-settings.json: USB only or network share, the account, whether
-        its password is saved (never the password itself), and where PCs report for the Dashboard.
+        The Deploy Settings page's view of config\deploy-settings.json: the network share (empty = USB only), the
+        account and whether its password is saved (never the password itself).
     #>
     param([Parameter(Mandatory)][string]$ContentRoot)
     $s = Get-DeploySettings -ContentRoot $ContentRoot
     $share = if ($s.PSObject.Properties['share'] -and $s.share) { $s.share } else { [pscustomobject]@{} }
     $get = { param($o, $n) if ($o.PSObject.Properties[$n]) { "$($o.$n)".Trim() } else { '' } }
     $path = & $get $share 'path'
-    $report = if ($s.PSObject.Properties['reporting'] -and $s.reporting) { & $get $s.reporting 'path' } else { '' }
     [pscustomobject]@{
         Mode           = if ($path) { 'Share' } else { 'Usb' }
         SharePath      = $path
         ShareUser      = & $get $share 'user'
         PasswordSaved  = [bool](Test-AnswerPasswordText (& $get $share 'encryptedPassword'))
-        ReportPath     = $report
-        VersionsToKeep = if ($s.PSObject.Properties['versionsToKeep']) { "$($s.versionsToKeep)" } else { '0' }
     }
 }
 
@@ -994,31 +942,19 @@ function Get-DeploySettingsProblems {
     <#
     .SYNOPSIS
         What stops the Deploy Settings page from saving, one short sentence each; empty when it can save.
-        ReportPath: a separate share for the Dashboard, or empty to report where the deployment comes from.
+        An empty share means USB only.
     #>
     param(
-        [ValidateSet('Usb', 'Share')][string]$Mode = 'Usb',
         [string]$SharePath,
         [string]$ShareUser,
         [bool]$PasswordSaved,
-        [string]$NewPassword,
-        [string]$ReportPath,
-        [bool]$ReportElsewhere,
-        [string]$VersionsToKeep = '0'
+        [string]$NewPassword
     )
     $out = @()
-    $SharePath = "$SharePath".Trim(); $ShareUser = "$ShareUser".Trim(); $ReportPath = "$ReportPath".Trim()
-    if ($Mode -eq 'Share') {
-        if (-not $SharePath) { $out += 'Type the network share, for example \\SERVER01\Deploy.' }
-        elseif (-not (Get-UncRoot $SharePath)) { $out += "The network share must look like \\SERVER01\Deploy, not $SharePath." }
+    $SharePath = "$SharePath".Trim(); $ShareUser = "$ShareUser".Trim()
+    if ($SharePath) {
+        if (-not (Get-UncRoot $SharePath)) { $out += "The network share must look like \\SERVER01\Deploy, not $SharePath." }
         elseif (Test-ExampleShare $SharePath) { $out += "$SharePath is the example value. Type your own server and share." }
-    }
-    if ($ReportElsewhere) {
-        if (-not $ReportPath) { $out += 'Type the share PCs report to, for example \\SERVER01\Deploy\Status.' }
-        elseif (-not (Get-UncRoot $ReportPath)) { $out += "The Dashboard share must look like \\SERVER01\Deploy\Status, not $ReportPath." }
-        elseif (Test-ExampleShare $ReportPath) { $out += "$ReportPath is the example value. Type your own server and share." }
-    }
-    if ($Mode -eq 'Share' -or $ReportElsewhere) {
         if ($ShareUser) {
             if ($ShareUser -notmatch '^[^\\@\s]+\\[^\\@\s]+$' -and $ShareUser -notmatch '^[^\\@\s]+@[^\\@\s]+\.[^\\@\s]+$') {
                 $out += "The account must look like DOMAIN\user or user@domain.com, not $ShareUser."
@@ -1026,15 +962,14 @@ function Get-DeploySettingsProblems {
             elseif (-not $PasswordSaved -and -not $NewPassword) { $out += "Type the password of $ShareUser." }
         }
     }
-    $keep = 0
-    if (-not [int]::TryParse("$VersionsToKeep".Trim(), [ref]$keep) -or $keep -lt 0) { $out += 'Older image versions to keep must be 0 or more (0 keeps every version).' }
     $out
 }
 
 function Save-DeploySettingsPage {
     <#
     .SYNOPSIS
-        Saves the share, account, Dashboard and versions parts of the Deploy Settings page. The share password is kept
+        Saves the share and account parts of the Deploy Settings page. An empty share means USB only.
+        Every deploy reports to <share>\Status, so an old setup's separate reporting.path is dropped. The share password is kept
         encrypted in deploy-settings.json (share.encryptedPassword, AES-256 with the answer file key, like the answer
         files' passwords): no password file. An older setup's passwordFile entry is dropped (its file is not read).
         Returns whether anything WinPE reads changed, so the page can say the stick needs
@@ -1042,16 +977,13 @@ function Save-DeploySettingsPage {
     #>
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
-        [ValidateSet('Usb', 'Share')][string]$Mode = 'Usb',
         [string]$SharePath,
         [string]$ShareUser,
-        [string]$NewPassword,
-        [string]$ReportPath,
-        [int]$VersionsToKeep = 0
+        [string]$NewPassword
     )
     $s = Get-DeploySettings -ContentRoot $ContentRoot
     $before = ($s | ConvertTo-Json -Depth 5 -Compress)
-    $useAccount = $Mode -eq 'Share' -or "$ReportPath".Trim()
+    $SharePath = "$SharePath".Trim().TrimEnd('\')
     if (-not $s.PSObject.Properties['share'] -or -not $s.share) { $s | Add-Member -NotePropertyName share -NotePropertyValue ([pscustomobject]@{}) -Force }
     $set = { param($o, $n, $v) if ($o.PSObject.Properties[$n]) { $o.$n = $v } else { $o | Add-Member -NotePropertyName $n -NotePropertyValue $v } }
 
@@ -1062,13 +994,11 @@ function Save-DeploySettingsPage {
         & $set $s.share 'encryptedPassword' (Protect-AnswerPassword -Password $NewPassword -Key $key)
     }
 
-    & $set $s.share 'path' $(if ($Mode -eq 'Share') { "$SharePath".Trim().TrimEnd('\') } else { '' })
-    & $set $s.share 'user' $(if ($useAccount) { "$ShareUser".Trim() } else { '' })
+    & $set $s.share 'path' $SharePath
+    & $set $s.share 'user' $(if ($SharePath) { "$ShareUser".Trim() } else { '' })
     if ($s.share.PSObject.Properties['passwordFile']) { $s.share.PSObject.Properties.Remove('passwordFile') }
-    if (-not $s.PSObject.Properties['reporting'] -or -not $s.reporting) { $s | Add-Member -NotePropertyName reporting -NotePropertyValue ([pscustomobject]@{ path = '' }) -Force }
-    & $set $s.reporting 'path' "$ReportPath".Trim().TrimEnd('\')
-    & $set $s 'versionsToKeep' $VersionsToKeep
-    $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$(if ($o.share.PSObject.Properties['encryptedPassword']) { $o.share.encryptedPassword })|$($o.reporting.path)" }
+    if ($s.PSObject.Properties['reporting']) { $s.PSObject.Properties.Remove('reporting') }
+    $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$(if ($o.share.PSObject.Properties['encryptedPassword']) { $o.share.encryptedPassword })|$(if ($o.PSObject.Properties['reporting'] -and $o.reporting) { $o.reporting.path })" }
     $old = $before | ConvertFrom-Json
     $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
@@ -1103,17 +1033,15 @@ function Test-ShareConnection {
         [Parameter(Mandatory)][string]$SharePath,
         [string]$User,
         [string]$Password,
-        [string]$StatusPath,          # empty: <share>\Status
-        [switch]$StatusOnly,          # SharePath is only the Dashboard's share (USB deploys): no Images folder expected
         [string]$NetExe = 'net.exe'
     )
     $ErrorActionPreference = 'Continue'
     $SharePath = $SharePath.Trim().TrimEnd('\')
-    $status = if ("$StatusPath".Trim()) { "$StatusPath".Trim().TrimEnd('\') } elseif ($StatusOnly) { $SharePath } else { $SharePath + '\Status' }
+    $status = $SharePath + '\Status'
     $opened = @()
     $fail = { param($m) [pscustomobject]@{ Ok = $false; Message = $m } }
     try {
-        foreach ($root in @(@(Get-UncRoot $SharePath; Get-UncRoot $status) | Where-Object { $_ } | Select-Object -Unique)) {
+        foreach ($root in @(@(Get-UncRoot $SharePath) | Where-Object { $_ })) {
             if (-not $User) { continue }
             $listed = @(& $NetExe use 2>&1 | ForEach-Object { "$_" }) -match [regex]::Escape($root)
             if ($listed) { continue }
@@ -1126,9 +1054,9 @@ function Test-ShareConnection {
             }
             $opened += $root
         }
-        if (-not $StatusOnly -and -not [IO.Directory]::Exists($SharePath)) { return & $fail "Connected, but $SharePath does not exist or the account can't open it." }
+        if (-not [IO.Directory]::Exists($SharePath)) { return & $fail "Connected, but $SharePath does not exist or the account can't open it." }
         $notes = @()
-        if (-not $StatusOnly -and -not [IO.Directory]::Exists([IO.Path]::Combine($SharePath, 'Images'))) { $notes += 'no Images folder there yet (is this the content root?)' }
+        if (-not [IO.Directory]::Exists([IO.Path]::Combine($SharePath, 'Images'))) { $notes += 'no Images folder there yet (is this the content root?)' }
         try {
             [void][IO.Directory]::CreateDirectory($status)
             $probe = [IO.Path]::Combine($status, ".write-test-$([guid]::NewGuid().ToString('N')).tmp")
@@ -1165,18 +1093,36 @@ function Get-DeploymentLogs {
         }
 }
 
-function Get-LogTabRows {
-    # The Logs tab: captures, image updates, and the deployments that are no longer on the Dashboard (removed or
-    # cleared). A deployment still on the Dashboard shows its log there, so it is not listed twice.
+function Get-DeploymentHistoryRows {
+    # The Dashboard's History view: deployments no longer on the Dashboard (removed or cleared), from their final log
+    # in Logs\, shaped like Dashboard rows so the same grid and log pane show them. Newest first.
     # DashboardLogFiles: the Logs\ file names the Dashboard rows point to (their status record's logFile).
     param([Parameter(Mandatory)][string]$ContentRoot, [string[]]$DashboardLogFiles = @())
     $onDash = @{}
     foreach ($f in $DashboardLogFiles) { if ($f) { $onDash[$f.ToUpperInvariant()] = $true } }
     foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
-        $kind = if ($log.Serial -like 'CAPTURE-*') { 'Capture' } elseif ($log.Serial -like 'SERVICE-*') { 'Image update' } else { 'Deployment' }
-        if ($kind -eq 'Deployment' -and $onDash.ContainsKey([IO.Path]::GetFileName($log.FullName).ToUpperInvariant())) { continue }
-        $log | Add-Member -NotePropertyName Kind -NotePropertyValue $kind -PassThru
+        if ($log.Serial -like 'CAPTURE-*' -or $log.Serial -like 'SERVICE-*') { continue }
+        if ($onDash.ContainsKey([IO.Path]::GetFileName($log.FullName).ToUpperInvariant())) { continue }
+        [pscustomobject]@{
+            Id        = "log:$([IO.Path]::GetFileName($log.FullName))"
+            IsHistory = $true
+            Serial    = $log.Serial
+            State     = switch ($log.Status) { 'OK' { 'Succeeded' } 'FAILED' { 'Failed' } default { "$($log.Status)" } }
+            Step      = 'Removed from the Dashboard'
+            Started   = $log.When
+            Percent   = 100
+            LogPath   = $log.FullName
+        }
     }
+}
+
+function Get-ImageLogPath {
+    # The newest capture or image update log of an image (Logs\CAPTURE-VM-<name>_... or SERVICE-<name>_...), for the
+    # Images tab's Open log button; $null when there is none.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
+    $pattern = "^(CAPTURE-VM|CAPTURE|SERVICE)-$([regex]::Escape($ImageName))$"
+    @(Get-DeploymentLogs -ContentRoot $ContentRoot | Where-Object { $_.Serial -match $pattern } | Sort-Object When -Descending |
+        Select-Object -First 1 | ForEach-Object FullName)[0]
 }
 
 #endregion
@@ -1186,11 +1132,11 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
-    Get-DeploymentLogs, Get-LogTabRows,
+    Get-DeploymentLogs, Get-DeploymentHistoryRows, Get-ImageLogPath,
     Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
-    Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
+    Get-TaskUsage, Get-TaskList, Save-Task, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,

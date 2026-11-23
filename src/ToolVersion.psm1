@@ -134,5 +134,17 @@ function Get-StaleStickMessage {
     (@($lines) -join ' ') + ' Update it so it has the latest fixes: Media tab, tick "Update a stick", Build media.'
 }
 
+function Get-StaleBootImageMessage {
+    # One line for the console's banner when the network boot image (<content root>\Boot) was built with an older
+    # version of the tool than this console, or $null when it is up to date or there is none.
+    param([Parameter(Mandatory)]$Console, [Parameter(Mandatory)][string]$ContentRoot)
+    $boot = [IO.Path]::Combine($ContentRoot, 'Boot')
+    if (-not [IO.File]::Exists([IO.Path]::Combine($boot, 'boot.wim'))) { return $null }
+    $b = Read-ToolVersionFile -Path ([IO.Path]::Combine($boot, 'tool-version.json'))
+    if ((Compare-ToolVersion -Console $Console -Stick $b) -ne 'Older') { return $null }
+    if ($b) { "The network boot image was built with version $($b.Text)$(if ($b.Built) { " on $($b.Built)" }); this console is $($Console.Text). Rebuild it so reimaged PCs get the latest fixes." }
+    else { "The network boot image was built before this console stamped versions; this console is $($Console.Text). Rebuild it so reimaged PCs get the latest fixes." }
+}
+
 Export-ModuleMember -Function ConvertTo-ToolVersion, New-ToolVersion, Get-ToolVersion, ConvertTo-ToolVersionRecord, Read-ToolVersionFile,
-    Get-StickToolVersion, Compare-ToolVersion, Get-StaleStickMessage
+    Get-StickToolVersion, Compare-ToolVersion, Get-StaleStickMessage, Get-StaleBootImageMessage

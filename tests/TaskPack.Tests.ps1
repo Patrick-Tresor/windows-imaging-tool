@@ -177,14 +177,6 @@ try {
     $logs = New-TaskFromTemplate -Template (Get-TaskTemplates | Where-Object name -eq 'Copy-DeployLogs')
     Assert-Equal @(Test-TaskPack -Definition $logs.Definition | Where-Object { $_ -like '*REPLACE_SHARE*' }).Count 1 'a template placeholder blocks saving until replaced'
 
-    # Export and import.
-    $zip = Join-Path $root 'Cleanup.zip'
-    Export-LibraryItem -Kind Task -Root $taskRoot -Name 'Cleanup' -Path $zip | Out-Null
-    $other = Join-Path $root 'OtherTasks'
-    Import-LibraryItem -Kind Task -Root $other -Path $zip | Out-Null
-    Assert-Equal "$((Read-TaskPack -TaskRoot $other -Name 'Cleanup').phase)|$(Test-Path (Join-Path $other 'Cleanup/clean.cmd'))" 'POSTIMAGE|True' 'an exported task imports with its script'
-    Assert-Throws { Import-LibraryItem -Kind Task -Root $other -Path $zip } '*already exists*' 'import does not overwrite a task by accident'
-
     # Task logs go straight in C:\Windows\Temp, next to Deploy.log and FirstBoot.log, not in a subfolder.
     # (C:\Temp\Tasks, without Windows, is where FIRSTBOOT tasks are staged.)
     foreach ($f in 'FirstBoot.ps1', 'Deploy-Image.ps1') {
