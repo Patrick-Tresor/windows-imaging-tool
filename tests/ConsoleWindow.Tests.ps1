@@ -31,9 +31,9 @@ Assert-Equal ($text -match 'Dispatcher\.Add_UnhandledException') $true 'an error
 # Dispatcher.BeginInvoke has no (action, priority) overload: BeginInvoke([action]{...}, 'Background') passes the
 # priority to the action as an argument and WPF stops the console with 'Parameter count mismatch' (Computers tab,
 # 2026-11-22). The priority goes first.
-$bad = @(Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Recurse -Include *.ps1, *.psm1 | ForEach-Object {
+$bad = @(Get-ChildItem (Join-Path $repo 'src') -Recurse -File -Include *.ps1, *.psm1 | ForEach-Object {
     $file = $_
-    [regex]::Matches((Get-Content -Raw -LiteralPath $file.FullName), '(?is)BeginInvoke\(\s*\[action\]\s*\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}(?:\.GetNewClosure\(\))?\s*,') |
+    [regex]::Matches([IO.File]::ReadAllText($file.FullName), '(?is)BeginInvoke\(\s*\[action\]\s*\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}(?:\.GetNewClosure\(\))?\s*,') |
         ForEach-Object { "$($file.Name): $($_.Value.Substring(0, [Math]::Min(60, $_.Value.Length)))" }
 })
 Assert-Equal ($bad -join '; ') '' 'no BeginInvoke passes a priority (or anything else) after the action'
