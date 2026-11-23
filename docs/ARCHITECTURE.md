@@ -87,7 +87,7 @@ page reads twice a second (`Get-CaptureCheckView`). The temporary VHD it made is
 with a `.source` note (names, sizes and times of the VM's disk files); the capture
 gets it with `-ReuseConvertedDisk` and uses it only while that note still matches
 (`Test-ConvertedDiskReusable`). The capture then reports its steps with `-ProgressFile`
-to the same Progress window as a media build, which shows the time left for a
+to the same Progress window as a media build (a card that worked closes 10 seconds after it ends), which shows the time left for a
 step with a percent (`Format-TimeLeft` in `BuildSteps.psm1`).
 
 ## Image versions
@@ -236,6 +236,11 @@ with a timeout, check exit code, detect again), writes the results to
 `C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
 post-deploy checks and removes the files it staged in `C:\Temp` (other files there are left alone).
+It keeps the PC awake until it ends, and `Invoke-PackProcess` times each installer against the
+clock. An Office Deployment Tool pack is installed from the Office files the console put next to
+`setup.exe` (`Update-OfficeSources`, run by `New-DeploymentMedia.ps1` and `Start-RemoteReimage.ps1`):
+`New-OfficeDeployConfig` writes `configuration-deploy.xml` on the PC from the pack's own
+configuration (Display None, AcceptEULA, CDN fallback, an unreachable SourcePath dropped).
 
 `AppPack.psm1` holds the application pack format: reading and normalizing
 `app.json`, validation, installer inspection (MSI properties through the Windows

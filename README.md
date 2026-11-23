@@ -15,12 +15,12 @@ src/                 the scripts and modules that run in WinPE, at first boot an
                      Update-OfflineImage.ps1, Start-RemoteReimage.ps1, Invoke-SysprepAtDeploy.ps1,
                      Get-DriverPacks.ps1, Test-Deployment.ps1, and their *.psm1 modules; Assets\ (logo)
 src/Console/         ImagingConsole.ps1 (WPF GUI, MainWindow.xaml), the capture wizard, answer file, application
-                     and task editors, Update image, Versions and Progress windows, ConsoleData.psm1,
-                     DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
+                     and task editors, Update image, Versions and Progress windows, Styles.xaml (colours and
+                     button styles), ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json, app-templates.json, task-templates.json,
                      office-configuration.xml, answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
-tests/               *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
+tests/               Run-All.ps1 (every suite, as CI runs them), *.Tests.ps1 (pwsh -File tests/<name>.Tests.ps1), fixtures/
 ```
 
 ## Admin console
@@ -33,26 +33,22 @@ The header shows the tool's version, `v1.NN`, where NN counts the pull requests 
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
 plugged-in stick or the network boot image is older than the console, with **Update the stick** or
 **Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
-one **Progress** window; **Show progress** in the header opens it again after you close it.
-Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
-with **Browse...**; a new folder gets the content folders right away. Then:
+one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
+by itself once nothing is left; a failed job stays, with its log. **Show progress** in the header opens
+it again after you close it.
+
+The window has a header bar at the top (logo, version, the **content root** with **Browse...**
+and **Open folder**, and **Show progress** while a job runs), the tabs down the left side, and a
+status line at the bottom. Pick a **content root** (a local folder, the USB `DEPLOY` volume, or
+the share) with **Browse...**; a new folder gets the content folders right away. Each tab
+reloads when you open it, so there are no Refresh buttons. The tabs, top to bottom:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).
   **Versions...** (or double-click an image) lists its earlier versions (see
   [Image versions and rollback](#image-versions-and-rollback)).
   **Update image...** adds Windows updates to the selected image (see
-  [Updating an image](#updating-an-image)).
-- **Answer Files**: create, edit and check deployment profiles, and
-  **Delete** one (it asks first).
-  **New** and **Edit** (or double-click) open the answer file editor, where every
-  setting is a form field: General, Image and disk, Applications (pick and order
-  them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
-  boxes and saved in the answer file, encrypted (see Passwords below).
-- **Apps and Tasks**: one list of application packs and task scripts, with
-  when each runs. **New application...** opens the pack builder, **New task...**
-  the task editor (see Applications and Tasks below).
+  [Updating an image](#updating-an-image)). **Open log** shows the capture or update log.
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
   driver pack catalogs for a model, SKU or machine type; pick the pack and it
   downloads, checks, extracts and registers it. You can also import a pack you already have
@@ -75,6 +71,21 @@ with **Browse...**; a new folder gets the content folders right away. Then:
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
+  Pick the **USB disk**, tick **Update a stick this console built before** to refresh one
+  without erasing it, uncheck the **Driver packs on USB** you don't need, type the
+  **WinPE password** twice and click **Build media**. When Windows refused the console's
+  Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
+- **Answer Files**: create, edit and check deployment profiles, and
+  **Delete** one (it asks first).
+  **New** and **Edit** (or double-click) open the answer file editor, where every
+  setting is a form field: General, Image and disk, Applications (pick and order
+  them, or add a new installer), Windows settings, Computer name (with a preview),
+  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
+  boxes and saved in the answer file, encrypted (see Passwords below).
+- **Apps and Tasks**: one list of application packs and task scripts, with
+  when each runs. **New application...** opens the pack builder, **New task...**
+  the task editor, **Edit** and **Delete** the selected one, and **Find an app online**
+  adds an application from the winget catalog (see Applications and Tasks below).
 - **Deploy Settings**: four short sections. 1) The network share, left empty
   for USB sticks only (needed for ISO boot and the Computers tab; with a share,
   every PC, USB ones too, reports to its `Status` folder for the Dashboard).
@@ -92,9 +103,10 @@ with **Browse...**; a new folder gets the content folders right away. Then:
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. At the end, the **Result**
-  column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open; every tab
-  reloads when you open it, so there are no Refresh buttons.
-  See [Deployment dashboard](#deployment-dashboard). The **History** filter
+  column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open.
+  Counters at the top (Deploying, Succeeded, With warnings, Failed or stalled, PCs
+  listed), a **Show** filter (All, Deploying, Failed or stalled, Finished, History),
+  **Open folder** and **Remove**. **History**
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.
 
@@ -332,7 +344,8 @@ tab, or with **New application...** in the answer file editor:
 
 On the PC, apps for another maker or model are skipped in WinPE and never copied.
 At first boot each app is skipped when its detection already finds it, runs from
-its folder as SYSTEM, is stopped after its timeout, and is marked
+its folder as SYSTEM, is stopped after its timeout (real time, so a PC that
+slept does not stretch it; the PC is kept awake until first boot ends), and is marked
 failed when it exits 0 but detection still can't find it. Results go to
 `C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
@@ -348,9 +361,14 @@ Two installers need more than a silent switch:
 - **Microsoft 365 Apps (Office).** `OfficeSetup.exe` from office.com exits 0
   without installing anything. Use the Office Deployment Tool's `setup.exe`
   with a `configuration.xml` next to it (template `Microsoft-365-Apps`, sample in
-  `config\office-configuration.xml`). It downloads Office at first boot unless
-  you run `setup.exe /download configuration.xml` first and keep the files
-  in the pack.
+  `config\office-configuration.xml`). Each USB build and each reimage first
+  downloads the Office files into the pack on the console PC (`setup.exe
+  /download`, refreshed every 14 days or when `configuration.xml` changes, older
+  versions removed), so every PC installs Office from its own copy instead of
+  downloading 2-3 GB from Microsoft; the internet stays as a backup. On the PC,
+  the pack's own `configuration.xml` is used (found by name in the pack folder),
+  made silent (no Office window, EULA accepted), and a `SourcePath` the PC can't
+  reach is dropped. Office gets at least 60 minutes.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
   before Dell Command | Update in the answer file.
@@ -363,8 +381,8 @@ The PC needs internet at first boot; it tries for about five minutes, and a
 failed download marks the application failed in `FirstBoot.log`.
 To make one, click **New application...** on the Apps and Tasks tab, pick the template,
 leave the installer empty and click **Apply**: the pack gets the publisher's
-link (and, for Office, `configuration.xml`). The **Download
-link** column shows which packs download, and the builder's **Download from**
+link (and, for Office, `configuration.xml`). A pack's details on the Apps and
+Tasks tab show where it downloads from, and the builder's **Download from**
 box takes any other address. When the installer file is
 in the pack folder anyway, it is used and nothing is downloaded.
 
@@ -464,7 +482,7 @@ update reads the image's Windows build, finds the newest x64 cumulative update f
 that version (not a preview) in the
 [Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
 it into the content root's `Updates` folder (both files for a Windows 11 24H2
-checkpoint update), then applies it. The catalog has no official interface, so this
+checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H2), then applies it. The catalog has no official interface, so this
 can stop working when Microsoft changes the site: the update then fails before
 touching the image, and the message says to download the `.msu` by hand into
 `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
@@ -637,10 +655,10 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    .vmdk you pick, and the capture refuses to start while VMware still has the VM open. No
    password or ISO is needed, and the VM, its disk and its snapshots are left alone.
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
-   on it. Untested on Windows, including every conversion.
+   on it. VMDK capture from VMware Workstation has worked; the other conversions are untested.
 4. **Add drivers** in the console's Driver Library tab (**Find a model online**).
    After deploying, the same tab lists the models that had no pack, and **Find
-   selected online** finds theirs. You can also extract a pack into
+   its pack** finds theirs. You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
    Each month, run **Update image...** to add the latest cumulative update instead of
