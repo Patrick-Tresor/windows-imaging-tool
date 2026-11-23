@@ -296,8 +296,6 @@
             <Button x:Name="BtnAppNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnAppEdit" Content="Edit"/>
             <Button x:Name="BtnAppTest" Content="Test detection"/>
-            <Button x:Name="BtnAppExport" Content="Export..."/>
-            <Button x:Name="BtnAppImport" Content="Import..."/>
             <Button x:Name="BtnAppDelete" Content="Delete"/>
             <Button x:Name="BtnAppsRefresh" Content="Refresh"/>
             <Button x:Name="BtnAppsOpen" Content="Open folder"/>
@@ -346,8 +344,6 @@
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnTaskNew" Content="New..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnTaskEdit" Content="Edit"/>
-            <Button x:Name="BtnTaskExport" Content="Export..."/>
-            <Button x:Name="BtnTaskImport" Content="Import..."/>
             <Button x:Name="BtnTaskDelete" Content="Delete"/>
             <Button x:Name="BtnTasksRefresh" Content="Refresh"/>
             <Button x:Name="BtnTasksOpen" Content="Open folder"/>

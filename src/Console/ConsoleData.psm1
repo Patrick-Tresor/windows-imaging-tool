@@ -426,52 +426,10 @@ function Save-AnswerFromEditor {
 
 #region Library folders (Applications\<name>, Tasks\<name>)
 
-# What differs between an application pack and a task: its folder, its json file and how it is read and checked.
+# What differs between an application pack and a task: its folder and its json file.
 $script:LibraryKinds = @{
-    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application'; Suffix = '.apppack'
-        Check = { param($Name, $Dir)
-            $def = ConvertTo-AppDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'app.json') | ConvertFrom-Json)
-            @(Test-AppPack -Definition $def -Folder $Dir | Where-Object { $_ -notlike 'Warning:*' }) } }
-    Task = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task'; Suffix = ''
-        Check = { param($Name, $Dir)
-            $def = ConvertTo-TaskDefinition -Name $Name -Json (Get-Content -Raw (Join-Path $Dir 'task.json') | ConvertFrom-Json)
-            @(Test-TaskPack -Definition $def -Folder $Dir) } }
-}
-
-function Export-LibraryItem {
-    # Zips <Root>\<name> (installer or script, its json, other files) into one file to copy to another content root.
-    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
-    $k = $script:LibraryKinds[$Kind]
-    $src = Join-Path $Root $Name
-    if (-not (Test-Path (Join-Path $src $k.Json))) { throw "$Name has no $($k.Json) in $src." }
-    if (Test-Path $Path) { Remove-Item $Path -Force }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $src).ProviderPath, $Path, 'Optimal', $false)
-    $Path
-}
-
-function Import-LibraryItem {
-    # Unzips an exported pack into <Root>\<name>; the name comes from the file unless -Name is given.
-    param([Parameter(Mandatory)][ValidateSet('Application', 'Task')][string]$Kind, [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Path, [string]$Name, [switch]$Overwrite)
-    $k = $script:LibraryKinds[$Kind]
-    if (-not $Name) { $Name = [IO.Path]::GetFileNameWithoutExtension($Path); if ($k.Suffix) { $Name = $Name -replace "$([regex]::Escape($k.Suffix))$", '' } }
-    if ($Name -notmatch '^[A-Za-z0-9._-]+$') { throw "The $($k.What) name '$Name' may only contain letters, digits, dot, dash and underscore." }
-    $dest = Join-Path $Root $Name
-    if ((Test-Path $dest) -and -not $Overwrite) { throw "The $($k.What) $Name already exists." }
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("libraryitem-" + [guid]::NewGuid())
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    try {
-        [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $Path).ProviderPath, $tmp)
-        if (-not (Test-Path (Join-Path $tmp $k.Json))) { throw "$Path is not an exported $($k.What) (no $($k.Json) at the top)." }
-        $problems = @(& $k.Check $Name $tmp)
-        if ($problems) { throw ($problems -join "`n") }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        New-Item -ItemType Directory -Path $Root -Force | Out-Null
-        Move-Item $tmp $dest
-    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force } }
-    $dest
+    Application = @{ Folder = 'Applications'; Json = 'app.json'; What = 'application' }
+    Task        = @{ Folder = 'Tasks'; Json = 'task.json'; What = 'task' }
 }
 
 function Remove-LibraryItem {
@@ -1171,7 +1129,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
-    Get-TaskUsage, Get-TaskList, Save-Task, Export-LibraryItem, Import-LibraryItem, Remove-LibraryItem,
+    Get-TaskUsage, Get-TaskList, Save-Task, Remove-LibraryItem,
     Get-ImageVersionRows, Remove-ImageVersions, Get-ImageVersionsToDelete, Get-ImageVersionArguments,
     Get-ImageEditions,
     Get-UpdateKB, Get-UpdatePackageRows, Get-ImageServicingHistory, Add-ImageServicingRecord, Get-ImageUpdateArguments,

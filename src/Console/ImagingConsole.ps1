@@ -614,34 +614,10 @@ $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
 
 #region Applications and tasks
 
-# The Applications and Tasks tabs work the same way: export, import and delete an item of the library.
+# The Applications and Tasks tabs delete an item of the library the same way.
 $script:libraryTabs = @{
-    Application = @{ Folder = 'Applications'; Filter = 'Application pack (*.zip)|*.zip'; Files = 'its installer files'; Update = { Update-Apps } }
-    Task        = @{ Folder = 'Tasks'; Filter = 'Task (*.zip)|*.zip'; Files = 'its script files'; Update = { Update-Tasks } }
-}
-
-function Export-LibraryRow([string]$Kind, $Row) {
-    if (-not $Row) { return }
-    $t = $script:libraryTabs[$Kind]
-    $dlg = [Microsoft.Win32.SaveFileDialog]::new()
-    $dlg.Filter = $t.Filter
-    $dlg.FileName = "$($Row.Name).zip"
-    if (-not $dlg.ShowDialog($window)) { return }
-    $window.Cursor = 'Wait'
-    try { Export-LibraryItem -Kind $Kind -Root (Join-Path $script:root $t.Folder) -Name $Row.Name -Path $dlg.FileName | Out-Null } finally { $window.Cursor = $null }
-    Set-Status "Exported $($Row.Name) to $($dlg.FileName)"
-}
-
-function Import-LibraryZip([string]$Kind) {
-    if (-not (Test-RootReady)) { return }
-    $t = $script:libraryTabs[$Kind]
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new()
-    $dlg.Filter = $t.Filter
-    if (-not $dlg.ShowDialog($window)) { return }
-    $window.Cursor = 'Wait'
-    try { $dest = Import-LibraryItem -Kind $Kind -Root (Join-Path $script:root $t.Folder) -Path $dlg.FileName } finally { $window.Cursor = $null }
-    & $t.Update
-    Set-Status "Imported $(Split-Path $dest -Leaf)"
+    Application = @{ Folder = 'Applications'; Files = 'its installer files'; Update = { Update-Apps } }
+    Task        = @{ Folder = 'Tasks'; Files = 'its script files'; Update = { Update-Tasks } }
 }
 
 function Remove-LibraryRow([string]$Kind, $Row) {
@@ -724,8 +700,6 @@ $ui.BtnAppTest.Add_Click({ Invoke-Safely {
     Set-Status "Detection tested for $($row.Name)"
 } })
 
-$ui.BtnAppExport.Add_Click({ Invoke-Safely { Export-LibraryRow Application (Get-SelectedApp) } })
-$ui.BtnAppImport.Add_Click({ Invoke-Safely { Import-LibraryZip Application } })
 $ui.BtnAppDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Application (Get-SelectedApp) } })
 
 function Get-SelectedTask {
@@ -762,8 +736,6 @@ $ui.GridTaskLibrary.Add_SelectionChanged({
     }
 })
 
-$ui.BtnTaskExport.Add_Click({ Invoke-Safely { Export-LibraryRow Task (Get-SelectedTask) } })
-$ui.BtnTaskImport.Add_Click({ Invoke-Safely { Import-LibraryZip Task } })
 $ui.BtnTaskDelete.Add_Click({ Invoke-Safely { Remove-LibraryRow Task (Get-SelectedTask) } })
 
 #endregion
