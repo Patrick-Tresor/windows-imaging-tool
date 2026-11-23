@@ -8,13 +8,13 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | Piece | Runs on | What it does |
 |---|---|---|
 | **Reference prep** (`src/Prepare-Reference.ps1`) | Inside the reference machine | Checks for a pending reboot, BitLocker and per-user Store apps (sysprep error 0x80073cf2), then runs sysprep and shuts down. |
-| **Capture** (`src/Capture-VMImage.ps1`) | The admin PC, reading the shut-down reference VM's disk file | Captures the sysprepped Windows on the disk to `Images\<name>.wim`; with `-NewVersion` it replaces an existing image and keeps the old one in `Images\Previous\`. |
+| **Capture** (`src/Capture-VMImage.ps1`) | The admin PC, reading the shut-down reference VM's disk file | Captures the sysprepped Windows on the disk to `Images\<name>.wim`; an existing image of that name is replaced once the capture succeeds and kept in `Images\Previous\`. |
 | **Sysprep at deploy** (`src/SysprepAtDeploy.psm1`, `src/Invoke-SysprepAtDeploy.ps1`) | WinPE, then the deployed PC's first start | Optional, for an image captured without sysprep (`Capture-VMImage.ps1 -SysprepAtDeploy`). After applying the image, WinPE sees it is not generalized and sets `HKLM\SYSTEM\Setup` SetupType 2 + CmdLine offline. At the first start that hook starts a SYSTEM task and waits for it, so no logon screen appears; the task runs `Prepare-Reference.ps1 -CheckOnly -RemoveUserApps` and `sysprep /generalize /oobe /reboot /unattend`, and removes the task and its PreventDeviceEncryption value before sysprep. The deploy screen and the PC show nothing about sysprep; only a failure turns the hook off and is shown on the logon screen and logged to `C:\Windows\Temp\SysprepAtDeploy.log`. |
 | **Image versions** (`src/ImageVersions.psm1`, `src/Invoke-ImageVersion.ps1`) | WinPE and the admin workstation | Keeps earlier images, rolls back, and resolves the version an answer file is pinned to. |
 | **Reimage from Active Directory** (`src/ActiveDirectory.psm1`, `src/RemoteReimage.psm1`, `src/Start-RemoteReimage.ps1`) | Admin workstation, then WinPE | The console's Computers tab lists computer accounts over LDAP (ADSI, no RSAT). A reimage reads each PC over WinRM (name, serial, UUID, UEFI), writes `Reimage\<serial>.json` on the share, copies `Boot\boot.wim` to `C:\_ImagingBoot` with a one-time RAM disk boot entry (`bcdedit /bootsequence`), suspends BitLocker for one restart and restarts. `Deploy-Image.ps1` takes the job by serial (UUID checked) right after mapping the share, moves it to `Reimage\Started`, and deploys its answer file with the kept name and OU, no wizard and no password prompts. |
 | **Driver library** (`config/driver-catalog.json` + `Drivers\`) | The share or USB | Maps a PC's identity (maker, model, SKU / Lenovo machine type) to a driver folder. |
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
-| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, an ISO, or a `boot.wim` for the Computers tab's network boot. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
+| **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, or (`-Target Wim`) a `boot.wim` for the Computers tab's network boot plus `Deploy-WinPE.iso` of the same WinPE, both in `Boot\` with a `tool-version.json` the console compares with its own version. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
 | **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
 
@@ -111,14 +111,14 @@ as kept by an offline update.
   If the link fails, the partial copy is removed and the old current image moved back.
 - Retention: `Invoke-ImageVersionRetention` (in `ImageVersions.psm1`, so WinPE can
   use it too) keeps the newest N and deletes older versions that no answer file is
-  pinned to, plus anything passed as `-Protect`. N is the image's own limit in
-  `Images\<name>.versions.json` if it has one, else `versionsToKeep` in
-  deploy-settings.json, else 0 (keep all). It runs after a copy, a rollback, and a
-  replacing capture (`Capture-VMImage.ps1`).
+  pinned to, plus anything passed as `-Protect`. N is `versionsToKeep` in
+  deploy-settings.json (one count for every image, set in the Versions window), else
+  0 (keep all). It runs after a rollback, a capture (`Capture-VMImage.ps1`) and an
+  offline update.
 - `Test-ImageHardLinks` tells the rollback whether it can link; the console and
   `Invoke-ImageVersion.ps1` warn when it can't and the rollback will copy.
-- `Capture-VMImage.ps1 -NewVersion` captures into `Images\.capture-<name>\`,
-  then archives the old image and moves the new one in, so a failed capture
+- `Capture-VMImage.ps1` captures into `Images\.capture-<name>\`, then archives
+  the old image (when there is one) and moves the new one in, so a failed capture
   leaves the current image alone.
 - `Deploy-Image.ps1` reads `<image><version>`; when it is set it deploys
   `Get-ImageVersionPath` (the file in the version folder) instead of the current image.
@@ -268,9 +268,11 @@ Microsoft Entra key backup is not done: the PC is not Entra joined at first boot
 the content root is found, `Deploy-Image.ps1` starts a status record and
 rewrites `Status\<id>.json` (write to `.tmp`, then rename) plus `Status\<id>.log`
 at each step; `<id>` is the BIOS serial, or `MAC-<mac>` for placeholder serials.
-`Resolve-StatusTarget` picks the folder: the content root's `Status`, or
-`reporting.path` from `deploy-settings.json`, reached through the share's `Z:`
-when it lies under the share and mapped as `R:` otherwise. DISM's apply runs
+`Resolve-StatusTarget` picks the folder: the share's `Status` whenever
+`deploy-settings.json` names a share (a USB deploy maps it as `R:` with the share
+account, and falls back to the stick's `Status` when it can't), else the content
+root's `Status`. An older `reporting.path` is still honoured. The example share
+names (`\\deploy-server`, `\\server`, `\\yourserver`) count as no share. DISM's apply runs
 through `Invoke-NativeWithProgress`, which polls its output every 15 seconds
 for a percentage and doubles as a heartbeat. Reporting never fails a deployment:
 a write error is one warning in the log.
@@ -285,8 +287,8 @@ ends as Warning instead of Succeeded.
 
 `PostDeployChecks.psm1` is split so it can be tested off Windows. In WinPE,
 `New-PostDeployCheckPlan` writes what the PC should look like into
-`firstboot.json` (`checks`: name, membership, domain, BitLocker and device error
-modes, applications and any legacy `detect` rule). At the end of `FirstBoot.ps1`,
+`firstboot.json` (`checks`: name, membership, domain, BitLocker and device errors
+(always `Report`: a warning, never a failure), applications and any legacy `detect` rule). At the end of `FirstBoot.ps1`,
 `Get-PostDeployFacts` reads the PC (`Win32_ComputerSystem`,
 `Test-ComputerSecureChannel`, `Win32_PnPEntity` with a non-zero
 `ConfigManagerErrorCode`, the Uninstall registry keys, `Get-BitLockerVolume`),
@@ -368,7 +370,7 @@ The downloads run in a hidden PowerShell process (`Get-DriverPacks.ps1
 Packs can still be added by hand: extract one to `Drivers\<Maker>\<Model>\`
 and import it from the Driver Library tab.
 
-### Unknown models report
+### Models deployed without a driver pack
 
 Every deployment's dashboard status record (`Status\<id>.json`, the same
 file the Dashboard reads) holds the PC's maker, model, SKU / machine type,
@@ -383,9 +385,10 @@ still read, and a newer status record of the same PC wins.
 the current catalog and `Drivers\` folder, so a model leaves the report as soon
 as the library covers it. The rest are grouped by maker, model and SKU / machine
 type, most PCs first. For Dell, HP and Lenovo it looks the model up in the
-vendor catalog (SKU or machine type, then model name). The console's
-**Unknown models...** window ticks every model that has a pack and hands them to
-the same download job as **Find a model online**. **Use inbox drivers**
+vendor catalog (SKU or machine type, then model name). The Driver Library page
+lists them under **Deployed without a driver pack**; **Find selected online**
+puts their packs in the **Find a model online** list, which downloads them with
+the same job. **Use inbox drivers**
 adds a catalog entry with no folder, keyed on the SKU, machine type or model.
 
 PCs already deployed keep the drivers they got. Reimage them, or install the

@@ -11,11 +11,11 @@ DISM with PowerShell. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ImagingConsole.cmd   double-click to open the admin console
 src/                 Deploy-Image.ps1, FirstBoot.ps1, Test-Deployment.ps1, Capture-VMImage.ps1,
                      Prepare-Reference.ps1, VMwareVM.psm1, Update-OfflineImage.ps1, New-DeploymentMedia.ps1,
-                     Get-DriverPacks.ps1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
+                     Get-DriverPacks.ps1, UpdateCatalog.psm1, DeployCommon.psm1, AnswerFile.psm1, DeployStatus.psm1,
                      PostDeployChecks.psm1, DeployWizard.psm1,
                      DeployProgress.psm1, DeployProgressWindow.ps1
 src/Console/         ImagingConsole.ps1 (WPF GUI), CaptureWizard.ps1, UpdateImage.ps1, DriverDownloader.ps1,
-                     UnknownModels.ps1, *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
+                     *.xaml, ConsoleData.psm1, DriverPacks.psm1 (vendor catalogs), DriverReport.psm1
 config/              default deploy-settings.json, driver-catalog.json,
                      answer-files/Default.xml (commented sample)
 winpe/               startnet.cmd (auto-starts the deploy or capture in WinPE)
@@ -44,8 +44,8 @@ and click **Create folders** the first time. Then:
   them, or add a new installer), Windows settings, Computer name (with a preview),
   Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
-- **Applications**: the application pack builder. Build, edit, test, export and
-  import packs (see Applications below).
+- **Applications**: the application pack builder. Build, edit and test packs
+  (see Applications below).
 - **Tasks**: the task library, scripts to run during or after a deployment
   (see Tasks below).
 - **Driver Library**: **Find a model online** searches the Dell, HP and Lenovo
@@ -53,26 +53,28 @@ and click **Create folders** the first time. Then:
   downloads, checks, extracts and registers it. You can also import a pack you already have
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
-  **Unknown models...** (with a count when there are any) lists the models that
-  were deployed without their driver pack: they got the maker fallback, inbox
-  drivers only, or a catalog entry whose folder is missing. It shows how many
-  PCs and which ones, and finds each model's pack in the vendor catalog. Models
-  with a pack are pre-ticked, so **Download** fetches them all in one click.
-  **Use inbox drivers** marks a model (a VM, say) as needing no pack.
-- **Media**: build a USB stick or ISO in one click. The tab shows
+  **Deployed without a driver pack** shows, on the same page and only when there
+  are any, the models that were deployed without their pack: they got the maker
+  fallback, inbox drivers only, or a catalog entry whose folder is missing, with
+  how many PCs and which ones. **Find selected online** puts each model's packs
+  in the Find a model online list, ready for **Download**. **Use inbox drivers**
+  marks a model (a VM, say) as needing no pack.
+- **Media**: build a USB stick in one click (the ISO is made with the network
+  boot image, on the Computers tab). The tab shows
   whether the Windows ADK and its WinPE add-on are installed (and their version),
   with a **Download ADK** button when they aren't. Media builds and the capture
   wizard refuse to start until both are there.
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-- **Deploy Settings**: five short sections. 1) USB stick only, or a network
-  share (needed for ISO boot and the Computers tab). 2) The Active Directory account WinPE signs in
+- **Deploy Settings**: three short sections. 1) The network share, left empty
+  for USB sticks only (needed for ISO boot and the Computers tab; with a share,
+  every PC, USB ones too, reports to its `Status` folder for the Dashboard).
+  2) The Active Directory account WinPE signs in
   with: type its password in the console (saved encrypted in
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
-  that the Dashboard's `Status` folder can be written. 3) Where PCs report for
-  the Dashboard. 4) How many older image versions to
-  keep. 5) Post-deploy checks. Save refuses the example values
+  that the Dashboard's `Status` folder can be written. 3) Post-deploy checks:
+  one tick box, and devices to ignore. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
@@ -81,8 +83,9 @@ and click **Create folders** the first time. Then:
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
   answer file, state, a progress bar, the current step, duration and when it was
   last heard from, with the PC's live log underneath. Refreshes every 10 seconds.
-  See [Deployment dashboard](#deployment-dashboard).
-- **Logs**: capture and image update logs, and the final log of each deployment cleared from the Dashboard.
+  See [Deployment dashboard](#deployment-dashboard). The **History** filter
+  lists the final log of each deployment cleared from the Dashboard; capture and
+  image update logs open from the Images tab's **Open log**.
 
 Content root (USB `DEPLOY` partition or `\\server\Deploy`):
 
@@ -97,9 +100,9 @@ Applications\  Zoom\app.json + installer, Teams\app.json + installer, ...
 Tasks\         Set-Wallpaper\task.json + script.ps1, ... (scripts answer files run)
 config\        deploy-settings.json, driver-catalog.json, secrets\ (answer-key.txt)
 Logs\          one log per deployed PC or capture
-Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for Unknown models)
+Reports\       Drivers\<serial>.json: which drivers each deployed PC got (for the Driver Library)
 Status\        <serial>.json + <serial>.log per PC, for the Dashboard
-Boot\          boot.wim + boot.json: the network boot image the Computers tab starts on PCs
+Boot\          boot.wim + boot.json + Deploy-WinPE.iso: the network boot image, and the same WinPE as an ISO
 Reimage\       <serial>.json per PC waiting to be reimaged, Started\ for the ones WinPE took
 ```
 
@@ -108,7 +111,8 @@ Reimage\       <serial>.json per PC waiting to be reimaged, Started\ for the one
 The **Computers** tab lists the computers in your domain and reinstalls Windows
 on the ones you pick, with nobody at the PCs.
 
-1. Click **Connect**. By default the tab uses the account and saved password
+1. The tab connects by itself the first time you open it when it needs no
+   password typed; otherwise click **Connect**. By default the tab uses the account and saved password
    from the Deploy Settings tab (**Use the Deploy Settings account**), and the
    domain comes from that account (`user@corp.local`) or the console PC. To use
    another account, for example an administrator of the PCs, untick it and type
@@ -137,7 +141,10 @@ on the ones you pick, with nobody at the PCs.
 3. Once: set **Network share** on the Deploy Settings tab, then click **Build
    network boot image**. It builds WinPE with the deploy tool into `Boot\` on
    the content root, without a WinPE password (nobody is there to type it).
-   Rebuild it after updating the tool or the share settings.
+   The same build writes `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
+   Rebuild it after updating the tool or the share settings: a banner at the top
+   of the console says when it is older than the console, with a **Rebuild
+   network boot image** button.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
    **Reimage...**. **Keep each PC's name** and **Join it back into its OU** are
    on by default.
@@ -182,7 +189,8 @@ the console; the format is documented in the commented
   locales such as `fr-CA`).
 - **computer naming**: a WMI query (for example the serial from
   `Win32_SystemEnclosure`) with a prefix, a custom scheme like `A########`
-  (`#` = random digit, `{SERIAL}` = BIOS serial), or a prompt.
+  (`#` = random digit, `{SERIAL}` = BIOS serial). Older answer files that asked
+  the technician use the serial instead.
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
@@ -225,8 +233,8 @@ downloaded once into the console's cache
 (`%LOCALAPPDATA%\ImagingConsole\VendorCatalogs\WinPE`) and reused; the same
 driver in two packs goes in once. Lenovo publishes no single WinPE pack, but the
 Intel storage drivers in Dell's pack match the controller, so they cover Lenovo
-and other PCs with VMD too. Choose the vendors on the Media tab (both on by
-default) or with `-WinPEDriverVendors Dell,HP`; `-NoVendorWinPEDrivers` skips
+and other PCs with VMD too. The console always adds both; from the command
+line `-WinPEDriverVendors Dell` picks one and `-NoVendorWinPEDrivers` skips
 them. Each pack makes boot.wim bigger. Adding the components and drivers
 takes many minutes, so the result is kept in
 `%LOCALAPPDATA%\ImagingConsole\WinPEBuilds` (the last two builds) and the next
@@ -357,9 +365,6 @@ notes; test those on a VM first. Every search is written to
 output); when winget itself fails, the status line says why instead of
 "Nothing found".
 
-**Export...** zips a pack (installer included) to copy it to another content
-root; **Import...** adds it back.
-
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
 script (and any files it needs) and a `task.json`. Make them on the **Tasks** tab,
 or with **New script...** on the answer file editor's Tasks page:
@@ -403,8 +408,6 @@ are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 same way in every phase (`cmd /c`, exit code 0 is success, 60 minute timeout,
 its own log named after the command); a POSTIMAGE command that fails stops the
 deployment, and a FIRSTBOOT one is a post-deploy check like the library tasks.
-**Export...** zips a task to copy it to
-another content root; **Import...** adds it back.
 
 **Importing a deploy wizard answer file** keeps the mode, delay, image name, application
 order, regional settings, naming, domain join, tasks, shares and completion
@@ -418,20 +421,16 @@ platform packs, unsupported system properties).
 Earlier copies of an image are kept in `Images\Previous\<name>_<yyyyMMdd-HHmm>\`,
 so a bad capture or update never leaves you without a working image:
 
-- **Recapture** under the same name by ticking *replace it and keep the old one*
-  in the capture wizard. The old image moves to `Previous` only once the new
-  capture has succeeded.
+- **Recapture** under the same name: the old image moves to `Previous` only once
+  the new capture has succeeded.
 - **Offline updates** keep the image they replace in the same place.
-- **Keep a copy of current** (Images > Versions...) takes a snapshot, for
-  example before you try something, with a note saying what it is.
 - **Roll back to selected** makes an earlier version current again for every
   answer file that doesn't name a version. It links the file rather than copying
   it, so it is quick and uses no extra space. The image you roll away from is kept
   as a version too, so a rollback can itself be undone.
-- **Keep newest** deletes the oldest unpinned versions after a copy, a rollback or
-  a replacing capture, keeping the newest N. Set it for one image in the Versions
-  dialog (blank uses the default), or for all images as *Versions to keep* on
-  Deploy Settings. 0 keeps every version, which is the default. The version you
+- **Earlier versions to keep** (in the Versions window, for every image) deletes
+  the oldest unpinned versions after a rollback, a capture or an update, keeping
+  the newest N. 0 keeps every version, which is the default. The version you
   just rolled back to is never deleted by this.
 - **Pin an answer file** to a version on its *Image and disk* page (the
   `<image><version>` element). Use it to keep a lab or a pilot group on a
@@ -439,19 +438,23 @@ so a bad capture or update never leaves you without a working image:
 - **Delete selected** and **Delete older** (keep the newest N) free space. Both
   refuse versions an answer file is pinned to.
 
-Copies and rollbacks run in their own window (`src\Invoke-ImageVersion.ps1`)
+Rollbacks run in their own window (`src\Invoke-ImageVersion.ps1`)
 and write a `VERSION-<name>` log. Each version takes as much space as the image.
 
 ## Updating an image
 
-Patch Tuesday does not need a new capture. Download the month's cumulative update
-for the image's Windows version (and the .NET cumulative update) from the
-[Microsoft Update Catalog](https://www.catalog.update.microsoft.com) into the
-content root's `Updates` folder, select the image on the Images tab and click
-**Update image...**. The dialog lists the packages in the order they will be
-applied (Windows first, then .NET, oldest KB first); move a standalone servicing
-stack update to the top if there is one. For Windows 11 24H2 checkpoint updates,
-keep the earlier checkpoint in the same folder: DISM picks it up from there.
+Patch Tuesday does not need a new capture. Select the image on the Images tab and
+click **Update image...**. **Download the latest cumulative update** is ticked: the
+update reads the image's Windows build, finds the newest x64 cumulative update for
+that version (not a preview) in the
+[Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
+it into the content root's `Updates` folder (both files for a Windows 11 24H2
+checkpoint update), then applies it. The catalog has no official interface, so this
+can stop working when Microsoft changes the site: the update then fails before
+touching the image, and the message says to download the `.msu` by hand into
+`Updates`. Packages in the dialog's list (the .NET cumulative update, or one
+downloaded by hand) are applied after it, from top to bottom; move a standalone
+servicing stack update to the top if there is one.
 
 It runs `Update-OfflineImage.ps1` in the background on this PC, with each step in the Progress window. For each edition
 it mounts the image, adds the packages, optionally cleans up the replaced
@@ -460,7 +463,7 @@ the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
 name, so answer files pick it up without changes. Split images (`.swm`) are joined,
 updated and split again. The Images tab shows when each image was last updated and
-with which KBs, and the log appears on the Logs tab as `SERVICE-<name>`.
+with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass
 `-WorkDir`). A package that does not apply to the image is logged and skipped; any
@@ -471,6 +474,7 @@ PCs. Without the console:
 ```powershell
 .\src\Update-OfflineImage.ps1 -ImagePath D:\DeployShare\Images\Win11-24H2-Enterprise.wim `
     -PackagePath D:\DeployShare\Updates\windows11.0-kb5044284-x64.msu -Cleanup
+.\src\Update-OfflineImage.ps1 -ImagePath D:\DeployShare\Images\Win11-24H2-Enterprise.wim -LatestUpdate -Cleanup
 ```
 
 This updates Windows itself, not the applications in the image or its recovery
@@ -503,10 +507,10 @@ a UNC path, so it works when the PC deployed from the share (or a status share
 is set), and it writes **as the computer account**: give `Domain Computers`
 modify rights on the `Status` folder. Without that, the PC shows as Stalled
 after first boot even though it finished; its `C:\Windows\Temp\FirstBoot.log`
-has the result. USB deployments write to the stick's `Status` folder, unless
-**A network folder** is chosen under "Where PCs report progress" on the Deploy
-Settings tab (for example `\\SERVER01\Deploy\Status`), in which case WinPE maps
-it as `R:` with the share account and reports there.
+has the result. With a network share on the Deploy Settings tab, USB
+deployments report to its `Status` folder too (WinPE maps it as `R:` with the
+share account), falling back to the stick's `Status` folder when the share can't
+be reached; the console reads the stick's records when it is plugged in.
 
 ### Post-deploy checks
 
@@ -523,11 +527,9 @@ with every check listed under the PC's details):
 | BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
 
 Any failed check turns the deployment into Warning, with the failed checks
-named. The **Deploy Settings** tab sets how strict they are, saved as `checks`
-in `deploy-settings.json`: turn them off, make BitLocker **Required**,
-**Report** only (a warning, never a failure) or **Off** (**Auto**, the default,
-requires it when the answer file turns BitLocker on), do the same for device
-errors, and list devices to ignore (wildcards, for example `*Smart Card*`).
+named. BitLocker and device driver problems are warnings only. The **Deploy
+Settings** tab turns the checks off and lists devices to ignore (wildcards, for
+example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
 The application pack's detection rules (set in the Applications tab) catch
 installers that exit 0 without installing anything: first boot checks them after
@@ -543,7 +545,7 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 ```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; their final logs move to the Logs tab. A PC
+succeeded, warning and cancelled PCs; their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
@@ -552,7 +554,7 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
-   (or `-Target Iso`).
+   (`-Target Wim -OutputPath <root>\Boot` builds the network boot image and its ISO).
    Add `-AnswerFiles Staff-W11,Lab` to put only those answer files and their images on the stick.
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
@@ -595,7 +597,7 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
       shows on the Images tab when the console opens that folder's content root.
    5. Review and click Start. The capture is a card in the Progress window with each step (copy,
       read, capture, save), its bar and the time left.
-   The image is saved to the Save to folder, and a `CAPTURE-VM-<name>` log appears on the Logs tab.
+   The image is saved to the Save to folder, and the Images tab's **Open log** shows its `CAPTURE-VM-<name>` log.
    Without the console: run `Prepare-Reference.ps1` in the VM, then
    `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot <content root>` on this PC.
 
@@ -612,11 +614,11 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    Afterwards revert the VM to a snapshot taken before sysprep if you want to keep working
    on it. Untested on Windows, including every conversion.
 4. **Add drivers** in the console's Driver Library tab (**Find a model online**).
-   After deploying, **Unknown models...** on the same tab lists the models that had
-   no pack and downloads theirs. You can also extract a pack into
+   After deploying, the same tab lists the models that had no pack, and **Find
+   selected online** finds theirs. You can also extract a pack into
    `Drivers\<Maker>\<Model>` and add a line to `driver-catalog.json` by hand.
    Find a PC's identity in WinPE with `Get-HardwareIdentity`.
-   Each month, add the new cumulative update with **Update image...** instead of
+   Each month, run **Update image...** to add the latest cumulative update instead of
    capturing again.
 5. **Deploy**: boot the target PC from USB or ISO. The deploy wizard opens
    and shows the detected maker, model and serial. Pick the answer file, check
