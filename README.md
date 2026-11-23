@@ -181,7 +181,7 @@ the console; the format is documented in the commented
 - **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
   (start after `unattendDelay` seconds; a key pressed during the countdown opens
   the wizard instead).
-- **image** and index, **disk** number, **drivers** root.
+- **image** and index, **disk** number (the disk is always erased and partitioned again; drivers come from `Drivers`).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
