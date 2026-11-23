@@ -108,6 +108,9 @@ function Set-Progress([string]$Step, [int]$Percent, [string]$Warning) {
 }
 Set-Progress 'First boot: starting' 91
 # Each app is skipped when its detection rules find it already installed, and checked again after it runs.
+# No sleep until first boot ends: a laptop left at the logon screen went to sleep in the middle of the Office install.
+Import-Module (Join-Path $deployDir 'LibraryPack.psm1') -Force
+Set-SystemAwake -Continuous
 Import-Module (Join-Path $deployDir 'AppPack.psm1') -Force
 $total = @($plan.applications).Count
 $n = 0

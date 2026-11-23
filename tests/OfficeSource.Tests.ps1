@@ -82,13 +82,41 @@ try {
     $rows = @(Update-OfficeSources -AppRoot $appRoot -Names 'Zoom' -Runner $runner -Log { param($m) })
     Assert-Equal $rows.Count 0 'Update-OfficeSources: -Names limits the packs'
 
-    # A configuration with its own SourcePath (a file server) is left alone.
+    # A SourcePath on a drive of the console PC (C:\imager\...) means nothing on the PCs: the files are downloaded all the same.
     $x = [xml](Get-Content -Raw (Join-Path $folder 'configuration.xml'))
-    $x.Configuration.Add.SetAttribute('SourcePath', '\\server\office')
+    $x.Configuration.Add.SetAttribute('SourcePath', 'C:\imager\Office')
     $x.Save((Join-Path $folder 'configuration.xml'))
     $script:runs = @()
     $r = Update-OfficeSource -Definition $def -AppFolder $folder -Runner $runner -Log { param($m) }
-    Assert-Equal "$($r.Status)|$($script:runs.Count)" 'OwnSource|0' 'a configuration with its own SourcePath is not downloaded'
+    Assert-Equal "$($r.Status)|$($script:runs.Count)" 'Downloaded|1' 'a SourcePath on a console PC drive is not a reason to skip the download'
+
+    # A command written with the console PC's path (Patrick's Microsoft-Office pack, 2026-11-23) finds the pack's own copy.
+    $console = ConvertTo-AppDefinition -Name 'Microsoft-Office' -Json ([pscustomobject]@{ installer = 'setup.exe'; command = '"setup.exe" /configure C:\imager\Applications\Microsoft-Office\Configuration.xml' })
+    Assert-Equal (Test-OfficeDeploymentCommand -Definition $console) $true 'the /configure command is an Office Deployment Tool pack'
+    Assert-Equal (Get-OfficeConfigPath -Definition $console -AppFolder $folder) (Join-Path $folder 'configuration.xml') 'a console PC path in the command finds configuration.xml in the pack folder (any case)'
+
+    # On the PC: configuration-deploy.xml is silent, installs from the folder's Office files, and the command uses it.
+    $x = [xml](Get-Content -Raw (Join-Path $folder 'configuration.xml'))
+    $x.Configuration.Display.SetAttribute('Level', 'Full')
+    $x.Save((Join-Path $folder 'configuration.xml'))
+    $odtRun = New-OfficeDeployConfig -Definition $console -AppFolder $folder
+    [xml]$dep = Get-Content -Raw (Join-Path $folder 'configuration-deploy.xml')
+    Assert-Equal $odtRun.Command '"setup.exe" /configure "configuration-deploy.xml"' 'the PC runs setup.exe with configuration-deploy.xml'
+    Assert-Equal "$($dep.Configuration.Display.Level)|$($dep.Configuration.Display.AcceptEULA)|$($dep.Configuration.Add.SourcePath)|$($dep.Configuration.Add.AllowCdnFallback)" "None|TRUE|$folder|TRUE" 'configuration-deploy.xml: silent, from the folder''s Office files, internet as a fallback'
+    Assert-Equal (@($odtRun.Notes)[0] -like 'Office 16.0.* files from this folder') $true 'the log says Office installs from the folder'
+
+    # No Office files in the folder and a SourcePath the PC can't reach: from the internet, still silent.
+    $bare = Join-Path $appRoot 'Bare-Office'
+    New-Item -ItemType Directory -Path $bare -Force | Out-Null
+    Copy-Item (Join-Path $folder 'configuration.xml') (Join-Path $bare 'configuration.xml')
+    $odtRun = New-OfficeDeployConfig -Definition $console -AppFolder $bare
+    [xml]$dep = Get-Content -Raw (Join-Path $bare 'configuration-deploy.xml')
+    Assert-Equal "$($dep.Configuration.Display.Level)|$($dep.Configuration.Add.GetAttribute('SourcePath'))|$($dep.Configuration.Add.AllowCdnFallback)" 'None||TRUE' 'no Office files: the unreachable SourcePath is dropped, Office comes from the internet'
+
+    # No configuration file at all: a clear error at once, not an Office Deployment Tool window nobody sees.
+    $none = Join-Path $appRoot 'No-Config'
+    New-Item -ItemType Directory -Path $none -Force | Out-Null
+    Assert-Throws { New-OfficeDeployConfig -Definition $console -AppFolder $none } '*is not in the application''s folder*' 'a missing configuration file fails at once'
 }
 finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
