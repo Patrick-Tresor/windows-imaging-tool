@@ -40,15 +40,18 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.6 | Build network boot image | `Boot\boot.wim`, `boot.json`, `tool-version.json` and `Deploy-WinPE.iso` on the content root; the tab says it is ready; after updating the console, the yellow banner offers **Rebuild network boot image** |
 | 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |
 | 2.8 | Reimage a PC that is off, and one with a wrong DNS record | Both rows fail with one line, nothing changed on either PC |
+| 2.8a | Search `NAME 10.1.2.34` for a PC whose DNS record is old | The IP column shows where the PC really answers; with only the old address, Online says Old DNS and Reimage refuses it |
 | 2.8b | Search and Reimage on a PC with PowerShell remoting off (file sharing on) | Online says Yes (SMB); the reimage goes through the admin share, no `ImagingToolRun*` service is left on it (`sc.exe \\PC query state= all`), and no `C:\Windows\Temp\ImagingTool-*` folder |
+
+| 2.9 | Search the IP of a laptop that is not in the domain, Reimage | The row is listed with the IP; Reimage asks for its local administrator account, then the laptop restarts into WinPE and deploys |
+| 2.10 | Reimage notice on a PC with someone signed in | A window shows the countdown with **Reboot now** and **Close**; Reboot now restarts at once |
 
 ## 3. Features on the deployed PC
 
 | # | Test | Pass when |
 |---|------|-----------|
-| 3.1 | BitLocker (TPM, and TPM+PIN) | Encrypted at first boot; the recovery key is backed up where the answer file says |
-| 3.2 | Windows 11 readiness in Block mode | An unsupported PC stops before the erase |
-| 3.2b | Same PC, tick **Install Windows 11 anyway on this PC** and press Next | The wizard goes on; the Ready to deploy summary shows the failed requirement; `Deploy.log` has "Deploying Windows 11 anyway"; Windows 11 starts and joins the domain |
+| 3.1 | BitLocker (TPM only) | Encrypted at first boot (used space, XTS-AES 256); the recovery key is backed up where the answer file says; with no backup possible, BitLocker stays off |
+| 3.2 | Windows 11 on an older PC (ThinkPad X1 Yoga 1st gen, say) | No hardware check: the deploy goes through and Windows 11 starts and joins the domain |
 | 3.3 | Passwords removed from unattend.xml | After the first logon (OOBE over), `C:\Windows\Panther\unattend.xml` shows `*removed*` for every password, `C:\Windows\Temp\FirstBoot.log` says "unattend.xml passwords: removed N from ...", and the `ImagingTool\ClearUnattend` task and `C:\ProgramData\ImagingTool\Clear-UnattendPasswords.ps1` are gone; OOBE still skipped the account page and the domain join worked |
 | 3.4 | End-of-deploy result | `C:\Windows\Temp\DeployResult.txt` says Ready (or what failed) with one line each for drivers, applications, tasks, domain join, BitLocker and total time; the Dashboard's Result column and details say the same |
 
@@ -62,7 +65,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 4.1c | Capture progress window | Each step with its bar, the capture step shows a percent and the time left |
 | 4.1d | Sysprep on each PC: capture a VM shut down with `shutdown /s /t 0`, not sysprepped | Check the disk passes with "Not sysprepped: each PC runs sysprep"; a VM shut down from the Start menu with Fast Startup gets a cross |
 | 4.1e | Deploy that image to the Dell 5521, then an HP and a Lenovo | First start shows only the spinner (no logon screen, no message), restarts by itself, then setup, name, domain join, apps and tasks as usual; `C:\Windows\Temp\SysprepAtDeploy.log` ends with "Sysprep finished" |
-| 4.1f | Same, with a Store app installed for one user only in the VM | The app is removed and sysprep still runs; with a missing Store the logon screen says sysprep failed |
+| 4.1f | Same, with a Store app installed for one user only in the VM (or a Store-updated app with an optional package such as Microsoft.OneDrive.Photos) | Sysprep stops on it once (0x80073cf2), the package is removed for every user and sysprep runs again and finishes; with a missing Store the logon screen says sysprep failed |
 | 4.3 | Update image with **Download the latest cumulative update** ticked | The Progress window shows "Downloading the latest cumulative update" with the KB, the `.msu` lands in `Updates`, then a new version in the Images tab, old one under Versions; with no internet it fails before touching the image and says to download the `.msu` by hand |
 | 4.4 | Roll back a version | Answer files deploy the older image |
 | 4.5 | Capture with compression **Smallest (.esd)** | The capture shows a "Compressing to the smallest size" step and logs the .esd size (about 70-80 % of Maximum); the Images tab lists `Name.esd`; a stick with it deploys normally; Update image works on it |

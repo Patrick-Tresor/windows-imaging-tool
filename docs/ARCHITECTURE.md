@@ -16,7 +16,7 @@ WinPE, DISM, Sysprep) and driven by PowerShell. No third-party runtime.
 | **Deploy** (`src/Deploy-Image.ps1`) | WinPE, booted on the target PC | Detects the model, partitions the disk, applies the WIM, injects the matching drivers offline, writes boot files and unattend. |
 | **Media builder** (`src/New-DeploymentMedia.ps1`) | Admin workstation with the ADK | Builds the WinPE boot image with the tool baked in, then a bootable USB, or (`-Target Wim`) a `boot.wim` for the Computers tab's network boot plus `Deploy-WinPE.iso` of the same WinPE, both in `Boot\` with a `tool-version.json` the console compares with its own version. Checks the ADK first with `src/AdkCheck.psm1`: the ADK folder from the registry (`KitsRoot10`), Deployment Tools (`DandISetEnv.bat`, `oscdimg.exe`, `efisys_noprompt.bin`), the WinPE add-on (`copype.cmd`, `MakeWinPEMedia.cmd`, `winpe.wim`, each optional component it adds), and whether the ADK and add-on versions match. |
 | **Image updates** (`src/Update-OfflineImage.ps1`) | Admin workstation | Adds .msu/.cab updates to every edition of a captured WIM offline (mount, add, clean up, commit, export), keeps the old version in `Images\Previous\`. |
-| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, driver library (import and matching rules), media builds, deploy settings, a live deployment dashboard, deployment logs. |
+| **Admin console** (`src/Console/`) | Admin workstation | WPF GUI over the content root: images, answer files, applications, driver library (import and matching rules), media builds, deploy settings, Active Directory computers to reimage, a live deployment dashboard with each deployment's result and history. |
 
 ## Admin console
 
@@ -87,7 +87,7 @@ page reads twice a second (`Get-CaptureCheckView`). The temporary VHD it made is
 with a `.source` note (names, sizes and times of the VM's disk files); the capture
 gets it with `-ReuseConvertedDisk` and uses it only while that note still matches
 (`Test-ConvertedDiskReusable`). The capture then reports its steps with `-ProgressFile`
-to the same Build progress window as a media build, which shows the time left for a
+to the same Progress window as a media build, which shows the time left for a
 step with a percent (`Format-TimeLeft` in `BuildSteps.psm1`).
 
 ## Image versions
@@ -133,7 +133,7 @@ as kept by an offline update.
 script works on a local copy in `%ProgramData%\ImagingConsole\Servicing` (DISM
 mounts must be on a local NTFS volume). Per index: `DISM /Mount-Image`,
 `/Add-Package` for each package in order (exit 0x800F081E, not applicable, is a
-warning), optional `/Cleanup-Image /StartComponentCleanup [/ResetBase]`,
+warning), `/Cleanup-Image /StartComponentCleanup` (always from the console; `/ResetBase` only with `-ResetBase` on the command line),
 `/Unmount-Image /Commit`. Then every index is exported to a new WIM to reclaim the
 space of superseded components, and only after the export is verified is the
 original moved to `Images\Previous\` and replaced. Any failure before that
@@ -157,7 +157,10 @@ Read from WMI inside WinPE:
 - `Win32_ComputerSystem.Model` first 4 chars (Lenovo machine type, e.g. "21HD")
 - `MS_SystemInformation.SystemSKU` (Dell SKU / HP product ID, more exact than the name)
 
-The catalog is matched most-specific first: SKU, then exact model, then a
+Lenovo has no SKU here: its machine type is the ID (an old `LENOVO_MT_...` SystemSKU in
+the catalog or a status record is read as the machine type, one row per model).
+
+The catalog is matched most-specific first: SKU or machine type, then exact model, then a
 wildcard model pattern, then a per-maker fallback (e.g. a generic
 storage/network pack), then nothing (Windows inbox drivers only).
 
@@ -237,8 +240,9 @@ post-deploy checks and removes the files it staged in `C:\Temp` (other files the
 `AppPack.psm1` holds the application pack format: reading and normalizing
 `app.json`, validation, installer inspection (MSI properties through the Windows
 Installer COM object, MSIX manifests, framework markers in .exe files), silent
-switch suggestions, templates (`config\app-templates.json`), export and import as
-.zip, maker and model requirements, and detection rules. The console's builder is
+switch suggestions, templates (`config\app-templates.json`), downloads at first boot
+(`Get-AppDownload`: SHA256 check, or a file signed by the pack's publisher), maker and
+model requirements, and detection rules (all must match). The console's builder is
 `src/Console/AppPackEditor.ps1` + `.xaml`.
 
 `TaskPack.psm1` is the same for library tasks (`task.json`). What applications and
@@ -261,11 +265,11 @@ BitLocker is turned on by `FirstBoot.ps1` as SYSTEM, after the domain join
    to the computer object in AD (four tries, 15 s apart, in case the network is
    still coming up), and/or a text file in `recoveryKeyFolder` written with the
    computer account.
-3. With `requireBackup`, if no backup worked, remove the protector and leave
-   BitLocker off.
+3. If no backup worked, remove the protector and leave BitLocker off (the
+   editor always saves `requireBackup`).
 4. `Enable-BitLocker -TpmProtector -EncryptionMethod XtsAes256`, used space
-   only by default, skipping the hardware test so encryption
-   starts at once.
+   only, skipping the hardware test so encryption starts at once. There is no
+   startup PIN and no other method (an old answer file's PIN or method is ignored).
 Microsoft Entra key backup is not done: the PC is not Entra joined at first boot.
 
 ### Status reporting
@@ -392,9 +396,9 @@ the current catalog and `Drivers\` folder, so a model leaves the report as soon
 as the library covers it. The rest are grouped by maker, model and SKU / machine
 type, most PCs first. For Dell, HP and Lenovo it looks the model up in the
 vendor catalog (SKU or machine type, then model name). The Driver Library page
-lists them under **Deployed without a driver pack**; **Find selected online**
-puts their packs in the **Find a model online** list, which downloads them with
-the same job. **Use inbox drivers**
+lists them under **Deployed without a driver pack**; **Find its pack**
+puts the selected model's pack in the **Find a model online** list, which downloads it with
+the same job. **No pack needed**
 adds a catalog entry with no folder, keyed on the SKU, machine type or model.
 
 PCs already deployed keep the drivers they got. Reimage them, or install the
@@ -403,4 +407,4 @@ pack on them by other means, once it is in the library.
 ## Not in v1
 
 BitLocker pre-provisioning in WinPE, BIOS-to-UEFI conversion,
-user data migration (USMT), multicast, remote reimage, wipe-and-load / keep-user-data disk options, static IP, display settings, Azure AD join, and a management agent.
+user data migration (USMT), multicast, PXE/WDS, Wake-on-LAN, a Windows 11 hardware check, wipe-and-load / keep-user-data disk options, static IP, display settings, Azure AD join, and a management agent.
