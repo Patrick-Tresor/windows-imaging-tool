@@ -196,7 +196,7 @@ the console; the format is documented in the commented
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
   applications), `FIRSTLOGON` (when the first user logs on). A task is a
   command or a script from the task library (`<task script="name">`).
-- extra **shares** to map in WinPE, **options** (disable System Restore, enable
+- extra **shares** to map in WinPE, **options** (enable
   the built-in Administrator), and reboot or shut down when done.
 - **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
   the recovery key backed up to AD and/or a share first.

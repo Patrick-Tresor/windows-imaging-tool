@@ -86,7 +86,6 @@ function Read-AnswerFile {
         EnableAdministrator  = ConvertTo-Bool (Get-XmlText $d 'options/enableAdministrator') $false
         AdminPasswordFile    = Get-XmlText $d 'options/administratorPasswordFile'
         AdminPasswordEncrypted = Get-XmlText $d 'options/administratorEncryptedPassword' ''
-        DisableSystemRestore = ConvertTo-Bool (Get-XmlText $d 'options/disableSystemRestore') $false
         TaskLocation         = Get-XmlText $d 'tasks/@location' 'Tasks'
         Tasks                = @()
         Shares               = @()
@@ -526,7 +525,6 @@ function New-FirstBootPlan {
     # through Invoke-TaskPack; a plain command without a definition gets one there).
     [pscustomobject]@{
         answerFile           = $Answer.Name
-        disableSystemRestore = $Answer.DisableSystemRestore
         enableAdministrator  = $Answer.EnableAdministrator
         applications         = @($AppDefinitions)
         tasks                = @($rows | Where-Object Phase -eq 'FIRSTBOOT' | ForEach-Object {
@@ -638,7 +636,6 @@ $(& $e $a 'JoinPasswordEncrypted' 'encryptedPassword' '      ')
     </joinCredentials>
   </network>
   <options>
-    <disableSystemRestore>$(& $b $a.DisableSystemRestore)</disableSystemRestore>
     <enableAdministrator>$(& $b $a.EnableAdministrator)</enableAdministrator>
     <administratorPasswordFile>$(& $x $a.AdminPasswordFile)</administratorPasswordFile>
 $(& $e $a 'AdminPasswordEncrypted' 'administratorEncryptedPassword' '    ')
@@ -843,7 +840,6 @@ function ConvertFrom-DeployWizardAnswerFile {
         JoinPasswordFile     = 'config\secrets\join.txt'
         EnableAdministrator  = [bool]$props['ENABLE_ADMINISTRATOR_ACCOUNT']
         AdminPasswordFile    = 'config\secrets\admin.txt'
-        DisableSystemRestore = [bool]$props['DISABLE_SYSTEM_RESTORE']
         TaskLocation         = 'Tasks'
         Tasks                = $tasks
         Shares               = $shares

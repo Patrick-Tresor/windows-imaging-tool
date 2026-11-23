@@ -139,8 +139,6 @@
             <ComboBox x:Name="CmbLanguage" Grid.Row="4" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="Display language, system locale and main keyboard, for example fr-CA. Must be a language installed in the image."/>
             <Label Grid.Row="5" Content="Fallback language"/>
             <ComboBox x:Name="CmbFallback" Grid.Row="5" Grid.Column="1" IsEditable="True" Width="260" HorizontalAlignment="Left" ToolTip="For example en-US: used for untranslated text, added as the second keyboard (Windows+Space) and for date and number formats. Leave empty for one language only."/>
-            <Label Grid.Row="6" Content="Options"/>
-            <CheckBox x:Name="ChkNoRestore" Grid.Row="6" Grid.Column="1" Content="Turn off System Restore"/>
             <Label Grid.Row="7" Content="Built-in Administrator"/>
             <CheckBox x:Name="ChkAdmin" Grid.Row="7" Grid.Column="1" Content="Enable it with this password (needed to skip the local account page in Windows setup)"/>
             <StackPanel Grid.Row="8" Grid.Column="1">

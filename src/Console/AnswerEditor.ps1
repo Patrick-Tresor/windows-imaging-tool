@@ -120,7 +120,6 @@ function Show-AnswerEditor {
     # Two languages only; keyboards, formats and locales follow from them (Get-RegionalSettings).
     $e.CmbLanguage.Text = if ($a.UILanguage) { $a.UILanguage } else { $a.SystemLocale }
     $e.CmbFallback.Text = $a.UILanguageFallback
-    $e.ChkNoRestore.IsChecked = $a.DisableSystemRestore
     $e.ChkAdmin.IsChecked = $a.EnableAdministrator
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
@@ -272,7 +271,6 @@ function Show-AnswerEditor {
         $a.TimeZone      = $e.CmbTimeZone.Text.Trim()
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
-        $a.DisableSystemRestore = [bool]$e.ChkNoRestore.IsChecked
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
         $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } else { 'WMI' }
         $a.Prefix        = $e.TxtPrefix.Text.Trim()

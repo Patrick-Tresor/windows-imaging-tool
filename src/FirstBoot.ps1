@@ -147,10 +147,6 @@ $appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-
 
 if (-not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'options') -ne 'Done') {
     Start-FirstBootStep -Progress $progress -Step 'options'; Save-Progress
-    if ($plan.disableSystemRestore) {
-        Disable-ComputerRestore -Drive "$env:SystemDrive\"
-        Write-Log 'System Restore disabled'
-    }
     if ($plan.enableAdministrator) {
         # By SID (RID 500): the account is "Administrateur" on French Windows, and net user Administrator failed there.
         $admin = Get-CimInstance Win32_UserAccount -Filter 'LocalAccount=True' | Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
