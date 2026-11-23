@@ -6,6 +6,7 @@ class TaskRow {
     [string]$Phase
     [string]$Script
     [string]$Command
+    [string]$Task      # what the Task column shows: the library task, or Command for an older answer file's plain command
 }
 
 class ShareRow {
@@ -45,13 +46,9 @@ function Show-AnswerEditor {
     foreach ($c in 'CmbLanguage', 'CmbFallback') { $e[$c].ItemsSource = $cultures }
     $e.GridTasks.Columns[0].ItemsSource = @('POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON')
     $refreshTaskLibrary = {
-        # The Script column offers the library's tasks, plus an empty choice for a plain command, plus any name
-        # the answer file already uses (so a missing one still shows, and Get-AnswerFileIssues reports it).
-        $library = @(Get-TaskList -ContentRoot $ContentRoot)
-        $e.CmbTaskScript.ItemsSource = $library
-        if ($library.Count -and $e.CmbTaskScript.SelectedIndex -lt 0) { $e.CmbTaskScript.SelectedIndex = 0 }
-        $used = @($tasks | Where-Object Script | ForEach-Object Script)
-        $e.GridTasks.Columns[1].ItemsSource = @(@('') + @($library | ForEach-Object Name) + $used | Select-Object -Unique)
+        # Available: the library's tasks (a task missing from the library still shows in the run order, and
+        # Get-AnswerFileIssues reports it).
+        $e.LstTaskLibrary.ItemsSource = @(Get-TaskList -ContentRoot $ContentRoot)
     }
 
     $updateIndexes = {
@@ -140,6 +137,8 @@ function Show-AnswerEditor {
     foreach ($t in $a.Tasks) {
         $r = [TaskRow]::new(); $r.Phase = $t.Phase; $r.Command = $t.Command
         $r.Script = if ($t.PSObject.Properties['Script']) { $t.Script } else { '' }
+        # An older answer file's plain command keeps running; its Arguments box holds the command itself.
+        $r.Task = if ($r.Script) { $r.Script } else { 'Command' }
         $tasks.Add($r)
     }
     $e.GridTasks.ItemsSource = $tasks
@@ -197,26 +196,26 @@ function Show-AnswerEditor {
         if ($name) { & $refreshAvailable }
     })
 
-    # Tasks
-    $e.BtnTaskAdd.Add_Click({ $r = [TaskRow]::new(); $r.Phase = 'FIRSTBOOT'; $r.Script = ''; $tasks.Add($r); $e.GridTasks.SelectedItem = $r })
-    $addScript = {
+    # Tasks: picked from the library like the applications (the same task can run twice, e.g. with other arguments).
+    $addTask = {
         # A library task, at the time it is set to run by default.
         param($Row)
         if (-not $Row) { return }
-        $r = [TaskRow]::new(); $r.Script = $Row.Name; $r.Command = ''
+        $r = [TaskRow]::new(); $r.Script = $Row.Name; $r.Task = $Row.Name; $r.Command = ''
         $r.Phase = if ($Row.Definition -and $Row.Definition.phase) { $Row.Definition.phase } else { 'FIRSTBOOT' }
         $tasks.Add($r); $e.GridTasks.SelectedItem = $r
     }
-    $e.BtnTaskAddScript.Add_Click({ & $addScript $e.CmbTaskScript.SelectedItem })
-    $e.BtnTaskNewScript.Add_Click({
+    $e.BtnTaskAdd.Add_Click({ & $addTask $e.LstTaskLibrary.SelectedItem })
+    $e.LstTaskLibrary.Add_MouseDoubleClick({ & $addTask $e.LstTaskLibrary.SelectedItem })
+    $e.BtnTaskNew.Add_Click({
         $name = Show-TaskEditor -Owner $win -ContentRoot $ContentRoot
         if (-not $name) { return }
         & $refreshTaskLibrary
-        & $addScript (@($e.CmbTaskScript.ItemsSource) | Where-Object Name -eq $name | Select-Object -First 1)
+        & $addTask (@($e.LstTaskLibrary.ItemsSource) | Where-Object Name -eq $name | Select-Object -First 1)
     })
     $e.BtnTaskRemove.Add_Click({ $r = $e.GridTasks.SelectedItem; if ($r -is [TaskRow]) { [void]$tasks.Remove($r) } })
-    $e.BtnTaskUp.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -gt 0) { $tasks.Move($i, $i - 1) } })
-    $e.BtnTaskDown.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -ge 0 -and $i -lt $tasks.Count - 1) { $tasks.Move($i, $i + 1) } })
+    $e.BtnTaskUp.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -gt 0) { $tasks.Move($i, $i - 1); $e.GridTasks.SelectedIndex = $i - 1 } })
+    $e.BtnTaskDown.Add_Click({ $i = $e.GridTasks.SelectedIndex; if ($i -ge 0 -and $i -lt $tasks.Count - 1) { $tasks.Move($i, $i + 1); $e.GridTasks.SelectedIndex = $i + 1 } })
 
 
     # Shares: the password box applies to the selected row and is kept until Save.

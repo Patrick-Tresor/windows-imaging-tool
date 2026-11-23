@@ -368,7 +368,7 @@ output); when winget itself fails, the status line says why instead of
 
 **Tasks** are scripts kept in the task library: a folder under `Tasks\` with the
 script (and any files it needs) and a `task.json`. Make them on the **Apps and Tasks** tab (**New task...**),
-or with **New script...** on the answer file editor's Tasks page:
+or with **New task...** on the answer file editor's Tasks page:
 
 1. Start from a **template** (`config\task-templates.json`): sync the clock,
    turn on Remote Desktop, no sleep on mains power, remove consumer Store apps,
@@ -394,9 +394,11 @@ or with **New script...** on the answer file editor's Tasks page:
 }
 ```
 
-In the answer file editor's **Tasks** page, pick a task and **Add script**: it
-goes in the list with the other commands, in order, and its **Command** column
-takes extra arguments for that answer file. A missing or broken task stops the
+In the answer file editor's **Tasks** page, pick a task under **Available** and
+**Add >** (or double-click it): it goes in the **Run order**, where you set when it
+runs, its order (**Up**/**Down**) and, in **Arguments**, extra arguments for that
+answer file. A plain command saved by an older version still runs and shows as
+**Command**; for a new one, make a task. A missing or broken task stops the
 deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
 the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
