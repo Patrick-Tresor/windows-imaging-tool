@@ -306,8 +306,6 @@ function Update-Settings {
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
-    Select-ComboText $ui.CmbCheckBitLocker (& $get 'bitLocker' 'Auto')
-    Select-ComboText $ui.CmbCheckDevices (& $get 'deviceErrors' 'Required')
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     Update-SettingsState
 }
@@ -321,11 +319,6 @@ function Update-SettingsState {
                                elseif ($script:sharePwSaved) { 'Password saved.' }
                                elseif ($ui.TxtShareUser.Text.Trim()) { 'No password saved yet.' }
                                else { '' }
-}
-
-function Select-ComboText($Combo, [string]$Text) {
-    $Combo.SelectedItem = @($Combo.Items | Where-Object { "$($_.Content)" -eq $Text })[0]
-    if (-not $Combo.SelectedItem) { $Combo.SelectedIndex = 0 }
 }
 
 function Get-DashboardFolder {
@@ -1302,8 +1295,6 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
         enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
-        bitLocker     = "$($ui.CmbCheckBitLocker.SelectedItem.Content)"
-        deviceErrors  = "$($ui.CmbCheckDevices.SelectedItem.Content)"
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }

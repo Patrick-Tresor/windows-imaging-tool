@@ -441,22 +441,11 @@
             <!-- 4. Checks -->
             <TextBlock Style="{StaticResource SettingsHead}" Text="4. Checks after deploy"/>
             <CheckBox x:Name="ChkChecksEnabled" Margin="0,4,0,8" VerticalAlignment="Center"
-                      Content="At the end of first boot, check the name, domain join, device drivers, applications and BitLocker, and show pass or fail on the Dashboard"/>
+                      Content="At the end of first boot, check the name, domain join, applications, device drivers and BitLocker, and show the result on the Dashboard (BitLocker and driver problems are warnings)"/>
             <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-              <Label Content="BitLocker check"/>
-              <ComboBox x:Name="CmbCheckBitLocker" Grid.Column="1" Width="320" HorizontalAlignment="Left"
-                        ToolTip="Auto: required when the answer file turns BitLocker on, otherwise only reported. Report: a warning, never a failure.">
-                <ComboBoxItem Content="Auto"/><ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
-              </ComboBox>
-              <Label Grid.Row="2" Content="Device driver check"/>
-              <ComboBox x:Name="CmbCheckDevices" Grid.Row="2" Grid.Column="1" Width="320" HorizontalAlignment="Left"
-                        ToolTip="Any device with an error in Device Manager (no driver, cannot start). Disabled devices are ignored.">
-                <ComboBoxItem Content="Required"/><ComboBoxItem Content="Report"/><ComboBoxItem Content="Off"/>
-              </ComboBox>
-              <Label Grid.Row="4" Content="Ignore devices"/>
-              <TextBox x:Name="TxtCheckIgnore" Grid.Row="4" Grid.Column="1"
+              <Label Content="Ignore devices"/>
+              <TextBox x:Name="TxtCheckIgnore" Grid.Column="1"
                        ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
 

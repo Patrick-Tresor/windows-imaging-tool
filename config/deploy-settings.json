@@ -5,10 +5,8 @@
     "user": "DOMAIN\\svc-deploy"
   },
   "checks": {
-    "_comment": "Post-deploy checks at the end of first boot, reported to the Dashboard. bitLocker: Auto (required when the answer file turns BitLocker on), Required, Report or Off. deviceErrors: Required, Report or Off. ignoreDevices: wildcards for device names or ids to skip.",
+    "_comment": "Post-deploy checks at the end of first boot, reported to the Dashboard. BitLocker and device driver problems are warnings. ignoreDevices: wildcards for device names or ids to skip.",
     "enabled": true,
-    "bitLocker": "Auto",
-    "deviceErrors": "Required",
     "ignoreDevices": []
   }
 }
