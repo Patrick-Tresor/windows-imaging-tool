@@ -1266,7 +1266,6 @@ $ui.BtnScanTipDone.Add_Click({ Invoke-Safely {
     Update-ScanTip
 } })
 
-$ui.BtnSettingsMedia.Add_Click({ $ui.Tabs.SelectedItem = $ui.TabMedia })
 
 $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
