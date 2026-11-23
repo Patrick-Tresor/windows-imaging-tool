@@ -72,10 +72,6 @@
             <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
             <Label Grid.Row="3" Content="Target disk number"/>
             <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
-            <Label Grid.Row="4" Content="Disk option"/>
-            <ComboBox x:Name="CmbDiskOption" Grid.Row="4" Grid.Column="1" Width="420" HorizontalAlignment="Left" IsEnabled="False" SelectedIndex="0">
-              <ComboBoxItem Content="Recreate: erase the disk and create new partitions"/>
-            </ComboBox>
             <Label Grid.Row="5" Content="Driver library folder"/>
             <TextBox x:Name="TxtDrivers" Grid.Row="5" Grid.Column="1" ToolTip="Relative to the content root. Usually Drivers."/>
           </Grid>
