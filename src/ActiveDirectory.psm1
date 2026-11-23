@@ -173,6 +173,17 @@ function Get-AdDomainFromAccount {
     ''
 }
 
+function Resolve-AdDomain {
+    # The domain the Computers tab reads: from the domain controller's full name (dc01.corp.local), else from the
+    # Deploy Settings account (user@corp.local), else the one an older console saved, else this PC's own.
+    param([string]$Server, [string]$Account, [string]$Saved, [string]$Default)
+    if ("$Server".Trim() -notmatch '^[\d.]+$' -and "$Server".Trim() -match '^[A-Za-z0-9-]+\.([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)$') { return $Matches[1].ToLowerInvariant() }
+    $d = Get-AdDomainFromAccount $Account
+    if ($d) { return $d }
+    if ("$Saved".Trim()) { return "$Saved".Trim() }
+    "$Default"
+}
+
 function Get-AdDefaultDomain {
     # The domain the console PC (or else the signed-in user) belongs to, or '' when it is in a workgroup.
     try { return [DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain().Name } catch { }
@@ -283,5 +294,5 @@ function Get-AdOrganizationalUnits {
 
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
-    Get-AdDomainFromAccount, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits,
+    Get-AdDomainFromAccount, Resolve-AdDomain, Get-AdDefaultDomain, Get-AdComputers, Get-AdOrganizationalUnits,
     ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp, New-LocalComputerRow, ConvertTo-LocalAccountName

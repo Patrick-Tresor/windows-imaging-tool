@@ -110,13 +110,12 @@ Reimage\       <serial>.json per PC waiting to be reimaged, Started\ for the one
 The **Computers** tab lists the computers in your domain and reinstalls Windows
 on the ones you pick, with nobody at the PCs.
 
-1. The tab connects by itself the first time you open it when it needs no
-   password typed; otherwise click **Connect**. By default the tab uses the account and saved password
-   from the Deploy Settings tab (**Use the Deploy Settings account**), and the
-   domain comes from that account (`user@corp.local`) or the console PC. To use
-   another account, for example an administrator of the PCs, untick it and type
-   one (`CORP\admin`); its password is asked once and never saved. Not joined to
-   the domain? Also type a domain controller.
+1. The tab connects by itself the first time you open it, with the account
+   and saved password from the Deploy Settings tab (or your own sign-in when
+   none is set there). Not joined to the domain? Type a **Domain controller**
+   in Deploy Settings, section 3. The domain comes from the domain controller's
+   full name (`dc01.corp.local`), the account (`user@corp.local`) or the
+   console PC. If it could not connect, the first **Search** tries again.
 2. Pick an OU (or the whole domain), optionally part of a name (`LAB` or
    `LAB-*`), and **Search**. Servers, domain controllers and disabled accounts
    are left out. Each row shows the OU, Windows version, last

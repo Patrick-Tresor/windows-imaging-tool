@@ -46,6 +46,10 @@ Assert-Equal ((Get-AdComputerFilter -Name 'x)(name=*' -IncludeDisabled -IncludeS
 Assert-Equal (Get-AdDomainFromAccount 'svc-deploy@Corp.Local') 'corp.local' 'a user@domain account gives its DNS domain'
 Assert-Equal (Get-AdDomainFromAccount 'CORP\svc-deploy') '' 'a DOMAIN\user account gives no DNS domain (the PC''s own is used)'
 Assert-Equal (Get-AdDomainFromAccount '') '' 'no account gives no domain'
+Assert-Equal (Resolve-AdDomain -Server 'DC01.Corp.Local' -Account 'x@other.com' -Saved 's.local' -Default 'pc.local') 'corp.local' 'the domain controller''s full name gives the domain'
+Assert-Equal (Resolve-AdDomain -Server 'dc01' -Account 'svc@corp.local' -Saved 's.local' -Default 'pc.local') 'corp.local' 'a short DC name: the account''s domain'
+Assert-Equal (Resolve-AdDomain -Server '10.0.0.5' -Account 'CORP\svc' -Saved 's.local' -Default 'pc.local') 's.local' 'an IP and DOMAIN\user: the domain an older console saved'
+Assert-Equal (Resolve-AdDomain -Server '' -Account '' -Saved '' -Default 'pc.local') 'pc.local' 'nothing set: this PC''s domain'
 
 # Last logon (FILETIME)
 $when = [DateTime]::new(2026, 11, 2, 15, 30, 0, [DateTimeKind]::Utc)

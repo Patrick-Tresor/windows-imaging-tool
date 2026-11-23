@@ -319,6 +319,7 @@ function Update-Settings {
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
+    $ui.TxtAdServer.Text = "$((Get-AdSettings).server)"
     Update-SettingsState
 }
 
@@ -841,31 +842,29 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
 
 $script:adRows = @()
 $script:adOnline = @{}
-$script:adCredential = $null
-$script:adCredentialUser = ''
 $script:adLoaded = $false
+$script:adOusLoaded = $false
 
 function Get-AdSettings {
-    # The Computers tab's domain, domain controller, account and OU, kept in console.json (never a password).
+    # The Computers tab's domain controller (set on Deploy Settings) and last OU, kept in console.json (never a
+    # password). domain is only what an older console saved.
     $c = Get-ConsoleConfig
     if ($c.PSObject.Properties['activeDirectory'] -and $c.activeDirectory) { return $c.activeDirectory }
-    [pscustomobject]@{ domain = ''; server = ''; user = ''; searchBase = ''; useShareAccount = $true }
+    [pscustomobject]@{ domain = ''; server = ''; searchBase = '' }
 }
 
 function Save-AdSettings {
+    param([string]$Server, [string]$SearchBase)
     $c = Get-ConsoleConfig
+    $old = Get-AdSettings
     $ad = [pscustomobject]@{
-        domain = $ui.TxtAdDomain.Text.Trim(); server = $ui.TxtAdServer.Text.Trim()
-        # The Deploy Settings account is not copied here: it is read from deploy-settings.json each time.
-        user = $(if ($ui.ChkAdUseShare.IsChecked) { "$($script:adOwnUser)" } else { $ui.TxtAdUser.Text.Trim() })
-        useShareAccount = [bool]$ui.ChkAdUseShare.IsChecked
-        searchBase = $(if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' })
+        domain     = "$($old.domain)"
+        server     = $(if ($PSBoundParameters.ContainsKey('Server')) { $Server.Trim() } else { "$($old.server)" })
+        searchBase = $(if ($PSBoundParameters.ContainsKey('SearchBase')) { $SearchBase } else { "$($old.searchBase)" })
     }
     $c | Add-Member -NotePropertyName activeDirectory -NotePropertyValue $ad -Force
     Save-ConsoleConfig $c
 }
-
-$script:adOwnUser = ''
 
 function Get-ShareAccount {
     # The account on the Deploy Settings tab, or $null when none is set there.
@@ -875,43 +874,25 @@ function Get-ShareAccount {
     $v
 }
 
-function Update-AdAccount {
-    # Shows which account the Computers tab uses: the Deploy Settings one (read only here, change it there) or its own.
+function Get-AdConnection {
+    # Where the Computers tab reads Active Directory: the domain controller from Deploy Settings and its domain.
+    $ad = Get-AdSettings
     $share = Get-ShareAccount
-    if ($ui.ChkAdUseShare.IsChecked) {
-        $ui.TxtAdUser.Text = if ($share) { $share.ShareUser } else { '' }
-        $ui.TxtAdUser.IsReadOnly = $true
-        $ui.TxtAdUser.SetResourceReference([Windows.Controls.Control]::BackgroundProperty, 'ControlHoverBrush')
-    } else {
-        $ui.TxtAdUser.Text = "$($script:adOwnUser)"
-        $ui.TxtAdUser.IsReadOnly = $false
-        $ui.TxtAdUser.ClearValue([Windows.Controls.Control]::BackgroundProperty)
-    }
-    # The domain from that account (user@corp.local), else the one this PC is joined to, when none is typed.
-    if (-not $ui.TxtAdDomain.Text.Trim()) {
-        $d = Get-AdDomainFromAccount $ui.TxtAdUser.Text
-        $ui.TxtAdDomain.Text = if ($d) { $d } else { Get-AdDefaultDomain }
+    $server = "$($ad.server)".Trim()
+    [pscustomobject]@{
+        Server = $server
+        Domain = Resolve-AdDomain -Server $server -Account $(if ($share) { $share.ShareUser }) -Saved "$($ad.domain)" -Default (Get-AdDefaultDomain)
     }
 }
 
 function Get-AdCredential {
-    # With Use the Deploy Settings account: that account and the password saved there, never asked.
-    # Otherwise the account typed on the tab, its password asked once per console session and kept in memory only.
-    # $null = the account the console runs as.
-    if ($ui.ChkAdUseShare.IsChecked) {
-        $share = Get-ShareAccount
-        if (-not $share) { throw 'No account on the Deploy Settings tab yet. Set it there, or untick Use the Deploy Settings account.' }
-        $pw = Get-SharePassword -ContentRoot $script:root
-        if (-not $pw) { throw "No password saved for $($share.ShareUser) on the Deploy Settings tab. Save it there, or untick Use the Deploy Settings account." }
-        return [pscredential]::new($share.ShareUser, (ConvertTo-SecureString $pw -AsPlainText -Force))
-    }
-    $user = $ui.TxtAdUser.Text.Trim()
-    if (-not $user) { return $null }
-    if ($script:adCredential -and $script:adCredentialUser -eq $user) { return $script:adCredential }
-    $cred = Get-Credential -UserName $user -Message 'Password for Active Directory and the PCs to reimage'
-    if (-not $cred) { throw 'No password given.' }
-    $script:adCredential = $cred; $script:adCredentialUser = $user
-    $cred
+    # The Deploy Settings account with the password saved there, never asked; $null (the account the console runs
+    # as) when Deploy Settings has no account.
+    $share = Get-ShareAccount
+    if (-not $share) { return $null }
+    $pw = Get-SharePassword -ContentRoot $script:root
+    if (-not $pw) { throw "No password saved for $($share.ShareUser) on the Deploy Settings tab. Save it there first." }
+    [pscredential]::new($share.ShareUser, (ConvertTo-SecureString $pw -AsPlainText -Force))
 }
 
 function Get-ReimageShare {
@@ -948,11 +929,6 @@ function Update-Computers {
     if (-not $script:adLoaded) {
         $script:adLoaded = $true
         $ad = Get-AdSettings
-        $ui.TxtAdDomain.Text = "$($ad.domain)"
-        $ui.TxtAdServer.Text = "$($ad.server)"
-        $script:adOwnUser = "$($ad.user)"
-        # Older console.json files have no useShareAccount: use the Deploy Settings account unless one was typed here.
-        $ui.ChkAdUseShare.IsChecked = if ($ad.PSObject.Properties['useShareAccount']) { [bool]$ad.useShareAccount } else { -not $ad.user }
         $ou = if ($ad.searchBase) { [pscustomobject]@{ Path = (ConvertTo-AdFriendlyPath "$($ad.searchBase)"); DN = "$($ad.searchBase)" } }
               else { [pscustomobject]@{ Path = '(whole domain)'; DN = '' } }
         $ui.CmbAdOu.ItemsSource = @($ou)
@@ -963,12 +939,16 @@ function Update-Computers {
     $ui.CmbAdAnswer.ItemsSource = $answers
     # No default answer file: keep the one picked, or the only one there is.
     $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif ($answers.Count -eq 1) { $answers[0] } else { $null }
-    Update-AdAccount
     Update-AdBootStatus
     Show-AdRows
 }
 
 function Search-AdComputers {
+    # The OU list is read with the first search when opening the tab could not read it by itself. A PC typed by IP
+    # can still be found without Active Directory.
+    if (-not $script:adOusLoaded) {
+        try { Connect-AdDirectory; return } catch { if (-not (ConvertFrom-AdSearchText $ui.TxtAdName.Text).Ip) { throw } }
+    }
     $base = if ($ui.CmbAdOu.SelectedItem) { "$($ui.CmbAdOu.SelectedItem.DN)" } else { '' }
     $window.Cursor = 'Wait'
     $localNote = ''
@@ -985,8 +965,8 @@ function Search-AdComputers {
             Set-Status 'Searching Active Directory...'
             try {
                 $cred = Get-AdCredential
-                $found = @(Get-AdComputers -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -SearchBase $base -Name $find.Name `
-                    -Credential $cred)
+                $conn = Get-AdConnection
+                $found = @(Get-AdComputers -Domain $conn.Domain -Server $conn.Server -SearchBase $base -Name $find.Name -Credential $cred)
             } catch {
                 # A PC typed by IP can still be reimaged without Active Directory (a laptop outside the domain).
                 if (-not $find.Ip) { throw }
@@ -1007,7 +987,7 @@ function Search-AdComputers {
         Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
         Update-AdOnline
     } finally { $window.Cursor = $null }
-    Save-AdSettings
+    Save-AdSettings -SearchBase $base
     Show-AdRows
     Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)$localNote"
 }
@@ -1023,13 +1003,15 @@ function Get-AdOnlineSummary {
 }
 
 function Connect-AdDirectory {
-    # Reads the OUs and lists the computers. Connect runs it, and so does opening the tab (Invoke-AdAutoConnect).
+    # Reads the OUs and lists the computers: when the tab first opens (Invoke-AdAutoConnect), or at the first Search.
     $cred = Get-AdCredential
+    $conn = Get-AdConnection
     $window.Cursor = 'Wait'
     try {
         Set-Status 'Reading the OUs from Active Directory...'
-        $ous = @(Get-AdOrganizationalUnits -Domain $ui.TxtAdDomain.Text.Trim() -Server $ui.TxtAdServer.Text.Trim() -Credential $cred)
+        $ous = @(Get-AdOrganizationalUnits -Domain $conn.Domain -Server $conn.Server -Credential $cred)
     } finally { $window.Cursor = $null }
+    $script:adOusLoaded = $true
     $keep = "$((Get-AdSettings).searchBase)"
     $items = @([pscustomobject]@{ Path = '(whole domain)'; DN = '' }) + $ous
     $ui.CmbAdOu.ItemsSource = $items
@@ -1039,35 +1021,16 @@ function Connect-AdDirectory {
 }
 
 function Invoke-AdAutoConnect {
-    # The first time the Computers tab opens: connect by itself when nothing has to be typed (the Deploy Settings
-    # account with its saved password, or this PC's own sign-in), and fold the Connect box away. A failure leaves
-    # the box open with one line in the status bar.
+    # The first time the Computers tab opens: read the OUs and list the computers by itself, unless the Deploy
+    # Settings account has no saved password yet. A failure is one line in the status bar; Search tries again.
     if (-not (Test-ContentRoot $script:root)) { return }
-    if ($ui.ChkAdUseShare.IsChecked) {
-        if (-not (Get-ShareAccount) -or -not (Get-SharePassword -ContentRoot $script:root)) { return }
-    } elseif ($ui.TxtAdUser.Text.Trim() -and -not ($script:adCredential -and $script:adCredentialUser -eq $ui.TxtAdUser.Text.Trim())) { return }
-    try {
-        Connect-AdDirectory
-        $ui.GrpAdConnect.Visibility = 'Collapsed'
-        $ui.BtnAdShowConnect.Visibility = 'Visible'
-    } catch {
+    if ((Get-ShareAccount) -and -not (Get-SharePassword -ContentRoot $script:root)) { return }
+    try { Connect-AdDirectory }
+    catch {
         $window.Cursor = $null
         Set-Status "Could not connect to Active Directory by itself: $($_.Exception.Message)"
     }
 }
-
-$ui.BtnAdConnect.Add_Click({ Invoke-Safely { Connect-AdDirectory } })
-$ui.BtnAdShowConnect.Add_Click({
-    $ui.GrpAdConnect.Visibility = 'Visible'
-    $ui.BtnAdShowConnect.Visibility = 'Collapsed'
-})
-
-$ui.ChkAdUseShare.Add_Click({ Invoke-Safely {
-    # Turned on: keep what was typed in the box, to show it again when turned off.
-    if ($ui.ChkAdUseShare.IsChecked) { $script:adOwnUser = $ui.TxtAdUser.Text.Trim() }
-    Update-AdAccount
-    Save-AdSettings
-} })
 
 $ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
 $ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke-Safely { Search-AdComputers } } })
@@ -1280,6 +1243,10 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
+    # The domain controller is this console's own (console.json). The Computers tab reads the OUs again at its next
+    # Search, with this account and domain controller.
+    $script:adOusLoaded = $false
+    Save-AdSettings -Server $ui.TxtAdServer.Text
     # The Computers tab uses this account and share: show the change there too.
     Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
     if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
