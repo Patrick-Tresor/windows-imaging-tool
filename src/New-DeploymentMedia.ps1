@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    Builds the WinPE boot image with the deploy tool inside, then a USB stick, an ISO, or a boot.wim in a folder
-    (the Computers tab's network boot image).
+    Builds the WinPE boot image with the deploy tool inside, then a USB stick, or the network boot image: boot.wim
+    in a folder (what the Computers tab starts on PCs) plus Deploy-WinPE.iso of the same WinPE (for a VM or a PC
+    without a stick; it loads everything from the share).
 .DESCRIPTION
     Run as admin on a workstation with the Windows ADK and the WinPE add-on installed.
-    All three targets boot both UEFI and legacy BIOS PCs.
+    Both targets boot both UEFI and legacy BIOS PCs.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare
     Copies every answer file, the images they deploy, drivers, applications and config to the stick.
@@ -24,11 +25,12 @@
     Updates a stick built earlier without erasing it: new WinPE, and only the content files that changed.
 .EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Wim -OutputPath D:\DeployShare\Boot -SettingsPath D:\DeployShare\config\deploy-settings.json
-    Writes boot.wim and boot.json to the folder (what the console's Computers tab starts on PCs over the network).
+    Writes boot.wim, boot.json and Deploy-WinPE.iso to the folder (the console's Computers tab starts boot.wim on PCs
+    over the network; the ISO boots a VM or a PC from the same share).
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Usb', 'Iso', 'Wim')][string]$Target,
+    [Parameter(Mandatory)][ValidateSet('Usb', 'Wim')][string]$Target,
     [string]$WorkDir = 'C:\WinPE_Build',
     [int]$UsbDiskNumber = -1,
     [string]$ContentSource,          # content root to copy to the USB's DEPLOY partition (answer files, their images, drivers, apps, config)
@@ -84,13 +86,11 @@ switch ($Target) {
         if ($ContentSource) { $steps += , @('content', $(if ($UpdateOnly) { 'Copying changed images and content' } else { 'Copying images and content' })) }
         if (-not $NoVendorWinPEDrivers) { $steps += , @('packs', 'Copying WinPE driver packs to the stick') }
     }
-    'Iso' { $steps += , @('iso', 'Making the ISO') }
-    'Wim' { $steps += , @('wim', 'Writing boot.wim') }
+    'Wim' { $steps += @(@('wim', 'Writing boot.wim'), @('iso', 'Making the ISO')) }
 }
 $title = switch ($Target) {
     'Usb' { if ($UpdateOnly) { "Updating USB stick (disk $UsbDiskNumber)" } else { "Creating USB stick (disk $UsbDiskNumber)" } }
-    'Iso' { 'Creating ISO' }
-    'Wim' { 'Creating the network boot image' }
+    'Wim' { 'Creating the network boot image and ISO' }
 }
 Start-BuildProgress -Path $ProgressFile -Title $title -Steps $steps -LogPath $LogPath
 # Any error from here on: the progress window shows the step that failed and one line, this window and the log the rest.
@@ -148,7 +148,7 @@ if ($WinPEPasswordFile) {
     if ([IO.Path]::GetFullPath($WinPEPasswordFile).StartsWith($tempFull, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $WinPEPasswordFile -Force }
     if ($winPEPassword.Length -lt 8) { throw 'The WinPE password needs at least 8 characters.' }
 }
-if ($winPEPassword -and $Target -eq 'Wim') { throw '-WinPEPasswordFile is for USB and ISO media: the network boot image starts on PCs nobody is at to type it.' }
+if ($winPEPassword -and $Target -eq 'Wim') { throw '-WinPEPasswordFile is for USB sticks: the network boot image starts on PCs nobody is at to type it.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
 $packArgs = @{}
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
@@ -438,8 +438,7 @@ switch ($Target) {
             share = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"; toolVersion = $toolVersion.Text })
         Complete-BuildStep 'wim'
         Write-Host "boot.wim written to $OutputPath."
-    }
-    'Iso' {
+        # The same WinPE as an ISO, for a VM or a PC without a stick: it maps the share like the network boot image.
         $iso = Join-Path $OutputPath 'Deploy-WinPE.iso'
         Start-BuildStep 'iso' -Detail $iso
         if (Test-Path $iso) { Remove-Item $iso }
@@ -450,7 +449,7 @@ switch ($Target) {
         if ($LASTEXITCODE -ne 0) {
             throw ("oscdimg could not build $iso (exit code $LASTEXITCODE). Its own message above says why. " +
                 "It used $WorkDir\media with the boot files $($bootFiles.BiosBoot) and $($bootFiles.UefiBoot). " +
-                'Check that the output folder exists, has free space and the ISO is not open or attached to a VM.')
+                'Check that the folder has free space and the ISO is not open or attached to a VM.')
         }
         Complete-BuildStep 'iso'
         Write-Host "ISO written to $iso"

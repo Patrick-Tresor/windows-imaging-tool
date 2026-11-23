@@ -181,12 +181,11 @@
             </DockPanel>
           </Border>
 
-          <RadioButton x:Name="RbUsb" GroupName="Media" Content="USB stick (offline: WinPE plus answer files, their images and drivers)" IsChecked="True" Margin="0,4"/>
-          <RadioButton x:Name="RbIso" GroupName="Media" Content="ISO (boot from a VM or burn; content comes from the network share)" Margin="0,4"/>
+          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Build network boot image on the Computers tab also makes Boot\Deploy-WinPE.iso, which loads everything from the share."/>
 
-          <Grid Margin="0,16,0,0">
+          <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
 
             <Label Content="USB disk"/>
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
@@ -215,17 +214,13 @@
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
-            <Label Grid.Row="6" Content="Output folder (ISO)"/>
-            <TextBox x:Name="TxtOutput" Grid.Row="6" Grid.Column="1"/>
-            <Button x:Name="BtnOutput" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
-
-            <Label Grid.Row="8" Content="Extra WinPE drivers"/>
-            <TextBox x:Name="TxtPeDrivers" Grid.Row="8" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
-            <Button x:Name="BtnPeDrivers" Grid.Row="8" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
+            <Label Grid.Row="6" Content="Extra WinPE drivers"/>
+            <TextBox x:Name="TxtPeDrivers" Grid.Row="6" Grid.Column="1" ToolTip="Optional. NIC or storage drivers WinPE needs to see the disk or network on new hardware. Dell's and HP's WinPE driver packs (Intel RST/VMD storage, network) always go in."/>
+            <Button x:Name="BtnPeDrivers" Grid.Row="6" Grid.Column="2" Content="Browse..." Margin="8,0,0,0"/>
 
 
-            <Label Grid.Row="12" Content="WinPE password" VerticalAlignment="Top"/>
-            <StackPanel Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2">
+            <Label Grid.Row="8" Content="WinPE password" VerticalAlignment="Top"/>
+            <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">
               <StackPanel Orientation="Horizontal">
                 <PasswordBox x:Name="PwdWinPE" Width="200"/>
                 <TextBlock Text="Again" VerticalAlignment="Center" Margin="12,0,8,0"/>
@@ -510,7 +505,7 @@
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,0"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,0" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
                   <Button x:Name="BtnAdBuildBoot" Content="Build network boot image"
-                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root. Rebuild it after updating the tool or the share settings."/>
+                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root: boot.wim for reimaging, and Deploy-WinPE.iso of the same WinPE to boot a VM or a PC without a stick. Rebuild it after updating the tool or the share settings."/>
                 </StackPanel>
               </Grid>
             </GroupBox>

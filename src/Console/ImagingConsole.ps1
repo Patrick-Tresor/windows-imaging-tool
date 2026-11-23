@@ -870,7 +870,7 @@ function Update-AdBootStatus {
     if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share)." }
+    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
     $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
 }
 
@@ -1101,7 +1101,6 @@ $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll(
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
-$ui.BtnOutput.Add_Click({ $p = Select-Folder 'Where to write the ISO'; if ($p) { $ui.TxtOutput.Text = $p } })
 $ui.BtnPeDrivers.Add_Click({ $p = Select-Folder 'Folder of extra drivers for WinPE (NIC, storage)'; if ($p) { $ui.TxtPeDrivers.Text = $p } })
 
 $ui.BtnBuild.Add_Click({ Invoke-Safely {
@@ -1111,39 +1110,34 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $settingsPath = Join-Path $script:root 'config\deploy-settings.json'
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"), '-SettingsPath', (ConvertTo-Arg $settingsPath))
 
-    if ($ui.RbUsb.IsChecked) {
-        $disk = $ui.CmbUsb.SelectedItem
-        if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
-        if ($ui.ChkCopyContent.IsChecked) {
-            # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
-            $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
-            if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-            # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
-            $packArgs = @{}
-            $allPacks = @($ui.LstMediaPacks.Items)
-            $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
-            if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
-            if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
-            if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-        } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
-        if ($ui.ChkUsbUpdate.IsChecked) {
-            if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
-        } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
-        # Deployments the stick holds go to the dashboard first: erasing it would lose them.
-        $dashFolder = Get-DashboardFolder
-        if ($dashFolder) { Import-StickDashboard $dashFolder }
-        $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-        if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
-        if ($ui.ChkCopyContent.IsChecked) {
-            $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
-            if ($packArgs.ContainsKey('DriverPacks')) {
-                if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
-            }
+    $disk = $ui.CmbUsb.SelectedItem
+    if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
+    if ($ui.ChkCopyContent.IsChecked) {
+        # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+        $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+        if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+        # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+        $packArgs = @{}
+        $allPacks = @($ui.LstMediaPacks.Items)
+        $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+        if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+        $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
+        if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+        if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
+    } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
+    if ($ui.ChkUsbUpdate.IsChecked) {
+        if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
+    } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+    # Deployments the stick holds go to the dashboard first: erasing it would lose them.
+    $dashFolder = Get-DashboardFolder
+    if ($dashFolder) { Import-StickDashboard $dashFolder }
+    $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
+    if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
+    if ($ui.ChkCopyContent.IsChecked) {
+        $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
+        if ($packArgs.ContainsKey('DriverPacks')) {
+            if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
         }
-    } else {
-        if (-not $ui.TxtOutput.Text) { Show-Error 'Choose an output folder.'; return }
-        $buildArgs += @('-Target', 'Iso', '-OutputPath', (ConvertTo-Arg $ui.TxtOutput.Text))
     }
     $buildArgs += Get-WinPEDriverArgs
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
@@ -1155,15 +1149,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
         $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($pwFile, $pePw, (New-Object Text.UTF8Encoding($false)))
         $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
-    } elseif ($ui.RbUsb.IsChecked -and $ui.ChkCopyContent.IsChecked) {
+    } elseif ($ui.ChkCopyContent.IsChecked) {
         if (-not (Confirm-Action 'No WinPE password: the deploy asks for nothing, because the answer files carry their passwords encrypted and the key is in boot.wim. But anyone with the stick can boot it, and could take that key out of boot.wim to decrypt the passwords. Set a WinPE password to lock the stick. Continue?')) { return }
     }
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
     # window shows each step; the build's window (Show build window) and its log have every line.
     $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
-    $what = if ($ui.RbUsb.IsChecked) { "USB stick $($ui.CmbUsb.SelectedItem.Label)" } else { 'ISO' }
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building $what"
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)"
     Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 
