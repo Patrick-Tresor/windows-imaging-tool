@@ -1,1 +1,1 @@
-$Format:%h %cI$
+$Format:%h %cI %s$
