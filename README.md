@@ -288,9 +288,10 @@ domain, the check is skipped and noted in `Deploy.log`.
 tab, or with **New application...** in the answer file editor:
 
 1. Pick the installer file, or a folder when it needs files next to it.
-   **Inspect** reads its type (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
+   The editor reads its type at once (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
    code, and fills in the silent command, uninstall command and a detection rule.
+   Changing the installer type changes the silent command too, unless you typed it.
 2. Or apply a **template** from `config\app-templates.json`. There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked

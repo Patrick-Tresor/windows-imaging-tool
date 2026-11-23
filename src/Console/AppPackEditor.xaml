@@ -45,7 +45,6 @@
             </StackPanel>
             <Label Grid.Row="1" Content="Installer to run"/>
             <ComboBox x:Name="CmbInstaller" Grid.Row="1" Grid.Column="1" IsEditable="True" ToolTip="The file in the application folder that installs it."/>
-            <Button x:Name="BtnInspect" Grid.Row="1" Grid.Column="2" Content="Inspect" Margin="8,0,0,8"/>
             <Label Grid.Row="2" Content="Template"/>
             <ComboBox x:Name="CmbTemplate" Grid.Row="2" Grid.Column="1" ToolTip="Known silent switches, detection and PC limits for common applications."/>
             <Button x:Name="BtnTemplate" Grid.Row="2" Grid.Column="2" Content="Apply" Margin="8,0,0,8"/>
@@ -79,7 +78,6 @@
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Installer type"/>
             <ComboBox x:Name="CmbType" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-            <Button x:Name="BtnSuggest" Grid.Column="2" Content="Suggest command" Margin="8,0,0,8"/>
             <TextBlock x:Name="TxtTypeNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="2" Content="Install command"/>
             <TextBox x:Name="TxtCommand" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas"/>
