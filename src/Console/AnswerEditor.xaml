@@ -51,12 +51,6 @@
             </StackPanel>
             <Label Grid.Row="2" Content="Countdown (seconds)"/>
             <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
-            <Label Grid.Row="3" Content="When finished"/>
-            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-              <RadioButton x:Name="RbReboot" GroupName="Done" Content="Restart"/>
-              <RadioButton x:Name="RbShutdown" GroupName="Done" Content="Shut down"/>
-              <RadioButton x:Name="RbStay" GroupName="Done" Content="Stay in WinPE"/>
-            </StackPanel>
           </Grid>
         </StackPanel>
       </ScrollViewer>

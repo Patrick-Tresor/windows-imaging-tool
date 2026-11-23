@@ -195,7 +195,9 @@ the console; the format is documented in the commented
   applications), `FIRSTLOGON` (when the first user logs on). A task is a
   command or a script from the task library (`<task script="name">`).
 - extra **shares** to map in WinPE, **options** (enable
-  the built-in Administrator), and reboot or shut down when done.
+  the built-in Administrator). The PC restarts into Windows when the deploy is
+  done; the result screen in WinPE still has **Shut down**. (An older answer file
+  with `<shutdown>` or `<reboot>false` keeps doing that until it is saved again.)
 - **BitLocker** on the Windows drive at first boot, with TPM or TPM + PIN, and
   the recovery key backed up to AD and/or a share first.
 

@@ -95,9 +95,6 @@ function Show-AnswerEditor {
     $e.RbInteractive.IsChecked = $a.Mode -ne 'Unattended'
     $e.RbUnattended.IsChecked = $a.Mode -eq 'Unattended'
     $e.TxtDelay.Text = $a.UnattendDelay
-    $e.RbShutdown.IsChecked = $a.Shutdown
-    $e.RbReboot.IsChecked = -not $a.Shutdown -and $a.Reboot
-    $e.RbStay.IsChecked = -not $a.Shutdown -and -not $a.Reboot
 
     $e.CmbImage.Text = $a.ImageFile
     & $updateVersions "$($a.ImageVersion)"
@@ -257,8 +254,9 @@ function Show-AnswerEditor {
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
         $a.UnattendDelay = if ([int]::TryParse($e.TxtDelay.Text, [ref]$n)) { $n } else { 10 }
-        $a.Reboot        = [bool]$e.RbReboot.IsChecked
-        $a.Shutdown      = [bool]$e.RbShutdown.IsChecked
+        # The PC always restarts into Windows when the deploy is done (the result screen still has Shut down).
+        $a.Reboot        = $true
+        $a.Shutdown      = $false
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
