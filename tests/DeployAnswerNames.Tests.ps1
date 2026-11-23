@@ -28,7 +28,7 @@ try {
     Assert-Equal $one.Count 1 'one answer file: one name'
     Assert-Equal $one[0] 'W11-Staff' 'one answer file: [0] is the whole name, not its first letter'
 
-    # The selection Deploy-Image does when there is no default.
+    # The selection Deploy-Image does without -AnswerFile or a reimage job: the only answer file.
     $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
     $AnswerFile = $null
     if ($names.Count -eq 1) { $AnswerFile = $names[0] }
@@ -38,9 +38,9 @@ try {
     Set-Content -LiteralPath (Join-Path $dir 'A-Lab.xml') -Value '<x/>'
     $two = @(Get-AnswerFileNames -ContentRoot $root)
     Assert-Equal ($two -join ',') 'A-Lab,W11-Staff' 'several answer files come back sorted'
-    Assert-Equal "$($two.Count)|$($two[1])" '2|W11-Staff' 'several answer files: one item each (the deploy picks the default among them)'
+    Assert-Equal "$($two.Count)|$($two[1])" '2|W11-Staff' 'several answer files: one item each (the wizard lists them)'
     $names = @(Get-AnswerFileNames -ContentRoot $root -Required)
-    Assert-Equal ('W11-Staff' -in $names) $true 'the default answer file is found among several'
+    Assert-Equal ('W11-Staff' -in $names) $true 'an answer file is found among several'
 
     # A content root at the top of a drive (E:\) must not give E:\\AnswerFiles in the message.
     $driveRoot = [IO.Path]::GetPathRoot($root)

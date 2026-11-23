@@ -156,8 +156,7 @@ $content = $null
 if ($Target -eq 'Usb' -and $ContentSource) {
     # Check the content before the build and before the stick is erased: a stick without its answer file and
     # image boots, then fails on the PC ("Cannot find path D:\AnswerFiles").
-    $default = try { (Get-Content -Raw $SettingsPath | ConvertFrom-Json).defaultAnswerFile } catch { $null }
-    $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles -DefaultAnswerFile $default @packArgs
+    $content = Get-MediaContent -ContentRoot $ContentSource -AnswerFiles $AnswerFiles @packArgs
     if ($content.Problems) { throw ("The USB stick would not deploy:`n - " + ($content.Problems -join "`n - ")) }
     foreach ($a in $content.AnswerFiles) { Write-Host "Answer file $($a.Name): image $($a.Image)$(if ($a.Version) { " version $($a.Version)" })" }
     foreach ($n in $content.Notes) { Write-Warning $n }

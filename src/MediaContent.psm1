@@ -61,7 +61,6 @@ function Get-MediaContent {
     param(
         [Parameter(Mandatory)][string]$ContentRoot,
         [string[]]$AnswerFiles,
-        [string]$DefaultAnswerFile,
         # Driver catalog paths to copy (Get-MediaDriverPacks). Not passed: the whole driver folder. Empty: no driver packs.
         [AllowEmptyCollection()][string[]]$DriverPacks
     )
@@ -147,9 +146,6 @@ function Get-MediaContent {
         $copied = @($packsCopied | Select-Object -Unique).Count
         $notes += $(if ($copied) { "Driver packs on this stick: $copied. Other models get their maker's fallback pack if it is on the stick, otherwise Windows inbox drivers." }
                     else { 'No driver packs on this stick: PCs get Windows inbox drivers only.' })
-    }
-    if ($DefaultAnswerFile -and $names -and $DefaultAnswerFile -notin $names) {
-        $notes += "The default answer file $DefaultAnswerFile is not on this stick, so the deploy wizard asks which one to use."
     }
     # Password files (config\secrets: join, share and Administrator passwords, the answer file key) never go on the
     # stick: a lost stick would give them away. WinPE uses the passwords encrypted in the answer files instead.

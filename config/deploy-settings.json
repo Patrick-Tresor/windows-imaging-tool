@@ -4,7 +4,6 @@
     "path": "\\\\deploy-server\\Deploy",
     "user": "DOMAIN\\svc-deploy"
   },
-  "defaultAnswerFile": "Default",
   "reporting": {
     "_comment": "Optional. Where PCs report progress for the console's Dashboard. Empty = <content root>\\Status. Set a UNC path (e.g. \\\\deploy-server\\Deploy\\Status) so USB deployments report to a server too.",
     "path": ""

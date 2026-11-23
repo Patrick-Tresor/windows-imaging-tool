@@ -51,7 +51,7 @@ try {
     # The content: settings, answer file, image, driver pack, application.
     foreach ($d in 'config', 'AnswerFiles', 'Images', 'Drivers\Dell\Latitude 5521', 'Applications\E2E-App', 'Logs') { New-Item -ItemType Directory -Path (Join-Path $root $d) -Force | Out-Null }
     $settings = Get-Content -Raw (Join-Path $repo 'config\deploy-settings.json') | ConvertFrom-Json
-    $settings.share.path = ''; $settings.share.user = ''; $settings.defaultAnswerFile = 'E2E'
+    $settings.share.path = ''; $settings.share.user = ''
     $settings | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $root 'config\deploy-settings.json')
     Copy-Item (Join-Path $root 'config\deploy-settings.json') 'X:\Deploy\config\deploy-settings.json'
     $xml = Get-Content -Raw (Join-Path $repo 'config\answer-files\Default.xml')

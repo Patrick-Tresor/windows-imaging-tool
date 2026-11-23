@@ -45,11 +45,6 @@ try {
     $c = Get-MediaContent -ContentRoot $root
     Assert-Equal ($c.AnswerFiles.Name -join ',') 'Default,Lab' 'no names given: every answer file'
 
-    # A default answer file left off the stick is a note, not a problem.
-    $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Lab' -DefaultAnswerFile 'Default'
-    Assert-Equal $c.Problems.Count 0 'default left off: not a problem'
-    Assert-Equal ($c.Notes -join '' -like '*default answer file Default is not on this stick*') $true 'default left off: note'
-
     # A pinned version copies its folder in Images\Previous, not the current image.
     $prev = Join-Path $images 'Previous/Win11-Enterprise_20261022-1530'
     New-Item -ItemType Directory -Path $prev -Force | Out-Null

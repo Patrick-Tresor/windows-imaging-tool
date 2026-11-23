@@ -178,7 +178,6 @@ function Update-Answers {
     # @() outside the if: an if statement unrolls its output, so one answer file would come back as a lone object.
     $rows = @(if (Test-ContentRoot $script:root) { Get-AnswerFileRows -ContentRoot $script:root })
     $ui.GridAnswers.ItemsSource = $rows
-    $ui.CmbDefaultAnswer.ItemsSource = @($rows.Name)
     $ui.TxtAnswerIssues.Text = ''
     Update-MediaAnswers
     Update-ScanTip
@@ -308,7 +307,6 @@ function Update-Settings {
     $ui.RbReportShare.IsChecked   = [bool]$v.ReportPath
     $ui.RbReportDefault.IsChecked = -not $v.ReportPath
     $ui.TxtReportPath.Text = $v.ReportPath
-    $ui.CmbDefaultAnswer.SelectedItem = $s.defaultAnswerFile
     $ui.TxtVersionsToKeep.Text = $v.VersionsToKeep
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
@@ -575,13 +573,6 @@ $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item 
 
 #region Answer files
 
-function Set-DefaultAnswerFile([string]$Name) {
-    $s = Get-DeploySettings -ContentRoot $script:root
-    if ($s.PSObject.Properties['defaultAnswerFile']) { $s.defaultAnswerFile = $Name }
-    else { $s | Add-Member -NotePropertyName defaultAnswerFile -NotePropertyValue $Name }
-    Save-DeploySettings -ContentRoot $script:root -Settings $s
-}
-
 function Edit-AnswerFile([string]$Path, [string]$NewName) {
     $saved = if ($Path) { Show-AnswerEditor -Owner $window -ContentRoot $script:root -Path $Path }
              else { Show-AnswerEditor -Owner $window -ContentRoot $script:root -NewName $NewName }
@@ -625,22 +616,14 @@ $ui.BtnAnswerEdit.Add_Click({ Invoke-Safely {
     Edit-AnswerFile -Path $row.FullName
 } })
 
-$ui.BtnAnswerDefault.Add_Click({ Invoke-Safely {
-    $row = $ui.GridAnswers.SelectedItem
-    if (-not $row) { Show-Error 'Select an answer file first.'; return }
-    Set-DefaultAnswerFile $row.Name
-    Update-Answers; Update-Settings
-    Set-Status "Default answer file is now $($row.Name)"
-} })
-
 $ui.BtnAnswerDelete.Add_Click({ Invoke-Safely {
     $row = $ui.GridAnswers.SelectedItem
     if (-not $row) { Show-Error 'Select an answer file first.'; return }
     $check = Get-AnswerFileDeleteCheck -ContentRoot $script:root -Name $row.Name
     if (-not (Confirm-Action $check.Text)) { return }
     [void](Remove-AnswerFile -ContentRoot $script:root -Name $row.Name)
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Settings
-    Set-Status $(if ($check.IsDefault) { "Deleted $($row.Name). No answer file is the default now." } else { "Deleted $($row.Name)" })
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks
+    Set-Status "Deleted $($row.Name)"
 } })
 
 #endregion
@@ -1012,7 +995,8 @@ function Update-Computers {
     $answers = @(if (Test-ContentRoot $script:root) { Get-ChildItem (Join-Path $script:root 'AnswerFiles') -Filter *.xml -File -ErrorAction SilentlyContinue | ForEach-Object BaseName })
     $picked = $ui.CmbAdAnswer.SelectedItem
     $ui.CmbAdAnswer.ItemsSource = $answers
-    $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif (Test-ContentRoot $script:root) { (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile } else { $null }
+    # No default answer file: keep the one picked, or the only one there is.
+    $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif ($answers.Count -eq 1) { $answers[0] } else { $null }
     Update-AdAccount
     Update-AdBootStatus
     Show-AdRows
@@ -1226,7 +1210,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
             $allPacks = @($ui.LstMediaPacks.Items)
             $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
             if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names -DefaultAnswerFile (Get-DeploySettings -ContentRoot $script:root).defaultAnswerFile @packArgs
+            $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
             if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
             if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
         } elseif (-not (Confirm-Action 'Without content the stick has no answer file or image and can only deploy from the network share. Continue?')) { return }
@@ -1340,7 +1324,6 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
-    if ($ui.CmbDefaultAnswer.SelectedItem) { Set-DefaultAnswerFile $ui.CmbDefaultAnswer.SelectedItem }
     # The Computers tab uses this account and share: show the change there too.
     Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
     if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
