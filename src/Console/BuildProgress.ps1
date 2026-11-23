@@ -4,6 +4,9 @@
 # Not modal: the console stays usable, and closing the window leaves the work running.
 # Closing the window while work runs only hides it: Show progress in the console header brings it back
 # (Patrick, 2026-11-22: a closed progress window could not be opened again; then: one window, not one per reimage).
+# It has no owner (Patrick, 2026-11-23: the window stayed black in the taskbar and would not come up). An owned window
+# is placed from its owner (off screen when the console is minimized), hides and shows with it, and its taskbar
+# button can fail to bring it up. Its own window, centred on the screen and drawn in software, avoids all three.
 
 if (-not $script:ProgressWindows) { $script:ProgressWindows = New-Object Collections.ArrayList }
 
@@ -91,10 +94,19 @@ function Start-ConsoleJob {
 
 function Get-ProgressHub {
     # The one Progress window, made the first time something runs and again after it was really closed.
+    # -Owner is the console window: the console closes this window when it closes (Close-ProgressHub).
     param([Parameter(Mandatory)]$Owner)
     if ($script:ProgressHub) { return $script:ProgressHub }
-    $form = New-ConsoleWindow 'BuildProgress.xaml' -Owner $Owner
+    $form = New-ConsoleWindow 'BuildProgress.xaml'
     $dlg = $form.Window
+    # Drawn by the CPU: some graphics drivers leave a WPF window black after it was hidden or minimized.
+    $dlg.Add_SourceInitialized({
+        param($sender)
+        try {
+            $src = [Windows.Interop.HwndSource]::FromVisual($sender)
+            if ($src) { $src.CompositionTarget.RenderMode = [Windows.Interop.RenderMode]::SoftwareOnly }
+        } catch { }
+    })
     $b = $form.Controls
     $jobs = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildJobView]'
     $b.LstJobs.ItemsSource = $jobs
@@ -172,6 +184,7 @@ function Show-BuildProgress {
     Update-ProgressHubCount
     Update-BuildProgressWindow $ctx
     Show-ProgressWindows
+    Show-ProgressWindows -Later
     try { $hub.B.ScrollJobs.ScrollToEnd() } catch { }
 }
 
@@ -236,15 +249,49 @@ function Update-ShowProgressButton {
 }
 
 function Show-ProgressWindows {
-    # Brings back the Progress window, hidden or behind the console.
+    # Brings back the Progress window, hidden, minimized, off screen or behind the console.
+    param([switch]$Later)
     $hub = $script:ProgressHub
     if (-not $hub) { return }
+    $w = $hub.Window
+    if ($Later) {
+        # Again once the click that started the job is over: a wizard or dialog closing after it hands the focus
+        # back to the console, which would cover the window just shown.
+        [void]$w.Dispatcher.BeginInvoke([action]{ Show-ProgressWindows }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+        return
+    }
     try {
-        $w = $hub.Window
-        if (-not $w.IsVisible) { $w.Show() }
         if ($w.WindowState -eq 'Minimized') { $w.WindowState = 'Normal' }
+        if (-not $w.IsVisible) { $w.Show() }
+        Move-WindowOnScreen $w
+        # Topmost for a moment puts it over the console even when Windows refuses to hand over the focus.
+        $w.Topmost = $true
         [void]$w.Activate()
+        $w.Topmost = $false
     } catch { }
+}
+
+function Move-WindowOnScreen {
+    # Centres a window on the main screen's work area when less than 100 pixels of it are on any screen.
+    param([Parameter(Mandatory)]$Window)
+    $v = [Windows.SystemParameters]
+    $left = [double]$Window.Left; $top = [double]$Window.Top
+    $w = [math]::Max([double]$Window.ActualWidth, [double]$Window.Width)
+    $h = [math]::Max([double]$Window.ActualHeight, [double]$Window.Height)
+    if ([double]::IsNaN($left) -or [double]::IsNaN($top) -or [double]::IsNaN($w) -or [double]::IsNaN($h)) { return }
+    $visibleW = [math]::Min($left + $w, $v::VirtualScreenLeft + $v::VirtualScreenWidth) - [math]::Max($left, $v::VirtualScreenLeft)
+    $visibleH = [math]::Min($top + $h, $v::VirtualScreenTop + $v::VirtualScreenHeight) - [math]::Max($top, $v::VirtualScreenTop)
+    if ($visibleW -ge 100 -and $visibleH -ge 40) { return }
+    $area = $v::WorkArea
+    $Window.Width = [math]::Min($w, $area.Width); $Window.Height = [math]::Min($h, $area.Height)
+    $Window.Left = $area.Left + ($area.Width - $Window.Width) / 2
+    $Window.Top = $area.Top + ($area.Height - $Window.Height) / 2
+}
+
+function Close-ProgressHub {
+    # The console is closing: the Progress window goes with it (it has no owner to take it along).
+    $hub = $script:ProgressHub
+    if ($hub) { try { $hub.Window.Close() } catch { } }
 }
 
 function Invoke-BuildFinished {
