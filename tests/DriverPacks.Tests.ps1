@@ -188,6 +188,55 @@ try {
     $msg = $null
     try { Invoke-VendorExtract -File 'C:\x\dell.exe' -Maker Dell -Destination $ex -Runner { 2 } 6>$null } catch { $msg = $_.Exception.Message }
     Assert-Equal $msg 'dell.exe exited with code 2 while extracting.' 'Dell: one try, its exit code reported'
+
+    # Lenovo SCCM packs are Inno Setup. The X1 Yoga 1st gen 1909 pack exited 1 with nothing extracted for
+    # /DIR=<folder>: the second try leaves /DIR out, reads where the files went from its /LOG, and moves them.
+    $lenovoDefault = Join-Path $root 'DRIVERS\SCCM\x1yoga'
+    $setupTemp = Join-Path ([IO.Path]::GetTempPath()) 'is-AB12C.tmp'
+    $logOf = { param($Arguments) (@($Arguments | Where-Object { $_ -like '/LOG=*' })[0]) -replace '^/LOG="?', '' -replace '"$', '' }
+    $refused = @(
+        '2026-11-22 20:40:50.100   Log opened. (Time zone: UTC-05:00)',
+        '2026-11-22 20:40:50.110   Setup version: Inno Setup version 5.5.9 (u)',
+        '2026-11-22 20:40:50.120   Defaulting to No for suppressed message box (Yes/No):',
+        'You have changed the extraction location.',
+        'Do you want to continue?',
+        '2026-11-22 20:40:50.130   InitializeSetup returned False; aborting.',
+        '2026-11-22 20:40:50.140   Got EAbort exception.',
+        '2026-11-22 20:40:50.150   Log closed.')
+    $calls.Clear()
+    $lenovoRunner = {
+        param($Exe, $Arguments)
+        [void]$calls.Add(($Arguments | Where-Object { $_ -notlike '/LOG=*' }) -join ' ')
+        $log = & $logOf $Arguments
+        if ($Arguments -like '/DIR=*') { Set-Content -LiteralPath $log -Value $refused; return 1 }
+        New-Item -ItemType Directory -Path (Join-Path $lenovoDefault '10x64\Audio') -Force | Out-Null
+        Set-Content (Join-Path $lenovoDefault '10x64\Audio\audio.inf') '[Version]'
+        Set-Content (Join-Path $lenovoDefault 'readme.txt') 'x'
+        Set-Content -LiteralPath $log -Value @(
+            '2026-11-22 20:41:00.000   Log opened.',
+            "2026-11-22 20:41:00.010   Dest filename: $setupTemp\_isetup\_shfoldr.dll",
+            "2026-11-22 20:41:00.020   Dest filename: $(Join-Path $lenovoDefault '10x64\Audio\audio.inf')",
+            "2026-11-22 20:41:00.030   Dest filename: $(Join-Path $lenovoDefault 'readme.txt')",
+            '2026-11-22 20:41:00.040   Log closed.')
+        0
+    }
+    Invoke-VendorExtract -File 'C:\x\tp_x1yoga_1909.exe' -Maker Lenovo -Destination $ex -Runner $lenovoRunner 6>$null
+    Assert-Equal ($calls -join '|') "/VERYSILENT /SUPPRESSMSGBOXES /DIR=`"$ex`" /EXTRACT=YES|/VERYSILENT /SUPPRESSMSGBOXES /EXTRACT=YES" 'Lenovo: a refused /DIR is retried without /DIR'
+    Assert-Equal (Test-Path (Join-Path $ex '10x64\Audio\audio.inf')) $true 'Lenovo: drivers are moved from the pack''s own folder into place'
+    Assert-Equal (Test-Path $lenovoDefault) $false 'Lenovo: the pack''s own folder is moved away'
+    Remove-Item $ex -Recurse -Force
+
+    $msg = $null
+    $alwaysRefused = { param($Exe, $Arguments) Set-Content -LiteralPath (& $logOf $Arguments) -Value $refused; 1 }
+    try { Invoke-VendorExtract -File 'C:\x\tp_x1yoga_1909.exe' -Maker Lenovo -Destination $ex -Runner $alwaysRefused 6>$null } catch { $msg = $_.Exception.Message }
+    Assert-Equal $msg ('tp_x1yoga_1909.exe exited with code 1, then 1 while extracting. Setup said: Defaulting to No for suppressed message box (Yes/No): ' +
+        'You have changed the extraction location. Do you want to continue? InitializeSetup returned False; aborting.') 'Lenovo: the failure says what the setup log says'
+
+    Assert-Equal (Get-InnoSetupExtractFolder -LogLines @('Dest filename: C:\a.inf', 'Dest filename: D:\b.inf')) '' 'Inno log: no common folder, nothing taken'
+    Assert-Equal (Get-InnoSetupExtractFolder -LogLines @('2026-01-01 10:00:00.000   Dest filename: C:\DRIVERS\SCCM\x\a\a.inf', 'Dest filename: C:\DRIVERS\SCCM\x\b\b.inf')) 'C:\DRIVERS\SCCM\x' 'Inno log: deepest common folder'
+    Assert-Equal (Get-InnoSetupExtractFolder -LogLines @('Dest filename: C:\a.inf')) '' 'Inno log: a drive root is never taken'
+    Assert-Equal (Get-InnoSetupExtractFolder -LogLines @('Dest filename: \\srv\share\x\a.inf', 'Dest filename: \\srv\share\y\b.inf')) '' 'Inno log: a share root is never taken'
+    Assert-Equal (Get-InnoSetupExtractFolder -LogLines @('Dest filename: \\srv\share\x\a.inf', 'Dest filename: \\srv\share\x\y\b.inf')) '\\srv\share\x' 'Inno log: a folder on a share'
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
