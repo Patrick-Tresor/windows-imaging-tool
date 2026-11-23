@@ -767,10 +767,13 @@ try {
     }
     # The agent: checks in with the console from Windows and takes the jobs the console signs (reimage). It reports
     # to the same UNC status folder as first boot; FirstBoot.ps1 makes its task. A failure here never stops the deploy.
-    if ($statusTarget -and $statusTarget.Unc) {
-        try { Copy-AgentToImage -StatusFolder $statusTarget.Unc -Settings $settings -Root $root -Deploy $plan.deploy }
+    # USB deploys get it too: when WinPE could not reach the share (status kept on the stick), the agent still gets
+    # the share's Status folder from the settings and checks in once Windows reaches it.
+    $agentStatus = Get-AgentStatusFolder -StatusTarget $statusTarget -Settings $settings
+    if ($agentStatus) {
+        try { Copy-AgentToImage -StatusFolder $agentStatus -Settings $settings -Root $root -Deploy $plan.deploy }
         catch { Write-DeployLog "The agent was not put on this PC: $($_.Exception.Message)" -Level WARN }
-    } else { Write-DeployLog 'No network status folder: the agent is not put on this PC (it would have nowhere to check in)' }
+    } else { Write-DeployLog 'No network share in the settings: the agent is not put on this PC (it would have nowhere to check in)' }
     Save-JsonFile -Path 'W:\Temp\firstboot.json' -InputObject $plan -Depth 8
     # Made here so they get the same rights: first boot only writes into them (its progress, and the file it holds
     # open so only one run goes at a time).

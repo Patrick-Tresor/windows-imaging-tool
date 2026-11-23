@@ -118,6 +118,14 @@ try {
     Assert-Equal (Test-Path $jobDir) $false 'the console removes the job and its boot image'
     Assert-Equal ($null -eq (Get-AgentJob -StatusFolder $status -Serial 'To be filled by O.E.M.')) $true 'a shared serial never has a job'
 
+    # Where a new PC's agent checks in: the folder WinPE reported to, or for a USB deploy that could not reach the
+    # share (status kept on the stick), the share's Status folder from the settings.
+    $shareSettings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } }
+    Assert-Equal (Get-AgentStatusFolder -StatusTarget ([pscustomobject]@{ Unc = '\\srv\Deploy\Status'; Local = 'R:\' }) -Settings $shareSettings) '\\srv\Deploy\Status' 'the folder WinPE reported to'
+    Assert-Equal (Get-AgentStatusFolder -StatusTarget ([pscustomobject]@{ Unc = $null; Local = 'E:\Status' }) -Settings $shareSettings) '\\srv\Deploy\Status' 'a USB deploy that could not reach the share still gets the agent'
+    Assert-Equal (Get-AgentStatusFolder -StatusTarget $null -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '\\deploy-server\Deploy' } })) '' 'the shipped example share is no share'
+    Assert-Equal (Get-AgentStatusFolder -StatusTarget $null -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '' } })) '' 'USB only, no share: no agent'
+
     # agent.json and the task.
     $cfg = New-AgentConfig -StatusFolder '\\server\Deploy\Status' -PublicKeys @($public, '') -CheckInMinutes 0
     Assert-Equal "$($cfg.checkInMinutes)|$(@($cfg.publicKeys).Count)" '1|1' 'agent.json: at least 1 minute, empty keys left out'
@@ -149,7 +157,7 @@ Assert-Equal ($agentPs1 -match "Invoke-LocalDiskBoot[^\r\n]+-Method Local") $tru
 Assert-Equal ($agentPs1 -match 'bootWimSha256') $true 'the boot image is checked against the signed checksum'
 Assert-Equal ($agentPs1 -match 'Global\\ImagingToolAgent') $true 'one agent at a time'
 $deploy = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Deploy-Image.ps1')
-Assert-Equal ($deploy -match 'Copy-AgentToImage -StatusFolder \$statusTarget\.Unc') $true 'deploy puts the agent on PCs that report to a network status folder'
+Assert-Equal ($deploy -match '(?s)Get-AgentStatusFolder -StatusTarget \$statusTarget.{0,80}Copy-AgentToImage -StatusFolder \$agentStatus') $true 'deploy puts the agent on every PC when a share is set, USB deploys too'
 Assert-Equal ($deploy -match "(?s)function Copy-AgentToImage.*?Protect-StagedItem -Path \`$dir -Folder.*?Get-AgentFileNames") $true 'its folder is limited to administrators before the files go in'
 $firstBoot = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/FirstBoot.ps1')
 Assert-Equal ($firstBoot -match '(?s)Agent\\ImagingAgent\.ps1.{0,200}-File \$agentScript -Register') $true 'first boot makes the agent''s task'

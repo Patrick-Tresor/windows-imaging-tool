@@ -205,7 +205,8 @@ then waits at the wizard for someone at its screen.
 ### The agent on imaged PCs
 
 Every PC deployed while a network share is set on the Deploy Settings tab gets
-a small agent: a SYSTEM scheduled task (`ImagingTool\Agent`, PowerShell, in
+a small agent, from the share or from a USB stick (even when WinPE could not
+reach the share: the agent checks in once Windows can): a SYSTEM scheduled task (`ImagingTool\Agent`, PowerShell, in
 `C:\ProgramData\ImagingTool\Agent`, administrators only) that starts with
 Windows and keeps running. It opens no port: everything goes through files on
 the share, written as the computer account, like first boot's status.

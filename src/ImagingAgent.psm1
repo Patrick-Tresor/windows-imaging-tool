@@ -57,6 +57,22 @@ function Get-AgentFolder {
     Join-AgentPath $StatusFolder 'Agents'
 }
 
+function Get-AgentStatusFolder {
+    <#
+    .SYNOPSIS
+        Deploy: the UNC status folder the agent on a newly deployed PC checks in to, or '' when there is none. The one
+        WinPE reported to; else, for a USB deploy that could not reach the share, the share's Status folder from
+        deploy-settings.json (reporting.path on older setups), which Windows reaches later as the computer account.
+    #>
+    param($StatusTarget, $Settings)
+    if ($StatusTarget -and $StatusTarget.Unc) { return "$($StatusTarget.Unc)" }
+    if ($Settings -and $Settings.PSObject.Properties['reporting'] -and $Settings.reporting -and "$($Settings.reporting.path)" -like '\\*') { return "$($Settings.reporting.path)".TrimEnd('\') }
+    $share = if ($Settings -and $Settings.PSObject.Properties['share'] -and $Settings.share) { "$($Settings.share.path)".Trim().TrimEnd('\') } else { '' }
+    # The shipped example (\\deploy-server\Deploy) points at no real server.
+    if (-not $share -or $share -notlike '\\*' -or $share -match '^\\\\(deploy-server|server|yourserver)\\') { return '' }
+    "$share\Status"
+}
+
 function Get-AgentJobFolder {
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial)
     Join-AgentPath (Get-AgentFolder $StatusFolder) "Jobs\$(ConvertTo-SerialKey $Serial)"
@@ -536,7 +552,7 @@ function Install-AgentOnRemotePC {
 
 #endregion
 
-Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentJobFolder,
+Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentRowView,
