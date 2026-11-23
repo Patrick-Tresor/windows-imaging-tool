@@ -232,7 +232,7 @@ before anything is erased, telling the operator to pick the UEFI boot entry.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order through `Invoke-AppInstall` (detect, skip if present, run
-with a timeout, check exit code, detect again), writes the results to
+with a timeout, stopped early when stuck on a window for 5 idle minutes (`Invoke-PackProcess -IdleSeconds`, `Get-ProcessTreeActivity`), check exit code, detect again), writes the results to
 `C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
 post-deploy checks and removes the files it staged in `C:\Temp` (other files there are left alone).

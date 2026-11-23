@@ -292,6 +292,36 @@ Installers:
     Assert-Equal (@(Get-AppExpectedSigners -Definition @{ downloadUrl = 'https://evilgoogle.com/x.msi' }).Count) 0 'expected signers: a lookalike domain is not Google'
     Assert-Equal (Get-WingetManifestUrl -Id 'Google.Chrome' -Version '1' -Locale 'en-US') 'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/g/Google/Chrome/1/Google.Chrome.locale.en-US.yaml' 'winget locale manifest address'
     Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $broken } '*after 2 tries*Last error: The remote name could not be resolved*' 'no internet: the message gives the last error'
+    # A refused link (Dell Command Update got 403 ten times, 2026-11-05) is not tried again.
+    $script:refusedCalls = 0
+    $refused = { param($Url, $Path) $script:refusedCalls++; throw 'The remote server returned an error: (403) Forbidden.' }
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 5 -WaitSeconds 0 -Downloader $refused } '*server refused the link (HTTP 403)' 'HTTP 403: short message'
+    Assert-Equal $script:refusedCalls 1 'HTTP 403: not tried again'
+    Assert-Equal (Get-HttpErrorStatus ([Exception]::new('Response status code does not indicate success: 404 (Not Found).'))) 404 'HTTP status read from a PowerShell 7 message'
+    Assert-Equal (Get-HttpErrorStatus ([Exception]::new('The remote name could not be resolved'))) 0 'no HTTP status when there is no network'
+    # After a download found no internet, the next application tries once instead of waiting minutes.
+    $script:tries = 0
+    $script:offLog = @()
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) $script:offLog += $m } -WaitSeconds 0 -Downloader $broken } '*after 1 tries*' 'offline: the next download tries once'
+    Assert-Equal "$($script:tries)|$(@($script:offLog -like '*No internet for the last download*').Count)" '1|1' 'offline: one try, and the log says why'
+    $plainDef = ConvertTo-AppDefinition -Name 'Plain' -Json @{ installer = 'p.exe'; command = 'p.exe /S'; downloadUrl = 'https://x.example/p.exe' }
+    Get-AppDownload -Definition $plainDef -AppFolder $hf -Log { param($m) } -WaitSeconds 0 -Downloader $abc
+    Remove-Item (Join-Path $hf 'p.exe')
+    $script:tries = 0
+    Assert-Throws { Get-AppDownload -Definition $hd -AppFolder $hf -Log { param($m) } -Attempts 2 -WaitSeconds 0 -Downloader $broken } '*after 2 tries*' 'a download that worked clears the offline memory'
+
+    # An installer stuck on a window with nothing happening is stopped early, not after its whole timeout.
+    $pLog = Join-Path $tmp 'stuck.log'
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $stuckRun = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments '/c ping -n 120 127.0.0.1 >nul' -TimeoutMinutes 5 -LogPath $pLog -Log { param($m) } -IdleSeconds 8 -Activity { param($Id) [pscustomobject]@{ Work = 42; HasWindow = $true } }
+    Assert-Equal "$($stuckRun.Stuck)|$($stuckRun.TimedOut)|$($sw.Elapsed.TotalSeconds -lt 60)" 'True|True|True' 'stuck installer: stopped after the idle time'
+    $script:work = 0
+    $busyRun = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments '/c ping -n 16 127.0.0.1 >nul' -TimeoutMinutes 5 -LogPath $pLog -Log { param($m) } -IdleSeconds 8 -Activity { param($Id) $script:work++; [pscustomobject]@{ Work = $script:work; HasWindow = $true } }
+    Assert-Equal "$($busyRun.Stuck)|$($busyRun.ExitCode)" 'False|0' 'busy installer with a window: left to finish'
+    $quietRun = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments '/c ping -n 16 127.0.0.1 >nul' -TimeoutMinutes 5 -LogPath $pLog -Log { param($m) } -IdleSeconds 8 -Activity { param($Id) [pscustomobject]@{ Work = 1; HasWindow = $false } }
+    Assert-Equal "$($quietRun.Stuck)|$($quietRun.ExitCode)" 'False|0' 'quiet installer without a window (msiexec /qn): left to finish'
+    $real = Get-ProcessTreeActivity -Id $PID
+    Assert-Equal ($real.Work -gt 0) $true 'process activity: CPU and I/O counted'
     $hd.downloadSha256 = 'xyz'
     Assert-Equal @(@(Test-AppPack -Definition $hd) -like '*64 hexadecimal*').Count 1 'a SHA256 must be 64 hexadecimal characters'
 

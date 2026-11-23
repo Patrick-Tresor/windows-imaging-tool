@@ -697,13 +697,16 @@ function Get-AppDownload {
     .SYNOPSIS
         Downloads the installer of an application that has a downloadUrl into its folder, unless it is already there.
         Tries -Attempts times, -WaitSeconds apart (the network can take a minute after setup). Throws when it can't.
+        A link the server refuses (HTTP 4xx such as 403 or 404) is not tried again: it gives the same answer every time.
+        Once a download found no internet, the next ones within 10 minutes try only once, so a PC with no network
+        does not wait minutes for every application.
     #>
     param(
         [Parameter(Mandatory)]$Definition,
         [Parameter(Mandatory)][string]$AppFolder,
         [scriptblock]$Log = { param($m) Write-Host $m },
-        [int]$Attempts = 10,
-        [int]$WaitSeconds = 30,
+        [int]$Attempts = 6,
+        [int]$WaitSeconds = 20,
         # Tests pass their own; the default is Invoke-WebRequest.
         [scriptblock]$Downloader = { param($Url, $Path) Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing },
         # Tests pass their own; the default reads the file's Authenticode signature (Status, Subject).
@@ -720,6 +723,10 @@ function Get-AppDownload {
     # Windows PowerShell 5.1 does not always offer TLS 1.2 on its own.
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+    if (-not $PSBoundParameters.ContainsKey('Attempts') -and $script:DownloadOfflineUntil -and (Get-Date) -lt $script:DownloadOfflineUntil) {
+        & $Log '  No internet for the last download: trying once'
+        $Attempts = 1
+    }
     try {
         $last = ''
         for ($i = 1; $i -le $Attempts; $i++) {
@@ -730,9 +737,12 @@ function Get-AppDownload {
                 $last = $_.Exception.Message
                 & $Log "  Download attempt $i of $Attempts failed: $last"
                 if ([IO.File]::Exists($path)) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+                $status = Get-HttpErrorStatus $_.Exception
+                if ($status -ge 400 -and $status -lt 500 -and $status -notin 408, 429) { throw "the server refused the link (HTTP $status)" }
                 if ($i -lt $Attempts) { Start-Sleep -Seconds $WaitSeconds }
                 continue
             }
+            $script:DownloadOfflineUntil = $null
             # The download worked. A file that fails the check is refused at once: downloading it again gives the same file.
             $problem = Test-AppDownloadFile -Definition $d -Path $path -Signature $Signature -Log $Log
             if ($problem) {
@@ -743,7 +753,19 @@ function Get-AppDownload {
             return
         }
     } finally { $ProgressPreference = $old }
+    $script:DownloadOfflineUntil = (Get-Date).AddMinutes(10)
     throw "could not download $($d.downloadUrl) after $Attempts tries (no internet?). Last error: $last"
+}
+
+function Get-HttpErrorStatus {
+    # The HTTP status of a failed web request (WebException in Windows PowerShell, HttpResponseException in 7), else 0.
+    param($Exception)
+    for ($e = $Exception; $e; $e = $e.InnerException) {
+        $code = try { [int]$e.Response.StatusCode } catch { 0 }
+        if ($code) { return $code }
+        if ("$($e.Message)" -match '\((\d{3})\)|status code does not indicate success: (\d{3})') { return [int]$(if ($Matches[1]) { $Matches[1] } else { $Matches[2] }) }
+    }
+    0
 }
 
 # Signer names of well-known publishers. A pack matches an entry when its publisher is one of the entry's names
@@ -1134,7 +1156,8 @@ function Invoke-AppInstall {
     #>
     param(
         [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][string]$AppFolder, [scriptblock]$Log = { param($m) Write-Host $m },
-        [string]$LogPath   # the installer's own output; default App-<name>.log in TEMP
+        [string]$LogPath,   # the installer's own output; default App-<name>.log in TEMP
+        [int]$IdleMinutes = 5
     )
     $d = $Definition
     $out = { param($s, $code, $reboot, $msg) [pscustomobject]@{ Status = $s; ExitCode = $code; RebootNeeded = [bool]$reboot; Message = $msg } }
@@ -1160,8 +1183,12 @@ function Invoke-AppInstall {
     if (-not $LogPath) { $LogPath = Join-Path ([IO.Path]::GetTempPath()) "App-$($d.name).log" }
     # Office takes 10-20 minutes from local files, longer from the internet: never less than an hour for it.
     $timeout = if ($odt) { [Math]::Max(60, [int]$d.timeoutMinutes) } else { $d.timeoutMinutes }
-    $run = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments "/c $command" -WorkingDirectory $AppFolder -TimeoutMinutes $timeout -LogPath $LogPath -Log $Log
+    # An installer that shows a window and does nothing for 5 minutes waits for a click: stopped then, not after the
+    # whole timeout (first boot holds the PC on "Please wait" meanwhile). Office's setup is left to its timeout.
+    $idle = if ($odt) { 0 } else { $IdleMinutes * 60 }
+    $run = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments "/c $command" -WorkingDirectory $AppFolder -TimeoutMinutes $timeout -LogPath $LogPath -Log $Log -IdleSeconds $idle
     $tail = if ($run.LastLine) { "; last line: $($run.LastLine)" } else { '' }
+    if ($run.Stuck) { return & $out 'TimedOut' $null $false "stuck on a window for $IdleMinutes minutes (wrong silent switch?); stopped" }
     if ($run.TimedOut) { return & $out 'TimedOut' $null $false "still running after $timeout minutes; stopped$tail" }
     $code = $run.ExitCode
     if ($d.successCodes -notcontains $code) { return & $out 'Failed' $code $false "exit code $code is not a success code ($($d.successCodes -join ', '))$tail" }
@@ -1182,7 +1209,7 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, Copy-AppTemplateFiles,
     ConvertFrom-WingetSearch, Remove-ConsoleControl, Get-WingetSearchFailure, Find-WingetPackage, Get-WingetManifestUrl, ConvertFrom-WingetInstallerYaml, Select-WingetInstaller,
-    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
+    New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Get-HttpErrorStatus, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
     Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
     Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
