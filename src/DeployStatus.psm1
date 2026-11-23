@@ -360,6 +360,13 @@ function Remove-DeploymentStatus {
     }
 }
 
+function Get-ExpiredDeployments {
+    # Finished PCs (Succeeded, Warning, Cancelled) not heard from for -Days: the console moves them off the Dashboard
+    # by itself, so nobody has to click Clear finished. Their final log stays under Show: History.
+    param([AllowEmptyCollection()][object[]]$Rows, [int]$Days = 7, [datetime]$Now = (Get-Date))
+    @($Rows | Where-Object { $_.State -in 'Succeeded', 'Warning', 'Cancelled' -and $_.Updated -and $_.Updated -lt $Now.AddDays(-$Days) })
+}
+
 function Import-StickDeployStatus {
     <#
     .SYNOPSIS
@@ -517,4 +524,4 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Remove-DeploymentStatus, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary
+    Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

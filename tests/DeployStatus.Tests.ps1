@@ -72,6 +72,14 @@ try {
     Assert-Equal $rows.Count 3 'unreadable status files are skipped'
     $sum = Get-DeploymentSummary -Rows $rows
     Assert-Equal "$($sum.Total)|$($sum.Running)|$($sum.Warning)|$($sum.Failed)" '3|0|1|2' 'summary counts failed and stalled together'
+    $now = [datetime]::Now
+    $aged = @(
+        [pscustomobject]@{ Id = 'OLD-OK'; State = 'Succeeded'; Updated = $now.AddDays(-8) }
+        [pscustomobject]@{ Id = 'NEW-OK'; State = 'Succeeded'; Updated = $now.AddDays(-2) }
+        [pscustomobject]@{ Id = 'OLD-FAIL'; State = 'Failed'; Updated = $now.AddDays(-30) }
+        [pscustomobject]@{ Id = 'OLD-WARN'; State = 'Warning'; Updated = $now.AddDays(-9) }
+    )
+    Assert-Equal ((Get-ExpiredDeployments -Rows $aged -Now $now).Id -join ',') 'OLD-OK,OLD-WARN' 'finished PCs older than 7 days leave the Dashboard; failed ones stay'
     Remove-DeploymentStatus -Rows @($rows | Where-Object Id -eq '5CG1')
     Assert-Equal "$(Test-Path (Join-Path $folder '5CG1.json'))|$(Test-Path (Join-Path $folder '5CG1.log'))" 'False|False' 'remove deletes the status and live log'
 

@@ -355,6 +355,12 @@ function Update-Dashboard {
     $folder = Get-DashboardFolder
     if ($folder) { Import-StickDashboard $folder }
     $rows = @(if ($folder) { Get-DeploymentStatus -Folder $folder })
+    # Finished more than 7 days ago: off the Dashboard by itself, the final log stays under Show: History.
+    $expired = @(Get-ExpiredDeployments -Rows $rows)
+    if ($expired) {
+        Remove-DeploymentStatus -Rows $expired
+        $rows = @($rows | Where-Object { $expired -notcontains $_ })
+    }
     $sum = Get-DeploymentSummary -Rows $rows
     $ui.TxtDashRunning.Text   = $sum.Running
     $ui.TxtDashSucceeded.Text = $sum.Succeeded

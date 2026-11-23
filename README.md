@@ -541,7 +541,8 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\ImagingTool\Test-Deploym
 ```
 
 **Remove** takes one PC off the dashboard and **Clear finished** removes all
-succeeded, warning and cancelled PCs; their final logs stay under the **History** filter. A PC
+succeeded, warning and cancelled PCs; finished PCs also leave by themselves 7 days
+after their last report. Their final logs stay under the **History** filter. A PC
 that is redeployed replaces its earlier entry. PCs with a placeholder serial
 (common on white boxes) are listed by MAC address.
 
