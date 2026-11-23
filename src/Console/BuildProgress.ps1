@@ -257,7 +257,7 @@ function Show-ProgressWindows {
     if ($Later) {
         # Again once the click that started the job is over: a wizard or dialog closing after it hands the focus
         # back to the console, which would cover the window just shown.
-        [void]$w.Dispatcher.BeginInvoke([action]{ Show-ProgressWindows }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+        [void]$w.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::ApplicationIdle, [action]{ Show-ProgressWindows })
         return
     }
     try {
