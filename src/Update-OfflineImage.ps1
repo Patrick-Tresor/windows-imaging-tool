@@ -99,7 +99,7 @@ try {
                 Set-BuildStepProgress 'download' -Percent (100 * ($Number - 1) / $Count) -Detail $FileName
             }
         } catch {
-            $why = "$($_.Exception.Message) Download the cumulative update for this Windows version from the Microsoft Update Catalog into $updatesDir, then use Update image with that file."
+            $why = "$($_.Exception.Message) Put its .msu from the Microsoft Update Catalog in $updatesDir and pick it in Update image."
             if (-not $PackagePath) { throw $why }
             Write-DeployLog $why -Level WARN
             $latest = $null
