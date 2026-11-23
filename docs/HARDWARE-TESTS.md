@@ -1,9 +1,8 @@
 # Hardware test checklist
 
 Everything below passes the Windows CI tests, but CI has no real WinPE, USB stick, network or laptop.
-Work through it in this order: each step needs the ones before it. Mark each result on the console's
-**Hardware Tests** tab (it reads this list), and when one fails, use **Copy logs** in WinPE, then **Attach the
-latest log** on that tab.
+Work through it in this order: each step needs the ones before it. When one fails, use **Copy logs** in WinPE
+and send the log.
 
 Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP or Lenovo) when you can.
 
