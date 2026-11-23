@@ -2,10 +2,11 @@
      Copy it into the application's folder as configuration.xml, next to setup.exe (from the Office Deployment Tool).
      Change Product ID to your license (O365ProPlusRetail = Microsoft 365 Apps for enterprise) and the languages.
      Office has no fr-CA: French is fr-fr. MatchOS also installs the Windows display language.
-     For an offline install, run once: setup.exe /download configuration.xml, then add SourcePath=".\" to <Add>
-     (the Office folder that /download makes must be next to setup.exe). -->
+     Leave SourcePath out: building a USB stick, or a Computers tab reimage, runs setup.exe /download on the console PC
+     and puts the Office files (Office\Data) next to setup.exe, and with no SourcePath each PC installs from those files.
+     AllowCdnFallback: a PC whose copy has no Office files (or a broken one) still installs from the internet. -->
 <Configuration>
-  <Add OfficeClientEdition="64" Channel="MonthlyEnterprise">
+  <Add OfficeClientEdition="64" Channel="MonthlyEnterprise" AllowCdnFallback="TRUE">
     <Product ID="O365ProPlusRetail">
       <Language ID="fr-fr" />
       <Language ID="en-us" />

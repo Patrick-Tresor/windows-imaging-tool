@@ -70,7 +70,33 @@ $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
         } else { $credential })
     }
 })
-Start-BuildProgress -Path $ProgressFile -Title "Reimaging $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' }) with $AnswerFile" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
+# Microsoft 365 Apps in the answer file: its Office files go next to setup.exe on the share first, so each PC
+# installs Office from the share instead of downloading 2-3 GB from Microsoft at first boot.
+$officeApps = @()
+try {
+    $answerPath = Join-Path $ContentRoot "AnswerFiles\$AnswerFile.xml"
+    if (Test-Path -LiteralPath $answerPath) {
+        Import-Module (Join-Path $PSScriptRoot 'AnswerFile.psm1') -Force
+        Import-Module (Join-Path $PSScriptRoot 'AppPack.psm1') -Force   # after AnswerFile, which imports it for itself only
+        $ans = Read-AnswerFile -Path $answerPath -SkipValidation
+        $officeAppRoot = Join-Path $ContentRoot $ans.AppLocation
+        $officeApps = @($ans.Applications | Where-Object {
+            $def = try { Read-AppPack -AppRoot $officeAppRoot -Name $_ } catch { $null }
+            $def -and (Get-OfficeConfigPath -Definition $def -AppFolder (Join-Path $officeAppRoot $_))
+        })
+    }
+} catch { Write-Warning "Could not check the answer file's applications for Office: $($_.Exception.Message)" }
+$reimageSteps = @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
+if ($officeApps) { $reimageSteps = @(, @('office', 'Getting the Office files ready')) + $reimageSteps }
+Start-BuildProgress -Path $ProgressFile -Title "Reimaging $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' }) with $AnswerFile" -LogPath $LogPath -Steps $reimageSteps
+if ($officeApps) {
+    Start-BuildStep 'office' -Detail ($officeApps -join ', ')
+    $officeRows = @(Update-OfficeSources -AppRoot $officeAppRoot -Names $officeApps)
+    $bad = @($officeRows | Where-Object Status -eq 'Failed')
+    $ok = @($officeRows | Where-Object { $_.Status -in 'Downloaded', 'Fresh' })
+    if ($bad) { Complete-BuildStep 'office' -State failed -Detail "Not downloaded: the PCs download Office at first boot ($($bad[0].Message))" }
+    else { Complete-BuildStep 'office' -Detail $(if ($ok) { "Office $($ok[0].Version) on the share" } else { 'Nothing to do' }) }
+}
 Write-Host "Reimaging $($pcs.Count) PC(s) with answer file $AnswerFile from $ContentRoot" -ForegroundColor Cyan
 
 function Stop-Pc($p, [string]$Message) {

@@ -70,7 +70,7 @@
       ] },
       "timeoutMinutes": 90,
       "verify": true,
-      "notes": "Made with no installer picked, the pack gets the Office Deployment Tool's setup.exe (downloaded at first boot) and config\\office-configuration.xml as configuration.xml; Office itself then downloads from Microsoft. Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Without a Source folder Office downloads from the internet at first boot; to install offline, run setup.exe /download configuration.xml once and put the Office folder next to setup.exe."
+      "notes": "Made with no installer picked, the pack gets the Office Deployment Tool's setup.exe (downloaded at first boot) and config\\office-configuration.xml as configuration.xml; Office itself then downloads from Microsoft. Office Deployment Tool: setup.exe plus configuration.xml in the same folder (sample in config\\office-configuration.xml). OfficeSetup.exe from office.com does not install silently: it exits 0 without installing anything. Building a USB stick (or a Computers tab reimage) runs setup.exe /download on the console PC and puts the Office files next to setup.exe in this folder (about 2-3 GB, refreshed every 14 days), so each PC installs Office from its own copy instead of downloading it at first boot. Leave SourcePath out of configuration.xml."
     },
     {
       "name": "Teams",
