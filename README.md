@@ -28,7 +28,7 @@ Double-click `ImagingConsole.cmd` on a Windows admin PC (it asks for admin right
 opens: the PowerShell window behind it stays hidden. If the console stops on an error, a message says so and
 the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 Pick a **content root** (a local folder, the USB `DEPLOY` volume, or the share)
-and click **Create folders** the first time. Then:
+with **Browse...**; a new folder gets the content folders right away. Then:
 
 - **Images**: see captured images, their size and editions, and which answer
   files use them. **Capture new image...** opens the capture wizard (below).

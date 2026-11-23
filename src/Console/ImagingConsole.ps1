@@ -168,7 +168,7 @@ function Invoke-Safely([scriptblock]$Action) {
 
 function Test-RootReady {
     if (Test-ContentRoot $script:root) { return $true }
-    Show-Error 'Choose a content root first (Browse...), then click Create folders if it is new.'
+    Show-Error 'Choose a content root first (Browse...).'
     $false
 }
 
@@ -520,15 +520,11 @@ $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
     $cfg = Get-ConsoleConfig
     $cfg | Add-Member -NotePropertyName contentRoot -NotePropertyValue $path -Force
     Save-ConsoleConfig $cfg
-    if (-not (Test-ContentRoot $path)) { Set-Status 'This folder is not a content root yet. Click Create folders.' }
+    # A new folder becomes a content root right away (nothing existing is overwritten).
+    $created = -not (Test-ContentRoot $path)
+    if ($created) { Initialize-ContentRoot -Path $path }
     Update-All
-} })
-
-$ui.BtnInitRoot.Add_Click({ Invoke-Safely {
-    if (-not $script:root) { Show-Error 'Choose a folder with Browse... first.'; return }
-    Initialize-ContentRoot -Path $script:root
-    Update-All
-    Set-Status "Created the content folders (Images, Drivers, AnswerFiles, Applications, config, Logs) in $($script:root)"
+    if ($created) { Set-Status "Created the content folders (Images, Drivers, AnswerFiles, Applications, Tasks, config, Logs) in $path" }
 } })
 
 #endregion

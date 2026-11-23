@@ -24,7 +24,6 @@
         <!-- Shown while a progress window exists (build, capture, reimage), also one that was closed: shows them again. -->
         <Button x:Name="BtnShowProgress" DockPanel.Dock="Right" Content="Show progress" Margin="20,0,0,0" Visibility="Collapsed"
                 ToolTip="Opens the progress windows again, also the ones you closed while the work goes on."/>
-        <Button x:Name="BtnInitRoot" DockPanel.Dock="Right" Content="Create folders" Margin="8,0,0,0"/>
         <Button x:Name="BtnOpenRoot" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0" ToolTip="Opens the content root in File Explorer"/>
         <Button x:Name="BtnBrowseRoot" DockPanel.Dock="Right" Content="Browse..." Margin="8,0,0,0"/>
         <TextBox x:Name="TxtRoot" IsReadOnly="True"/>
