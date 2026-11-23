@@ -151,19 +151,21 @@ Assert-Equal ($hookText.Contains('Test-SysprepTaskNeverStarted -State $state')) 
 $pantherLines = @(
     '2026-11-23 10:40:00, Error                 SYSPRP Package Microsoft.Old_1.0.0.0_x64__8wekyb3d8bbwe was installed for a user, but not provisioned for all users. This package will not function properly in the sysprep image.',
     '2026-11-23 10:53:06, Info                  SYSPRP ========================================================',
-    '2026-11-23 10:53:07, Error                 SYSPRP Package Microsoft.BingSearch_1.1.33.0_x64__8wekyb3d8bbwe was installed for a user, but not provisioned for all users. This package will not function properly in the sysprep image.',
+    '2026-11-23 10:53:07, Error                 SYSPRP Package Microsoft.OneDrive.Photos_26.212.1029.6_neutral__8wekyb3d8bbwe was installed for a user, but not provisioned for all users. This package will not function properly in the sysprep image.',
     '2026-11-23 10:53:07, Error                 SYSPRP Failed to remove apps for the current user: 0x80073cf2.',
-    '2026-11-23 10:53:07, Error                 SYSPRP Package Microsoft.BingSearch_1.1.33.0_x64__8wekyb3d8bbwe was installed for a user, but not provisioned for all users. This package will not function properly in the sysprep image.',
+    '2026-11-23 10:53:07, Error                 SYSPRP Package Microsoft.OneDrive.Photos_26.212.1029.6_neutral__8wekyb3d8bbwe was installed for a user, but not provisioned for all users. This package will not function properly in the sysprep image.',
     '2026-11-23 10:53:07, Error      [0x0f00d8] SYSPRP WinMain:Hit failure while pre-validate sysprep generalize internal providers; hr = 0x80073cf2')
 $since = [datetime]::ParseExact('2026-11-23 10:53:05', 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
-Assert-Equal ((@(Get-SysprepBlockingPackages -Lines $pantherLines -Since $since)) -join ',') 'Microsoft.BingSearch_1.1.33.0_x64__8wekyb3d8bbwe' 'the package of this sysprep run, once, not an older run''s'
+Assert-Equal ((@(Get-SysprepBlockingPackages -Lines $pantherLines -Since $since)) -join ',') 'Microsoft.OneDrive.Photos_26.212.1029.6_neutral__8wekyb3d8bbwe' 'the package of this sysprep run, once, not an older run''s'
 Assert-Equal (@(Get-SysprepBlockingPackages -Lines $pantherLines).Count) 2 'without a start time every named package counts'
 Assert-Equal (@(Get-SysprepBlockingPackages -Lines @('2026-11-23 10:53:07, Error [0x0f0082] SYSPRP other failure')).Count) 0 'another sysprep failure names no package'
-Assert-Equal (Get-AppxPackageNameFromFullName -FullName 'Microsoft.BingSearch_1.1.33.0_x64__8wekyb3d8bbwe') 'Microsoft.BingSearch' 'package name from the full name'
+Assert-Equal (Get-AppxPackageNameFromFullName -FullName 'Microsoft.OneDrive.Photos_26.212.1029.6_neutral__8wekyb3d8bbwe') 'Microsoft.OneDrive.Photos' 'package name from the full name'
 $loopText = [IO.File]::ReadAllText((Join-Path $repo 'src/Invoke-SysprepAtDeploy.ps1'))
 Assert-Equal ($loopText -match '(?s)for \(\$round = 1;.*Start-Process -FilePath \$sysprep.*Get-SysprepBlockingPackages.*Remove-AppxForEveryUser -FullName \$pkg') $true 'sysprep runs again after removing the package it stopped on'
 Assert-Equal ($loopText.Contains('if ($removed.ContainsKey($pkg))')) $true 'a package that comes back after removal stops the retries'
 Assert-Equal ($loopText -match '(?s)function Remove-AppxForEveryUser.*-AllUsers.*-User \$sid') $true 'the package is removed for all users, then for each user still holding it'
 Assert-Equal ($loopText -match '(?s)function Remove-AppxForEveryUser.*Remove-AppxProvisionedPackage') $false 'the provisioned copy is never removed'
+
+Assert-Equal ($prep.Contains('Get-AppxPackage -AllUsers -PackageTypeFilter Main, Framework, Optional')) $true 'the checks also see optional packages (Microsoft.OneDrive.Photos)'
 
 Complete-Tests 'All sysprep at deploy tests passed.'

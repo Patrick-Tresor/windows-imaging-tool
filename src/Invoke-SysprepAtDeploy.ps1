@@ -119,7 +119,7 @@ function Remove-AppxForEveryUser([string]$FullName) {
     try { Remove-AppxPackage -Package $FullName -AllUsers -ErrorAction Stop }
     catch { Write-Log "  Remove-AppxPackage -AllUsers: $($_.Exception.Message)" 'WARN' }
     $name = Get-AppxPackageNameFromFullName -FullName $FullName
-    $left = @(Get-AppxPackage -AllUsers -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -eq $FullName })
+    $left = @(Get-AppxPackage -AllUsers -Name $name -PackageTypeFilter Main, Framework, Optional -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -eq $FullName })
     foreach ($user in @($left | ForEach-Object { $_.PackageUserInformation } | Where-Object { "$($_.InstallState)" -eq 'Installed' })) {
         $sid = "$($user.UserSecurityId.Sid)"
         if (-not $sid) { continue }

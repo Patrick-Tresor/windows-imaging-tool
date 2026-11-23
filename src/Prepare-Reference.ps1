@@ -123,7 +123,9 @@ try {
 
 # Sysprep fails with 0x80073cf2 when a Store app is installed for a user but not provisioned for all users.
 $provisioned = @(Get-AppxProvisionedPackage -Online)
-$installedApps = @(Get-AppxPackage -AllUsers)
+# Optional packages (Microsoft.OneDrive.Photos, added by Photos) are left out of Get-AppxPackage by default, but sysprep
+# fails on them too (the 5521, 2026-11-23).
+$installedApps = @(Get-AppxPackage -AllUsers -PackageTypeFilter Main, Framework, Optional)
 $storeProblem = Get-StoreProblem -Installed $installedApps -Provisioned $provisioned
 if ($storeProblem) { $problems.Add($storeProblem) }
 $updated = @(Get-UpdatedInboxApps -Installed $installedApps -Provisioned $provisioned)
