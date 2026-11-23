@@ -230,6 +230,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal ($v.Summary -like 'Done in *') $true 'window: done'
         Assert-Equal "$($v.SummaryState)|$($v.Finished)" 'success|True' 'window: a finished card is green and can be removed'
         Assert-Equal $ctx.Timer.IsEnabled $false 'window: stops reading when the build is done'
+        Assert-Equal "$($ctx.RemoveTimer.IsEnabled)|$($ctx.RemoveTimer.Interval.TotalSeconds)" 'True|10' 'window: a build that worked takes its card off after 10 seconds, so the window closes itself'
         Assert-Equal $dlg.FindName('TxtCount').Text '1 running, 1 finished' 'window: count after one finished'
         Remove-ProgressJob -Ctx $ctx
         Assert-Equal "$($script:ProgressWindows.Count)|$(@($dlg.FindName('LstJobs').ItemsSource).Count)" '1|1' 'window: Remove takes the finished card off'
