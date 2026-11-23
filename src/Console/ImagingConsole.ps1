@@ -1333,6 +1333,7 @@ $window.Dispatcher.Add_UnhandledException({
 })
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
 $window.Add_Closing({ $script:ConsoleClosing = $true })
+$window.Add_Closed({ Close-ProgressHub })
 $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop() })
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).

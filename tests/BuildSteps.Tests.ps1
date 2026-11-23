@@ -188,7 +188,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Set-BuildStepProgress 'b' -Percent 30 -Detail '1 GB of 3 GB'
         $owner.Show()
         Show-BuildProgress -Owner $owner -ProgressFile $file -Title 'Building USB stick'
-        $dlg = @($owner.OwnedWindows)[0]
+        $dlg = $script:ProgressHub.Window
+        Assert-Equal $dlg.Owner $null 'window: not owned by the console, so the taskbar can always bring it up'
         $dlg.Left = -10000; $dlg.Top = -10000
         $dlg.Dispatcher.Invoke([action]{}, 'Background')
         $ctx = $script:ProgressWindows[0]
@@ -206,7 +207,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Copy-Item -LiteralPath $file -Destination $file2   # a second job's progress file, still running
         Show-BuildProgress -Owner $owner -ProgressFile $file2 -Title 'Downloading the Dell Latitude 5531 driver pack' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5
         $dlg.Dispatcher.Invoke([action]{}, 'Background')
-        Assert-Equal @($owner.OwnedWindows).Count 1 'window: still one window for two jobs'
+        Assert-Equal ($script:ProgressHub.Window -eq $dlg) $true 'window: still one window for two jobs'
         Assert-Equal @($dlg.FindName('LstJobs').ItemsSource).Count 2 'window: two cards'
         Assert-Equal $script:ProgressWindows.Count 2 'window: both jobs listed for Show progress'
         Assert-Equal $script:ProgressWindows[1].View.CanShowWindow $false 'window: a hidden job has no Show build window'
@@ -219,6 +220,10 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Assert-Equal $script:ProgressWindows.Count 2 'window: hidden jobs stay listed'
         Show-ProgressWindows
         Assert-Equal $dlg.IsVisible $true 'window: Show progress shows it again'
+        Assert-Equal ($dlg.Left -gt -1000 -and $dlg.Top -gt -1000) $true 'window: Show progress moves it back on screen'
+        $dlg.WindowState = 'Minimized'
+        Show-ProgressWindows
+        Assert-Equal "$($dlg.WindowState)" 'Normal' 'window: Show progress restores it when minimized'
 
         Complete-BuildStep 'b'
         Stop-BuildProgress
