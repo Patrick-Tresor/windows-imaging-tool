@@ -151,7 +151,7 @@ try {
     Assert-Equal (Get-ImageFileExtension -Compression recovery) '.esd' 'Smallest makes an .esd'
     Assert-Equal (Get-ImageFileExtension -Compression max) '.wim' 'Maximum makes a .wim'
     Assert-Equal ((Get-CaptureImageArgs -WimPath 'D:\S\W.wim' -CaptureDir 'C:\' -Name 'W' -Compression recovery -Description 'Ref') -join ' ') '/Capture-Image /ImageFile:D:\S\W.wim /CaptureDir:C:\ /Name:W /Compress:max /CheckIntegrity /Description:Ref' 'Smallest captures with max first'
-    Assert-Equal ((Get-CaptureImageArgs -WimPath 'W.wim' -CaptureDir 'V:\' -Name 'W' -Compression fast) -join ' ') '/Capture-Image /ImageFile:W.wim /CaptureDir:V:\ /Name:W /Compress:fast /CheckIntegrity' 'VM capture: no /Verify'
+    Assert-Equal ((Get-CaptureImageArgs -WimPath 'W.wim' -CaptureDir 'V:\' -Name 'W' -Compression max) -join ' ') '/Capture-Image /ImageFile:W.wim /CaptureDir:V:\ /Name:W /Compress:max /CheckIntegrity' 'VM capture: no /Verify'
     Set-Content (Join-Path $pubDir 'Small.esd') 'old esd'
     Assert-Equal ((Get-ExistingImageFiles -ImagesDir $pubDir -Name 'Small' | ForEach-Object { Split-Path $_ -Leaf }) -join ',') 'Small.esd' 'an existing .esd counts as the image of that name'
     $esdStage = Join-Path $pubDir '.capture-Small'

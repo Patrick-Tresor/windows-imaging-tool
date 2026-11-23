@@ -29,7 +29,7 @@ param(
     [string]$Name,
     [string]$ContentRoot,
     [string]$Description,
-    [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',   # recovery = Smallest: an .esd about a quarter smaller than max
+    [ValidateSet('max', 'recovery')][string]$Compression = 'max',   # recovery = Smallest: an .esd about a quarter smaller than max
     [switch]$NewVersion,         # replace an existing image, keeping the old one as a version
     [switch]$NoPrompt,
     [switch]$CheckOnly,          # only read the disk and write what was found to -ResultPath

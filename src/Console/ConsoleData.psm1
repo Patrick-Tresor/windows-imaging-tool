@@ -805,7 +805,7 @@ function Get-VMCaptureArguments {
         [Parameter(Mandatory)][string]$DiskPath,
         [Parameter(Mandatory)][string]$Name,
         [string]$Description,
-        [ValidateSet('fast', 'max', 'recovery')][string]$Compression = 'max',
+        [ValidateSet('max', 'recovery')][string]$Compression = 'max',
         [switch]$NewVersion,
         [switch]$SysprepAtDeploy,
         [string]$ReuseConvertedDisk,

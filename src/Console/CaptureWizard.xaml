@@ -129,7 +129,6 @@
             <Label Grid.Row="4" Content="Compression"/>
             <ComboBox x:Name="CmbCompression" Grid.Row="4" Grid.Column="1" Width="220" HorizontalAlignment="Left" SelectedIndex="0">
               <ComboBoxItem Content="Maximum (smaller, slower)" Tag="max"/>
-              <ComboBoxItem Content="Fast (larger, quicker)" Tag="fast"/>
               <ComboBoxItem Content="Smallest (.esd, slowest capture)" Tag="recovery"
                             ToolTip="About a quarter smaller than Maximum, so a stick build copies less. The capture takes longer (it is compressed a second time) and each deploy a little longer."/>
             </ComboBox>
