@@ -65,6 +65,7 @@
             <Button x:Name="BtnCapture" Content="Capture new image..." Style="{StaticResource Primary}"/>
             <Button x:Name="BtnImageVersions" Content="Versions..." ToolTip="Earlier versions of the selected image: keep a copy, roll back, delete old ones."/>
             <Button x:Name="BtnImageUpdate" Content="Update image..."/>
+            <Button x:Name="BtnImageLog" Content="Open log" ToolTip="The newest capture or update log of the selected image."/>
             <Button x:Name="BtnImagesRefresh" Content="Refresh"/>
             <Button x:Name="BtnImagesOpen" Content="Open folder"/>
           </StackPanel>
@@ -535,7 +536,7 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick with no network folder to report to show up here when you plug the stick into this PC; their first boot (applications, checks) is only reported with a network folder (Deploy Settings, section 3)."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Show: History lists deployments removed or cleared from here, with their final log."/>
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
@@ -563,6 +564,7 @@
                 <ComboBoxItem Content="Deploying"/>
                 <ComboBoxItem Content="Failed or stalled"/>
                 <ComboBoxItem Content="Finished"/>
+                <ComboBoxItem Content="History"/>
               </ComboBox>
               <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
               <Button x:Name="BtnDashClear" DockPanel.Dock="Right" Content="Clear finished" Margin="8,0,0,0"/>
@@ -627,31 +629,6 @@
         </ScrollViewer>
       </TabItem>
 
-      <!-- Logs -->
-      <TabItem Header="Logs">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <TextBlock Style="{StaticResource SectionTitle}" Text="Logs"/>
-            <TextBlock Style="{StaticResource Hint}" Text="Captures, image updates, and deployments no longer on the Dashboard. A PC on the Dashboard shows its log there."/>
-          </StackPanel>
-          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-            <Button x:Name="BtnLogsRefresh" Content="Refresh"/>
-          </StackPanel>
-          <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="440"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <DataGrid x:Name="GridLogs" IsReadOnly="True">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="When" Binding="{Binding When, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
-                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="90"/>
-                <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="*"/>
-                <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="70"/>
-              </DataGrid.Columns>
-            </DataGrid>
-            <TextBox x:Name="TxtLog" Grid.Column="2" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
-          </Grid>
-        </DockPanel>
-      </TabItem>
     </TabControl>
   </DockPanel>
 </Window>

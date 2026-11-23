@@ -334,7 +334,6 @@ function Import-StickDashboard([string]$Folder) {
     }
     if ($n) {
         Set-Status "Added $n deployment(s) from the USB stick to the dashboard"
-        try { Update-Logs } catch { }
     }
 }
 
@@ -349,12 +348,18 @@ function Update-Dashboard {
     $ui.TxtDashFailed.Text    = $sum.Failed
     $ui.TxtDashTotal.Text     = $sum.Total
 
-    $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
-        1 { 'Running' }
-        2 { 'Failed', 'Stalled' }
-        3 { 'Succeeded', 'Warning', 'Cancelled' }
-    })
-    if ($states) { $rows = @($rows | Where-Object State -in $states) }
+    if ($ui.CmbDashFilter.SelectedIndex -eq 4) {
+        # History: deployments removed or cleared from the Dashboard, from their final log in Logs\.
+        $onDash = @($rows | ForEach-Object LogFile)
+        $rows = @(if (Test-ContentRoot $script:root) { Get-DeploymentHistoryRows -ContentRoot $script:root -DashboardLogFiles $onDash })
+    } else {
+        $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
+            1 { 'Running' }
+            2 { 'Failed', 'Stalled' }
+            3 { 'Succeeded', 'Warning', 'Cancelled' }
+        })
+        if ($states) { $rows = @($rows | Where-Object State -in $states) }
+    }
 
     # Keep the selected PC selected across refreshes.
     $selectedId = if ($ui.GridDash.SelectedItem) { $ui.GridDash.SelectedItem.Id } else { $null }
@@ -366,6 +371,12 @@ function Update-Dashboard {
 function Update-DashboardDetail {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
+    if ($r.PSObject.Properties['IsHistory']) {
+        $ui.TxtDashDetail.Text = "Final log of $($r.Serial), $($r.State), $($r.Started.ToString('yyyy-MM-dd HH:mm'))"
+        $text = try { [IO.File]::ReadAllText($r.LogPath) } catch { '' }
+        if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
+        return
+    }
     # The deployment's result first (one line each: drivers, applications, tasks, join, BitLocker, time), then the rest.
     $parts = @("MAC: $($r.MacAddress)", "Phase: $($r.Phase)", "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })")
     if ($r.Message)  { $parts += "Error: $($r.Message)" }
@@ -384,14 +395,6 @@ function Update-Apps {
 function Update-Tasks {
     $ui.GridTaskLibrary.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-TaskList -ContentRoot $script:root })
     $ui.TxtTaskIssues.Text = ''
-}
-
-function Update-Logs {
-    # Deployments still on the Dashboard show their log there; this tab lists everything else.
-    $onDash = @()
-    try { $folder = Get-DashboardFolder; if ($folder) { $onDash = @(Get-DeploymentStatus -Folder $folder | ForEach-Object LogFile) } } catch { }
-    $ui.GridLogs.ItemsSource = @(if (Test-ContentRoot $script:root) { Get-LogTabRows -ContentRoot $script:root -DashboardLogFiles $onDash })
-    $ui.TxtLog.Text = ''
 }
 
 function Get-UsbDiskChoices {
@@ -450,7 +453,7 @@ function Update-AdkStatus {
 
 function Update-All {
     $ui.TxtRoot.Text = $script:root
-    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard; Update-Logs
+    Update-Answers; Update-Images; Update-Apps; Update-Tasks; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -505,8 +508,16 @@ $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name). The Progress window shows each step; its log appears on the Logs tab when it finishes."
+        Set-Status "Updating $($image.Name). The Progress window shows each step; Open log shows its log when it finishes."
     }
+} })
+$ui.BtnImageLog.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $image = $ui.GridImages.SelectedItem
+    if (-not $image) { Show-Error 'Select an image first.'; return }
+    $log = Get-ImageLogPath -ContentRoot $script:root -ImageName ([IO.Path]::GetFileNameWithoutExtension($image.Name))
+    if (-not $log) { Show-Error "No capture or update log for $($image.Name) yet."; return }
+    Invoke-Item $log
 } })
 $ui.BtnImagesOpen.Add_Click({ Invoke-Safely { if (Test-RootReady) { Invoke-Item (Join-Path $script:root 'Images') } } })
 
@@ -1236,11 +1247,11 @@ $ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
 $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem
     if (-not $r) { Show-Error 'Select a PC first.'; return }
+    if ($r.PSObject.Properties['IsHistory']) { Show-Error 'This deployment is already off the Dashboard.'; return }
     if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
-    Update-Logs
-    Set-Status "Removed $($r.Serial) from the dashboard. Its final log is now on the Logs tab."
+    Set-Status "Removed $($r.Serial) from the dashboard. Show: History has its final log."
 } })
 
 $ui.BtnDashClear.Add_Click({ Invoke-Safely {
@@ -1248,10 +1259,9 @@ $ui.BtnDashClear.Add_Click({ Invoke-Safely {
     if (-not $folder) { return }
     $done = @(Get-DeploymentStatus -Folder $folder | Where-Object State -in 'Succeeded', 'Warning', 'Cancelled')
     if (-not $done) { Set-Status 'No finished deployments to clear'; return }
-    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. The cleared PCs' final logs move to the Logs tab.")) { return }
+    if (-not (Confirm-Action "Clear $($done.Count) finished deployment(s) from the dashboard? Failed and stalled PCs stay. Their final logs stay under Show: History.")) { return }
     Remove-DeploymentStatus -Rows $done
     Update-Dashboard
-    Update-Logs
     Set-Status "Cleared $($done.Count) finished deployment(s)"
 } })
 
@@ -1291,15 +1301,6 @@ $script:stickTimer.Start()
 
 #endregion
 
-#region Logs
-
-$ui.BtnLogsRefresh.Add_Click({ Invoke-Safely { Update-Logs; Set-Status 'Logs refreshed' } })
-$ui.GridLogs.Add_SelectionChanged({ Invoke-Safely {
-    $log = $ui.GridLogs.SelectedItem
-    $ui.TxtLog.Text = if ($log) { Get-Content -Raw $log.FullName } else { '' }
-} })
-
-#endregion
 
 Update-All
 Invoke-Safely { Update-UsbDisks }

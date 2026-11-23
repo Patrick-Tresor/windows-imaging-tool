@@ -247,12 +247,17 @@ try {
     Assert-Equal (Test-Path (Join-Path $root 'AnswerFiles/ToDelete.xml')) $false 'delete: the file is gone'
     Assert-Throws { Get-AnswerFileDeleteCheck -ContentRoot $root -Name 'ToDelete' } '*no answer file named ToDelete*' 'delete: a missing answer file is refused'
 
-    # Logs tab: a deployment still on the Dashboard is not listed twice; captures and updates always are.
-    $tab = @(Get-LogTabRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
-    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Count) 0 'Logs tab hides a deployment that is on the Dashboard'
-    Assert-Equal ((@($tab | ForEach-Object Kind) | Sort-Object) -join ',') 'Capture,Image update' 'Logs tab keeps capture and image update logs'
-    $tab = @(Get-LogTabRows -ContentRoot $root)
-    Assert-Equal (@($tab | Where-Object Serial -eq 'ABC123').Kind) 'Deployment' 'Logs tab lists a deployment cleared from the Dashboard'
+    # Dashboard History: deployments no longer on the Dashboard, never captures or image updates.
+    $tab = @(Get-DeploymentHistoryRows -ContentRoot $root -DashboardLogFiles @('abc123_20261022-1530_OK.log'))
+    Assert-Equal $tab.Count 0 'History hides a deployment that is still on the Dashboard, and has no capture or update logs'
+    $tab = @(Get-DeploymentHistoryRows -ContentRoot $root)
+    Assert-Equal "$($tab.Serial)|$($tab.State)|$($tab.IsHistory)" 'ABC123|Succeeded|True' 'History lists a deployment cleared from the Dashboard as a Dashboard row'
+
+    # Images tab, Open log: the newest capture or update log of that image only.
+    Set-Content (Join-Path $root 'Logs/CAPTURE-VM-Win11_20261024-0900_OK.log') 'x'
+    Set-Content (Join-Path $root 'Logs/CAPTURE-VM-Win11_Ref_20261025-0900_OK.log') 'x'
+    Assert-Equal ([IO.Path]::GetFileName((Get-ImageLogPath -ContentRoot $root -ImageName 'Win11'))) 'CAPTURE-VM-Win11_20261024-0900_OK.log' 'image log: newest of its capture and update logs'
+    Assert-Equal ($null -eq (Get-ImageLogPath -ContentRoot $root -ImageName 'Other')) $true 'image log: none for an image never captured here'
 }
 finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

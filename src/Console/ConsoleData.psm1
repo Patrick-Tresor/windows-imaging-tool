@@ -1104,18 +1104,36 @@ function Get-DeploymentLogs {
         }
 }
 
-function Get-LogTabRows {
-    # The Logs tab: captures, image updates, and the deployments that are no longer on the Dashboard (removed or
-    # cleared). A deployment still on the Dashboard shows its log there, so it is not listed twice.
+function Get-DeploymentHistoryRows {
+    # The Dashboard's History view: deployments no longer on the Dashboard (removed or cleared), from their final log
+    # in Logs\, shaped like Dashboard rows so the same grid and log pane show them. Newest first.
     # DashboardLogFiles: the Logs\ file names the Dashboard rows point to (their status record's logFile).
     param([Parameter(Mandatory)][string]$ContentRoot, [string[]]$DashboardLogFiles = @())
     $onDash = @{}
     foreach ($f in $DashboardLogFiles) { if ($f) { $onDash[$f.ToUpperInvariant()] = $true } }
     foreach ($log in Get-DeploymentLogs -ContentRoot $ContentRoot) {
-        $kind = if ($log.Serial -like 'CAPTURE-*') { 'Capture' } elseif ($log.Serial -like 'SERVICE-*') { 'Image update' } else { 'Deployment' }
-        if ($kind -eq 'Deployment' -and $onDash.ContainsKey([IO.Path]::GetFileName($log.FullName).ToUpperInvariant())) { continue }
-        $log | Add-Member -NotePropertyName Kind -NotePropertyValue $kind -PassThru
+        if ($log.Serial -like 'CAPTURE-*' -or $log.Serial -like 'SERVICE-*') { continue }
+        if ($onDash.ContainsKey([IO.Path]::GetFileName($log.FullName).ToUpperInvariant())) { continue }
+        [pscustomobject]@{
+            Id        = "log:$([IO.Path]::GetFileName($log.FullName))"
+            IsHistory = $true
+            Serial    = $log.Serial
+            State     = switch ($log.Status) { 'OK' { 'Succeeded' } 'FAILED' { 'Failed' } default { "$($log.Status)" } }
+            Step      = 'Removed from the Dashboard'
+            Started   = $log.When
+            Percent   = 100
+            LogPath   = $log.FullName
+        }
     }
+}
+
+function Get-ImageLogPath {
+    # The newest capture or image update log of an image (Logs\CAPTURE-VM-<name>_... or SERVICE-<name>_...), for the
+    # Images tab's Open log button; $null when there is none.
+    param([Parameter(Mandatory)][string]$ContentRoot, [Parameter(Mandatory)][string]$ImageName)
+    $pattern = "^(CAPTURE-VM|CAPTURE|SERVICE)-$([regex]::Escape($ImageName))$"
+    @(Get-DeploymentLogs -ContentRoot $ContentRoot | Where-Object { $_.Serial -match $pattern } | Sort-Object When -Descending |
+        Select-Object -First 1 | ForEach-Object FullName)[0]
 }
 
 #endregion
@@ -1125,7 +1143,7 @@ Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleC
     Get-DeploySettings, Save-DeploySettings,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
-    Get-DeploymentLogs, Get-LogTabRows,
+    Get-DeploymentLogs, Get-DeploymentHistoryRows, Get-ImageLogPath,
     Update-ContentTools, Test-ImageName,
     Get-AnswerFilePath, Get-AnswerFileIssues, Get-AnswerFileRows, Import-DeployWizardAnswerFile, Get-ImageUsage,
     Get-NewAnswer, Test-SavedPassword, Save-AnswerFromEditor, Split-JoinAccount, Get-DomainJoinProblem, Get-ApplicationList, New-Application,
