@@ -128,7 +128,7 @@ $storeProblem = Get-StoreProblem -Installed $installedApps -Provisioned $provisi
 if ($storeProblem) { $problems.Add($storeProblem) }
 $updated = @(Get-UpdatedInboxApps -Installed $installedApps -Provisioned $provisioned)
 if ($updated) {
-    $warnings.Add("The Store updated these Windows apps after Windows was installed: $(($updated.Name | Sort-Object -Unique) -join ', '). They are kept. If sysprep fails on one of them, revert the VM and keep the Store from updating apps before capture (docs\REFERENCE-PC.md).")
+    $warnings.Add("The Store updated these Windows apps after Windows was installed: $(($updated.Name | Sort-Object -Unique) -join ', '). They are kept. If sysprep fails on one of them, revert the VM and keep the Store from updating apps before capture (docs\REFERENCE-PC.md); sysprep at deploy removes such an app for the user by itself.")
 }
 # A Store policy set while building the reference would be captured and apply to every deployed PC.
 $storePolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'

@@ -113,6 +113,23 @@ function Disable-ReservedStorage {
     }
 }
 
+function Remove-AppxForEveryUser([string]$FullName) {
+    # Remove-AppxPackage -AllUsers can leave the app with a user who is not logged on; the -User pass catches those.
+    # The provisioned copy (an older version of a Windows app the Store updated) is left alone, so new users still get it.
+    try { Remove-AppxPackage -Package $FullName -AllUsers -ErrorAction Stop }
+    catch { Write-Log "  Remove-AppxPackage -AllUsers: $($_.Exception.Message)" 'WARN' }
+    $name = Get-AppxPackageNameFromFullName -FullName $FullName
+    $left = @(Get-AppxPackage -AllUsers -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.PackageFullName -eq $FullName })
+    foreach ($user in @($left | ForEach-Object { $_.PackageUserInformation } | Where-Object { "$($_.InstallState)" -eq 'Installed' })) {
+        $sid = "$($user.UserSecurityId.Sid)"
+        if (-not $sid) { continue }
+        try { Remove-AppxPackage -Package $FullName -User $sid -ErrorAction Stop; Write-Log "  Removed it for $sid" }
+        catch { Write-Log "  Could not remove it for ${sid}: $($_.Exception.Message)" 'WARN' }
+    }
+    $kept = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { "$($_.DisplayName)" -eq $name })
+    if ($kept.Count) { Write-Log "  $name stays provisioned ($($kept[0].Version)), so new users still get it" }
+}
+
 function Invoke-RunStage {
     $plan = Read-Plan
     $attemptFile = [IO.Path]::Combine($folder, 'attempts.txt')
@@ -166,22 +183,43 @@ function Invoke-RunStage {
 
     $unattend = [IO.Path]::Combine($folder, 'unattend.xml')
     $sysprepArgs = Get-SysprepArguments -UnattendPath $unattend
-    Write-Log "Running sysprep $($sysprepArgs -join ' ')"
     Set-RunState 'sysprep'
     $sysprep = [IO.Path]::Combine($env:WINDIR, 'System32\Sysprep\sysprep.exe')
-    $proc = Start-Process -FilePath $sysprep -ArgumentList $sysprepArgs -Wait -PassThru -ErrorAction Stop
-    # sysprep keeps its own copy in Windows\Panther; this one holds the deploy's passwords.
-    if ([IO.File]::Exists($unattend)) { try { [IO.File]::Delete($unattend) } catch { } }
-
+    $panther = [IO.Path]::Combine($env:WINDIR, 'System32\Sysprep\Panther')
     $ini = [IO.Path]::Combine($env:WINDIR, 'Setup\State\State.ini')
-    $state = if ([IO.File]::Exists($ini)) {
-        @([IO.File]::ReadAllLines($ini) | ForEach-Object { if ($_ -match '^\s*ImageState\s*=\s*(\S+)') { $Matches[1] } }) | Select-Object -First 1
-    } else { '' }
-    $errLog = [IO.Path]::Combine($env:WINDIR, 'System32\Sysprep\Panther\setuperr.log')
-    $errors = if ([IO.File]::Exists($errLog)) { [IO.File]::ReadAllLines($errLog) } else { @() }
-    $outcome = Get-SysprepOutcome -ImageState $state -ExitCode $proc.ExitCode -ErrorLines $errors
-    if ($outcome.Ok) { Set-RunState 'done'; Write-Log 'Sysprep finished; Windows restarts into setup.'; Wait-ForRestart; exit 0 }
-    Stop-WithFailure $outcome.Reason
+    $removed = @{}
+    # Sysprep stops at the first Store app that is installed for a user but not provisioned (hr 0x80073cf2), often a
+    # Windows app the Store updated on the reference. Each failed run names one: remove it for every user and run
+    # sysprep again. The 5521 (2026-11-23) had 40 Store-updated apps, hence the many rounds; each takes seconds.
+    for ($round = 1; $round -le 80; $round++) {
+        Write-Log "Running sysprep $($sysprepArgs -join ' ')$(if ($round -gt 1) { " (round $round)" })"
+        $started = (Get-Date).AddSeconds(-1)
+        $proc = Start-Process -FilePath $sysprep -ArgumentList $sysprepArgs -Wait -PassThru -ErrorAction Stop
+        $state = if ([IO.File]::Exists($ini)) {
+            @([IO.File]::ReadAllLines($ini) | ForEach-Object { if ($_ -match '^\s*ImageState\s*=\s*(\S+)') { $Matches[1] } }) | Select-Object -First 1
+        } else { '' }
+        $errLog = [IO.Path]::Combine($panther, 'setuperr.log')
+        $errors = if ([IO.File]::Exists($errLog)) { [IO.File]::ReadAllLines($errLog) } else { @() }
+        $outcome = Get-SysprepOutcome -ImageState $state -ExitCode $proc.ExitCode -ErrorLines $errors
+        if ($outcome.Ok) {
+            # sysprep keeps its own copy in Windows\Panther; this one holds the deploy's passwords.
+            if ([IO.File]::Exists($unattend)) { try { [IO.File]::Delete($unattend) } catch { } }
+            Set-RunState 'done'; Write-Log 'Sysprep finished; Windows restarts into setup.'; Wait-ForRestart; exit 0
+        }
+        $actLog = [IO.Path]::Combine($panther, 'setupact.log')
+        $lines = @($errors) + @(if ([IO.File]::Exists($actLog)) { [IO.File]::ReadAllLines($actLog) })
+        $blocking = @(Get-SysprepBlockingPackages -Lines $lines -Since $started)
+        if (-not $blocking.Count) { Stop-WithFailure $outcome.Reason }
+        foreach ($pkg in $blocking) {
+            if ($removed.ContainsKey($pkg)) {
+                Stop-WithFailure "Sysprep still fails on the Store app $pkg after removing it for every user. $($outcome.Reason)"
+            }
+            $removed[$pkg] = $true
+            Write-Log "Sysprep stopped on $pkg (installed for a user but not provisioned); removing it for every user" 'WARN'
+            Remove-AppxForEveryUser -FullName $pkg
+        }
+    }
+    Stop-WithFailure "Sysprep still fails after removing $($removed.Count) Store apps. $($outcome.Reason)"
 }
 
 try {
