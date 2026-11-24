@@ -61,7 +61,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Image"/>
-            <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
+            <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder."/>
             <Label Grid.Row="1" Content="Version"/>
             <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
                       ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>

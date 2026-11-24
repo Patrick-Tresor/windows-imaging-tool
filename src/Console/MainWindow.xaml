@@ -256,7 +256,7 @@
         <DockPanel>
           <StackPanel DockPanel.Dock="Top">
             <TextBlock Style="{StaticResource SectionTitle}" Text="Answer files"/>
-            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, disk, regional settings, computer naming, domain join, tasks and shares. The PC picks one at boot, and the Computers tab picks one for each reimage. Passwords are saved in the answer file, encrypted; the key stays in config\secrets."/>
+            <TextBlock Style="{StaticResource Hint}" Text="An answer file is one deployment profile: image, applications, regional settings, computer naming, domain join, tasks and BitLocker. The PC picks one at boot, and the Computers tab picks one for each reimage. Passwords are saved in the answer file, encrypted; the key stays in config\secrets."/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
             <Button x:Name="BtnAnswerNew" Content="New..." Style="{StaticResource Primary}"/>
