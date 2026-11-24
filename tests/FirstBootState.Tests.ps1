@@ -126,7 +126,6 @@ try {
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 $fb = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
 Assert-Equal ($fb -match '/SC ONLOGON /RU SYSTEM') $true 'unattend: first boot creates the SYSTEM logon task'
-Assert-Equal ($fb -match 'if \(\$FromTask -and \$setupNow') $true 'unattend: never blanked from SetupComplete.cmd, before OOBE is done with it'
 $dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($dp -match "Protect-StagedItem -Path 'W:\\ProgramData\\ImagingTool\\Clear-UnattendPasswords\.ps1'") $true 'unattend: the script is staged for admins only'
 

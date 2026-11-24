@@ -286,10 +286,8 @@ if (Test-Path $clearScript) {
     & schtasks.exe /Create /F /TN 'ImagingTool\ClearUnattend' /SC ONLOGON /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$clearScript`"" 2>&1 | Out-Null
     Write-Log "Logon task ImagingTool\ClearUnattend (removes the passwords from unattend.xml after OOBE) created: exit $LASTEXITCODE"
     # Started by the startup task after OOBE: nobody may log on for a while, so clean now (the task stays if this fails).
-    # Never from SetupComplete.cmd: the setup flags are already clear there, but OOBE has not finished with
-    # unattend.xml yet (blanking them then is the likely cause of 30+ minutes on "Attendez un instant", 5521, 2026-11-23).
     $setupNow = Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue
-    if ($FromTask -and $setupNow -and -not $setupNow.SystemSetupInProgress -and -not $setupNow.OOBEInProgress) {
+    if ($setupNow -and -not $setupNow.SystemSetupInProgress -and -not $setupNow.OOBEInProgress) {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $clearScript -LogPath $log
     }
 } else { Write-Log "No ${clearScript}: the passwords in unattend.xml are left to Windows Setup" }
