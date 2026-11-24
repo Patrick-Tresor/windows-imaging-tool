@@ -210,9 +210,9 @@ the console; the format is documented in the commented
 [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
 - **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
-  (start after `unattendDelay` seconds; a key pressed during the countdown opens
-  the wizard instead).
-- **image** and index, **disk** number (the disk is always erased and partitioned again; drivers come from `Drivers`).
+  (start after a 10 second countdown; a key pressed during it opens the wizard
+  instead).
+- **image** and index (the first internal disk is always erased and partitioned again; drivers come from `Drivers`).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).

@@ -46,10 +46,8 @@
             <Label Grid.Row="1" Content="Mode"/>
             <StackPanel Grid.Row="1" Grid.Column="1">
               <RadioButton x:Name="RbInteractive" GroupName="Mode" Content="Interactive: the technician picks this answer file and types YES"/>
-              <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a countdown"/>
+              <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a 10 second countdown (any key opens the wizard instead)"/>
             </StackPanel>
-            <Label Grid.Row="2" Content="Countdown (seconds)"/>
-            <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

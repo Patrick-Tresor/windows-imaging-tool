@@ -65,7 +65,6 @@ function Read-AnswerFile {
         Name                 = [IO.Path]::GetFileNameWithoutExtension($Path)
         Path                 = $Path
         Mode                 = Get-XmlText $d 'mode' 'Interactive'
-        UnattendDelay        = [int](Get-XmlText $d 'unattendDelay' '10')
         ImageFile            = Get-XmlText $d 'image/file'
         ImageIndex           = [int](Get-XmlText $d 'image/index' '1')
         ImageVersion         = Get-XmlText $d 'image/version'
@@ -571,7 +570,6 @@ function Export-AnswerFile {
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
 <deployment version="1.0">
   <mode>$(& $x $a.Mode)</mode>
-  <unattendDelay>$($a.UnattendDelay)</unattendDelay>
   <image>
     <file>$(& $x $a.ImageFile)</file>
     <index>$($a.ImageIndex)</index>

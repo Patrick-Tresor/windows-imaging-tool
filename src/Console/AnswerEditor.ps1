@@ -89,7 +89,6 @@ function Show-AnswerEditor {
     $e.TxtName.IsEnabled = $isNew
     $e.RbInteractive.IsChecked = $a.Mode -ne 'Unattended'
     $e.RbUnattended.IsChecked = $a.Mode -eq 'Unattended'
-    $e.TxtDelay.Text = $a.UnattendDelay
 
     $e.CmbImage.Text = $a.ImageFile
     & $updateVersions "$($a.ImageVersion)"
@@ -157,7 +156,6 @@ function Show-AnswerEditor {
     $e.LstSections.SelectedIndex = 0
 
     $syncEnabled = {
-        $e.TxtDelay.IsEnabled = [bool]$e.RbUnattended.IsChecked
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
@@ -213,10 +211,8 @@ function Show-AnswerEditor {
     # --- Collect and save ------------------------------------------------------------------------------------
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
-        $n = 0
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
-        $a.UnattendDelay = if ([int]::TryParse($e.TxtDelay.Text, [ref]$n)) { $n } else { 10 }
         # The PC always restarts into Windows when the deploy is done (the result screen still has Shut down).
         $a.Reboot        = $true
         $a.Shutdown      = $false

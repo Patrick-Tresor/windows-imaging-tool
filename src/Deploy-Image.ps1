@@ -540,7 +540,8 @@ try {
                 ForEach-Object { Write-Host $_ }
             Set-DeployStatus -Step 'Counting down' -Percent 5
             # Nobody may be at a PC reimaged from the console: count down, so someone who is can still stop it.
-            $confirmed = Wait-Countdown $(if ($job) { [Math]::Max([int]$answer.UnattendDelay, 15) } else { $answer.UnattendDelay })
+            # Unattended: 10 seconds; a reimage from the console 15, for someone who happens to be at the PC.
+            $confirmed = Wait-Countdown $(if ($job) { 15 } else { 10 })
             if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
         }
     }
