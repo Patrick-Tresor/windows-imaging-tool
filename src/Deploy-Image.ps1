@@ -137,8 +137,8 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     }
     if (-not (Test-Path $imagePath)) { throw "Image not found: $imagePath" }
 
-    # The disk Windows goes on: never the USB stick or the disk holding the content, even when the answer file
-    # says disk 0 and the stick took that number. The wizard preselects it; the operator can still pick another.
+    # The disk Windows goes on: the first internal disk, never the USB stick or the disk holding the content.
+    # The wizard preselects it; the operator can still pick another (kept here on the next pass).
     $exclude = @(Get-ContentDiskNumber $Root)
     $target = Resolve-TargetDisk -Disks @(Get-Disk) -Requested $Answer.DiskNumber -Exclude $exclude
     if (-not $target.Disk -and -not $script:PeDriversLoaded) {
@@ -157,10 +157,13 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
         }
         throw $target.Short
     }
-    if ($target.Disk.Number -ne $Answer.DiskNumber) {
+    if ($Answer.DiskNumber -ge 0 -and $target.Disk.Number -ne $Answer.DiskNumber) {
         if ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $($target.Reason)" -Level WARN }
         $Answer.DiskNumber = $target.Disk.Number
-    } elseif ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $(Format-DiskChoice $target.Disk), $($target.Reason)" }
+    } else {
+        if ($script:DiskNotes[$Answer.Name] -ne $target.Reason) { Write-DeployLog "Target disk: $(Format-DiskChoice $target.Disk), $($target.Reason)" }
+        $Answer.DiskNumber = $target.Disk.Number
+    }
     $script:DiskNotes[$Answer.Name] = $target.Reason
 
     # The domain join account is checked now, before the disk is wiped: a wrong password would otherwise only show
@@ -537,7 +540,8 @@ try {
                 ForEach-Object { Write-Host $_ }
             Set-DeployStatus -Step 'Counting down' -Percent 5
             # Nobody may be at a PC reimaged from the console: count down, so someone who is can still stop it.
-            $confirmed = Wait-Countdown $(if ($job) { [Math]::Max([int]$answer.UnattendDelay, 15) } else { $answer.UnattendDelay })
+            # Unattended: 10 seconds; a reimage from the console 15, for someone who happens to be at the PC.
+            $confirmed = Wait-Countdown $(if ($job) { 15 } else { 10 })
             if ($confirmed) { $ComputerName = $name } else { Write-DeployLog 'Countdown cancelled by operator' -Level WARN }
         }
     }

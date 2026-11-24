@@ -8,9 +8,8 @@
   password (no file is read or written there). Use a join account that can only join computers to one OU.
 -->
 <deployment version="1.0">
-  <!-- Interactive: pick the answer file and type YES. Unattended: start after unattendDelay seconds unless a key is pressed. -->
+  <!-- Interactive: pick the answer file and type YES. Unattended: start after 10 seconds unless a key is pressed. -->
   <mode>Interactive</mode>
-  <unattendDelay>10</unattendDelay>
 
   <image>
     <file>Images\Win11-Enterprise.wim</file>
@@ -21,7 +20,7 @@
   </image>
 
   <disk>
-    <number>0</number>
+    <!-- Windows goes on the first internal disk (NVMe, then SATA), never the USB stick. -->
     <!-- Recreate: wipe the disk and create new GPT partitions (EFI, MSR, Windows, Recovery). UEFI only. -->
     <option>Recreate</option>
   </disk>

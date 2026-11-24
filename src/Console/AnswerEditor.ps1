@@ -42,6 +42,13 @@ function Show-AnswerEditor {
         $e.LstTaskLibrary.ItemsSource = @(Get-TaskList -ContentRoot $ContentRoot)
     }
 
+    $showIndex = {
+        # One edition (every capture of this tool): it is the one, so the Edition row is hidden. Several editions,
+        # or an image the console can't read (a number is typed): the row shows.
+        $one = $e.CmbIndex.Items.Count -eq 1
+        if ($one) { $e.CmbIndex.Text = "$($e.CmbIndex.Items[0])" }
+        foreach ($c in $e.LblIndex, $e.CmbIndex) { $c.Visibility = if ($one) { 'Collapsed' } else { 'Visible' } }
+    }
     $updateIndexes = {
         # Editions from the selected image, as "index: name". A pinned version lists that copy's editions.
         # Falls back to typing a number.
@@ -54,6 +61,7 @@ function Show-AnswerEditor {
         } else {
             $e.CmbIndex.ItemsSource = @(if ($img -and $img.Indexes) { $img.Indexes -split '; ' })
         }
+        & $showIndex
     }
     $updateVersions = {
         # Current plus the versions kept in Images\Previous for an image in the Images folder, with $Want selected.
@@ -81,12 +89,11 @@ function Show-AnswerEditor {
     $e.TxtName.IsEnabled = $isNew
     $e.RbInteractive.IsChecked = $a.Mode -ne 'Unattended'
     $e.RbUnattended.IsChecked = $a.Mode -eq 'Unattended'
-    $e.TxtDelay.Text = $a.UnattendDelay
 
     $e.CmbImage.Text = $a.ImageFile
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
-    $e.TxtDisk.Text = $a.DiskNumber
+    & $showIndex
 
     $selected = [Collections.ObjectModel.ObservableCollection[string]]::new()
     foreach ($n in $a.Applications) { $selected.Add($n) }
@@ -149,7 +156,6 @@ function Show-AnswerEditor {
     $e.LstSections.SelectedIndex = 0
 
     $syncEnabled = {
-        $e.TxtDelay.IsEnabled = [bool]$e.RbUnattended.IsChecked
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
@@ -205,17 +211,14 @@ function Show-AnswerEditor {
     # --- Collect and save ------------------------------------------------------------------------------------
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
-        $n = 0
         $a.Name          = $e.TxtName.Text.Trim()
         $a.Mode          = if ($e.RbUnattended.IsChecked) { 'Unattended' } else { 'Interactive' }
-        $a.UnattendDelay = if ([int]::TryParse($e.TxtDelay.Text, [ref]$n)) { $n } else { 10 }
         # The PC always restarts into Windows when the deploy is done (the result screen still has Shut down).
         $a.Reboot        = $true
         $a.Shutdown      = $false
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
-        $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
         $a.Applications  = @($selected)
         $a.FullName      = $e.TxtFullName.Text.Trim()
         $a.Organization  = $e.TxtOrg.Text.Trim()

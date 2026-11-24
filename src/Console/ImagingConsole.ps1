@@ -437,6 +437,22 @@ function Update-UsbDisks {
     Update-UsbMode
 }
 
+function Initialize-WinPEPassword {
+    # The password of the last build, remembered for this Windows account: no typing it twice for every update.
+    $script:winPeSaved = Read-WinPEPassword
+    $ui.PwdWinPE.Password = $script:winPeSaved
+    $ui.PwdWinPE2.Password = $script:winPeSaved
+    Update-WinPEPasswordAgain
+}
+
+function Update-WinPEPasswordAgain {
+    # "Again" only when the password is new or changed; the remembered one was already typed twice once.
+    $same = $script:winPeSaved -and $ui.PwdWinPE.Password -eq $script:winPeSaved
+    $ui.PnlWinPEAgain.Visibility = if ($same) { 'Collapsed' } else { 'Visible' }
+    if ($same) { $ui.PwdWinPE2.Password = $script:winPeSaved }
+    elseif ($ui.PwdWinPE2.Password -eq $script:winPeSaved) { $ui.PwdWinPE2.Password = '' }
+}
+
 function Update-UsbMode {
     # Says what Build media will do with the selected stick: update one this tool built, or erase any other.
     $d = $ui.CmbUsb.SelectedItem
@@ -825,12 +841,16 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
     $window.Cursor = 'Wait'
     Set-Status "Importing $maker $model..."
     try {
+        # The SKUs / machine types come from the maker's catalog; without them the pack matches by model name.
+        $ids = Find-DriverPackIds -Maker $maker -Model $model
         $result = Import-DriverPack -ContentRoot $script:root -Source $ui.TxtSource.Text -Maker $maker -Model $model `
-            -Sku $ui.TxtSku.Text.Trim() -MachineType $ui.TxtMachineType.Text.Trim()
+            -Sku "$($ids.Sku)" -MachineType "$($ids.MachineType)"
     } finally { $window.Cursor = $null }
     Update-Drivers
-    $ui.TxtModel.Text = ''; $ui.TxtSku.Text = ''; $ui.TxtMachineType.Text = ''; $ui.TxtSource.Text = ''
-    Set-Status "Imported $($result.InfCount) drivers to Drivers\$($result.Path)"
+    $ui.TxtModel.Text = ''; $ui.TxtSource.Text = ''
+    $idText = (@($ids.Sku, $ids.MachineType) | Where-Object { $_ }) -join ', '
+    Set-Status ("Imported $($result.InfCount) drivers to Drivers\$($result.Path)" +
+        $(if ($idText) { " (matches $idText)" } else { ' (not in the maker''s catalog: matches by model name)' }))
     if ($result.InfCount -eq 0) { Show-Error 'No .inf files were found after import. The pack may need extracting first.' }
 } })
 
@@ -1095,6 +1115,7 @@ $ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() }
 $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
+$ui.PwdWinPE.Add_PasswordChanged({ Update-WinPEPasswordAgain })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
 
@@ -1109,7 +1130,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
     # A stick always has a WinPE password: the answer files' passwords and the key that decrypts them are on it.
     $pePw = $ui.PwdWinPE.Password
-    if (-not $pePw) { Show-Error 'Type the WinPE password, twice. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
+    if (-not $pePw) { Show-Error 'Type the WinPE password. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
     if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; [void]$ui.PwdWinPE2.Focus(); return }
     if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; [void]$ui.PwdWinPE.Focus(); return }
     # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
@@ -1140,6 +1161,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     # Required (checked before anything is asked, see the top of this handler).
     $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
     [IO.File]::WriteAllText($pwFile, $ui.PwdWinPE.Password, (New-Object Text.UTF8Encoding($false)))
+    try { Save-WinPEPassword -Password $pePw; $script:winPeSaved = $pePw; Update-WinPEPasswordAgain } catch { }
     $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
@@ -1300,5 +1322,6 @@ $script:stickTimer.Start()
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Initialize-WinPEPassword }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

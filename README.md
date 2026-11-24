@@ -55,8 +55,9 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
   To import, type the model (Latitude 5521, HP EliteBook 840 G8): the maker is
-  read from the model or the pack's name. Lenovo PCs are matched by machine type
-  (the first four letters of the model, `20FR`), one row per model.
+  read from the model or the pack's name, and its SKUs (Dell, HP) or machine types
+  (Lenovo, `20FR`) from the maker's catalog. A model the catalog doesn't know is
+  matched by name.
   **Deployed without a driver pack** shows, on the same page and only when there
   are any, the models that were deployed without their pack: they got the maker
   fallback, inbox drivers only, or a catalog entry whose folder is missing, with
@@ -73,7 +74,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   The build stops before erasing the stick when an answer file's image is missing.
   Pick the **USB disk** (a stick this tool built before is updated in place, any other
   is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
-  **WinPE password** twice and click **Build media**. When Windows refused the console's
+  **WinPE password** (twice the first time; the console remembers it for your Windows
+  account on this PC, encrypted) and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
   **Delete** one (it asks first).
@@ -208,9 +210,9 @@ the console; the format is documented in the commented
 [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
 - **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
-  (start after `unattendDelay` seconds; a key pressed during the countdown opens
-  the wizard instead).
-- **image** and index, **disk** number (the disk is always erased and partitioned again; drivers come from `Drivers`).
+  (start after a 10 second countdown; a key pressed during it opens the wizard
+  instead).
+- **image** and index (the first internal disk is always erased and partitioned again; drivers come from `Drivers`).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
@@ -246,10 +248,10 @@ requirements). Microsoft does not support Windows 11 on older PCs (Intel 7th
 gen and earlier, such as a ThinkPad X1 Yoga 1st gen) and may not offer them
 feature updates through Windows Update.
 
-The target disk is the internal disk Windows will go on, never the USB stick
-or the disk holding the content: WinPE often numbers the stick disk 0, so when
-the answer file's disk is USB, a card reader or missing, the first internal
-disk (NVMe, then SATA) is used instead and the log says so. The Disk line in
+The target disk is the first internal disk (NVMe, then SATA), never the USB
+stick or the disk holding the content (WinPE often numbers the stick disk 0).
+Answer files have no disk number; the technician can pick another internal disk
+in the deploy wizard. The Disk line in
 the log names the disk it measured. When WinPE sees no internal disk at all
 (Intel RST/VMD, on by default on Dell 11th gen and later and many other
 laptops, hides the SSD from plain WinPE), the wizard says so in one line and
@@ -289,7 +291,8 @@ restrict who can read `config\secrets`.
 How far that protects them, honestly: the answer files on the stick, or a copy
 mailed or left on a share, give nothing away without the key. Every USB stick
 the console builds needs a **WinPE password** (Media tab, 8 characters or
-more, typed for each build): the key goes
+more; the console remembers it for your Windows account on this PC, encrypted
+with DPAPI in `%LOCALAPPDATA%\ImagingConsole\winpe-password.dat`): the key goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
 tries or **Shut down**. (The network boot image has no WinPE password, since
@@ -318,7 +321,7 @@ tab, or with **New application...** in the answer file editor:
 1. Pick the installer file, or a folder when it needs files next to it.
    The editor reads its type at once (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
-   code, and fills in the silent command, uninstall command and a detection rule.
+   code, and fills in the silent command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
    There is one **Name** box (the folder under `Applications` is made from it);
    version and publisher come from the installer and are shown, not typed.
@@ -504,8 +507,8 @@ checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H
 can stop working when Microsoft changes the site, and it needs internet: when the
 catalog can't be reached, the packages in the list are still added (one warning line
 in the log), and with no packages the update stops before touching the image and
-says to download the `.msu` by hand into `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
-downloaded by hand) are applied after it, in a fixed order: a standalone
+says to download the `.msu` by hand into `Updates`. Every `.msu`/`.cab` in `Updates` (the dialog lists them; move one out of the
+folder to leave it out: the .NET cumulative update, or one downloaded by hand) is applied after it, in a fixed order: a standalone
 servicing stack update (`ssu` in its name) first, then Windows, then .NET,
 oldest KB first.
 
@@ -641,8 +644,9 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
-      Store apps that break sysprep and a missing Microsoft Store, frees space so the image is smaller
+      (`Tools\Prepare-Reference.ps1 -RemoveUserApps`), then click Next (no tick box: the next page
+      checks that sysprep ran). It checks for a pending reboot, BitLocker, removes
+      Store apps installed for a user only (the Store stays) and refuses a missing Microsoft Store, frees space so the image is smaller
       (Windows Update downloads, Delivery Optimization cache, temp folders, recycle bin, and DISM
       component cleanup with `/ResetBase`, 10-30 minutes), then runs sysprep and shuts down.
       `-SkipCleanup` skips freeing space.

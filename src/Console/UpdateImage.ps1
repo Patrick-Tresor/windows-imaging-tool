@@ -23,29 +23,16 @@ function Show-UpdateImageDialog {
 
     $updatesDir = Join-Path $ContentRoot 'Updates'
     New-Item -ItemType Directory -Path $updatesDir -Force | Out-Null
+    # The list is the Updates folder, in the order they are applied (Get-UpdatePackageRows). It is read again each
+    # time the window gets the focus back, so files dropped there in File Explorer show at once.
     $packages = [Collections.ObjectModel.ObservableCollection[object]]::new()
-    $add = {
-        param([string[]]$Paths)
-        # The whole list is sorted again: the order they are applied in is fixed (Get-UpdatePackageRows).
-        $all = @(@($packages | ForEach-Object FullName) + @($Paths))
+    $refresh = {
         $packages.Clear()
-        foreach ($row in Get-UpdatePackageRows -Path $all) { $packages.Add($row) }
+        foreach ($row in Get-UpdatePackageRows -Path @($updatesDir)) { $packages.Add($row) }
     }
-    & $add @($updatesDir)
+    & $refresh
     $d.GridPackages.ItemsSource = $packages
-
-    $d.BtnAddFiles.Add_Click({
-        $open = [Microsoft.Win32.OpenFileDialog]::new()
-        $open.Filter = 'Update packages (*.msu;*.cab)|*.msu;*.cab'
-        $open.Multiselect = $true
-        if ($open.ShowDialog($dlg)) { & $add $open.FileNames }
-    })
-    $d.BtnAddFolder.Add_Click({
-        $fb = [Windows.Forms.FolderBrowserDialog]::new()
-        $fb.Description = 'Folder with .msu or .cab update packages'
-        if ($fb.ShowDialog() -eq 'OK') { & $add @($fb.SelectedPath) }
-    })
-    $d.BtnRemove.Add_Click({ if ($d.GridPackages.SelectedItem) { [void]$packages.Remove($d.GridPackages.SelectedItem) } })
+    $dlg.Add_Activated({ try { & $refresh } catch { } })
     $d.BtnOpenUpdates.Add_Click({ Invoke-Item $updatesDir })
 
 

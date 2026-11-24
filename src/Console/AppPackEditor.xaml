@@ -73,19 +73,17 @@
           <TextBlock Style="{StaticResource Hint}" Text="Runs with cmd /c in the application's folder, as SYSTEM, the first time the PC starts. Nobody can click through it, so it must be silent. Exit codes not in the success list mark the app as failed in C:\Windows\Temp\FirstBoot.log."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Installer type"/>
             <ComboBox x:Name="CmbType" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
             <TextBlock x:Name="TxtTypeNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="2" Content="Install command"/>
             <TextBox x:Name="TxtCommand" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas"/>
-            <Label Grid.Row="3" Content="Uninstall command"/>
-            <TextBox x:Name="TxtUninstall" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas" ToolTip="Optional. Kept with the pack for removing the app later."/>
-            <Label Grid.Row="4" Content="Success exit codes"/>
-            <TextBox x:Name="TxtCodes" Grid.Row="4" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
-            <TextBlock Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10" Text="3010 and 1641 always mean the install worked and the PC needs a restart."/>
-            <Label Grid.Row="6" Content="Timeout (minutes)"/>
-            <TextBox x:Name="TxtTimeout" Grid.Row="6" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
+            <Label Grid.Row="3" Content="Success exit codes"/>
+            <TextBox x:Name="TxtCodes" Grid.Row="3" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <TextBlock Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10" Text="3010 and 1641 always mean the install worked and the PC needs a restart."/>
+            <Label Grid.Row="5" Content="Timeout (minutes)"/>
+            <TextBox x:Name="TxtTimeout" Grid.Row="5" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>

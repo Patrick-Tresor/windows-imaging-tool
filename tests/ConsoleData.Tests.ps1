@@ -289,6 +289,16 @@ try {
 } finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Faster builds: the folders the console adds to Defender's exclusions itself; the Media tab lists them only on failure.
+# The WinPE password is remembered for this account (DPAPI on Windows) and reads back; a bad file gives ''.
+$pwPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "winpe-pw-$([guid]::NewGuid().ToString('N'))", 'winpe-password.dat')
+Assert-Equal (Read-WinPEPassword -Path $pwPath) '' 'WinPE password: none remembered yet'
+Save-WinPEPassword -Password 'Str0ng pass!' -Path $pwPath
+Assert-Equal (Read-WinPEPassword -Path $pwPath) 'Str0ng pass!' 'WinPE password: remembered and read back'
+Assert-Equal ([IO.File]::ReadAllText($pwPath) -match 'Str0ng') $false 'WinPE password: not saved as plain text'
+[IO.File]::WriteAllText($pwPath, 'not-a-secure-string')
+Assert-Equal (Read-WinPEPassword -Path $pwPath) '' 'WinPE password: an unreadable file is ignored'
+Remove-Item ([IO.Path]::GetDirectoryName($pwPath)) -Recurse -Force
+
 $folders = @(Get-ScanExclusionFolders -ContentRoot 'D:\Deploy' -WorkDir 'C:\WinPE_Build')
 Assert-Equal $folders[0] 'C:\WinPE_Build' 'scan tip: the WinPE work folder first'
 Assert-Equal ($folders[1] -like '*ImagingConsole*WinPEBuilds') $true 'scan tip: the WinPE build cache'

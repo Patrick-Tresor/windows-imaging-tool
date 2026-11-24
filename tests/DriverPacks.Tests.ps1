@@ -258,6 +258,13 @@ Assert-Equal (Get-Found '   ') '' 'find: blank finds nothing'
 $yogas = @([pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad X1 Yoga Type 20FQ 20FR'; Skus = @(); MachineTypes = @('20FQ', '20FR') },
            [pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad X13 Yoga Gen 1'; Skus = @(); MachineTypes = @('20SX', '20SY') })
 Assert-Equal ((@(Find-VendorDriverPack -Query 'X1 Yoga' -Packs $yogas)).Model -join ',') 'ThinkPad X1 Yoga Type 20FQ 20FR' 'find: a word with a digit matches a whole word (X1 is not X13)'
+# Import a driver pack: the model typed by hand gets its SKUs / machine types from the catalog.
+$ids = Find-DriverPackIds -Maker 'Dell' -Model 'latitude 5440' -Packs $every
+Assert-Equal "$($ids.Model)|$($ids.Sku -match '0C1D')" 'Latitude 5440|True' 'import ids: Dell SKUs from the catalog, any case'
+$ids = Find-DriverPackIds -Maker 'Lenovo' -Model 'T14 Gen 4' -Packs $every
+Assert-Equal "$($ids.MachineType -match '21HE')" 'True' 'import ids: Lenovo machine types from the search when the name is shorter'
+Assert-Equal (Find-DriverPackIds -Maker 'Dell' -Model 'Latitude' -Packs $every) $null 'import ids: a search that finds several models gives nothing'
+Assert-Equal (Find-DriverPackIds -Maker 'Dell' -Model 'Precision 9999' -Packs $every) $null 'import ids: a model not in the catalog gives nothing'
 $r = Find-VendorDriverPackOnline -Query 'lenovo t14' -CatalogPaths $cats
 Assert-Equal "$(@($r.Packs).Count) $($r.Packs[0].Model) $(@($r.Errors).Count)" '1 ThinkPad T14 Gen 4 0' 'find online: maker word reads only that catalog'
 $r = Find-VendorDriverPackOnline -Query 'thinkpad' -CatalogPaths @{ Dell = (Join-Path $fixtures 'missing.xml'); HP = $cats.HP; Lenovo = $cats.Lenovo }

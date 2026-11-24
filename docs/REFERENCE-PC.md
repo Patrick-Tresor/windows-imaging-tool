@@ -75,7 +75,8 @@ It prints `PROBLEM:` lines (must fix) and `WARNING:` lines (read them):
 
 ## 7. Sysprep
 
-Run the same command without `-CheckOnly` (add `-RemoveUserApps` if step 6 asked for it). It first
+Run the command the capture wizard shows: the same one without `-CheckOnly`, with `-RemoveUserApps`
+(it removes Store apps installed for a user only, never the Store or a Windows app). It first
 frees space so the image is smaller: it empties the Windows Update download folder, the Delivery
 Optimization cache, the temp folders and the recycle bin, then runs DISM component cleanup with
 `/ResetBase` (10-30 minutes; updates already installed can no longer be uninstalled, which an image
@@ -115,7 +116,7 @@ Fix the VM, capture again and redeploy. Try a new image on one PC of each model 
 On the admin PC, in the console: **Images > Capture new image...**
 
 1. **The VM's disk file on this PC**: pick the VM's .vmdk (the newest snapshot is read).
-2. Tick that the prepare command has run.
+2. Run the prepare command it shows in the VM, then click Next.
 3. **Check the disk**: wait until every line has a tick. A cross on "Sysprep has run" means the VM
    was not generalized: boot it, run the prepare command again, and click **Check again**.
 4. Name the image and pick the compression (**Maximum**, or **Smallest** for an `.esd` about a
