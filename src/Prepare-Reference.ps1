@@ -5,17 +5,28 @@
     Catches the usual reasons sysprep fails or a golden image ends up tied to one machine:
     a pending reboot, BitLocker, Store apps installed for one user only, a missing Microsoft Store, and running
     on real hardware. Step by step guide: docs\REFERENCE-PC.md.
+
+    Before sysprep it frees space so the captured image is smaller: Windows Update downloads, the Delivery
+    Optimization cache, temp folders, the recycle bin, and old copies of updated Windows components (DISM component
+    cleanup with /ResetBase, so updates already installed can no longer be uninstalled). -SkipCleanup skips that;
+    -CleanupOnly frees the space and stops without sysprep (for a VM captured with sysprep at deploy); add -ShutDown
+    to shut the VM down fully after.
 .EXAMPLE
     \\deploy-server\Deploy\Tools\Prepare-Reference.ps1
 .EXAMPLE
     .\Prepare-Reference.ps1 -CheckOnly
+.EXAMPLE
+    .\Prepare-Reference.ps1 -CleanupOnly
 #>
 [CmdletBinding()]
 param(
     [switch]$CheckOnly,        # report problems and stop, without running sysprep
     [switch]$RemoveUserApps,   # remove Store apps that are installed for a user but not provisioned (they break sysprep); never the Store itself
     [string]$Unattend,         # optional answer file passed to sysprep /unattend
-    [switch]$SkipRebootCheck   # a pending restart is only a warning (sysprep at deploy restarts by itself first)
+    [switch]$SkipRebootCheck,  # a pending restart is only a warning (sysprep at deploy restarts by itself first)
+    [switch]$SkipCleanup,      # don't free space before sysprep
+    [switch]$CleanupOnly,      # free space, then stop without sysprep (a VM captured with sysprep at deploy)
+    [switch]$ShutDown          # with -CleanupOnly: then shut down fully (shutdown /s /t 0, not Fast Startup's hibernation)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,6 +103,64 @@ function Get-SysprepErrors {
     }
 }
 
+function Get-CleanupFolders {
+    # Returns the folders whose contents are deleted before capture: Windows Update downloads, the Delivery
+    # Optimization cache and the temp folders (Windows and every user profile). Windows fills them again by itself.
+    param([Parameter(Mandatory)][string]$WinDir, [Parameter(Mandatory)][string]$UsersDir)
+    $list = @(
+        [IO.Path]::Combine($WinDir, 'SoftwareDistribution', 'Download'),
+        [IO.Path]::Combine($WinDir, 'ServiceProfiles', 'NetworkService', 'AppData', 'Local', 'Microsoft', 'Windows', 'DeliveryOptimization', 'Cache'),
+        [IO.Path]::Combine($WinDir, 'Temp')
+    )
+    if ([IO.Directory]::Exists($UsersDir)) {
+        foreach ($userDir in [IO.Directory]::GetDirectories($UsersDir)) {
+            $list += [IO.Path]::Combine($userDir, 'AppData', 'Local', 'Temp')
+        }
+    }
+    @($list | Where-Object { [IO.Directory]::Exists($_) })
+}
+
+function Clear-FolderContents {
+    # Deletes what is in Folder, not the folder itself. Files in use stay. Paths in Keep (this script's folder, the
+    # answer file) and the folders that hold them are never deleted. Returns how many items could not be deleted.
+    param([Parameter(Mandatory)][string]$Folder, [string[]]$Keep = @())
+    $keepFull = @($Keep | Where-Object { $_ } | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') })
+    $left = 0
+    try { $items = [IO.Directory]::GetFileSystemEntries($Folder) } catch { return 1 }
+    foreach ($item in $items) {
+        $full = [IO.Path]::GetFullPath($item).TrimEnd('\')
+        if (@($keepFull | Where-Object { $_ -eq $full -or $_.StartsWith($full + '\', [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+        try { Remove-Item -LiteralPath $item -Recurse -Force -ErrorAction Stop } catch { $left++ }
+    }
+    $left
+}
+
+function Invoke-ReferenceCleanup {
+    # Frees space on the system drive before capture, so the image is smaller. Prints how much was freed.
+    param([string[]]$Keep = @())
+    $drive = [IO.DriveInfo]::new($env:SystemDrive)
+    $freeBefore = $drive.AvailableFreeSpace
+    Write-Host 'Freeing space before capture (update downloads, temp folders, recycle bin, old components).'
+    # Windows Update and Delivery Optimization hold their downloads open while they run.
+    $services = @(Get-Service -Name wuauserv, bits, dosvc -ErrorAction SilentlyContinue | Where-Object Status -eq 'Running')
+    foreach ($svc in $services) { Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue }
+    $left = 0
+    foreach ($folder in Get-CleanupFolders -WinDir $env:WINDIR -UsersDir ([IO.Path]::Combine($env:SystemDrive + '\', 'Users'))) {
+        $left += Clear-FolderContents -Folder $folder -Keep $Keep
+    }
+    foreach ($svc in $services) { Start-Service -Name $svc.Name -ErrorAction SilentlyContinue }
+    if ($left) { Write-Host "  $left file(s) in use were left." }
+    try { Clear-RecycleBin -Force -ErrorAction Stop } catch { }
+    # Old versions of updated Windows components. /ResetBase removes them for good: installed updates can no longer
+    # be uninstalled, which a golden image doesn't need. It can take 10 to 30 minutes.
+    Write-Host 'Removing old Windows component versions (DISM component cleanup, can take 10 to 30 minutes).'
+    & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase /English | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: DISM component cleanup ended with exit code $LASTEXITCODE; the image is still fine, only bigger." -ForegroundColor Yellow }
+    $drive = [IO.DriveInfo]::new($env:SystemDrive)
+    $freed = [Math]::Max(0, $drive.AvailableFreeSpace - $freeBefore)
+    Write-Host ('Freed {0:N1} GB.' -f ($freed / 1GB)) -ForegroundColor Green
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { throw 'Run this from an elevated PowerShell window.' }
@@ -161,9 +230,19 @@ if ($sysprepErrors) {
 
 foreach ($w in $warnings) { Write-Host "WARNING: $w" -ForegroundColor Yellow }
 foreach ($p in $problems) { Write-Host "PROBLEM: $p" -ForegroundColor Red }
-if ($problems.Count) { Write-Host "`nFix the problems above, then run this again." -ForegroundColor Red; exit 1 }
-Write-Host 'Reference machine is ready for capture.' -ForegroundColor Green
-if ($CheckOnly) { return }
+# -CleanupOnly is for a VM captured for sysprep at deploy: each PC runs the checks again (and remove apps
+# installed for one user), so a problem here doesn't stop the clean-up.
+if ($problems.Count -and $CleanupOnly) { Write-Host 'Each deployed PC runs these checks again before its sysprep; fix the problems above in the VM if you can.' -ForegroundColor Yellow }
+elseif ($problems.Count) { Write-Host "`nFix the problems above, then run this again." -ForegroundColor Red; exit 1 }
+else { Write-Host 'Reference machine is ready for capture.' -ForegroundColor Green }
+if ($CheckOnly -and -not $CleanupOnly) { return }
+
+if ($SkipCleanup -and -not $CleanupOnly) { Write-Host 'Skipping the clean-up before capture (-SkipCleanup).' }
+else { Invoke-ReferenceCleanup -Keep @($PSScriptRoot, $Unattend) }
+if ($CleanupOnly) {
+    if ($ShutDown) { Write-Host 'Clean-up done. Shutting down; then capture the disk.' -ForegroundColor Green; & shutdown.exe /s /t 0; return }
+    Write-Host 'Clean-up done. Shut the VM down (shutdown /s /t 0), then capture its disk.' -ForegroundColor Green; return
+}
 
 # Sysprep refuses to generalize while reserved storage is in use ("Audit mode cannot be turned on if reserved storage
 # is in use", hr 0x800F0975). Turning it off only gives back the space Windows keeps for updates.
