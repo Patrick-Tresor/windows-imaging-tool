@@ -232,7 +232,7 @@ before anything is erased, telling the operator to pick the UEFI boot entry.
 
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order through `Invoke-AppInstall` (detect, skip if present, run
-with a timeout, check exit code, detect again), writes the results to
+with a timeout, stopped early when stuck on a window for 5 idle minutes (`Invoke-PackProcess -IdleSeconds`, `Get-ProcessTreeActivity`), check exit code, detect again), writes the results to
 `C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
 post-deploy checks and removes the files it staged in `C:\Temp` (other files there are left alone).
@@ -246,7 +246,7 @@ configuration (Display None, AcceptEULA, CDN fallback, an unreachable SourcePath
 `app.json`, validation, installer inspection (MSI properties through the Windows
 Installer COM object, MSIX manifests, framework markers in .exe files), silent
 switch suggestions, templates (`config\app-templates.json`), downloads at first boot
-(`Get-AppDownload`: SHA256 check, or a file signed by the pack's publisher), maker and
+(`Get-AppDownload`: SHA256 check, or a file signed by the pack's publisher; `Get-AppExpectedSigners` adds the signer names of well-known publishers by name or download site), maker and
 model requirements, and detection rules (all must match). The console's builder is
 `src/Console/AppPackEditor.ps1` + `.xaml`.
 

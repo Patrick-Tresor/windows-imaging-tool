@@ -93,11 +93,31 @@ function Set-SystemAwake {
     try { [void][ImagingTool.PowerState]::SetThreadExecutionState($flags) } catch { }
 }
 
+function Get-ProcessTreeActivity {
+    # A process and everything it started: Work = CPU time + bytes read, written and other I/O (network too), which
+    # stays the same while nothing happens; HasWindow = one of them shows a window (a question or an error box).
+    param([Parameter(Mandatory)][int]$Id)
+    $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, KernelModeTime, UserModeTime, ReadTransferCount, WriteTransferCount, OtherTransferCount -ErrorAction Stop)
+    $tree = @{ $Id = $true }
+    do {
+        $added = $false
+        foreach ($x in $all) { if (-not $tree.ContainsKey([int]$x.ProcessId) -and $tree.ContainsKey([int]$x.ParentProcessId)) { $tree[[int]$x.ProcessId] = $true; $added = $true } }
+    } while ($added)
+    [uint64]$work = 0; $window = $false
+    foreach ($x in $all) {
+        if (-not $tree.ContainsKey([int]$x.ProcessId)) { continue }
+        $work += [uint64]$x.KernelModeTime + [uint64]$x.UserModeTime + [uint64]$x.ReadTransferCount + [uint64]$x.WriteTransferCount + [uint64]$x.OtherTransferCount
+        if (-not $window) { $window = try { [Diagnostics.Process]::GetProcessById([int]$x.ProcessId).MainWindowHandle -ne [IntPtr]::Zero } catch { $false } }
+    }
+    [pscustomobject]@{ Work = $work; HasWindow = $window }
+}
+
 function Invoke-PackProcess {
     <#
     .SYNOPSIS
         Runs a program with a timeout, its output and errors going to $LogPath (UTF-8, after a line with the command).
-        Returns @{ TimedOut; ExitCode; LastLine } (LastLine: the last line it printed, for the message).
+        Returns @{ TimedOut; Stuck; ExitCode; LastLine } (LastLine: the last line it printed, for the message;
+        Stuck: stopped early by -IdleSeconds).
     #>
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -105,7 +125,12 @@ function Invoke-PackProcess {
         [string]$WorkingDirectory,
         [Parameter(Mandatory)][int]$TimeoutMinutes,
         [Parameter(Mandatory)][string]$LogPath,
-        [scriptblock]$Log = { param($m) Write-Host $m }
+        [scriptblock]$Log = { param($m) Write-Host $m },
+        # Stops it early when it shows a window and does nothing (no CPU, no disk or network) for this long: a "silent"
+        # installer stuck on a question or an error box waits for a click nobody gives. 0 = only the timeout.
+        [int]$IdleSeconds = 0,
+        # Tests pass their own; the default is Get-ProcessTreeActivity.
+        [scriptblock]$Activity = { param($Id) Get-ProcessTreeActivity -Id $Id }
     )
     & $Log "  > $FilePath $Arguments"
     New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force | Out-Null
@@ -129,10 +154,18 @@ function Invoke-PackProcess {
     # logon screen goes to sleep during first boot, and a plain WaitForExit(30 min) does not count the time asleep
     # (Office "still running after 30 minutes" was logged 2 hours later on a Latitude 5521, 2026-11-23).
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    $timedOut = $false
+    $timedOut = $false; $stuck = $false
+    $lastWork = ''; $idleSince = Get-Date
     while (-not $p.WaitForExit(5000)) {
         Set-SystemAwake
         if ((Get-Date) -ge $deadline) { $timedOut = $true; break }
+        if ($IdleSeconds -gt 0) {
+            $a = try { & $Activity $p.Id } catch { $null }
+            $work = if ($a) { "$($a.Work)" } else { '' }
+            if (-not $a -or -not $a.HasWindow -or $work -ne $lastWork) { $idleSince = Get-Date }
+            $lastWork = $work
+            if (((Get-Date) - $idleSince).TotalSeconds -ge $IdleSeconds) { $timedOut = $true; $stuck = $true; break }
+        }
     }
     if ($timedOut) { try { & taskkill.exe /PID $p.Id /T /F | Out-Null } catch { } }
     else { $p.WaitForExit() }
@@ -147,9 +180,10 @@ function Invoke-PackProcess {
     $last = @($lines | Select-Object -Skip 1 | Where-Object { "$_".Trim() } | Select-Object -Last 1)
     [pscustomobject]@{
         TimedOut = $timedOut
+        Stuck    = $stuck
         ExitCode = if ($timedOut) { $null } else { $p.ExitCode }
         LastLine = if ($last) { "$($last[0])".Trim() } else { '' }
     }
 }
 
-Export-ModuleMember -Function Read-PackJson, Save-PackFolder, Get-PackTemplates, Test-PackRequirement, Invoke-PackProcess, Set-SystemAwake
+Export-ModuleMember -Function Read-PackJson, Save-PackFolder, Get-PackTemplates, Test-PackRequirement, Invoke-PackProcess, Get-ProcessTreeActivity, Set-SystemAwake

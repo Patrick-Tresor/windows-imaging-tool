@@ -351,7 +351,11 @@ On the PC, apps for another maker or model are skipped in WinPE and never copied
 At first boot each app is skipped when its detection already finds it, runs from
 its folder as SYSTEM, is stopped after its timeout (real time, so a PC that
 slept does not stretch it; the PC is kept awake until first boot ends), and is marked
-failed when it exits 0 but detection still can't find it. Results go to
+failed when it exits 0 but detection still can't find it. An installer that shows
+a window and does nothing (no CPU, disk or network) for 5 minutes is waiting for
+a click nobody gives (a wrong silent switch, an error box): it is stopped then
+instead of after its whole timeout, so the PC does not stay on "Please wait"
+(Office's setup is left to its timeout). Results go to
 `C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
 First boot starts from `SetupComplete.cmd`. Windows skips that script when it
@@ -382,8 +386,11 @@ Some applications are ready to download with nothing to get first, because
 `config\app-templates.json` has a `download` address for them: .NET 8 Desktop
 Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
-The PC needs internet at first boot; it tries for about five minutes, and a
-failed download marks the application failed in `FirstBoot.log`.
+The PC needs internet at first boot; it tries 6 times, 20 seconds apart (about
+two minutes), and a failed download marks the application failed in
+`FirstBoot.log`. A link the server refuses (HTTP 403, 404...) is not tried
+again, and once one download found no internet, the next applications try only
+once.
 To make one, click **New application...** on the Apps and Tasks tab and pick the
 template with the installer left empty: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). A pack's details on the Apps and
@@ -399,10 +406,16 @@ Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
 the publisher's download address, the silent switches and the file's SHA256
 from the catalog; nothing big is downloaded when you add it. The PC downloads
 the installer at first boot and checks its SHA256. A "latest" link whose file
-the publisher has since replaced (Office's `setup.exe`) gives another SHA256:
-the file is kept when it is signed by the pack's publisher, and the log says so;
-otherwise it is refused at once, with the hash and the signer in the log. Add
-the application again to save the new SHA256. Packs whose catalog entry gives no silent switch say so in their
+the publisher has since replaced (Chrome's MSI, Office's `setup.exe`) gives
+another SHA256: the file is still kept when it has a valid signature from the
+publisher, and the log says so. The publisher is the one saved in the pack (read
+from the catalog), matched loosely (Google = Google LLC, Zoom = Zoom Video
+Communications, Inc.), and for well-known publishers (Google, Microsoft,
+Mozilla, Zoom, Adobe, VideoLAN, Dell, HP, Lenovo, Cisco, Notepad++, Oracle) it
+is also known from the download site, so older packs saved without a publisher
+work too. Any other file is refused at once with one short line in the result;
+the hashes and the signer are in the log. Add the application again to save
+the new SHA256. Packs whose catalog entry gives no silent switch say so in their
 notes; test those on a VM first. Every search is written to
 `%LOCALAPPDATA%\ImagingConsole\winget-search.log` (winget's exit code and full
 output); when winget itself fails, the status line says why instead of
