@@ -507,8 +507,8 @@ checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H
 can stop working when Microsoft changes the site, and it needs internet: when the
 catalog can't be reached, the packages in the list are still added (one warning line
 in the log), and with no packages the update stops before touching the image and
-says to download the `.msu` by hand into `Updates`. Packages in the dialog's list (the .NET cumulative update, or one
-downloaded by hand) are applied after it, in a fixed order: a standalone
+says to download the `.msu` by hand into `Updates`. Every `.msu`/`.cab` in `Updates` (the dialog lists them; move one out of the
+folder to leave it out: the .NET cumulative update, or one downloaded by hand) is applied after it, in a fixed order: a standalone
 servicing stack update (`ssu` in its name) first, then Windows, then .NET,
 oldest KB first.
 
