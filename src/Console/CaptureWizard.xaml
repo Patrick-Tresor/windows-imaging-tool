@@ -71,8 +71,6 @@
             <Button x:Name="BtnCopyCmd" DockPanel.Dock="Right" Content="Copy"/>
             <TextBox x:Name="TxtPrepCmd" IsReadOnly="True" FontFamily="Consolas"/>
           </DockPanel>
-          <CheckBox x:Name="ChkPrepared" Margin="0,12,0,0"
-                    Content="The reference machine has been prepared with sysprep and is shut down"/>
         </StackPanel>
       </ScrollViewer>
 

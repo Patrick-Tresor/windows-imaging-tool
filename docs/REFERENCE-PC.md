@@ -116,7 +116,7 @@ Fix the VM, capture again and redeploy. Try a new image on one PC of each model 
 On the admin PC, in the console: **Images > Capture new image...**
 
 1. **The VM's disk file on this PC**: pick the VM's .vmdk (the newest snapshot is read).
-2. Tick that the prepare command has run.
+2. Run the prepare command it shows in the VM, then click Next.
 3. **Check the disk**: wait until every line has a tick. A cross on "Sysprep has run" means the VM
    was not generalized: boot it, run the prepare command again, and click **Check again**.
 4. Name the image and pick the compression (**Maximum**, or **Smallest** for an `.esd` about a

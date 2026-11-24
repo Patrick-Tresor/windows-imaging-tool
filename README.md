@@ -644,8 +644,9 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
-      Store apps that break sysprep and a missing Microsoft Store, frees space so the image is smaller
+      (`Tools\Prepare-Reference.ps1 -RemoveUserApps`), then click Next (no tick box: the next page
+      checks that sysprep ran). It checks for a pending reboot, BitLocker, removes
+      Store apps installed for a user only (the Store stays) and refuses a missing Microsoft Store, frees space so the image is smaller
       (Windows Update downloads, Delivery Optimization cache, temp folders, recycle bin, and DISM
       component cleanup with `/ResetBase`, 10-30 minutes), then runs sysprep and shuts down.
       `-SkipCleanup` skips freeing space.
