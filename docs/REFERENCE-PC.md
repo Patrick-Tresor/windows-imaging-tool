@@ -75,7 +75,11 @@ It prints `PROBLEM:` lines (must fix) and `WARNING:` lines (read them):
 
 ## 7. Sysprep
 
-Run the same command without `-CheckOnly` (add `-RemoveUserApps` if step 6 asked for it). Sysprep
+Run the same command without `-CheckOnly` (add `-RemoveUserApps` if step 6 asked for it). It first
+frees space so the image is smaller: it empties the Windows Update download folder, the Delivery
+Optimization cache, the temp folders and the recycle bin, then runs DISM component cleanup with
+`/ResetBase` (10-30 minutes; updates already installed can no longer be uninstalled, which an image
+doesn't need). It prints how much it freed. `-SkipCleanup` skips this. Then sysprep
 runs and the VM **shuts down by itself**. Don't start it again: it would run OOBE and the disk would
 no longer be generalized.
 
@@ -85,7 +89,9 @@ error line from `C:\Windows\System32\Sysprep\Panther\setuperr.log`.
 ### Or: sysprep on each PC instead (optional, tried on a Dell Latitude 5521)
 
 On the capture wizard's second page, **Skip sysprep here: each PC runs sysprep at its first start**
-lets you capture the VM without sysprep. Run `shutdown /s /t 0` in the VM instead (the Start menu's
+lets you capture the VM without sysprep. The wizard then shows the prepare command with
+`-CleanupOnly -ShutDown`: it frees space (the same clean-up as step 7, without sysprep), then runs
+`shutdown /s /t 0` (the Start menu's
 Shut down only hibernates Windows when Fast Startup is on, and the check refuses that disk).
 
 Each PC deployed from that image then:

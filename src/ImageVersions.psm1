@@ -43,12 +43,43 @@ function Get-CaptureImageArgs {
         [Parameter(Mandatory)][string]$CaptureDir,
         [Parameter(Mandatory)][string]$Name,
         [string]$Compression = 'max',
-        [string]$Description
+        [string]$Description,
+        [string]$ConfigFile          # exclusion list from New-CaptureConfigFile
     )
     $a = @('/Capture-Image', "/ImageFile:$WimPath", "/CaptureDir:$CaptureDir", "/Name:$Name",
         "/Compress:$(if ($Compression -eq 'recovery') { 'max' } else { $Compression })", '/CheckIntegrity')
     if ($Description) { $a += "/Description:$Description" }
+    if ($ConfigFile) { $a += "/ConfigFile:$ConfigFile" }
     $a
+}
+
+function Get-CaptureExclusionList {
+    # Files and folders left out of every capture: junk Windows makes again by itself, so the image is smaller and a
+    # deployed PC loses nothing it needs. A config file replaces DISM's own list, so DISM's defaults come first.
+    # Whole paths from the root only: DISM allows a wildcard only in the last part of a path with no leading '\'.
+    @(
+        # DISM's default list
+        '\$ntfs.log', '\hiberfil.sys', '\pagefile.sys', '\swapfile.sys', '\System Volume Information', '\RECYCLER',
+        '\Windows\CSC',
+        # Recycle bin, Windows Update downloads (already installed), Delivery Optimization cache
+        '\$Recycle.Bin',
+        '\Windows\SoftwareDistribution\Download',
+        '\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache',
+        # Old Windows and upgrade leftovers
+        '\Windows.old', '\$Windows.~BT', '\$Windows.~WS', '\$WinREAgent', '\$GetCurrent',
+        # Crash dumps
+        '\Windows\MEMORY.DMP', '\Windows\Minidump', '\Windows\LiveKernelReports'
+    )
+}
+
+function New-CaptureConfigFile {
+    # Writes DISM's configuration list for /ConfigFile: Get-CaptureExclusionList, then DISM's default compression
+    # exclusions. Returns the path.
+    param([Parameter(Mandatory)][string]$Path)
+    $lines = @('[ExclusionList]') + @(Get-CaptureExclusionList) +
+        @('', '[CompressionExclusionList]', '*.mp3', '*.zip', '*.cab', '\WINDOWS\inf\*.pnf')
+    [IO.File]::WriteAllLines($Path, [string[]]$lines, [Text.Encoding]::ASCII)
+    $Path
 }
 
 function Convert-ImageToEsd {
@@ -349,7 +380,7 @@ function Publish-CapturedImage {
     $newLeaf
 }
 
-Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Get-CaptureExclusionList, New-CaptureConfigFile, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-VersionsToKeep, Set-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

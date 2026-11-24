@@ -305,6 +305,7 @@ $status = 'FAILED'
 $staging = $null
 $swap = @{ Swapping = $false }
 $tempDisk = $null     # a converted VHD made by this run; deleted in finally
+$captureConfig = $null # the capture's exclusion list; deleted in finally
 $mount = $null        # the mounted virtual disks; dismounted in finally
 
 $captureSteps = @(
@@ -406,7 +407,11 @@ try {
     Write-DeployLog "Capturing the disk ($windowsRoot) to $imagesDir$(if ($target.Text) { " ($($target.Text))" })."
     # No /Verify: its extra error and duplicate checks slow down a capture that is already long. /CheckIntegrity
     # still stores checksums, so a damaged .wim is refused when it is applied.
-    $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description
+    # Leave out junk Windows makes again by itself (update downloads, recycle bin, old Windows, crash dumps), so the
+    # image is smaller. The list is in ImageVersions.psm1 (Get-CaptureExclusionList).
+    $captureConfig = New-CaptureConfigFile -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), "Capture-$Name-exclusions.ini"))
+    Write-DeployLog "Leaving out of the image: $((Get-CaptureExclusionList) -join ', ')"
+    $captureArgs = Get-CaptureImageArgs -WimPath $wim -CaptureDir $windowsRoot -Name $Name -Compression $Compression -Description $Description -ConfigFile $captureConfig
     # DISM first scans every file on the disk with no percent (half an hour on a big disk), so say so under the bar.
     $scanText = 'Scanning the files on the disk (no percent from DISM yet)'
     Start-BuildStep 'capture' -Detail $scanText
@@ -448,6 +453,7 @@ finally {
     # Release the disk before the temporary copy's deletion, which needs it free.
     if ($mount) { Dismount-VMDisks $mount }
     if ($tempDisk) { Remove-ConvertedDisk $tempDisk }
+    if ($captureConfig) { Remove-Item -LiteralPath $captureConfig -Force -ErrorAction SilentlyContinue }
     # The check's copy is used once: reused above, or stale, or never reached because the capture failed earlier.
     if ($ReuseConvertedDisk) { Remove-ConvertedDisk $ReuseConvertedDisk }
     # Once the swap has started the staging folder may hold the only copy of the new capture, so keep it then.

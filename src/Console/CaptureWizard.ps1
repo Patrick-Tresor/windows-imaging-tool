@@ -42,9 +42,9 @@ function Show-CaptureWizard {
         $atDeploy = (& $getChoice).SysprepAtDeploy
         $w.TxtPrepTitle.Text = if ($atDeploy) { 'Shut the reference VM down' } else { 'Run sysprep on the reference machine' }
         $w.TxtPrepIntro.Text = if ($atDeploy) {
-            'Run this in the VM to shut it down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
+            'Run this in the VM as administrator: it frees space so the image is smaller (10-30 minutes), then shuts the VM down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
         } else { $prepIntro }
-        $w.TxtPrepCmd.Text = if ($atDeploy) { 'shutdown /s /t 0' } else { $prepCommand }
+        $w.TxtPrepCmd.Text = if ($atDeploy) { "$prepCommand -CleanupOnly -ShutDown" } else { $prepCommand }
         $w.TxtPrepHint.Visibility = if ($atDeploy) { 'Collapsed' } else { 'Visible' }
         $w.ChkPrepared.Content = if ($atDeploy) { 'The VM is shut down' } else { $prepDone }
     }

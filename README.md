@@ -642,9 +642,13 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
       (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
-      Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
-      Or tick **Skip sysprep here: each PC runs sysprep at its first start** and only
-      run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
+      Store apps that break sysprep and a missing Microsoft Store, frees space so the image is smaller
+      (Windows Update downloads, Delivery Optimization cache, temp folders, recycle bin, and DISM
+      component cleanup with `/ResetBase`, 10-30 minutes), then runs sysprep and shuts down.
+      `-SkipCleanup` skips freeing space.
+      Or tick **Skip sysprep here: each PC runs sysprep at its first start**: the wizard then shows the
+      prepare command with `-CleanupOnly -ShutDown` (frees space, no sysprep, then `shutdown /s /t 0`).
+      Each deployed PC then runs these checks and sysprep itself
       (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
    3. **Check the disk**: each line gets a tick or a cross. The quick checks (the
       disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
@@ -659,6 +663,9 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
       shows on the Images tab when the console opens that folder's content root.
    5. Review and click Start. The capture is a card in the Progress window with each step (copy,
       read, capture, save), its bar and the time left.
+   Every capture leaves out files Windows makes again by itself: the page file, hibernation file,
+   recycle bin, Windows Update downloads, Delivery Optimization cache, `Windows.old` and upgrade
+   leftovers, and crash dumps (the list is `Get-CaptureExclusionList` in `src\ImageVersions.psm1`).
    The image is saved to the Save to folder, and the Images tab's **Open log** shows its `CAPTURE-VM-<name>` log.
    Without the console: run `Prepare-Reference.ps1` in the VM, then
    `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot <content root>` on this PC.
