@@ -69,7 +69,8 @@ function Read-AnswerFile {
         ImageFile            = Get-XmlText $d 'image/file'
         ImageIndex           = [int](Get-XmlText $d 'image/index' '1')
         ImageVersion         = Get-XmlText $d 'image/version'
-        DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
+        # -1: the first internal disk, picked at deploy (Resolve-TargetDisk). An old file's disk/number is ignored.
+        DiskNumber           = -1
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
         DriverRoot           = Get-XmlText $d 'drivers/root' 'Drivers'
         AppLocation          = Get-XmlText $d 'applications/@location' 'Applications'
@@ -577,7 +578,6 @@ function Export-AnswerFile {
     <version>$(& $x $a.ImageVersion)</version>
   </image>
   <disk>
-    <number>$($a.DiskNumber)</number>
     <option>$(& $x $a.DiskOption)</option>
   </disk>
   <drivers>

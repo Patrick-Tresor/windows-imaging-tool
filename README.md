@@ -248,10 +248,10 @@ requirements). Microsoft does not support Windows 11 on older PCs (Intel 7th
 gen and earlier, such as a ThinkPad X1 Yoga 1st gen) and may not offer them
 feature updates through Windows Update.
 
-The target disk is the internal disk Windows will go on, never the USB stick
-or the disk holding the content: WinPE often numbers the stick disk 0, so when
-the answer file's disk is USB, a card reader or missing, the first internal
-disk (NVMe, then SATA) is used instead and the log says so. The Disk line in
+The target disk is the first internal disk (NVMe, then SATA), never the USB
+stick or the disk holding the content (WinPE often numbers the stick disk 0).
+Answer files have no disk number; the technician can pick another internal disk
+in the deploy wizard. The Disk line in
 the log names the disk it measured. When WinPE sees no internal disk at all
 (Intel RST/VMD, on by default on Dell 11th gen and later and many other
 laptops, hides the SSD from plain WinPE), the wizard says so in one line and

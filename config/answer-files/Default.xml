@@ -21,7 +21,7 @@
   </image>
 
   <disk>
-    <number>0</number>
+    <!-- Windows goes on the first internal disk (NVMe, then SATA), never the USB stick. -->
     <!-- Recreate: wipe the disk and create new GPT partitions (EFI, MSR, Windows, Recovery). UEFI only. -->
     <option>Recreate</option>
   </disk>

@@ -95,7 +95,6 @@ function Show-AnswerEditor {
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
     & $showIndex
-    $e.TxtDisk.Text = $a.DiskNumber
 
     $selected = [Collections.ObjectModel.ObservableCollection[string]]::new()
     foreach ($n in $a.Applications) { $selected.Add($n) }
@@ -224,7 +223,6 @@ function Show-AnswerEditor {
         $a.ImageFile     = $e.CmbImage.Text.Trim()
         $a.ImageIndex    = if ($e.CmbIndex.Text -match '^\s*(\d+)') { [int]$Matches[1] } else { 0 }
         $a.ImageVersion  = if ($e.CmbVersion.SelectedItem) { $e.CmbVersion.SelectedItem.Version } else { '' }
-        $a.DiskNumber    = if ([int]::TryParse($e.TxtDisk.Text, [ref]$n)) { $n } else { 0 }
         $a.Applications  = @($selected)
         $a.FullName      = $e.TxtFullName.Text.Trim()
         $a.Organization  = $e.TxtOrg.Text.Trim()
