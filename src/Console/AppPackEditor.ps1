@@ -66,7 +66,6 @@ function Show-AppPackEditor {
         $e.TxtDownloadUrl.Text = $d.downloadUrl
         $e.CmbType.Text = $d.installerType
         $e.TxtCommand.Text = $d.command
-        $e.TxtUninstall.Text = $d.uninstallCommand
         $e.TxtCodes.Text = $d.successCodes -join ', '
         $e.TxtTimeout.Text = $d.timeoutMinutes
         $rules.Clear()
@@ -113,7 +112,6 @@ function Show-AppPackEditor {
             downloadUrl      = $e.TxtDownloadUrl.Text.Trim()
             installerType    = $e.CmbType.Text.Trim()
             command          = $e.TxtCommand.Text.Trim()
-            uninstallCommand = $e.TxtUninstall.Text.Trim()
             successCodes     = ConvertFrom-ListText $e.TxtCodes.Text -Numbers
             rebootCodes      = @(3010, 1641)     # always: the standard "restart needed" codes
             timeoutMinutes   = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 60 }
@@ -140,7 +138,6 @@ function Show-AppPackEditor {
         $e.CmbType.Text = $info.Type
         $e.TxtTypeNote.Text = $info.Note
         if (-not $e.TxtCommand.Text -or $e.TxtCommand.Text -eq $state.Suggested) { $e.TxtCommand.Text = $info.Command; $state.Suggested = $info.Command }
-        if ($info.UninstallCommand -and -not $e.TxtUninstall.Text) { $e.TxtUninstall.Text = $info.UninstallCommand }
         if ($info.Detection -and -not $rules.Count) {
             $row = [DetectionRow]::new()
             $row.Type = $info.Detection.type; $row.Target = $info.Detection.target; $row.Operator = $info.Detection.operator

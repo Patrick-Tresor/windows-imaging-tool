@@ -321,7 +321,7 @@ tab, or with **New application...** in the answer file editor:
 1. Pick the installer file, or a folder when it needs files next to it.
    The editor reads its type at once (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
-   code, and fills in the silent command, uninstall command and a detection rule.
+   code, and fills in the silent command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
    There is one **Name** box (the folder under `Applications` is made from it);
    version and publisher come from the installer and are shown, not typed.

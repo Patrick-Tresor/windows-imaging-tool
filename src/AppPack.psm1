@@ -48,7 +48,6 @@ function ConvertTo-AppDefinition {
         successCodes     = @(if ($Json.PSObject.Properties['successCodes'] -and @($Json.successCodes).Count) { & $ints $Json.successCodes } else { 0, 3010, 1641 })
         rebootCodes      = @(if ($Json.PSObject.Properties['rebootCodes'] -and $null -ne $Json.rebootCodes) { & $ints $Json.rebootCodes } else { 3010, 1641 })
         timeoutMinutes   = [int](& $get 'timeoutMinutes' 60)
-        uninstallCommand = & $get 'uninstallCommand' ''
         requirements     = [pscustomobject][ordered]@{
             makers = @(if ($req -and $req.PSObject.Properties['makers']) { $req.makers | ForEach-Object { "$_" } | Where-Object { $_ } })
             models = @(if ($req -and $req.PSObject.Properties['models']) { $req.models | ForEach-Object { "$_" } | Where-Object { $_ } })
@@ -186,14 +185,14 @@ function Get-InstallerInfo {
     <#
     .SYNOPSIS
         Reads what can be learned from an installer file: type, name, version, publisher, MSI product code or
-        MSIX package name, and a suggested silent command, uninstall command and detection rule.
+        MSIX package name, and a suggested silent command and detection rule.
     #>
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path $Path -PathType Leaf)) { throw "Installer not found: $Path" }
     $leaf = Split-Path $Path -Leaf
     $info = [ordered]@{
         Installer = $leaf; Type = 'exe'; DisplayName = [IO.Path]::GetFileNameWithoutExtension($leaf); Version = ''; Publisher = ''
-        ProductCode = ''; PackageName = ''; Command = ''; UninstallCommand = ''; Detection = $null; Note = ''
+        ProductCode = ''; PackageName = ''; Command = ''; Detection = $null; Note = ''
     }
     switch -Wildcard ($leaf.ToLowerInvariant()) {
         '*.msi' {
@@ -223,7 +222,6 @@ function Get-InstallerInfo {
     $info.Command = Get-SilentInstallCommand -Installer $leaf -Type $info.Type
     $info.Note = Get-InstallerTypeNote $info.Type
     if ($info.ProductCode) {
-        $info.UninstallCommand = "msiexec /x $($info.ProductCode) /qn /norestart"
         $info.Detection = ConvertTo-DetectionRule ([pscustomobject]@{ type = 'msi'; target = $info.ProductCode })
     } elseif ($info.PackageName) {
         $info.Detection = ConvertTo-DetectionRule ([pscustomobject]@{ type = 'appx'; target = $info.PackageName })
@@ -326,9 +324,7 @@ function New-AppDefinitionFromTemplate {
         $json | Add-Member -NotePropertyName downloadUrl -NotePropertyValue $dl.url -Force
         if ($dl.PSObject.Properties['command'] -and $dl.command) { $json.command = $dl.command }
     }
-    foreach ($p in 'command', 'uninstallCommand') {
-        if ($json.PSObject.Properties[$p] -and $json.$p) { $json.$p = $json.$p.Replace('{installer}', $file) }
-    }
+    if ($json.PSObject.Properties['command'] -and $json.command) { $json.command = $json.command.Replace('{installer}', $file) }
     if ($json.PSObject.Properties['installer']) { $json.installer = $file } else { $json | Add-Member -NotePropertyName installer -NotePropertyValue $file }
     ConvertTo-AppDefinition -Name $(if ($Name) { $Name } else { $Template.name }) -Json $json
 }

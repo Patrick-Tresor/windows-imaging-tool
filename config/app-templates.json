@@ -149,7 +149,6 @@
       "publisher": "VideoLAN",
       "installerType": "nsis",
       "command": "\"{installer}\" /L=1033 /S",
-      "uninstallCommand": "\"%ProgramFiles%\\VideoLAN\\VLC\\uninstall.exe\" /S",
       "detection": { "match": "all", "rules": [ { "type": "file", "target": "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe" } ] },
       "timeoutMinutes": 15,
       "verify": false,
