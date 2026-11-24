@@ -824,6 +824,32 @@ function Find-VendorDriverPackOnline {
     [pscustomobject]@{ Packs = $found; Errors = $errors }
 }
 
+function Find-DriverPackIds {
+    <#
+    .SYNOPSIS
+        The SKUs (Dell, HP) and machine types (Lenovo) of a model, read from its maker's catalog, for a pack imported
+        by hand: the admin types only the model. The catalog model with the same name wins; otherwise the search
+        must find exactly one model. $null when the catalog can't be read or the model is not in it (the pack then
+        matches by model name only).
+    #>
+    param([Parameter(Mandatory)][string]$Maker, [Parameter(Mandatory)][string]$Model, [object[]]$Packs, [string]$CatalogPath)
+    if ($Maker -notin 'Dell', 'HP', 'Lenovo') { return $null }
+    if (-not $PSBoundParameters.ContainsKey('Packs')) {
+        try { $Packs = @(Get-VendorDriverPacks -Maker $Maker -CatalogPath $CatalogPath) } catch { return $null }
+    }
+    $norm = { param($t) (("$t" -replace "^(?i)(dell|hp|hewlett[- ]packard|lenovo)\s+", '') -replace '\s+', ' ').Trim().ToUpperInvariant() }
+    $want = & $norm $Model
+    $hits = @($Packs | Where-Object { $_.Maker -eq $Maker -and (& $norm $_.Model) -eq $want })
+    if (-not $hits) {
+        $hits = @(Find-VendorDriverPack -Query $Model -Packs @($Packs | Where-Object Maker -eq $Maker))
+        if ($hits.Count -ne 1) { return $null }
+    }
+    $skus = @($hits | ForEach-Object { $_.Skus } | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    $types = @($hits | ForEach-Object { $_.MachineTypes } | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $skus -and -not $types) { return $null }
+    [pscustomobject]@{ Model = $hits[0].Model; Sku = ($skus -join ', '); MachineType = ($types -join ', ') }
+}
+
 function Format-DriverPackName {
     # "Lenovo ThinkPad T570", "HP EliteBook 840 G9" (HP names already start with HP).
     param([Parameter(Mandatory)]$Pack)
@@ -847,4 +873,4 @@ Export-ModuleMember -Function Invoke-VendorExtract, Get-InnoSetupFailure, Get-In
     ConvertFrom-LenovoDriverPackCatalog, Select-LatestDriverPacks, Get-DownloadKind, Get-BitsPercent, Resolve-CatalogDownload, Update-VendorCatalog, Get-VendorDriverPacks,
     Get-DriverPackFolder, Get-InstalledDriverPack, Add-DriverPackLibraryStatus, Register-DriverPack,
     Expand-VendorDriverPack, Install-VendorDriverPack,
-    Find-VendorDriverPack, Find-VendorDriverPackOnline, Format-DriverPackName, Format-VendorDriverPack
+    Find-VendorDriverPack, Find-VendorDriverPackOnline, Find-DriverPackIds, Format-DriverPackName, Format-VendorDriverPack

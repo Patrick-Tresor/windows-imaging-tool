@@ -55,8 +55,9 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
   To import, type the model (Latitude 5521, HP EliteBook 840 G8): the maker is
-  read from the model or the pack's name. Lenovo PCs are matched by machine type
-  (the first four letters of the model, `20FR`), one row per model.
+  read from the model or the pack's name, and its SKUs (Dell, HP) or machine types
+  (Lenovo, `20FR`) from the maker's catalog. A model the catalog doesn't know is
+  matched by name.
   **Deployed without a driver pack** shows, on the same page and only when there
   are any, the models that were deployed without their pack: they got the maker
   fallback, inbox drivers only, or a catalog entry whose folder is missing, with

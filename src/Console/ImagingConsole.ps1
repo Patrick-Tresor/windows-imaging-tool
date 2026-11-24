@@ -841,12 +841,16 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
     $window.Cursor = 'Wait'
     Set-Status "Importing $maker $model..."
     try {
+        # The SKUs / machine types come from the maker's catalog; without them the pack matches by model name.
+        $ids = Find-DriverPackIds -Maker $maker -Model $model
         $result = Import-DriverPack -ContentRoot $script:root -Source $ui.TxtSource.Text -Maker $maker -Model $model `
-            -Sku $ui.TxtSku.Text.Trim() -MachineType $ui.TxtMachineType.Text.Trim()
+            -Sku "$($ids.Sku)" -MachineType "$($ids.MachineType)"
     } finally { $window.Cursor = $null }
     Update-Drivers
-    $ui.TxtModel.Text = ''; $ui.TxtSku.Text = ''; $ui.TxtMachineType.Text = ''; $ui.TxtSource.Text = ''
-    Set-Status "Imported $($result.InfCount) drivers to Drivers\$($result.Path)"
+    $ui.TxtModel.Text = ''; $ui.TxtSource.Text = ''
+    $idText = (@($ids.Sku, $ids.MachineType) | Where-Object { $_ }) -join ', '
+    Set-Status ("Imported $($result.InfCount) drivers to Drivers\$($result.Path)" +
+        $(if ($idText) { " (matches $idText)" } else { ' (not in the maker''s catalog: matches by model name)' }))
     if ($result.InfCount -eq 0) { Show-Error 'No .inf files were found after import. The pack may need extracting first.' }
 } })
 

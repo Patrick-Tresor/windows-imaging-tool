@@ -135,22 +135,13 @@
 
             <GroupBox DockPanel.Dock="Bottom" Header="Import a driver pack" Margin="0,12,0,0" Padding="10">
               <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="130"/>
-                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
-                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="90"/>
-                </Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Model"/>
-                <TextBox x:Name="TxtModel" Grid.Column="1" Grid.ColumnSpan="3" ToolTip="For example Latitude 5521 or HP EliteBook 840 G8. The maker is read from the model or the pack's name."/>
-                <Label Grid.Column="4" Content="SKU" Margin="8,0,0,0"/>
-                <TextBox x:Name="TxtSku" Grid.Column="5"/>
-                <Label Grid.Column="6" Content="Machine type" Margin="8,0,0,0"/>
-                <TextBox x:Name="TxtMachineType" Grid.Column="7"/>
+                <TextBox x:Name="TxtModel" Grid.Column="1" ToolTip="For example Latitude 5521 or HP EliteBook 840 G8. The maker is read from the model or the pack's name; its SKUs or machine types are read from the maker's catalog."/>
 
                 <Label Grid.Row="2" Content="Source"/>
-                <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="7">
+                <DockPanel Grid.Row="2" Grid.Column="1">
                   <Button x:Name="BtnImport" DockPanel.Dock="Right" Content="Import" Style="{StaticResource Primary}" Margin="8,0,0,0"/>
                   <Button x:Name="BtnSrcFile" DockPanel.Dock="Right" Content="File..." Margin="8,0,0,0"/>
                   <Button x:Name="BtnSrcFolder" DockPanel.Dock="Right" Content="Folder..." Margin="8,0,0,0"/>
