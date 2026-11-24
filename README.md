@@ -73,7 +73,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   The build stops before erasing the stick when an answer file's image is missing.
   Pick the **USB disk** (a stick this tool built before is updated in place, any other
   is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
-  **WinPE password** twice and click **Build media**. When Windows refused the console's
+  **WinPE password** (twice the first time; the console remembers it for your Windows
+  account on this PC, encrypted) and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
   **Delete** one (it asks first).
@@ -289,7 +290,8 @@ restrict who can read `config\secrets`.
 How far that protects them, honestly: the answer files on the stick, or a copy
 mailed or left on a share, give nothing away without the key. Every USB stick
 the console builds needs a **WinPE password** (Media tab, 8 characters or
-more, typed for each build): the key goes
+more; the console remembers it for your Windows account on this PC, encrypted
+with DPAPI in `%LOCALAPPDATA%\ImagingConsole\winpe-password.dat`): the key goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
 tries or **Shut down**. (The network boot image has no WinPE password, since

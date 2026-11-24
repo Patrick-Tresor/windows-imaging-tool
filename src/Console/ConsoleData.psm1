@@ -1179,9 +1179,39 @@ function Get-ImageLogPath {
 
 #endregion
 
+function Get-WinPEPasswordPath {
+    # Where the console keeps the stick's WinPE password: this Windows account's profile on this PC only.
+    $local = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::Combine($HOME, '.cache') }
+    [IO.Path]::Combine($local, 'ImagingConsole', 'winpe-password.dat')
+}
+
+function Save-WinPEPassword {
+    <#
+    .SYNOPSIS
+        Remembers the WinPE password for the next Build or Update, encrypted for this Windows account (DPAPI,
+        ConvertFrom-SecureString without a key): another account or another PC can't read it.
+    #>
+    param([Parameter(Mandatory)][string]$Password, [string]$Path = (Get-WinPEPasswordPath))
+    $dir = [IO.Path]::GetDirectoryName($Path)
+    if (-not [IO.Directory]::Exists($dir)) { [void][IO.Directory]::CreateDirectory($dir) }
+    $enc = ConvertTo-SecureString $Password -AsPlainText -Force | ConvertFrom-SecureString
+    [IO.File]::WriteAllText($Path, $enc, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Read-WinPEPassword {
+    # The remembered WinPE password, or '' when there is none or it can't be decrypted (another account, a copied file).
+    param([string]$Path = (Get-WinPEPasswordPath))
+    try {
+        if (-not [IO.File]::Exists($Path)) { return '' }
+        $sec = ConvertTo-SecureString ([IO.File]::ReadAllText($Path).Trim()) -ErrorAction Stop
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+        try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    } catch { '' }
+}
+
 Export-ModuleMember -Function Join-ContentPath, Get-ConsoleConfig, Save-ConsoleConfig, Initialize-ContentRoot, Test-ContentRoot, Remove-SampleDriverEntries, Merge-LenovoSkuEntries,
     Get-ImageList, Get-DriverCatalog, Get-DriverCatalogRows, Save-DriverCatalog, Import-DriverPack, Get-DriverPackMaker,
-    Get-DeploySettings, Save-DeploySettings,
+    Get-DeploySettings, Save-DeploySettings, Get-WinPEPasswordPath, Save-WinPEPassword, Read-WinPEPassword,
     Get-ScanExclusionFolders, Get-ScanExclusionTodo, Add-ScanExclusionsDone, Read-ScanExclusionResult, Get-ScanExclusionTip,
     Get-UncRoot, Test-ExampleShare, Get-DeploySettingsView, Get-SharePassword, Get-DeploySettingsProblems, Save-DeploySettingsPage, Get-ShareErrorText, Test-ShareConnection,
     Get-DeploymentLogs, Get-DeploymentHistoryRows, Get-ImageLogPath,

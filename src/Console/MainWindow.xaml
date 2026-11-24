@@ -231,11 +231,13 @@
             <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">
               <StackPanel Orientation="Horizontal">
                 <PasswordBox x:Name="PwdWinPE" Width="200"/>
-                <TextBlock Text="Again" VerticalAlignment="Center" Margin="12,0,8,0"/>
-                <PasswordBox x:Name="PwdWinPE2" Width="200"/>
+                <StackPanel x:Name="PnlWinPEAgain" Orientation="Horizontal">
+                  <TextBlock Text="Again" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                  <PasswordBox x:Name="PwdWinPE2" Width="200"/>
+                </StackPanel>
               </StackPanel>
               <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"
-                         Text="Required, at least 8 characters. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator, share and other passwords go inside the boot image, encrypted with it. Not saved: type it for each build or update."/>
+                         x:Name="TxtWinPEPwHint" Text="Required, at least 8 characters. WinPE asks for this one password when it starts, and nothing else: the join, local Administrator and other passwords go inside the boot image, encrypted with it. Remembered for your Windows account on this PC after a build."/>
             </StackPanel>
           </Grid>
 
