@@ -42,6 +42,13 @@ function Show-AnswerEditor {
         $e.LstTaskLibrary.ItemsSource = @(Get-TaskList -ContentRoot $ContentRoot)
     }
 
+    $showIndex = {
+        # One edition (every capture of this tool): it is the one, so the Edition row is hidden. Several editions,
+        # or an image the console can't read (a number is typed): the row shows.
+        $one = $e.CmbIndex.Items.Count -eq 1
+        if ($one) { $e.CmbIndex.Text = "$($e.CmbIndex.Items[0])" }
+        foreach ($c in $e.LblIndex, $e.CmbIndex) { $c.Visibility = if ($one) { 'Collapsed' } else { 'Visible' } }
+    }
     $updateIndexes = {
         # Editions from the selected image, as "index: name". A pinned version lists that copy's editions.
         # Falls back to typing a number.
@@ -54,6 +61,7 @@ function Show-AnswerEditor {
         } else {
             $e.CmbIndex.ItemsSource = @(if ($img -and $img.Indexes) { $img.Indexes -split '; ' })
         }
+        & $showIndex
     }
     $updateVersions = {
         # Current plus the versions kept in Images\Previous for an image in the Images folder, with $Want selected.
@@ -86,6 +94,7 @@ function Show-AnswerEditor {
     $e.CmbImage.Text = $a.ImageFile
     & $updateVersions "$($a.ImageVersion)"
     $e.CmbIndex.Text = $a.ImageIndex
+    & $showIndex
     $e.TxtDisk.Text = $a.DiskNumber
 
     $selected = [Collections.ObjectModel.ObservableCollection[string]]::new()
