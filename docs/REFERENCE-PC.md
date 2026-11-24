@@ -75,7 +75,8 @@ It prints `PROBLEM:` lines (must fix) and `WARNING:` lines (read them):
 
 ## 7. Sysprep
 
-Run the same command without `-CheckOnly` (add `-RemoveUserApps` if step 6 asked for it). It first
+Run the command the capture wizard shows: the same one without `-CheckOnly`, with `-RemoveUserApps`
+(it removes Store apps installed for a user only, never the Store or a Windows app). It first
 frees space so the image is smaller: it empties the Windows Update download folder, the Delivery
 Optimization cache, the temp folders and the recycle bin, then runs DISM component cleanup with
 `/ResetBase` (10-30 minutes; updates already installed can no longer be uninstalled, which an image

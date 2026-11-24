@@ -22,6 +22,7 @@ function Show-CaptureWizard {
     Update-ContentTools -ContentRoot $ContentRoot
     $toolsDir = if ($settings.share.path) { Join-Path $settings.share.path 'Tools' } else { Join-Path $ContentRoot 'Tools' }
     $w.TxtPrepCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$(Join-Path $toolsDir 'Prepare-Reference.ps1')`""
+    # Sysprep: always with -RemoveUserApps (Store apps installed for a user only break sysprep; the Store stays).
     $copyCommand = {
         param($box)
         # Another program (clipboard history, remote desktop) can hold the clipboard for a moment, so retry
@@ -36,7 +37,7 @@ function Show-CaptureWizard {
     }
     $w.BtnCopyCmd.Add_Click({ & $copyCommand $w.TxtPrepCmd })
     # Sysprep on each PC instead (VM disk file only): the VM is only shut down, fully (not Fast Startup's hibernation).
-    $prepCommand = $w.TxtPrepCmd.Text; $prepIntro = $w.TxtPrepIntro.Text; $prepHint = $w.TxtPrepHint.Text
+    $prepCommand = $w.TxtPrepCmd.Text; $prepIntro = $w.TxtPrepIntro.Text
     $prepDone = "$($w.ChkPrepared.Content)"
     $updatePrepPage = {
         $atDeploy = (& $getChoice).SysprepAtDeploy
@@ -44,8 +45,7 @@ function Show-CaptureWizard {
         $w.TxtPrepIntro.Text = if ($atDeploy) {
             'Run this in the VM as administrator: it frees space so the image is smaller (10-30 minutes), then shuts the VM down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
         } else { $prepIntro }
-        $w.TxtPrepCmd.Text = if ($atDeploy) { "$prepCommand -CleanupOnly -ShutDown" } else { $prepCommand }
-        $w.TxtPrepHint.Visibility = if ($atDeploy) { 'Collapsed' } else { 'Visible' }
+        $w.TxtPrepCmd.Text = if ($atDeploy) { "$prepCommand -CleanupOnly -ShutDown" } else { "$prepCommand -RemoveUserApps" }
         $w.ChkPrepared.Content = if ($atDeploy) { 'The VM is shut down' } else { $prepDone }
     }
     $w.ChkSysprepAtDeploy.Add_Click({ try { & $updatePrepPage } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message } })
