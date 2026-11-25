@@ -42,6 +42,7 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |
 | 2.8 | Reimage a PC that is off, and one with a wrong DNS record | Both rows fail with one line, nothing changed on either PC |
 | 2.8a | Search `NAME 10.1.2.34` for a PC whose DNS record is old | The IP column shows where the PC really answers; with only the old address, Online says Old DNS and Reimage refuses it |
+| 2.8c | Search the whole domain (no name) | The list shows at once with Online **Checking...**; Online and IP fill in a few seconds later; a PC with two addresses in DNS (`Resolve-DnsName NAME`) shows the one that answers, the same on every Search |
 | 2.8b | Search and Reimage on a PC with PowerShell remoting off (file sharing on) | Online says Yes (SMB); the reimage goes through the admin share, no `ImagingToolRun*` service is left on it (`sc.exe \\PC query state= all`), and no `C:\Windows\Temp\ImagingTool-*` folder |
 
 | 2.9 | Search the IP of a laptop that is not in the domain, Reimage | The row is listed with the IP; Reimage asks for its local administrator account, then the laptop restarts into WinPE and deploys |

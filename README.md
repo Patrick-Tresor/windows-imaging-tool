@@ -147,9 +147,13 @@ on the ones you pick, with nobody at the PCs.
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the IP address, OU, Windows version, last
    logon and whether the console can reach it, checked on every Search (Search again
-   to check again). The IP is where that PC really answers: each DNS address is
+   to check again). The list shows right away; Online says **Checking...** while
+   the network check runs in the background (a few seconds, however many PCs), then
+   fills in. The IP is where that PC really answers: each DNS address is
    asked for its computer name, and one that names another PC is dropped (Online
-   then says **Old DNS** and a reimage never goes there). A PC typed by IP that is
+   then says **Old DNS** and a reimage never goes there). A PC with several
+   addresses (a second adapter, a dock, a VPN) is tried at each, and the one that
+   answers best is shown; an agent's reported address is tried first. A PC typed by IP that is
    not in Active Directory (a laptop outside the domain) is listed too, and
    **Reimage...** asks for its local administrator account. **Online** (point at it for
    details):

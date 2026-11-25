@@ -289,10 +289,28 @@ function Find-ComputerOnLocalNetwork {
     } catch { @() }
 }
 
+function Wait-PortProbes {
+    # Waits for connection attempts until all are done, TimeoutMs passed, or (QuietMs > 0) none has finished for
+    # QuietMs, counted from the start or the last one that finished. A PC that is off drops the attempt and it
+    # never finishes, so without this one PC that is off made everyone wait TimeoutMs.
+    param([Parameter(Mandatory)][Threading.Tasks.Task[]]$Task, [int]$TimeoutMs = 3000, [int]$QuietMs = 1000)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $done = 0; $lastChange = 0
+    while ($clock.ElapsedMilliseconds -lt $TimeoutMs) {
+        $left = @($Task | Where-Object { -not $_.IsCompleted })
+        if (-not $left) { return }
+        $now = $Task.Count - $left.Count
+        if ($now -ne $done) { $done = $now; $lastChange = $clock.ElapsedMilliseconds }
+        if ($QuietMs -gt 0 -and ($clock.ElapsedMilliseconds - $lastChange) -ge $QuietMs) { return }
+        $slice = [int][Math]::Max(1, [Math]::Min(50, $TimeoutMs - $clock.ElapsedMilliseconds))
+        try { [void][Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]$left, $slice) } catch { }
+    }
+}
+
 function Get-RemoteOnlineState {
     <#
     .SYNOPSIS
-        For each host, whether the console can reimage it now and how, and if not why: checked in parallel, 200 at
+        For each host, whether the console can reimage it now and how, and if not why: checked in parallel, 1000 at
         a time. Ping is often blocked by Windows Firewall, so a PC that is on is told apart by its other ports.
     .OUTPUTS
         Hashtable: name as given -> { Online, Method, State, Address (the name that resolved), Ip, Detail }
@@ -307,14 +325,16 @@ function Get-RemoteOnlineState {
         hands them out in turn: each is knocked on, and the one that answers best is shown and used (Patrick,
         2026-11-25: the same PC showed 10.10.64.51 Yes (SMB), then 10.10.2.1 No access). KnownAddress: name ->
         addresses the PC itself reported (its agent's last check-in), tried before DNS's.
+        QuietMs: the port check stops once no new port has answered for that long (and QuietMs has passed): a PC that
+        is on answers in milliseconds, so the PCs that are off don't hold everyone up to TimeoutMs. 0 waits TimeoutMs.
     #>
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
-        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck, [hashtable]$KnownAddress = @{})
+        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck, [hashtable]$KnownAddress = @{}, [int]$QuietMs = 1000)
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
     $allPorts = @(@($Port, $SmbPort) + $OtherPorts | Where-Object { $_ -gt 0 } | Select-Object -Unique)
-    for ($i = 0; $i -lt $names.Count; $i += 200) {
-        $batch = @($names[$i..([Math]::Min($i + 199, $names.Count - 1))])
+    for ($i = 0; $i -lt $names.Count; $i += 1000) {
+        $batch = @($names[$i..([Math]::Min($i + 999, $names.Count - 1))])
 
         # 1. Names to addresses. A full name that does not resolve (this PC uses another DNS server) is tried short.
         $lookups = foreach ($c in $batch) {
@@ -402,7 +422,7 @@ function Get-RemoteOnlineState {
             }
         }
         $tasks = @($probes | Where-Object Task | ForEach-Object Task)
-        if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
+        if ($tasks) { Wait-PortProbes -Task $tasks -TimeoutMs $TimeoutMs -QuietMs $QuietMs }
         $open = @{}
         foreach ($p in @($probes)) {
             if ($p.Task -and $p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected) { $open[$p.Key] = $true }
@@ -1101,6 +1121,6 @@ function Read-ReimageTargets {
 }
 
 Export-ModuleMember -Function Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
-    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
+    Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Wait-PortProbes, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
     Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems
