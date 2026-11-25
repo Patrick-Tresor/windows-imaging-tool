@@ -952,11 +952,14 @@ function Show-AdRows {
         if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
     }
     $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
+    # Keep the selected PCs selected when Online fills in.
+    $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
         $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name
-        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $view.Online -Force
+        $online = if (-not $check -and $script:adCheck -and $view.Online -ne 'Agent') { 'Checking...' } else { $view.Online }
+        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $online -Force
         # The address the online check reached; when the network check got no way in, the one the PC's agent reported
         # lately (the PC's own word, DNS can be old); a PC found by IP shows that IP.
         $agentIp = if ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } else { '' }
@@ -968,6 +971,7 @@ function Show-AdRows {
         $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
+    if ($picked) { foreach ($row in @($ui.GridAd.ItemsSource | Where-Object { $picked -contains $_.Name })) { [void]$ui.GridAd.SelectedItems.Add($row) } }
 }
 
 function Update-Computers {
@@ -1016,23 +1020,73 @@ function Search-AdComputers {
             foreach ($r in $found) { $r.Address = $find.Ip }
         }
         $script:adRows = $found
-        Set-Status "Checking which of the $($script:adRows.Count) computers are online..."
-        Update-AdOnline
+        # The list shows now; Online fills in when the check in the background is done (Patrick, 2026-11-25: the
+        # tab waited for every PC's network check before it showed anything).
+        Start-AdOnlineCheck -Note $localNote
     } finally { $window.Cursor = $null }
     Show-AdRows
-    Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)$localNote"
+    Set-Status "$($script:adRows.Count) computer(s) found.$(if ($script:adCheck) { ' Checking which are online...' })$localNote"
 }
 
-function Update-AdOnline {
-    # The addresses a PC's agent reported in its last check-in are knocked on first: DNS can be old or give a second
-    # adapter's address.
+$script:adCheck = $null
+$script:adCheckTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:adCheckTimer.Interval = [timespan]::FromMilliseconds(250)
+$script:adCheckTimer.Add_Tick({ try { Complete-AdOnlineCheck } catch { $script:adCheckTimer.Stop(); $script:adCheck = $null; Set-Status "Online check failed: $($_.Exception.Message)" } })
+
+function Stop-AdOnlineCheck {
+    # A new search replaces the check still running: it is told to stop and its answer is dropped.
+    $c = $script:adCheck
+    $script:adCheck = $null
+    $script:adCheckTimer.Stop()
+    if ($c) { try { [void]$c.PS.BeginStop($null, $null) } catch { } }
+}
+
+function Start-AdOnlineCheck {
+    # Get-RemoteOnlineState in its own runspace, so the window stays free while it runs; Complete-AdOnlineCheck
+    # takes its answer. The addresses a PC's agent reported in its last check-in are knocked on first: DNS can be
+    # old or give a second adapter's address.
+    param([string]$Note = '')
+    Stop-AdOnlineCheck
+    $script:adOnline = @{}
+    if (-not $script:adRows) { return }
     $known = @{}
-    $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
+    $checkIns = @(Get-ConsoleAgentCheckIns)
     foreach ($r in @($script:adRows)) {
         $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $r.Name
         if ($a -and $a.Online) { $known[$r.Address] = @(@($a.ipAddresses) + "$($a.ipAddress)" | Where-Object { $_ }) }
     }
-    $script:adOnline = if ($script:adRows) { Get-RemoteOnlineState -ComputerName @($script:adRows | ForEach-Object Address) -KnownAddress $known } else { @{} }
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($Module, $Names, $Known)
+        Import-Module $Module -Force
+        Get-RemoteOnlineState -ComputerName $Names -KnownAddress $Known
+    }).AddArgument((Join-Path $srcDir 'RemoteReimage.psm1')).AddArgument([string[]]@($script:adRows | ForEach-Object Address)).AddArgument($known)
+    $script:adCheck = [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Note = $Note }
+    $script:adCheckTimer.Start()
+}
+
+function Complete-AdOnlineCheck {
+    # Timer tick: when the background check is done, its answer fills Online and IP address.
+    $c = $script:adCheck
+    if (-not $c) { $script:adCheckTimer.Stop(); return }
+    if (-not $c.Handle.IsCompleted) { return }
+    $script:adCheckTimer.Stop()
+    $script:adCheck = $null
+    try {
+        $out = @($c.PS.EndInvoke($c.Handle))
+        $h = if ($out) { $out[0] } else { $null }
+        # Every object is -is [psobject], and .BaseObject on a hashtable is a key lookup: unwrap through .PSObject.
+        if ($null -ne $h) { $h = $h.PSObject.BaseObject }
+        $script:adOnline = if ($h -is [hashtable]) { $h } else { @{} }
+        if (-not ($h -is [hashtable]) -and $c.PS.Streams.Error.Count) { throw $c.PS.Streams.Error[0].Exception }
+    } catch {
+        $script:adOnline = @{}
+        Show-AdRows
+        Set-Status "$($script:adRows.Count) computer(s) found. Online check failed: $($_.Exception.Message)$($c.Note)"
+        return
+    } finally { try { $c.PS.Dispose() } catch { } }
+    Show-AdRows
+    Set-Status "$($script:adRows.Count) computer(s) found. $(Get-AdOnlineSummary)$($c.Note)"
 }
 
 function Get-AdOnlineSummary {
@@ -1383,7 +1437,7 @@ $window.Dispatcher.Add_UnhandledException({
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
 $window.Add_Closing({ $script:ConsoleClosing = $true })
 $window.Add_Closed({ Close-ProgressHub })
-$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop() })
+$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop(); Stop-AdOnlineCheck })
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })

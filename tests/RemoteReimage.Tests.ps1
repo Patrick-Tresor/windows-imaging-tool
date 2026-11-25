@@ -213,7 +213,31 @@ try {
     $s = Get-RemoteOnlineState -ComputerName 'localhost' -KnownAddress @{ 'localhost' = @('192.0.2.1') } -Port $closedPort -SmbPort $closedPort -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['localhost'].Ip '192.0.2.1' 'nothing answers: the address the PC reported itself is shown'
     Assert-Equal $s['localhost'].Address '192.0.2.1' 'an address DNS does not give first is used by IP, not by the name'
+    # The console's background check: the same call in its own runspace hands back the hashtable.
+    $bg = [powershell]::Create()
+    try {
+        [void]$bg.AddScript({ param($Module, $Names, $P) Import-Module $Module -Force; Get-RemoteOnlineState -ComputerName $Names -Port $P -SmbPort $P -OtherPorts $P -TimeoutMs 2000 }).AddArgument((Join-Path $repo 'src/RemoteReimage.psm1')).AddArgument([string[]]@('127.0.0.1')).AddArgument($wp)
+        $handle = $bg.BeginInvoke()
+        Assert-Equal $handle.AsyncWaitHandle.WaitOne(20000) $true 'the background check finishes'
+        $h = @($bg.EndInvoke($handle))[0]
+        # Every object is -is [psobject], and .BaseObject on a hashtable is a key lookup: unwrap through .PSObject.
+        if ($null -ne $h) { $h = $h.PSObject.BaseObject }
+        Assert-Equal ($h -is [hashtable]) $true 'the background check hands back the hashtable'
+        Assert-Equal $h['127.0.0.1'].State 'Yes' 'the background check gives the same answer'
+    } finally { $bg.Dispose() }
 } finally { $winrm.Stop(); $smb.Stop() }
+# PCs that are off don't hold everyone up: the wait ends once no attempt has finished for QuietMs.
+$never = [Threading.Tasks.TaskCompletionSource[bool]]::new()
+$quick = [Threading.Tasks.Task]::FromResult($true)
+$clock = [Diagnostics.Stopwatch]::StartNew()
+Wait-PortProbes -Task @($quick, $never.Task) -TimeoutMs 10000 -QuietMs 300
+Assert-Equal ($clock.ElapsedMilliseconds -lt 3000) $true "the wait ends after the quiet time, not the timeout ($($clock.ElapsedMilliseconds) ms)"
+$clock.Restart()
+Wait-PortProbes -Task @($quick, $never.Task) -TimeoutMs 600 -QuietMs 0
+Assert-Equal ($clock.ElapsedMilliseconds -ge 500) $true 'QuietMs 0 waits the whole timeout'
+$clock.Restart()
+Wait-PortProbes -Task @($quick) -TimeoutMs 10000 -QuietMs 5000
+Assert-Equal ($clock.ElapsedMilliseconds -lt 1000) $true 'all done: no waiting at all'
 # Name and IP agree: DNS can give an old address where another PC answers now (Patrick, 2026-11-23).
 function New-TestNbstatAnswer([string]$Name) {
     $b = [Collections.Generic.List[byte]]::new()
@@ -324,7 +348,15 @@ $mainXaml = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Conso
 Assert-Equal ($mainXaml -match 'Header="IP address" Binding="\{Binding IpAddress\}"') $true 'the Computers grid has an IP address column'
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/ImagingConsole.ps1')
 Assert-Equal ($consoleText -match 'NotePropertyName IpAddress') $true 'each Computers row gets its IP address'
-Assert-Equal ($consoleText -match 'Get-RemoteOnlineState -ComputerName @\(\$script:adRows \| ForEach-Object Address\) -KnownAddress \$known') $true 'the online check tries the addresses the agents reported'
+Assert-Equal ($consoleText -match 'Get-RemoteOnlineState -ComputerName \$Names -KnownAddress \$Known') $true 'the online check tries the addresses the agents reported'
+# The list shows before the online check is done: the check runs in its own runspace (Patrick, 2026-11-25).
+$search = $consoleText.Substring($consoleText.IndexOf('function Search-AdComputers'))
+$search = $search.Substring(0, $search.IndexOf("`nfunction "))
+Assert-Equal ($search -match 'Get-RemoteOnlineState') $false 'Search does not wait for the online check'
+Assert-Equal ($search -match 'Start-AdOnlineCheck') $true 'Search starts the online check in the background'
+Assert-Equal ($consoleText -match '\$ps\.BeginInvoke\(\)') $true 'the online check runs asynchronously'
+Assert-Equal ($consoleText -match "'Checking\.\.\.'") $true 'Online says Checking... until the check is done'
+Assert-Equal ($consoleText -match 'Stop-AdOnlineCheck \}\)') $true 'closing the console stops a check still running'
 Assert-Equal ($consoleText -match '\$check\.Ip -and \(\$check\.Online -or -not \$agentIp\)') $true 'a PC the network check could not get into shows the address its agent reported'
 
 Complete-Tests 'All remote reimage tests passed.'
