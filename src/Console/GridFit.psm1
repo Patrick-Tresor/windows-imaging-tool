@@ -5,6 +5,9 @@
 # are not used). Each column keeps at least the longest word of its header, header and cell text wrap, and a row
 # grows to three lines instead of cutting its text off.
 
+# Each fitted grid's columns and the room they were last sized for; an entry goes when its grid does.
+$script:FitPlans = [Runtime.CompilerServices.ConditionalWeakTable[object, object]]::new()
+
 # The smallest width a column can have: its header's longest word plus the header's padding.
 function Get-GridHeaderMinWidth {
     param([string]$Header, [Windows.Media.FontFamily]$FontFamily = [Windows.Media.FontFamily]::new('Segoe UI'), [double]$FontSize = 13)
@@ -71,35 +74,45 @@ function Set-DataGridFit {
     if (-not $plan) { return }
     foreach ($p in $plan) { $p.Column.MinWidth = $p.Min; $p.Column.Width = [Windows.Controls.DataGridLength]::new($p.Base) }
 
-    $fit = ${function:Get-FitColumnWidths}
-    $state = @{ Last = -1.0 }
-    $apply = {
-        param($grid)
-        try {
-            $sv = $grid.Template.FindName('DG_ScrollViewer', $grid)
-            $room = if ($sv -and $sv.ViewportWidth -gt 0) { $sv.ViewportWidth } else { $grid.ActualWidth - $grid.BorderThickness.Left - $grid.BorderThickness.Right }
-            $shown = @($plan | Where-Object { $_.Column.Visibility -eq 'Visible' })
-            # Columns sized another way (Auto) keep their room.
-            foreach ($col in $grid.Columns) { if ($col.Visibility -eq 'Visible' -and -not ($plan.Column -contains $col)) { $room -= $col.ActualWidth } }
-            $room = [Math]::Floor($room) - 1
-            if ($room -le 0 -or -not $shown -or [Math]::Abs($room - $state.Last) -lt 1) { return }
-            $state.Last = $room
-            $widths = & $fit -Base @($shown.Base) -Min @($shown.Min) -Max @($shown.Max) -Available $room
-            for ($i = 0; $i -lt $shown.Count; $i++) { $shown[$i].Column.Width = [Windows.Controls.DataGridLength]::new($widths[$i]) }
-        } catch { }
-    }.GetNewClosure()
-    $Grid.Add_SizeChanged({ param($s, $e) & $apply $s }.GetNewClosure())
+    # Remove + Add, not AddOrUpdate: Windows PowerShell 5.1's .NET Framework doesn't have it.
+    [void]$script:FitPlans.Remove($Grid)
+    $script:FitPlans.Add($Grid, [pscustomobject]@{ Plan = $plan; Last = -1.0 })
+    # The handlers are plain script blocks of this module, so they reach Update-DataGridFit when WPF calls them later.
+    # (A closure made inside another closure's event handler loses the outer variables: that broke the console.)
+    $Grid.Add_SizeChanged({ param($s, $e) Update-DataGridFit $s })
     $Grid.Add_Loaded({
         param($s, $e)
         $sv = $s.Template.FindName('DG_ScrollViewer', $s)
         # The room also changes when the grid's own vertical scroll bar comes or goes.
         if ($sv -and -not $sv.Tag) {
             $sv.Tag = 'GridFit'
-            $grid = $s
-            $sv.Add_ScrollChanged({ param($x, $e) if ($e.ViewportWidthChange -ne 0) { & $apply $grid } }.GetNewClosure())
+            $sv.Add_ScrollChanged({
+                param($x, $e)
+                if ($e.ViewportWidthChange -ne 0) { Update-DataGridFit $x.TemplatedParent }
+            })
         }
-        & $apply $s
-    }.GetNewClosure())
+        Update-DataGridFit $s
+    })
+}
+
+# Sizes the columns of a grid that Set-DataGridFit prepared to the room it has now. Never throws: a layout problem
+# must not stop the console.
+function Update-DataGridFit($Grid) {
+    try {
+        $fit = $null
+        if (-not ($Grid -is [Windows.Controls.DataGrid]) -or -not $script:FitPlans.TryGetValue($Grid, [ref]$fit)) { return }
+        $plan = $fit.Plan
+        $sv = $Grid.Template.FindName('DG_ScrollViewer', $Grid)
+        $room = if ($sv -and $sv.ViewportWidth -gt 0) { $sv.ViewportWidth } else { $Grid.ActualWidth - $Grid.BorderThickness.Left - $Grid.BorderThickness.Right }
+        $shown = @($plan | Where-Object { $_.Column.Visibility -eq 'Visible' })
+        # Columns sized another way (Auto) keep their room.
+        foreach ($col in $Grid.Columns) { if ($col.Visibility -eq 'Visible' -and -not ($plan.Column -contains $col)) { $room -= $col.ActualWidth } }
+        $room = [Math]::Floor($room) - 1
+        if ($room -le 0 -or -not $shown -or [Math]::Abs($room - $fit.Last) -lt 1) { return }
+        $fit.Last = $room
+        $widths = Get-FitColumnWidths -Base @($shown.Base) -Min @($shown.Min) -Max @($shown.Max) -Available $room
+        for ($i = 0; $i -lt $shown.Count; $i++) { $shown[$i].Column.Width = [Windows.Controls.DataGridLength]::new($widths[$i]) }
+    } catch { }
 }
 
 # Every DataGrid in the window's XAML, on every tab.
@@ -115,4 +128,4 @@ function Enable-GridFit {
     foreach ($grid in @(Get-LogicalDataGrids $Window)) { Set-DataGridFit -Grid $grid }
 }
 
-Export-ModuleMember -Function Get-GridHeaderMinWidth, Get-FitColumnWidths, Set-DataGridFit, Enable-GridFit
+Export-ModuleMember -Function Get-GridHeaderMinWidth, Get-FitColumnWidths, Set-DataGridFit, Update-DataGridFit, Enable-GridFit
