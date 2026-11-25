@@ -73,9 +73,14 @@ function Get-Identity {
     $bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue
     $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
     $prod = Get-CimInstance Win32_ComputerSystemProduct -ErrorAction SilentlyContinue
-    $fw = if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control' -ErrorAction SilentlyContinue).PEFirmwareType -eq 2) { 'UEFI' } else { 'Legacy' }
+    # PEFirmwareType is only there in WinPE: in Windows the loader it started from says it (winload.efi = UEFI).
+    # Reading PEFirmwareType alone made GWHZLG3 (UEFI) report legacy BIOS and refuse the reimage.
+    $fw = 'Unknown'; $from = ''
+    $bcd = "$(& bcdedit.exe /enum '{current}' 2>$null)"
+    if ($bcd -match 'winload\.efi') { $fw = 'UEFI'; $from = 'bcdedit' } elseif ($bcd -match 'winload\.exe') { $fw = 'Legacy'; $from = 'bcdedit' }
+    else { try { $null = Confirm-SecureBootUEFI -ErrorAction Stop; $fw = 'UEFI'; $from = 'secureboot' } catch { } }
     [pscustomobject]@{ serial = "$($bios.SerialNumber)".Trim(); uuid = "$($prod.UUID)".Trim(); maker = "$($cs.Manufacturer)".Trim(); model = "$($cs.Model)".Trim()
-        firmware = $fw; domain = "$($cs.Domain)"; partOfDomain = [bool]$cs.PartOfDomain; user = "$($cs.UserName)" }
+        firmware = $fw; firmwareFrom = $from; domain = "$($cs.Domain)"; partOfDomain = [bool]$cs.PartOfDomain; user = "$($cs.UserName)" }
 }
 
 function Get-Network {
