@@ -153,7 +153,7 @@ try {
     Assert-Equal (Test-Path (Join-Path $jobDir 'Apps/Google Chrome/files/chrome.msi')) $true 'the app pack is copied next to the job'
     Assert-Equal (Test-Path (Join-Path $jobDir 'boot.wim')) $false 'no boot image for an install apps job'
     Assert-Equal $appsJob.payloadSha256 (Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) 'the packs'' hash is in the job'
-    Assert-Equal (Get-AgentPayloadHash (Join-Path $appRoot)) (Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) 'the same files give the same hash'
+    Assert-Equal (Get-AgentPayloadHash $appRoot) (Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) 'the same files give the same hash'
     $readApps = Get-AgentJob -StatusFolder $status -Serial 'ABC123'
     Assert-Equal ($null -eq (Test-AgentJob -Job $readApps -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1))) $true 'the PC takes an install apps job the console signed'
     Assert-Equal ((Get-AgentJobApps $readApps) -join '|') 'Google Chrome' 'the job names the apps'
