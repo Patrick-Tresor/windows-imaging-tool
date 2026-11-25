@@ -449,7 +449,8 @@ Two installers need more than a silent switch:
   downloading 2-3 GB from Microsoft; the internet stays as a backup. On the PC,
   the pack's own `configuration.xml` is used (found by name in the pack folder),
   made silent (no Office window, EULA accepted), and a `SourcePath` the PC can't
-  reach is dropped. Office gets at least 60 minutes.
+  reach is dropped, as is a `Logging` or `DownloadPath` folder from the console
+  PC. Office writes its own log to `C:\Windows\Temp`. Office gets at least 60 minutes.
 - **Dell Command | Update 5** needs the .NET 8 Desktop Runtime and exits 4
   without it. Add the `DotNet-Desktop-Runtime-8` application and list it
   before Dell Command | Update in the answer file.
@@ -487,7 +488,7 @@ Mozilla, Zoom, Adobe, VideoLAN, Dell, HP, Lenovo, Cisco, Notepad++, Oracle) it
 is also known from the download site, so older packs saved without a publisher
 work too. Any other file is refused at once with one short line in the result;
 the hashes and the signer are in the log. Add the application again to save
-the new SHA256. Packs whose catalog entry gives no silent switch say so in their
+the new SHA256. A downloaded MSI is detected by its own product code, so a newer Chrome MSI is not reported as "not installed". Packs whose catalog entry gives no silent switch say so in their
 notes; test those on a VM first. Every search is written to
 `%LOCALAPPDATA%\ImagingConsole\winget-search.log` (winget's exit code and full
 output); when winget itself fails, the status line says why instead of

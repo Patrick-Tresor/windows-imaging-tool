@@ -98,12 +98,16 @@ try {
     # On the PC: configuration-deploy.xml is silent, installs from the folder's Office files, and the command uses it.
     $x = [xml](Get-Content -Raw (Join-Path $folder 'configuration.xml'))
     $x.Configuration.Display.SetAttribute('Level', 'Full')
+    $lg = $x.CreateElement('Logging'); $lg.SetAttribute('Path', 'Q:\NoSuchFolder\OfficeLogs'); [void]$x.Configuration.AppendChild($lg)
+    $x.Configuration.Add.SetAttribute('DownloadPath', 'Q:\NoSuchFolder')
     $x.Save((Join-Path $folder 'configuration.xml'))
     $odtRun = New-OfficeDeployConfig -Definition $console -AppFolder $folder
     [xml]$dep = Get-Content -Raw (Join-Path $folder 'configuration-deploy.xml')
     Assert-Equal $odtRun.Command '"setup.exe" /configure "configuration-deploy.xml"' 'the PC runs setup.exe with configuration-deploy.xml'
     Assert-Equal "$($dep.Configuration.Display.Level)|$($dep.Configuration.Display.AcceptEULA)|$($dep.Configuration.Add.SourcePath)|$($dep.Configuration.Add.AllowCdnFallback)" "None|TRUE|$folder|TRUE" 'configuration-deploy.xml: silent, from the folder''s Office files, internet as a fallback'
     Assert-Equal (@($odtRun.Notes)[0] -like 'Office 16.0.* files from this folder') $true 'the log says Office installs from the folder'
+    Assert-Equal "$($dep.Configuration.Logging.Path)|$($dep.Configuration.Logging.Level)|$($dep.Configuration.Add.HasAttribute('DownloadPath'))" "$([IO.Path]::Combine($env:WINDIR, 'Temp'))|Standard|False" 'configuration-deploy.xml: Office logs to Windows\Temp, a console PC log or download folder is dropped (setup.exe exit 1, directory name invalid)'
+    Assert-Equal @(@($odtRun.Notes) -like 'Logging Path Q:*').Count 1 'the log says the console PC log folder was replaced'
 
     # No Office files in the folder and a SourcePath the PC can't reach: from the internet, still silent.
     $bare = Join-Path $appRoot 'Bare-Office'

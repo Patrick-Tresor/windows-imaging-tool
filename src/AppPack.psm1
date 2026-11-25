@@ -963,8 +963,17 @@ function New-OfficeDeployConfig {
     if (-not $display) { $display = $root.AppendChild($xml.CreateElement('Display')) }
     if ($display.GetAttribute('Level') -ne 'None' -or $display.GetAttribute('AcceptEULA') -ne 'TRUE') { $notes += 'silent (Display Level None, AcceptEULA)' }
     $display.SetAttribute('Level', 'None'); $display.SetAttribute('AcceptEULA', 'TRUE')
+    # Office's own log next to FirstBoot.log. A Logging Path from the console PC (a folder this PC doesn't have) makes
+    # setup.exe stop at once with "The directory name is invalid" (exit 1).
+    $logging = $xml.SelectSingleNode('/Configuration/Logging')
+    if (-not $logging) { $logging = $root.AppendChild($xml.CreateElement('Logging')) }
+    $oldLog = $logging.GetAttribute('Path').Trim()
+    $logDir = [IO.Path]::Combine($env:WINDIR, 'Temp')
+    if ($oldLog -and -not [IO.Directory]::Exists([Environment]::ExpandEnvironmentVariables($oldLog))) { $notes += "Logging Path $oldLog not on this PC" }
+    $logging.SetAttribute('Level', 'Standard'); $logging.SetAttribute('Path', $logDir)
     $local = Get-OfficeSourceVersion -AppFolder $AppFolder
     foreach ($add in @($xml.SelectNodes('/Configuration/Add'))) {
+        if ($add.HasAttribute('DownloadPath')) { $add.RemoveAttribute('DownloadPath'); $notes += 'DownloadPath dropped' }
         $src = $add.GetAttribute('SourcePath').Trim()
         if ($local) {
             $add.SetAttribute('SourcePath', $AppFolder); $add.SetAttribute('AllowCdnFallback', 'TRUE')
@@ -974,6 +983,7 @@ function New-OfficeDeployConfig {
         }
     }
     $notes = @($(if ($local) { "Office $local files from this folder" } else { 'no Office files in this folder, so from the internet' })) + $notes
+    $notes += "Office log in $logDir"
     $out = [IO.Path]::Combine($AppFolder, 'configuration-deploy.xml')
     $xml.Save($out)
     [pscustomobject]@{ Command = "`"$($Definition.installer)`" /configure `"configuration-deploy.xml`""; Notes = $notes }
@@ -1142,6 +1152,17 @@ function Add-MediaCopyItems {
     $out
 }
 
+function Update-MsiDetectionRule {
+    # Points the pack's one MSI product code rule at -ProductCode (the downloaded MSI's), when they differ.
+    # A pack with several MSI rules (a suite) is left as it is.
+    param([Parameter(Mandatory)]$Definition, [string]$ProductCode, [scriptblock]$Log = { param($m) })
+    if ($ProductCode -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { return }
+    $rules = @($Definition.detection.rules | Where-Object { $_.type -eq 'msi' })
+    if ($rules.Count -ne 1 -or $rules[0].target -eq $ProductCode) { return }
+    & $Log "  Detection: the downloaded MSI is $ProductCode (the pack had $($rules[0].target))"
+    $rules[0].target = $ProductCode
+}
+
 function Invoke-AppInstall {
     <#
     .SYNOPSIS
@@ -1165,6 +1186,12 @@ function Invoke-AppInstall {
     if ($d.downloadUrl) {
         try { Get-AppDownload -Definition $d -AppFolder $AppFolder -Log $Log }
         catch { return & $out 'Failed' $null $false "download failed: $($_.Exception.Message)" }
+        # A "latest" MSI link (Chrome) brings a new product code with every version: detect the MSI that came down.
+        $msi = [IO.Path]::Combine($AppFolder, "$($d.installer)")
+        if ($msi -like '*.msi' -and [IO.File]::Exists($msi)) {
+            $code = try { (Get-MsiProperties -Path $msi).ProductCode } catch { $null }
+            Update-MsiDetectionRule -Definition $d -ProductCode $code -Log $Log
+        }
     }
 
     $command = $d.command
@@ -1208,4 +1235,4 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Get-HttpErrorStatus, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
     Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
-    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Invoke-AppInstall
+    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Update-MsiDetectionRule, Invoke-AppInstall

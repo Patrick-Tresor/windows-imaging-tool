@@ -241,7 +241,7 @@ It keeps the PC awake until it ends, and `Invoke-PackProcess` times each install
 clock. An Office Deployment Tool pack is installed from the Office files the console put next to
 `setup.exe` (`Update-OfficeSources`, run by `New-DeploymentMedia.ps1` and `Start-RemoteReimage.ps1`):
 `New-OfficeDeployConfig` writes `configuration-deploy.xml` on the PC from the pack's own
-configuration (Display None, AcceptEULA, CDN fallback, an unreachable SourcePath dropped).
+configuration (Display None, AcceptEULA, CDN fallback, an unreachable SourcePath and any DownloadPath dropped, Logging to `C:\Windows\Temp`: a console PC log folder made setup.exe stop with "directory name invalid"). A downloaded MSI's product code replaces the pack's single MSI detection rule (`Update-MsiDetectionRule`), since a "latest" MSI link changes it with every version.
 
 `AppPack.psm1` holds the application pack format: reading and normalizing
 `app.json`, validation, installer inspection (MSI properties through the Windows

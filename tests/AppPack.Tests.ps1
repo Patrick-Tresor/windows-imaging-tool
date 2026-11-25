@@ -320,6 +320,16 @@ Installers:
     Assert-Equal "$($busyRun.Stuck)|$($busyRun.ExitCode)" 'False|0' 'busy installer with a window: left to finish'
     $quietRun = Invoke-PackProcess -FilePath 'cmd.exe' -Arguments '/c ping -n 16 127.0.0.1 >nul' -TimeoutMinutes 5 -LogPath $pLog -Log { param($m) } -IdleSeconds 8 -Activity { param($Id) [pscustomobject]@{ Work = 1; HasWindow = $false } }
     Assert-Equal "$($quietRun.Stuck)|$($quietRun.ExitCode)" 'False|0' 'quiet installer without a window (msiexec /qn): left to finish'
+    # Chrome's "latest" MSI brings a new product code: detection follows the MSI that was downloaded (5521, 2026-11-24).
+    $md = ConvertTo-AppDefinition -Name 'Chrome' -Json @{ installer = 'c.msi'; command = 'msiexec /i c.msi /qn'; detection = @{ match = 'all'; rules = @(@{ type = 'msi'; target = '{1B4E8B6D-8317-3063-B39C-D6EFE62A6D47}' }) } }
+    $script:mLog = @()
+    Update-MsiDetectionRule -Definition $md -ProductCode '{AAAAAAAA-1111-2222-3333-444444444444}' -Log { param($m) $script:mLog += $m }
+    Assert-Equal "$($md.detection.rules[0].target)|$(@($script:mLog -like '*downloaded MSI is*').Count)" '{AAAAAAAA-1111-2222-3333-444444444444}|1' 'MSI detection follows the downloaded product code'
+    Update-MsiDetectionRule -Definition $md -ProductCode 'not-a-code'
+    Assert-Equal $md.detection.rules[0].target '{AAAAAAAA-1111-2222-3333-444444444444}' 'MSI detection: no product code read, rule kept'
+    $suite = ConvertTo-AppDefinition -Name 'Suite' -Json @{ installer = 's.msi'; command = 'msiexec /i s.msi /qn'; detection = @{ match = 'all'; rules = @(@{ type = 'msi'; target = '{11111111-1111-1111-1111-111111111111}' }, @{ type = 'msi'; target = '{22222222-2222-2222-2222-222222222222}' }) } }
+    Update-MsiDetectionRule -Definition $suite -ProductCode '{AAAAAAAA-1111-2222-3333-444444444444}'
+    Assert-Equal "$($suite.detection.rules[0].target)" '{11111111-1111-1111-1111-111111111111}' 'MSI detection: a pack with several MSI rules is left alone'
     $real = Get-ProcessTreeActivity -Id $PID
     Assert-Equal ($real.Work -gt 0) $true 'process activity: CPU and I/O counted'
     $hd.downloadSha256 = 'xyz'
