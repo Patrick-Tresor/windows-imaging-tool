@@ -405,10 +405,10 @@
       <!-- Computers in Active Directory -->
       <TabItem x:Name="TabComputers" Header="Computers">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <DockPanel MinHeight="760" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+          <DockPanel MinHeight="460" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one gets WinPE from the network boot image, restarts into it and deploys the answer file without anyone at the PC, keeping its name and OU. Progress then shows on the Dashboard. A PC with the agent (installed by every deploy that reports to the network share, or with Install agent) checks in by itself: the Agent column says when it last did, and Reimage goes through its agent, with no WinRM or file sharing needed. Other PCs need PowerShell remoting (WinRM) or file sharing on, with your account as administrator; the image comes from the network share on the Deploy Settings tab, and Active Directory is read with the account and domain controller set there."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. A PC with the agent (put there by deploys that report to the network share, or by Install agent) checks in by itself and is reimaged through it. Other PCs need PowerShell remoting (WinRM) or file sharing, with your account as administrator. The network share and the Active Directory account are set on the Deploy Settings tab."/>
             </StackPanel>
             <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
@@ -430,16 +430,17 @@
                 <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
                 <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
-                <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal">
-                  <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,0"/>
-                  <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,0" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
-                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,10,0" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
-                  <Button x:Name="BtnAdBuildBoot" Content="Build network boot image"
+                <!-- Buttons go onto a second line when the window is narrow. -->
+                <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
+                  <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
+                  <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
+                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,10,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
+                  <Button x:Name="BtnAdBuildBoot" Content="Build network boot image" Margin="0,0,0,6"
                           ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root: boot.wim for reimaging, and Deploy-WinPE.iso of the same WinPE to boot a VM or a PC without a stick. Rebuild it after updating the tool or the share settings."/>
-                </StackPanel>
+                </WrapPanel>
               </Grid>
             </GroupBox>
-            <DataGrid x:Name="GridAd" IsReadOnly="True" SelectionMode="Extended" MinHeight="180">
+            <DataGrid x:Name="GridAd" IsReadOnly="True" SelectionMode="Extended" MinHeight="100">
               <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120"/>
                 <DataGridTextColumn Header="IP address" Binding="{Binding IpAddress}" Width="120"/>
@@ -503,7 +504,7 @@
               <TextBlock/>
             </DockPanel>
             <Grid>
-              <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="220" MinHeight="80"/></Grid.RowDefinitions>
+              <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="80"/></Grid.RowDefinitions>
               <DataGrid x:Name="GridDash" IsReadOnly="True">
                 <DataGrid.RowStyle>
                   <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">

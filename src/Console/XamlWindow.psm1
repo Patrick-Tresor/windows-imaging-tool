@@ -1,7 +1,8 @@
 # Loading the console's WPF windows: every window gets the shared styles in Styles.xaml, wheel scrolling
-# (WheelScroll.psm1) and a map of its named controls.
+# (WheelScroll.psm1), grids that fit the window's width (GridFit.psm1) and a map of its named controls.
 
 Import-Module (Join-Path $PSScriptRoot 'WheelScroll.psm1')
+Import-Module (Join-Path $PSScriptRoot 'GridFit.psm1')
 
 $script:XamlNs = 'http://schemas.microsoft.com/winfx/2006/xaml'
 
@@ -60,12 +61,13 @@ function Set-ConsoleLogo {
 }
 
 function New-ConsoleWindow {
-    # Loads src\Console\<Name>, with the shared styles, wheel scrolling and -Owner. Returns Window and Controls.
+    # Loads src\Console\<Name>, with the shared styles, wheel scrolling, fitting grids and -Owner. Returns Window and Controls.
     param([Parameter(Mandatory)][string]$Name, $Owner)
     $xaml = Read-ConsoleXaml -Path (Join-Path $PSScriptRoot $Name)
     $window = [Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($xaml))
     if ($Owner) { $window.Owner = $Owner }
     Enable-WheelScrolling $window
+    Enable-GridFit $window
     $controls = Get-XamlControls -Xaml $xaml -Window $window
     Set-ConsoleLogo -Window $window -Controls $controls
     [pscustomobject]@{ Window = $window; Controls = $controls }
