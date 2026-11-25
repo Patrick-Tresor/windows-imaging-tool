@@ -47,7 +47,7 @@ foreach ($c in @($Computers | ForEach-Object { "$_" -split ',' } | ForEach-Objec
 if (-not $targets) { throw 'No computers to put the agent on.' }
 
 $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
-    [pscustomobject]@{ Id = "pc$i"; Name = "$($targets[$i].name)".ToUpperInvariant(); Address = $(if ($targets[$i].address) { "$($targets[$i].address)" } else { "$($targets[$i].name)" }); State = 'Pending'; Since = $null }
+    [pscustomobject]@{ Id = "pc$i"; Name = "$($targets[$i].name)".ToUpperInvariant(); Address = $(if ($targets[$i].address) { "$($targets[$i].address)" } else { "$($targets[$i].name)" }); State = 'Pending'; Since = $null; Reached = $null; Method = $null }
 })
 Start-BuildProgress -Path $ProgressFile -Title "Installing the agent on $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' })" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
 
@@ -57,9 +57,28 @@ function Stop-Pc($p, [string]$Message) {
     Complete-BuildStep $p.Id -State failed -Detail (@("$Message" -split "`r?`n")[0])
 }
 
+function Get-RemoteAgentProblem($p) {
+    # The last lines of the agent's log and its task's state, over the same way in as the install.
+    $ch = Open-RemoteChannel -ComputerName $p.Reached -Credential $credential -Method $p.Method
+    try {
+        $r = @(Invoke-RemoteChannel -Channel $ch -ScriptBlock {
+            $log = "$env:WINDIR\Temp\ImagingAgent.log"
+            $lines = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log -Tail 15) } else { @() }
+            $task = Get-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'Agent' -ErrorAction SilentlyContinue
+            $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
+            [pscustomobject]@{ Lines = $lines; State = $(if ($task) { "$($task.State)" } else { '' }); Result = $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' }) }
+        })[0]
+    } finally { Close-RemoteChannel $ch }
+    foreach ($l in @($r.Lines)) { Write-Host "  $($p.Name) agent log: $l" }
+    Get-AgentLogProblem -Lines @($r.Lines) -TaskState $r.State -TaskResult $r.Result
+}
+
 try {
     $publicKey = Get-AgentPublicKey -ContentRoot $ContentRoot -Create
     Write-Host "Console key $(Get-AgentKeyId $publicKey); the agents check in to $StatusFolder every $CheckInMinutes min" -ForegroundColor Cyan
+    # The agents write there as their computer accounts: when the share is on this PC, make sure Domain Computers may.
+    try { foreach ($l in (Grant-StatusFolderAccess -StatusFolder $StatusFolder).Lines) { Write-Host $l } }
+    catch { Write-Host "Could not check the rights on ${StatusFolder}: $($_.Exception.Message)" -ForegroundColor Yellow }
     $up = Get-RemoteOnlineState -ComputerName @($pcs | ForEach-Object Address)
     foreach ($p in $pcs) {
         Start-BuildStep $p.Id -Detail 'Reaching the PC'
@@ -80,7 +99,7 @@ try {
                 -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
             Install-AgentOnRemotePC -Channel $ch -SourceDir $PSScriptRoot -Config $config
             Write-Host "$($p.Name): agent installed over $($ch.Method); waiting for its first check-in"
-            $p.State = 'Waiting'; $p.Since = Get-Date
+            $p.State = 'Waiting'; $p.Since = Get-Date; $p.Reached = $ch.ComputerName; $p.Method = $ch.Method
             Set-BuildStepProgress $p.Id -Percent 70 -Detail 'Waiting for its first check-in'
         } catch {
             Write-Host "$($p.Name): $($_.Exception.Message)"
@@ -99,8 +118,9 @@ try {
                 Write-Host "$($p.Name): checked in from $($a.ipAddress)" -ForegroundColor Green
                 Complete-BuildStep $p.Id -Detail "Checked in from $($a.ipAddress)"
             } elseif ((Get-Date) -gt $p.Since.AddMinutes($WaitMinutes)) {
-                # Installed, but the computer account can't write to the share (or the network is slow to come up).
-                Stop-Pc $p "Installed, but no check-in within $WaitMinutes min: give Domain Computers modify rights on $StatusFolder (see C:\Windows\Temp\ImagingAgent.log on the PC)"
+                # Installed, but no check-in: read why from the agent's own log and task on the PC.
+                $why = try { Get-RemoteAgentProblem $p } catch { "its log could not be read ($($_.Exception.Message))" }
+                Stop-Pc $p "No check-in within $WaitMinutes min. $why (C:\Windows\Temp\ImagingAgent.log on the PC)"
             }
         }
         Start-Sleep -Seconds 5
