@@ -76,6 +76,9 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
                 $item = @($ui.Controls['Tabs'].Items | Where-Object { $_.Header -eq $tab })[0]
                 $ui.Controls['Tabs'].SelectedItem = $item
                 $win.UpdateLayout()
+                # Let Loaded and the other queued layout events run, as they do in the console between clicks.
+                $win.Dispatcher.Invoke([Action]{ }, [Windows.Threading.DispatcherPriority]::ContextIdle)
+                $win.UpdateLayout()
                 $grids = New-Object Collections.ArrayList
                 $stack = New-Object Collections.Stack; $stack.Push($item.Content)
                 while ($stack.Count) {
