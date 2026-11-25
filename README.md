@@ -12,7 +12,8 @@ ImagingConsole.cmd   double-click to open the admin console
 src/                 the scripts and modules that run in WinPE, at first boot and behind the console:
                      Deploy-Image.ps1 (deploy), FirstBoot.ps1 (first start), New-DeploymentMedia.ps1 (USB stick
                      and network boot image), Capture-VMImage.ps1 + Prepare-Reference.ps1 (capture),
-                     Update-OfflineImage.ps1, Start-RemoteReimage.ps1, Invoke-SysprepAtDeploy.ps1,
+                     Update-OfflineImage.ps1, Start-RemoteReimage.ps1, ImagingAgent.ps1 (the agent on imaged
+                     PCs), Install-RemoteAgent.ps1, Invoke-SysprepAtDeploy.ps1,
                      Get-DriverPacks.ps1, Test-Deployment.ps1, and their *.psm1 modules; Assets\ (logo)
 src/Console/         ImagingConsole.ps1 (WPF GUI, MainWindow.xaml), the capture wizard, answer file, application
                      and task editors, Update image, Versions and Progress windows, Styles.xaml (colours and
@@ -202,6 +203,53 @@ Needs:
 
 **Cancel reimage** removes a waiting job. A PC that already restarted into WinPE
 then waits at the wizard for someone at its screen.
+
+### The agent on imaged PCs
+
+Every PC deployed while a network share is set on the Deploy Settings tab gets
+a small agent, from the share or from a USB stick (even when WinPE could not
+reach the share: the agent checks in once Windows can): a SYSTEM scheduled task (`ImagingTool\Agent`, PowerShell, in
+`C:\ProgramData\ImagingTool\Agent`, administrators only) that starts with
+Windows and keeps running. It opens no port: everything goes through files on
+the share, written as the computer account, like first boot's status.
+
+- **Check-in**: every 5 minutes it writes `Status\Agents\<serial>.json`: name,
+  serial, IP addresses, model, image and answer file, deploy result, who is
+  signed in, free space on C:. The Computers tab's **Agent** column says when
+  each PC last checked in (point at it for the details), **Online** says
+  **Agent** for a PC whose WinRM and file sharing are blocked but whose agent
+  checked in, and the IP column uses the agent's address when the network check
+  found none. The Dashboard's **Last seen** column shows the same for each
+  deployment.
+- **Reimage through the agent**: **Reimage...** on a PC whose agent checked in
+  within the last 15 minutes needs no WinRM or file sharing. The console writes
+  the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
+  a copy of the network boot image in `Status\Agents\Jobs\<serial>\`. The agent
+  looks for a job every minute, copies the boot image, checks its SHA-256, and
+  restarts into WinPE from its own disk with the same 60 second notice. If the
+  agent has not taken the job within 4 minutes, the console reaches the PC over
+  the network as before.
+- **Install agent** puts it on PCs imaged before it existed (over WinRM or the
+  admin share, like a reimage), and waits for each one's first check-in.
+
+Security: any domain PC can write in `Status`, so a job only counts when the
+console signed it (RSA 3072, SHA-256) with its private key,
+`config\secrets\agent-key.xml` on the content root (made at the first media
+build; it never goes on a stick). The public key goes into every boot.wim and
+on each PC. A job names the PC's serial, UUID and agent id (new at every
+deploy, so an old job can't reimage it again), expires after an hour, and runs
+once. The job's folder is readable only by administrators, the console's
+account and that PC's computer account, since boot.wim holds the answer file key.
+
+Needs: `Domain Computers` with modify rights on the share's `Status` folder (as
+for the Dashboard), and PCs in the domain (outside it the share can't tell who
+the PC is). Rebuild the sticks and the network boot image once, so deploys put
+the agent on and trust this console's key. The agent comes with each deploy:
+after a tool update, reimage the PC or click Install agent again to update it.
+`deploy-settings.json` `agent.enabled: false` leaves it out, and
+`agent.checkInMinutes` changes how often it checks in. Its log on the PC:
+`C:\Windows\Temp\ImagingAgent.log`. To try it by hand on a PC, as
+administrator: `powershell -File C:\ProgramData\ImagingTool\Agent\ImagingAgent.ps1 -Once`.
 
 ## Answer files
 

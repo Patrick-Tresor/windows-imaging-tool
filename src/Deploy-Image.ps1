@@ -36,6 +36,7 @@ Import-Module (Join-Path $PSScriptRoot 'DeployWizard.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SecretVault.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'SysprepAtDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ImagingAgent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'FirstBootState.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ToolVersion.psm1') -Force
 
@@ -270,6 +271,27 @@ function Protect-StagedItem([string]$Path, [switch]$Folder) {
     # and first boot runs the installers there as SYSTEM. A failure only warns.
     $out = & icacls.exe @(Get-AdminOnlyAclArgs -Path $Path -Folder:$Folder) 2>&1
     if ($LASTEXITCODE -ne 0) { Write-DeployLog "Could not limit $Path to administrators (icacls exit $LASTEXITCODE): $(@($out) -join ' ')" -Level WARN }
+}
+
+function Copy-AgentToImage([string]$StatusFolder, $Settings, [string]$Root, $Deploy) {
+    # ImagingAgent.ps1 and what it needs into C:\ProgramData\ImagingTool\Agent (administrators and SYSTEM only: it
+    # runs as SYSTEM), with agent.json and its task's XML. deploy-settings agent.enabled false leaves it out.
+    $cfg = if ($Settings -and $Settings.PSObject.Properties['agent']) { $Settings.agent } else { $null }
+    if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { Write-DeployLog 'Agent turned off in deploy-settings.json (agent.enabled): not put on this PC'; return }
+    $minutes = if ($cfg -and $cfg.PSObject.Properties['checkInMinutes'] -and $cfg.checkInMinutes) { [int]$cfg.checkInMinutes } else { 5 }
+    # The console's public key: baked into boot.wim by the build, or on the content root.
+    $keys = @(foreach ($p in [IO.Path]::Combine($PSScriptRoot, 'config', 'agent-public-key.xml'), [IO.Path]::Combine($Root, 'config', 'agent-public-key.xml')) {
+        if ([IO.File]::Exists($p)) { [IO.File]::ReadAllText($p).Trim() }
+    }) | Select-Object -Unique
+    $dir = 'W:\ProgramData\ImagingTool\Agent'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Protect-StagedItem -Path $dir -Folder
+    foreach ($f in Get-AgentFileNames) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $f) -Destination $dir -Force -ErrorAction Stop }
+    $info = [pscustomobject]@{ answerFile = "$($Deploy.answerFile)"; image = "$($Deploy.image)"; toolVersion = "$($Deploy.toolVersion)"; deployedAt = (Get-Date).ToString('o') }
+    Save-JsonFile -Path "$dir\agent.json" -InputObject (New-AgentConfig -StatusFolder $StatusFolder -PublicKeys $keys -CheckInMinutes $minutes -Deploy $info) -Depth 4
+    [IO.File]::WriteAllText("$dir\agent-task.xml", (Get-AgentTaskXml), [Text.Encoding]::Unicode)
+    Write-DeployLog ("Agent staged: checks in to $StatusFolder every $minutes min; " +
+        $(if ($keys) { "takes jobs signed by console key $(@($keys | ForEach-Object { Get-AgentKeyId $_ }) -join ', ')" } else { 'no console key found (config\agent-public-key.xml), so it takes no jobs' }))
 }
 
 function Wait-Countdown([int]$Seconds) {
@@ -737,6 +759,15 @@ try {
     if ($statusTarget -and $statusTarget.Unc) {
         $plan | Add-Member -NotePropertyName status -NotePropertyValue ([pscustomobject]@{ folder = $statusTarget.Unc; id = $statusId })
     }
+    # The agent: checks in with the console from Windows and takes the jobs the console signs (reimage). It reports
+    # to the same UNC status folder as first boot; FirstBoot.ps1 makes its task. A failure here never stops the deploy.
+    # USB deploys get it too: when WinPE could not reach the share (status kept on the stick), the agent still gets
+    # the share's Status folder from the settings and checks in once Windows reaches it.
+    $agentStatus = Get-AgentStatusFolder -StatusTarget $statusTarget -Settings $settings
+    if ($agentStatus) {
+        try { Copy-AgentToImage -StatusFolder $agentStatus -Settings $settings -Root $root -Deploy $plan.deploy }
+        catch { Write-DeployLog "The agent was not put on this PC: $($_.Exception.Message)" -Level WARN }
+    } else { Write-DeployLog 'No network share in the settings: the agent is not put on this PC (it would have nowhere to check in)' }
     Save-JsonFile -Path 'W:\Temp\firstboot.json' -InputObject $plan -Depth 8
     # Made here so they get the same rights: first boot only writes into them (its progress, and the file it holds
     # open so only one run goes at a time).

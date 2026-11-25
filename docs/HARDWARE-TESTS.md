@@ -46,6 +46,10 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 
 | 2.9 | Search the IP of a laptop that is not in the domain, Reimage | The row is listed with the IP; Reimage asks for its local administrator account, then the laptop restarts into WinPE and deploys |
 | 2.10 | Reimage notice on a PC with someone signed in | A window shows the countdown with **Reboot now** and **Close**; Reboot now restarts at once |
+| 2.11 | Deploy a PC from the share (new stick or network boot image), wait 5 min | Task `ImagingTool\Agent` is running; `Status\Agents\<serial>.json` appears; the Computers tab's Agent column says "Just now" or "x min ago", the Dashboard's Last seen too |
+| 2.12 | Block WinRM and file sharing on that PC (firewall), Search, Reimage | Online says Agent; the reimage goes through the agent: notice, restart into WinPE, deploy, back on the Dashboard |
+| 2.13 | Install agent on a PC imaged before the agent | The row ends "Checked in from <IP>"; the Agent column fills in |
+| 2.14 | Copy an old `job.json` back into `Status\Agents\Jobs\<serial>` after the reimage | The agent refuses it ("made for an earlier install"), nothing restarts |
 
 ## 3. Features on the deployed PC
 
