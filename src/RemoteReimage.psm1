@@ -303,9 +303,13 @@ function Get-RemoteOnlineState {
         PC was not found on the local network by its name) or 'No answer' (off, asleep, or a firewall drops everything).
         Ip is the address where the PC answers with its own name (NetBIOS) when it says it; Address is that IP when
         the name would lead to another, old address.
+        A name can have several addresses in DNS (a second network adapter, Wi-Fi and cable, a VPN), and a DNS server
+        hands them out in turn: each is knocked on, and the one that answers best is shown and used (Patrick,
+        2026-11-25: the same PC showed 10.10.64.51 Yes (SMB), then 10.10.2.1 No access). KnownAddress: name ->
+        addresses the PC itself reported (its agent's last check-in), tried before DNS's.
     #>
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
-        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck)
+        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck, [hashtable]$KnownAddress = @{})
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
     $allPorts = @(@($Port, $SmbPort) + $OtherPorts | Where-Object { $_ -gt 0 } | Select-Object -Unique)
@@ -331,7 +335,18 @@ function Get-RemoteOnlineState {
                 # Every address DNS gives, not only the first: one of them may be old.
                 foreach ($x in $a) { if (-not $cands.Contains($x)) { $cands.Add($x) } }
             }
-            [pscustomobject]@{ Name = $l.Name; Ip = $(if ($cands.Count) { $cands[0] } else { $null }); Used = $used; Candidates = @($cands); Moved = ''; OldDns = $null }
+            $dnsFirst = if ($cands.Count) { "$($cands[0])" } else { '' }
+            # Addresses the PC reported itself (its agent) go first: DNS may be old, the PC's own report is not.
+            $known = @(if ($KnownAddress -and $KnownAddress.ContainsKey($l.Name)) { $KnownAddress[$l.Name] })
+            $own = [Net.IPAddress]::None
+            for ($k = $known.Count - 1; $k -ge 0; $k--) {
+                if ([Net.IPAddress]::TryParse("$($known[$k])", [ref]$own) -and $own.AddressFamily -eq 'InterNetwork') {
+                    if ($cands.Contains($own)) { [void]$cands.Remove($own) }
+                    $cands.Insert(0, $own)
+                }
+            }
+            [pscustomobject]@{ Name = $l.Name; Ip = $(if ($cands.Count) { $cands[0] } else { $null }); Used = $used; Candidates = @($cands); Moved = ''; OldDns = $null
+                DnsFirst = $dnsFirst; Confirmed = $false; Want = ''; Try = @() }
         }
 
         # 2. Which address is really that PC. DNS can still hold an old address (DHCP gave the PC a new one and its
@@ -340,10 +355,12 @@ function Get-RemoteOnlineState {
         # computer name (NetBIOS, as nbtstat -A does). One that names another PC is dropped, and the PC is looked
         # for on the local network by its name (LLMNR/NetBIOS, answered by the PC itself).
         $byName = @($resolved | Where-Object { $_.Candidates.Count -and $_.Name -notmatch '^\d+(\.\d+){3}$' })
+        $nb = @{}
         if (-not $NoNameCheck -and $byName) {
             $v4 = @($byName | ForEach-Object { $_.Candidates } | Where-Object { $_.AddressFamily -eq 'InterNetwork' -and -not [Net.IPAddress]::IsLoopback($_) } | ForEach-Object { "$_" })
             $nb = Get-NetBiosComputerNames -Address $v4 -TimeoutMs ([Math]::Min($TimeoutMs, 1500))
             foreach ($r in $byName) {
+                $more = $null
                 $pick = Select-ComputerAddress -Name $r.Used -Candidates @($r.Candidates | ForEach-Object { "$_" }) -Names $nb
                 if ($pick.OtherName) {
                     $local = @(Find-ComputerOnLocalNetwork -Name $pick.Want | Where-Object { $_ -ne $pick.OldIp })
@@ -355,33 +372,60 @@ function Get-RemoteOnlineState {
                 }
                 if (-not $pick.Ip) { $r.Ip = $null; $r.OldDns = $pick; continue }
                 if ($pick.OtherName) { $r.Moved = "DNS still gives the old address $($pick.OldIp), where $($pick.OtherName) answers now" }
-                if ($pick.Ip -ne "$($r.Candidates[0])") {
-                    # The name would lead to the old address: the PC is reached by its real one.
-                    $r.Ip = [Net.IPAddress]::Parse($pick.Ip)
-                    $r.Used = $pick.Ip
-                }
+                $r.Want = $pick.Want
+                $r.Confirmed = ("$($nb[$pick.Ip])" -eq $pick.Want) -or ($more -and "$($more[$pick.Ip])" -eq $pick.Want)
+                # The name would lead to the old address: the PC is reached by its real one.
+                if ($pick.Ip -ne "$($r.Ip)") { $r.Ip = [Net.IPAddress]::Parse($pick.Ip) }
             }
         }
 
-        # 3. WinRM, file sharing, and the ports any Windows PC that is on answers on.
+        # 3. Which addresses to knock on. One that said the PC's name is the PC: only that one. Otherwise every IPv4
+        # address the name has, except those where another PC answers: the first one may be a second adapter (a
+        # VPN, a docking station, a virtual switch) the console can't reach while the PC answers on another.
+        foreach ($r in @($resolved | Where-Object Ip)) {
+            $try = @("$($r.Ip)")
+            if (-not $r.Confirmed) {
+                $try += @($r.Candidates | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | ForEach-Object { "$_" } |
+                    Where-Object { -not ($nb[$_] -and $r.Want -and $nb[$_] -ne $r.Want) })
+            }
+            $r.Try = @($try | Select-Object -Unique | Select-Object -First 4)
+        }
+
+        # 4. WinRM, file sharing, and the ports any Windows PC that is on answers on, at each of those addresses.
         $probes = foreach ($r in @($resolved | Where-Object Ip)) {
-            foreach ($p in $allPorts) {
-                $tcp = [Net.Sockets.TcpClient]::new($r.Ip.AddressFamily)
-                [pscustomobject]@{ Name = $r.Name; Port = $p; Client = $tcp; Task = $(try { $tcp.ConnectAsync($r.Ip, $p) } catch { $null }) }
+            foreach ($ip in $r.Try) {
+                $addr = [Net.IPAddress]::Parse($ip)
+                foreach ($p in $allPorts) {
+                    $tcp = [Net.Sockets.TcpClient]::new($addr.AddressFamily)
+                    [pscustomobject]@{ Key = "$($r.Name)|$ip|$p"; Client = $tcp; Task = $(try { $tcp.ConnectAsync($addr, $p) } catch { $null }) }
+                }
             }
         }
         $tasks = @($probes | Where-Object Task | ForEach-Object Task)
         if ($tasks) { try { [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$tasks, $TimeoutMs) } catch { } }
         $open = @{}
         foreach ($p in @($probes)) {
-            if ($p.Task -and $p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected) { $open["$($p.Name)|$($p.Port)"] = $true }
+            if ($p.Task -and $p.Task.Status -eq 'RanToCompletion' -and $p.Client.Connected) { $open[$p.Key] = $true }
             try { $p.Client.Close() } catch { }
         }
 
         foreach ($r in $resolved) {
-            $winrm = [bool]$open["$($r.Name)|$Port"]
-            $smb = [bool]$open["$($r.Name)|$SmbPort"]
-            $other = @($OtherPorts | Where-Object { $open["$($r.Name)|$_"] })
+            # The address that answers best: WinRM, then file sharing, then any port, then none; DNS order breaks ties.
+            $seen = @(foreach ($ip in @($r.Try)) {
+                $w = [bool]$open["$($r.Name)|$ip|$Port"]; $f = [bool]$open["$($r.Name)|$ip|$SmbPort"]
+                $o = @($OtherPorts | Where-Object { $open["$($r.Name)|$ip|$_"] })
+                $rank = if ($w) { 0 } elseif ($f) { 1 } elseif ($o) { 2 } else { 3 }
+                [pscustomobject]@{ Ip = $ip; WinRM = $w; Smb = $f; Other = $o; Rank = $rank
+                    State = @('Yes', 'Yes (SMB)', 'No access', 'No answer')[$rank] }
+            })
+            $best = $null
+            foreach ($x in $seen) { if (-not $best -or $x.Rank -lt $best.Rank) { $best = $x } }
+            if ($best -and $best.Ip -ne "$($r.Ip)") { $r.Ip = [Net.IPAddress]::Parse($best.Ip) }
+            # The name leads to another address than the one used: the PC is reached by this one.
+            if ($r.Ip -and "$($r.Ip)" -ne $r.DnsFirst) { $r.Used = "$($r.Ip)" }
+            $winrm = [bool]($best -and $best.WinRM)
+            $smb = [bool]($best -and $best.Smb)
+            $other = @(if ($best) { $best.Other })
             $method = if ($winrm) { 'WinRM' } elseif ($smb) { 'Smb' } else { '' }
             $state = if ($r.OldDns) { 'Old DNS' } elseif (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($other) { 'No access' } else { 'No answer' }
             $detail = switch ($state) {
@@ -393,7 +437,10 @@ function Get-RemoteOnlineState {
                 default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
             }
             if ($r.Moved -and $state -ne 'Old DNS') { $detail = "$detail ($($r.Moved))" }
-            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail }
+            $rest = @($seen | Where-Object { $_.Ip -ne "$($r.Ip)" })
+            if ($rest) { $detail = "$detail. Its other address$(if ($rest.Count -gt 1) { 'es' }): $(($rest | ForEach-Object { "$($_.Ip) $($_.State)" }) -join ', ')" }
+            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail
+                Addresses = @($seen | ForEach-Object Ip) }
         }
     }
     $result

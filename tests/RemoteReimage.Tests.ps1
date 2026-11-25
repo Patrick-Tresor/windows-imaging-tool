@@ -201,6 +201,18 @@ try {
     Assert-Equal $s['127.0.0.1'].State 'No answer' 'a PC that answers on no port says No answer'
     $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['localhost.pc-that-does-not-exist.invalid'].Address 'localhost' 'a full name that does not resolve is tried by its short name'
+    # A name with several addresses (a second adapter, a VPN): DNS hands them out in turn, and the same PC showed
+    # 10.10.64.51 Yes (SMB), then 10.10.2.1 No access (Patrick, 2026-11-25). Every address is knocked on, the best wins.
+    # 192.0.2.1 (a documentation address nobody answers on) stands in for the address the console can't reach.
+    $s = Get-RemoteOnlineState -ComputerName 'localhost' -KnownAddress @{ 'localhost' = @('192.0.2.1') } -Port $closedPort -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
+    Assert-Equal $s['localhost'].Ip '127.0.0.1' 'the address that answers wins over the one tried first'
+    Assert-Equal $s['localhost'].State 'Yes (SMB)' 'the state is the one at the address that answers'
+    Assert-Equal $s['localhost'].Address 'localhost' 'the name is kept when it leads to the address that answers'
+    Assert-Equal ($s['localhost'].Detail -match '192\.0\.2\.1 No answer') $true 'the detail says what the other address answered'
+    Assert-Equal (@($s['localhost'].Addresses) -join ',') '192.0.2.1,127.0.0.1' 'the agent-reported address is tried first, then DNS'
+    $s = Get-RemoteOnlineState -ComputerName 'localhost' -KnownAddress @{ 'localhost' = @('192.0.2.1') } -Port $closedPort -SmbPort $closedPort -OtherPorts $closedPort -TimeoutMs 2000
+    Assert-Equal $s['localhost'].Ip '192.0.2.1' 'nothing answers: the address the PC reported itself is shown'
+    Assert-Equal $s['localhost'].Address '192.0.2.1' 'an address DNS does not give first is used by IP, not by the name'
 } finally { $winrm.Stop(); $smb.Stop() }
 # Name and IP agree: DNS can give an old address where another PC answers now (Patrick, 2026-11-23).
 function New-TestNbstatAnswer([string]$Name) {
@@ -312,5 +324,7 @@ $mainXaml = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Conso
 Assert-Equal ($mainXaml -match 'Header="IP address" Binding="\{Binding IpAddress\}"') $true 'the Computers grid has an IP address column'
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '../src/Console/ImagingConsole.ps1')
 Assert-Equal ($consoleText -match 'NotePropertyName IpAddress') $true 'each Computers row gets its IP address'
+Assert-Equal ($consoleText -match 'Get-RemoteOnlineState -ComputerName @\(\$script:adRows \| ForEach-Object Address\) -KnownAddress \$known') $true 'the online check tries the addresses the agents reported'
+Assert-Equal ($consoleText -match '\$check\.Ip -and \(\$check\.Online -or -not \$agentIp\)') $true 'a PC the network check could not get into shows the address its agent reported'
 
 Complete-Tests 'All remote reimage tests passed.'
