@@ -11,6 +11,9 @@ $console = Join-Path $repo 'src/Console'
 
 $loader = Get-Content -Raw -LiteralPath (Join-Path $console 'XamlWindow.psm1')
 Assert-Equal ($loader -match 'Enable-GridFit \$window') $true 'New-ConsoleWindow fits the grids of every window'
+$fitCode = Get-Content -Raw -LiteralPath (Join-Path $console 'GridFit.psm1')
+Assert-Equal ($fitCode -match 'GetNewClosure') $false 'GridFit handlers are module script blocks, not closures (a nested closure lost its variables)'
+Assert-Equal ($fitCode -match 'AddOrUpdate') $false 'GridFit runs on Windows PowerShell 5.1 (no ConditionalWeakTable.AddOrUpdate there)'
 $styles = Get-Content -Raw -LiteralPath (Join-Path $console 'Styles.xaml')
 Assert-Equal ($styles -match 'Property="RowHeight"') $false 'grid rows have no fixed height, so wrapped text shows'
 Assert-Equal ($styles -match 'Property="MinRowHeight" Value="32"') $true 'one-line rows stay 32 px'
@@ -112,6 +115,26 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
                 }
             }
         }
+
+        # Rows arriving after the grid is on screen bring its vertical scroll bar, which narrows the room and runs
+        # the ScrollChanged handler. That handler once lost its variables and showed an error box in the console.
+        $item = @($ui.Controls['Tabs'].Items | Where-Object { $_.Header -eq 'Computers' })[0]
+        $ui.Controls['Tabs'].SelectedItem = $item
+        $win.Width = 1100; $win.Height = 720
+        $win.UpdateLayout(); $win.Dispatcher.Invoke([Action]{ }, [Windows.Threading.DispatcherPriority]::ContextIdle)
+        $grid = $ui.Controls['GridAd']
+        $sv = Find-Visual $grid ([Windows.Controls.ScrollViewer])
+        $before = $sv.ViewportWidth
+        $handlerError = $null
+        $Error.Clear()
+        try {
+            $grid.ItemsSource = @(1..80 | ForEach-Object { [pscustomobject]@{ Name = "PC$_"; IpAddress = "10.0.0.$_"; OUPath = 'Computers'; OperatingSystem = 'Windows 11 Pro' } })
+            $win.UpdateLayout(); $win.Dispatcher.Invoke([Action]{ }, [Windows.Threading.DispatcherPriority]::ContextIdle); $win.UpdateLayout()
+        } catch { $handlerError = $_.Exception.Message }
+        Assert-Equal ($sv.ViewportWidth -lt $before) $true "many rows: the grid's scroll bar narrows the room ($([int]$before) -> $([int]$sv.ViewportWidth))"
+        Assert-Equal "$handlerError" '' 'many rows: the resize handlers run without an error'
+        Assert-Equal (@($Error | Where-Object { "$_" -match 'GridFit|pipeline element|apply' }).Count) 0 "many rows: no GridFit error recorded ($(@($Error)[0]))"
+        Assert-Equal ([int]$sv.ScrollableWidth) 0 'many rows: the columns shrink to the narrower room, no sideways scrolling'
     } finally {
         $win.Close()
     }
