@@ -22,11 +22,6 @@
         <TextBox x:Name="TxtLimit" Width="60" VerticalContentAlignment="Center" ToolTip="How many of the newest earlier versions each image keeps; older ones are deleted when a capture, update or rollback replaces the image. 0 keeps them all. Versions an answer file uses are never deleted."/>
         <Button x:Name="BtnLimitSave" Content="Save" Margin="8,0,0,0" HorizontalAlignment="Left"/>
       </DockPanel>
-      <DockPanel Margin="0,0,0,10">
-        <TextBlock Text="Note" VerticalAlignment="Center" Width="50"/>
-        <Button x:Name="BtnNote" DockPanel.Dock="Right" Content="Save note" Margin="8,0,0,0"/>
-        <TextBox x:Name="TxtNote" ToolTip="What is in this version, e.g. 'Before the October cumulative update' or 'Known good for the lab'."/>
-      </DockPanel>
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
           <Button x:Name="BtnClose" Content="Close" Margin="0"/>
@@ -43,7 +38,7 @@
         <DataGridTextColumn Header="Version" Binding="{Binding Label}" Width="130"/>
         <DataGridTextColumn Header="Date" Binding="{Binding Date, StringFormat=yyyy-MM-dd HH:mm}" Width="120"/>
         <DataGridTextColumn Header="How it was kept" Binding="{Binding Reason}" Width="2*"/>
-        <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*"/>
+        <DataGridTextColumn Header="Details" Binding="{Binding Note}" Width="2*"/>
         <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="80"/>
         <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
       </DataGrid.Columns>

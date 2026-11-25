@@ -35,7 +35,7 @@ stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow 
 plugged-in stick or the network boot image is older than the console, with **Update the stick** or
 **Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
-by itself once nothing is left; a failed job stays, with its log. **Show progress** in the header opens
+by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens
 it again after you close it.
 
 The window has a header bar at the top (logo, version, the **content root** with **Browse...**
@@ -56,8 +56,9 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   (folder, .cab or .zip), edit how PCs are matched (SKU, machine type, model,
   pattern), and see which entries are missing drivers.
   To import, type the model (Latitude 5521, HP EliteBook 840 G8): the maker is
-  read from the model or the pack's name. Lenovo PCs are matched by machine type
-  (the first four letters of the model, `20FR`), one row per model.
+  read from the model or the pack's name, and its SKUs (Dell, HP) or machine types
+  (Lenovo, `20FR`) from the maker's catalog. A model the catalog doesn't know is
+  matched by name.
   **Deployed without a driver pack** shows, on the same page and only when there
   are any, the models that were deployed without their pack: they got the maker
   fallback, inbox drivers only, or a catalog entry whose folder is missing, with
@@ -72,16 +73,17 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   A USB stick gets the answer files you check in the list, the image each one
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
-  Pick the **USB disk**, tick **Update a stick this console built before** to refresh one
-  without erasing it, uncheck the **Driver packs on USB** you don't need, type the
-  **WinPE password** twice and click **Build media**. When Windows refused the console's
+  Pick the **USB disk** (a stick this tool built before is updated in place, any other
+  is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
+  **WinPE password** (twice the first time; the console remembers it for your Windows
+  account on this PC, encrypted) and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
   **Delete** one (it asks first).
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
   them, or add a new installer), Windows settings, Computer name (with a preview),
-  Domain or workgroup, Tasks, Network shares and BitLocker. Passwords are typed into password
+  Domain or workgroup, Tasks and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
 - **Apps and Tasks**: one list of application packs and task scripts, with
   when each runs. **New application...** opens the pack builder, **New task...**
@@ -95,7 +97,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   `deploy-settings.json`, like the answer files' passwords, no password file) and click **Test connection** to check the sign-in and
   that the Dashboard's `Status` folder can be written. 3) Active Directory: the
   **Domain controller** the Computers tab reads, left empty when the console PC
-  is joined to the domain. 4) Checks after deploy: one tick box, and devices to ignore. Save refuses the example values
+  is joined to the domain. 4) Checks after deploy: they always run; only the devices to ignore are set here. Save refuses the example values
   (`\\deploy-server`, `DOMAIN\...`), a share not written `\\server\share` and an
   account not written `DOMAIN\user` or `user@domain`, and says when the stick
   needs updating because WinPE reads these settings from the boot image.
@@ -256,9 +258,9 @@ the console; the format is documented in the commented
 [config/answer-files/Default.xml](config/answer-files/Default.xml). It sets:
 
 - **mode**: `Interactive` (the deploy wizard opens on the PC) or `Unattended`
-  (start after `unattendDelay` seconds; a key pressed during the countdown opens
-  the wizard instead).
-- **image** and index, **disk** number (the disk is always erased and partitioned again; drivers come from `Drivers`).
+  (start after a 10 second countdown; a key pressed during it opens the wizard
+  instead).
+- **image** and index (the first internal disk is always erased and partitioned again; drivers come from `Drivers`).
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
@@ -294,10 +296,10 @@ requirements). Microsoft does not support Windows 11 on older PCs (Intel 7th
 gen and earlier, such as a ThinkPad X1 Yoga 1st gen) and may not offer them
 feature updates through Windows Update.
 
-The target disk is the internal disk Windows will go on, never the USB stick
-or the disk holding the content: WinPE often numbers the stick disk 0, so when
-the answer file's disk is USB, a card reader or missing, the first internal
-disk (NVMe, then SATA) is used instead and the log says so. The Disk line in
+The target disk is the first internal disk (NVMe, then SATA), never the USB
+stick or the disk holding the content (WinPE often numbers the stick disk 0).
+Answer files have no disk number; the technician can pick another internal disk
+in the deploy wizard. The Disk line in
 the log names the disk it measured. When WinPE sees no internal disk at all
 (Intel RST/VMD, on by default on Dell 11th gen and later and many other
 laptops, hides the SSD from plain WinPE), the wizard says so in one line and
@@ -337,7 +339,8 @@ restrict who can read `config\secrets`.
 How far that protects them, honestly: the answer files on the stick, or a copy
 mailed or left on a share, give nothing away without the key. Every USB stick
 the console builds needs a **WinPE password** (Media tab, 8 characters or
-more, typed for each build): the key goes
+more; the console remembers it for your Windows account on this PC, encrypted
+with DPAPI in `%LOCALAPPDATA%\ImagingConsole\winpe-password.dat`): the key goes
 inside the boot image encrypted with it (AES-256, key from PBKDF2-SHA256); WinPE
 asks for that one password before it does anything and shuts down after 5 wrong
 tries or **Shut down**. (The network boot image has no WinPE password, since
@@ -366,17 +369,22 @@ tab, or with **New application...** in the answer file editor:
 1. Pick the installer file, or a folder when it needs files next to it.
    The editor reads its type at once (MSI, MSIX, NSIS, Inno Setup, InstallShield, WiX
    Burn, Advanced Installer, Squirrel), name, version, publisher and MSI product
-   code, and fills in the silent command, uninstall command and a detection rule.
+   code, and fills in the silent command and a detection rule.
    Changing the installer type changes the silent command too, unless you typed it.
-2. Or apply a **template** from `config\app-templates.json`. There are templates
+   There is one **Name** box (the folder under `Applications` is made from it);
+   version and publisher come from the installer and are shown, not typed.
+2. Or pick a **template** from `config\app-templates.json` (it fills the form in at once,
+   and an installer that matches one picks it by itself). There are templates
    for Lenovo System Update, Dell Command Update, Teams (new Teams, offline MSIX),
    Zoom, VLC, Lansweeper LsAgent, MirrorOp and a generic softphone. The ones marked
    *verify* are best guesses to test on a VM first.
-3. Check the **install command**, success and restart exit codes, and timeout.
+3. Check the **install command**, success exit codes and timeout (3010 and 1641
+   always mean "installed, restart needed").
 4. Add **detection** rules: MSI product code, program name in Programs and
    Features (wildcards, optional minimum version), file (with version), registry
    key or value, MSIX package, or a `.ps1` that exits 0 when installed. Every
-   rule must match. **Test on this PC** runs them on the admin PC.
+   rule must match; when they all do, the install is skipped (the app is already
+   there). **Test on this PC** runs them on the admin PC.
 5. Limit **which PCs** get it by maker and model (Dell Command Update only on
    Dell, Lenovo System Update only on Lenovo).
 
@@ -394,7 +402,11 @@ On the PC, apps for another maker or model are skipped in WinPE and never copied
 At first boot each app is skipped when its detection already finds it, runs from
 its folder as SYSTEM, is stopped after its timeout (real time, so a PC that
 slept does not stretch it; the PC is kept awake until first boot ends), and is marked
-failed when it exits 0 but detection still can't find it. Results go to
+failed when it exits 0 but detection still can't find it. An installer that shows
+a window and does nothing (no CPU, disk or network) for 5 minutes is waiting for
+a click nobody gives (a wrong silent switch, an error box): it is stopped then
+instead of after its whole timeout, so the PC does not stay on "Please wait"
+(Office's setup is left to its timeout). Results go to
 `C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
 First boot starts from `SetupComplete.cmd`. Windows skips that script when it
@@ -425,10 +437,13 @@ Some applications are ready to download with nothing to get first, because
 `config\app-templates.json` has a `download` address for them: .NET 8 Desktop
 Runtime, Microsoft 365 Apps (Office Deployment Tool plus
 `config\office-configuration.xml`), Teams, Zoom, Google Chrome and Firefox.
-The PC needs internet at first boot; it tries for about five minutes, and a
-failed download marks the application failed in `FirstBoot.log`.
-To make one, click **New application...** on the Apps and Tasks tab, pick the template,
-leave the installer empty and click **Apply**: the pack gets the publisher's
+The PC needs internet at first boot; it tries 6 times, 20 seconds apart (about
+two minutes), and a failed download marks the application failed in
+`FirstBoot.log`. A link the server refuses (HTTP 403, 404...) is not tried
+again, and once one download found no internet, the next applications try only
+once.
+To make one, click **New application...** on the Apps and Tasks tab and pick the
+template with the installer left empty: the pack gets the publisher's
 link (and, for Office, `configuration.xml`). A pack's details on the Apps and
 Tasks tab show where it downloads from, and the builder's **Download from**
 box takes any other address. When the installer file is
@@ -442,10 +457,16 @@ Installer, on Windows 10 1809 and later and Windows 11). The new pack keeps
 the publisher's download address, the silent switches and the file's SHA256
 from the catalog; nothing big is downloaded when you add it. The PC downloads
 the installer at first boot and checks its SHA256. A "latest" link whose file
-the publisher has since replaced (Office's `setup.exe`) gives another SHA256:
-the file is kept when it is signed by the pack's publisher, and the log says so;
-otherwise it is refused at once, with the hash and the signer in the log. Add
-the application again to save the new SHA256. Packs whose catalog entry gives no silent switch say so in their
+the publisher has since replaced (Chrome's MSI, Office's `setup.exe`) gives
+another SHA256: the file is still kept when it has a valid signature from the
+publisher, and the log says so. The publisher is the one saved in the pack (read
+from the catalog), matched loosely (Google = Google LLC, Zoom = Zoom Video
+Communications, Inc.), and for well-known publishers (Google, Microsoft,
+Mozilla, Zoom, Adobe, VideoLAN, Dell, HP, Lenovo, Cisco, Notepad++, Oracle) it
+is also known from the download site, so older packs saved without a publisher
+work too. Any other file is refused at once with one short line in the result;
+the hashes and the signer are in the log. Add the application again to save
+the new SHA256. Packs whose catalog entry gives no silent switch say so in their
 notes; test those on a VM first. Every search is written to
 `%LOCALAPPDATA%\ImagingConsole\winget-search.log` (winget's exit code and full
 output); when winget itself fails, the status line says why instead of
@@ -525,16 +546,17 @@ and write a `VERSION-<name>` log. Each version takes as much space as the image.
 ## Updating an image
 
 Patch Tuesday does not need a new capture. Select the image on the Images tab and
-click **Update image...**. **Download the latest cumulative update** is ticked: the
+click **Update image...**. It always looks for the latest cumulative update first: the
 update reads the image's Windows build, finds the newest x64 cumulative update for
 that version (not a preview) in the
 [Microsoft Update Catalog](https://www.catalog.update.microsoft.com) and downloads
 it into the content root's `Updates` folder (both files for a Windows 11 24H2
 checkpoint update; Windows 11 26H2 uses the cumulative update it shares with 25H2), then applies it. The catalog has no official interface, so this
-can stop working when Microsoft changes the site: the update then fails before
-touching the image, and the message says to download the `.msu` by hand into
-`Updates`. Packages in the dialog's list (the .NET cumulative update, or one
-downloaded by hand) are applied after it, in a fixed order: a standalone
+can stop working when Microsoft changes the site, and it needs internet: when the
+catalog can't be reached, the packages in the list are still added (one warning line
+in the log), and with no packages the update stops before touching the image and
+says to download the `.msu` by hand into `Updates`. Every `.msu`/`.cab` in `Updates` (the dialog lists them; move one out of the
+folder to leave it out: the .NET cumulative update, or one downloaded by hand) is applied after it, in a fixed order: a standalone
 servicing stack update (`ssu` in its name) first, then Windows, then .NET,
 oldest KB first.
 
@@ -617,8 +639,8 @@ with every check listed under the PC's details):
 | BitLocker | The Windows drive is encrypted with protection on (or encrypting with a protector in place). |
 
 Any failed check turns the deployment into Warning, with the failed checks
-named. BitLocker and device driver problems are warnings only. The **Deploy
-Settings** tab turns the checks off and lists devices to ignore (wildcards, for
+named. BitLocker and device driver problems are warnings only. The checks always
+run; the **Deploy Settings** tab lists devices to ignore (wildcards, for
 example `*Smart Card*`), saved as `checks` in `deploy-settings.json`.
 
 The application pack's detection rules (set on the Apps and Tasks tab) catch
@@ -649,8 +671,8 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose
    pack is left off gets its maker's fallback pack if that is on the stick, otherwise Windows inbox drivers.
-   To refresh a stick you built before without erasing it, tick **Update a stick this console built
-   before** (`-UpdateOnly`): WinPE is replaced, only files whose size or date changed are copied, and
+   A stick you built before (it has WINPE and DEPLOY partitions) is refreshed without erasing it
+   (`-UpdateOnly`); to start one fresh, format it in File Explorer first. WinPE is replaced, only files whose size or date changed are copied, and
    files the new content no longer has are deleted from `AnswerFiles`, `Images`, `Drivers`,
    `Applications`, `Tasks`, `Tools` and `config` (the stick's `Logs` folder is kept). The boot menu key
    is printed when the stick is ready: Dell F12, HP F9, Lenovo F12 or the Novo button, Surface: hold
@@ -670,10 +692,15 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 3. **Capture** with the console's capture wizard (Images > Capture new image...):
    1. Choose the reference VM's disk file on this PC (see below).
    2. Run the prepare command the wizard shows on the reference machine
-      (`Tools\Prepare-Reference.ps1`). It checks for a pending reboot, BitLocker,
-      Store apps that break sysprep and a missing Microsoft Store, then runs sysprep and shuts down.
-      Or tick **Skip sysprep here: each PC runs sysprep at its first start** and only
-      run `shutdown /s /t 0` in the VM: each deployed PC then runs these checks and sysprep itself
+      (`Tools\Prepare-Reference.ps1 -RemoveUserApps`), then click Next (no tick box: the next page
+      checks that sysprep ran). It checks for a pending reboot, BitLocker, removes
+      Store apps installed for a user only (the Store stays) and refuses a missing Microsoft Store, frees space so the image is smaller
+      (Windows Update downloads, Delivery Optimization cache, temp folders, recycle bin, and DISM
+      component cleanup with `/ResetBase`, 10-30 minutes), then runs sysprep and shuts down.
+      `-SkipCleanup` skips freeing space.
+      Or tick **Skip sysprep here: each PC runs sysprep at its first start**: the wizard then shows the
+      prepare command with `-CleanupOnly -ShutDown` (frees space, no sysprep, then `shutdown /s /t 0`).
+      Each deployed PC then runs these checks and sysprep itself
       (5-10 minutes and one restart more per PC; see [docs/REFERENCE-PC.md](docs/REFERENCE-PC.md)).
    3. **Check the disk**: each line gets a tick or a cross. The quick checks (the
       disk is on a drive in this PC, the VM is shut down, the snapshot that will be read, qemu-img,
@@ -688,6 +715,9 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
       shows on the Images tab when the console opens that folder's content root.
    5. Review and click Start. The capture is a card in the Progress window with each step (copy,
       read, capture, save), its bar and the time left.
+   Every capture leaves out files Windows makes again by itself: the page file, hibernation file,
+   recycle bin, Windows Update downloads, Delivery Optimization cache, `Windows.old` and upgrade
+   leftovers, and crash dumps (the list is `Get-CaptureExclusionList` in `src\ImageVersions.psm1`).
    The image is saved to the Save to folder, and the Images tab's **Open log** shows its `CAPTURE-VM-<name>` log.
    Without the console: run `Prepare-Reference.ps1` in the VM, then
    `src\Capture-VMImage.ps1 -DiskPath <disk file> -Name <name> -ContentRoot <content root>` on this PC.

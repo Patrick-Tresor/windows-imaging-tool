@@ -22,6 +22,7 @@ function Show-CaptureWizard {
     Update-ContentTools -ContentRoot $ContentRoot
     $toolsDir = if ($settings.share.path) { Join-Path $settings.share.path 'Tools' } else { Join-Path $ContentRoot 'Tools' }
     $w.TxtPrepCmd.Text = "powershell -ExecutionPolicy Bypass -File `"$(Join-Path $toolsDir 'Prepare-Reference.ps1')`""
+    # Sysprep: always with -RemoveUserApps (Store apps installed for a user only break sysprep; the Store stays).
     $copyCommand = {
         param($box)
         # Another program (clipboard history, remote desktop) can hold the clipboard for a moment, so retry
@@ -36,17 +37,14 @@ function Show-CaptureWizard {
     }
     $w.BtnCopyCmd.Add_Click({ & $copyCommand $w.TxtPrepCmd })
     # Sysprep on each PC instead (VM disk file only): the VM is only shut down, fully (not Fast Startup's hibernation).
-    $prepCommand = $w.TxtPrepCmd.Text; $prepIntro = $w.TxtPrepIntro.Text; $prepHint = $w.TxtPrepHint.Text
-    $prepDone = "$($w.ChkPrepared.Content)"
+    $prepCommand = $w.TxtPrepCmd.Text; $prepIntro = $w.TxtPrepIntro.Text
     $updatePrepPage = {
         $atDeploy = (& $getChoice).SysprepAtDeploy
         $w.TxtPrepTitle.Text = if ($atDeploy) { 'Shut the reference VM down' } else { 'Run sysprep on the reference machine' }
         $w.TxtPrepIntro.Text = if ($atDeploy) {
-            'Run this in the VM to shut it down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
+            'Run this in the VM as administrator: it frees space so the image is smaller (10-30 minutes), then shuts the VM down fully (the Start menu''s Shut down only hibernates Windows when Fast Startup is on). Each PC deployed from this image then runs the same checks and sysprep at its first start, and restarts into Windows setup. A sysprep failure there leaves that PC unfinished, with the reason on its logon screen.'
         } else { $prepIntro }
-        $w.TxtPrepCmd.Text = if ($atDeploy) { 'shutdown /s /t 0' } else { $prepCommand }
-        $w.TxtPrepHint.Visibility = if ($atDeploy) { 'Collapsed' } else { 'Visible' }
-        $w.ChkPrepared.Content = if ($atDeploy) { 'The VM is shut down' } else { $prepDone }
+        $w.TxtPrepCmd.Text = if ($atDeploy) { "$prepCommand -CleanupOnly -ShutDown" } else { "$prepCommand -RemoveUserApps" }
     }
     $w.ChkSysprepAtDeploy.Add_Click({ try { & $updatePrepPage } catch { Show-WindowMessage $wiz 'Capture Wizard' $_.Exception.Message } })
 
@@ -204,8 +202,8 @@ function Show-CaptureWizard {
                 elseif ([IO.Path]::GetExtension($c.DiskFile) -notin '.vhd', '.vhdx' -and -not (Find-QemuImg)) { 'Reading this disk file needs qemu-img.exe: install QEMU for Windows and add its folder to PATH.' }
             }
             1 {
-                if (-not $w.ChkPrepared.IsChecked) { $(if ($c.SysprepAtDeploy) { 'Shut the VM down first, then tick the box.' } else { 'Run the prepare command on the reference machine first, then tick the box.' }) }
-                elseif ((Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { $(if ($c.SysprepAtDeploy) { 'VMware still has this VM open. Shut it down, then click Next.' } else { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }) }
+                # No "done" tick: VMware still holding the VM is caught here, a VM sysprep didn't finish on the Check page.
+                if ((Test-VMwareFolderInUse -Folder (Split-Path -Parent $c.DiskFile))) { $(if ($c.SysprepAtDeploy) { 'VMware still has this VM open. Shut it down, then click Next.' } else { 'VMware still has this VM open. Wait until sysprep has shut it down, then click Next.' }) }
             }
             2 {
                 if (-not $state.CheckPassed) { 'The disk check has not passed yet. Fix the lines with a cross, then click Check again.' }

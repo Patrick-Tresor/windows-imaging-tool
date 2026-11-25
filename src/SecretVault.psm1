@@ -107,28 +107,24 @@ function Get-AnswerSecrets {
     .SYNOPSIS
         Every password file an answer file needs during a deployment, once each (two settings naming the same file
         give one entry), in the order the deploy wizard shows them; wrap the call in @(). Key is ConvertTo-SecretKey of the path, the
-        same key the vault and the typed passwords use. Share is set for a share's password (LocalName), so a
-        share that is already mapped can be left out.
+        same key the vault and the typed passwords use.
     #>
     param([Parameter(Mandatory)]$Answer)
     $seen = @{}
     $list = New-Object Collections.Generic.List[object]
     $add = {
-        param([string]$Path, [string]$Label, [string]$Share, [string]$Encrypted)
+        param([string]$Path, [string]$Label, [string]$Encrypted)
         if (-not $Path) { return }
         $key = ConvertTo-SecretKey $Path
         if ($seen.ContainsKey($key)) { return }
         $seen[$key] = $true
-        $list.Add([pscustomobject]@{ Key = $key; RelativePath = $Path; Label = $Label; Share = $Share; Encrypted = $Encrypted })
+        $list.Add([pscustomobject]@{ Key = $key; RelativePath = $Path; Label = $Label; Encrypted = $Encrypted })
     }
     $enc = { param($o, $p) if ($o -and $o.PSObject.Properties[$p]) { "$($o.$p)" } else { '' } }
-    if ($Answer.EnableAdministrator) { & $add $Answer.AdminPasswordFile 'Local Administrator password' '' (& $enc $Answer 'AdminPasswordEncrypted') }
+    if ($Answer.EnableAdministrator) { & $add $Answer.AdminPasswordFile 'Local Administrator password' (& $enc $Answer 'AdminPasswordEncrypted') }
     if ($Answer.Membership -eq 'Domain') {
         $account = try { (Resolve-JoinAccount -Answer $Answer).Account } catch { $null }
-        & $add $Answer.JoinPasswordFile $(if ($account) { "Join account password ($account)" } else { 'Join account password' }) '' (& $enc $Answer 'JoinPasswordEncrypted')
-    }
-    foreach ($share in @($Answer.Shares | Where-Object { $_ })) {
-        & $add $share.PasswordFile "Password for $($share.RemoteName)$(if ($share.Username) { " ($($share.Username))" })" $share.LocalName (& $enc $share 'PasswordEncrypted')
+        & $add $Answer.JoinPasswordFile $(if ($account) { "Join account password ($account)" } else { 'Join account password' }) (& $enc $Answer 'JoinPasswordEncrypted')
     }
     $bl = $Answer.BitLocker
     $list.ToArray()

@@ -110,14 +110,13 @@ try {
     $ed = Get-NewAnswer -Name 'Office'
     $ed.Membership = 'Domain'; $ed.Domain = 'corp.example.com'; $ed.JoinUser = 'svc-join'
     $ed.Applications = @('Zoom')
-    $ed.Shares = @([pscustomobject]@{ LocalName = 'Y:'; RemoteName = '\\srv\apps'; Username = 'svc'; Domain = 'CORP'; PasswordFile = $null })
-    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -SharePasswords @{ 'Y:' = 'Sh4re' } -IsNew
+    $saved = Save-AnswerFromEditor -ContentRoot $root -Answer $ed -JoinPassword 'J0in!' -IsNew
     $back = Read-AnswerFile -Path $saved
-    Assert-Equal "$($back.Membership)|$($back.JoinPasswordFile)|$($back.Shares[0].PasswordFile)|$($back.Applications)" 'Domain|config\secrets\Office-join.txt|config\secrets\Office-share-y.txt|Zoom' 'editor save writes the answer file with password file paths'
+    Assert-Equal "$($back.Membership)|$($back.JoinPasswordFile)|$($back.Applications)" 'Domain|config\secrets\Office-join.txt|Zoom' 'editor save writes the answer file with password file paths'
     $key = Get-AnswerKey -ContentRoot $root
-    Assert-Equal "$(Unprotect-AnswerPassword -Value $back.JoinPasswordEncrypted -Key $key)|$(Unprotect-AnswerPassword -Value $back.Shares[0].PasswordEncrypted -Key $key)" 'J0in!|Sh4re' 'typed passwords are saved encrypted in the answer file'
-    Assert-Equal "$(Test-Path (Join-Path $root 'config/secrets/Office-join.txt'))|$(Test-Path (Join-Path $root 'config/secrets/Office-share-y.txt'))" 'False|False' 'and not in password files'
-    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!|Sh4re') $false 'the answer file holds no password in plain text'
+    Assert-Equal "$(Unprotect-AnswerPassword -Value $back.JoinPasswordEncrypted -Key $key)" 'J0in!' 'typed passwords are saved encrypted in the answer file'
+    Assert-Equal "$(Test-Path (Join-Path $root 'config/secrets/Office-join.txt'))" 'False' 'and not in password files'
+    Assert-Equal ((Get-Content -Raw $saved) -match 'J0in!') $false 'the answer file holds no password in plain text'
     Assert-Equal (@(Get-AnswerFileIssues -ContentRoot $root -Answer $back | Where-Object { $_ -like '*password*' }).Count) 0 'encrypted passwords count as saved'
     $kept = Save-AnswerFromEditor -ContentRoot $root -Answer $back
     Assert-Equal "$((Read-AnswerFile -Path $kept).JoinPasswordEncrypted)" "$($back.JoinPasswordEncrypted)" 'saving again without typing keeps the encrypted password'
@@ -290,6 +289,16 @@ try {
 } finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Faster builds: the folders the console adds to Defender's exclusions itself; the Media tab lists them only on failure.
+# The WinPE password is remembered for this account (DPAPI on Windows) and reads back; a bad file gives ''.
+$pwPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "winpe-pw-$([guid]::NewGuid().ToString('N'))", 'winpe-password.dat')
+Assert-Equal (Read-WinPEPassword -Path $pwPath) '' 'WinPE password: none remembered yet'
+Save-WinPEPassword -Password 'Str0ng pass!' -Path $pwPath
+Assert-Equal (Read-WinPEPassword -Path $pwPath) 'Str0ng pass!' 'WinPE password: remembered and read back'
+Assert-Equal ([IO.File]::ReadAllText($pwPath) -match 'Str0ng') $false 'WinPE password: not saved as plain text'
+[IO.File]::WriteAllText($pwPath, 'not-a-secure-string')
+Assert-Equal (Read-WinPEPassword -Path $pwPath) '' 'WinPE password: an unreadable file is ignored'
+Remove-Item ([IO.Path]::GetDirectoryName($pwPath)) -Recurse -Force
+
 $folders = @(Get-ScanExclusionFolders -ContentRoot 'D:\Deploy' -WorkDir 'C:\WinPE_Build')
 Assert-Equal $folders[0] 'C:\WinPE_Build' 'scan tip: the WinPE work folder first'
 Assert-Equal ($folders[1] -like '*ImagingConsole*WinPEBuilds') $true 'scan tip: the WinPE build cache'

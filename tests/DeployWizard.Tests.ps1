@@ -21,13 +21,14 @@ $sata  = [pscustomobject]@{ Number = 2; FriendlyName = 'ST1000LM'; Size = 931GB;
 $card  = [pscustomobject]@{ Number = 3; FriendlyName = 'SD Card Reader'; Size = 0; BusType = 'SD' }
 Assert-Equal ((Select-TargetDisks -Disks $stick, $ssd, $sata, $card) | ForEach-Object Number) '1 2' 'USB sticks and empty card readers are never targets'
 Assert-Equal ((Select-TargetDisks -Disks $ssd, $sata -Exclude 2) | ForEach-Object Number) '1' 'the disk holding the content is never a target'
+$t = Resolve-TargetDisk -Disks $stick, $ssd
+Assert-Equal "$($t.Disk.Number) $($t.Reason)" '1 the first internal disk' 'no disk asked: the first internal disk, never the USB stick at disk 0'
+Assert-Equal (Resolve-TargetDisk -Disks $stick, $sata, $ssd).Disk.Number 1 'NVMe is picked before SATA'
+Assert-Equal (Resolve-TargetDisk -Disks $stick, $ssd, $sata -Requested 2).Disk.Number 2 'an internal disk the operator picked is kept'
 $t = Resolve-TargetDisk -Disks $stick, $ssd -Requested 0
-Assert-Equal $t.Disk.Number 1 'answer file disk 0 on the USB stick resolves to the internal SSD'
-Assert-Equal $t.Reason 'the answer file says disk 0, but disk 0 is a USB disk (0: SanDisk Ultra (58 GB, USB)); using the internal disk 1 instead' 'reason names the stick and the disk used'
-Assert-Equal (Resolve-TargetDisk -Disks $stick, $sata, $ssd -Requested 0).Disk.Number 1 'NVMe is picked before SATA'
-Assert-Equal (Resolve-TargetDisk -Disks $stick, $ssd, $sata -Requested 2).Disk.Number 2 'an internal disk the answer file names is kept'
-Assert-Equal (Resolve-TargetDisk -Disks $ssd -Requested 5).Reason 'the answer file says disk 5, but there is no disk 5; using the internal disk 1 instead' 'missing disk number falls back'
-$none = Resolve-TargetDisk -Disks $stick -Requested 0
+Assert-Equal $t.Reason 'disk 0 was picked, but disk 0 is a USB disk (0: SanDisk Ultra (58 GB, USB)); using the internal disk 1 instead' 'a picked USB disk is refused, the reason names it'
+Assert-Equal (Resolve-TargetDisk -Disks $ssd -Requested 5).Reason 'disk 5 was picked, but there is no disk 5; using the internal disk 1 instead' 'missing disk number falls back'
+$none = Resolve-TargetDisk -Disks $stick
 Assert-Equal "$($null -eq $none.Disk)" 'True' 'no internal disk gives no target'
 Assert-Equal "$($none.Reason -like '*no internal disk*WinPE sees: 0: SanDisk Ultra (58 GB, USB).*Intel RST/VMD*')" 'True' 'no internal disk says what WinPE sees and points at RST/VMD'
 Assert-Equal ($none.Short.Length -le 110) $true 'no internal disk: the wizard line is short (details go to the log)'

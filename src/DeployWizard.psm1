@@ -300,14 +300,18 @@ function Get-TargetDisks {
 function Resolve-TargetDisk {
     <#
     .SYNOPSIS
-        The disk Windows goes on. The answer file's disk number when that is an internal disk; otherwise the first
-        internal disk (NVMe, then SATA, then the rest). USB sticks often take disk 0 in WinPE, so the answer file's
-        default of 0 can point at the stick. Disk is $null when there is no internal disk; Reason says why in plain words.
+        The disk Windows goes on: the first internal disk (NVMe, then SATA, then the rest), never a USB stick (they
+        often take disk 0 in WinPE). -Requested (a disk the operator picked in the wizard) is kept when it is an
+        internal disk. Disk is $null when there is no internal disk; Reason says why in plain words.
     #>
-    param([object[]]$Disks = @(), [int]$Requested = 0, [int[]]$Exclude = @())
+    param([object[]]$Disks = @(), [int]$Requested = -1, [int[]]$Exclude = @())
     $targets = @(Select-TargetDisks -Disks $Disks -Exclude $Exclude)
+    $rank = @{ NVMe = 0; SATA = 1; ATA = 1; RAID = 2; SAS = 3; SCSI = 4 }
+    $first = $targets | Sort-Object @{ Expression = { $b = "$($_.BusType)"; if ($rank.ContainsKey($b)) { $rank[$b] } else { 9 } } }, Number |
+        Select-Object -First 1
+    if ($Requested -lt 0 -and $first) { return [pscustomobject]@{ Disk = $first; Reason = 'the first internal disk' } }
     $hit = $targets | Where-Object Number -eq $Requested | Select-Object -First 1
-    if ($hit) { return [pscustomobject]@{ Disk = $hit; Reason = "disk $Requested, as the answer file says" } }
+    if ($hit) { return [pscustomobject]@{ Disk = $hit; Reason = "disk $Requested, as picked" } }
 
     $asked = $Disks | Where-Object { $_ -and $_.Number -eq $Requested } | Select-Object -First 1
     $why = if (-not $asked) { "there is no disk $Requested" }
@@ -315,10 +319,7 @@ function Resolve-TargetDisk {
            elseif ("$($asked.BusType)" -in $script:RemovableBus) { "disk $Requested is a $($asked.BusType) disk ($(Format-DiskChoice $asked))" }
            else { "disk $Requested is empty or unreadable" }
 
-    $rank = @{ NVMe = 0; SATA = 1; ATA = 1; RAID = 2; SAS = 3; SCSI = 4 }
-    $pick = $targets | Sort-Object @{ Expression = { $b = "$($_.BusType)"; if ($rank.ContainsKey($b)) { $rank[$b] } else { 9 } } }, Number |
-        Select-Object -First 1
-    if ($pick) { return [pscustomobject]@{ Disk = $pick; Reason = "the answer file says disk $Requested, but $why; using the internal disk $($pick.Number) instead" } }
+    if ($first) { return [pscustomobject]@{ Disk = $first; Reason = "disk $Requested was picked, but $why; using the internal disk $($first.Number) instead" } }
 
     $seen = @($Disks | Where-Object { $_ } | Sort-Object Number | ForEach-Object { Format-DiskChoice $_ })
     [pscustomobject]@{

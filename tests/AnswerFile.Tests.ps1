@@ -33,20 +33,14 @@ try {
     $bad = $default.PSObject.Copy()
     $bad.Membership = 'Domain'; $bad.JoinPasswordFile = $null
     $bad.Tasks = @([pscustomobject]@{ Phase = 'LATER'; Command = 'x' })
-    $bad.Shares = @([pscustomobject]@{ LocalName = 'Z:'; RemoteName = 'server'; Username = $null; Domain = $null; PasswordFile = $null })
     $problems = @(Test-AnswerFile $bad)
-    Assert-Equal $problems.Count 4 'validation lists every problem (join creds, phase, share letter, share path)'
-    # diskpart assigns S: (EFI) and W: (Windows) after the erase, and the status share is R:: a share there would
-    # make the deploy fail on a wiped disk, so the answer file is refused before anything is erased.
-    foreach ($letter in 'R:', 'S:', 'W:', 'X:', 'Z:') {
-        $s = $default.PSObject.Copy()
-        $s.Shares = @([pscustomobject]@{ LocalName = $letter; RemoteName = '\\srv\apps'; Username = $null; Domain = $null; PasswordFile = $null })
-        Assert-Equal (@(Test-AnswerFile $s | Where-Object { $_ -like 'Share local name*' }).Count -ge 1) $true "a share on $letter is refused"
-    }
-    $s = $default.PSObject.Copy()
-    $s.Shares = @([pscustomobject]@{ LocalName = 'T:'; RemoteName = '\\srv\apps'; Username = $null; Domain = $null; PasswordFile = $null })
-    Assert-Equal (@(Test-AnswerFile $s).Count) 0 'a share on T: is fine'
-    $bad.Shares = @(); $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'KeepUserData'
+    Assert-Equal $problems.Count 2 'validation lists every problem (join creds, phase)'
+    # Extra network shares were removed: an older answer file's <shares> is ignored.
+    $sharesXml = Join-Path $tmp 'Shares.xml'
+    (Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')) -replace '</deployment>', '<shares><share><localName>Y:</localName><remoteName>\\srv\apps</remoteName></share></shares></deployment>' | Set-Content -LiteralPath $sharesXml
+    $withShares = Read-AnswerFile -Path $sharesXml
+    Assert-Equal "$($null -eq $withShares.PSObject.Properties['Shares'])" 'True' 'an older answer file with shares still reads, without them'
+    $bad.Tasks = @(); $bad.JoinPasswordFile = 'x'; $bad.DiskOption = 'KeepUserData'
     Assert-Equal (@(Test-AnswerFile $bad) -join '') "disk/option 'KeepUserData' is not supported yet; only Recreate (wipe the disk and recreate partitions)." 'unsupported disk option is rejected'
 
     # Naming.

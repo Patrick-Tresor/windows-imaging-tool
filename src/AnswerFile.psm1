@@ -1,5 +1,5 @@
 # Answer files: one XML per deployment profile (image, apps, disk, regional settings, naming,
-# domain join, tasks, shares).
+# domain join, tasks).
 # Used by Deploy-Image.ps1 in WinPE and by the admin console. PowerShell 5.1 compatible.
 
 $script:Phases = 'POSTIMAGE', 'FIRSTBOOT', 'FIRSTLOGON'
@@ -65,11 +65,11 @@ function Read-AnswerFile {
         Name                 = [IO.Path]::GetFileNameWithoutExtension($Path)
         Path                 = $Path
         Mode                 = Get-XmlText $d 'mode' 'Interactive'
-        UnattendDelay        = [int](Get-XmlText $d 'unattendDelay' '10')
         ImageFile            = Get-XmlText $d 'image/file'
         ImageIndex           = [int](Get-XmlText $d 'image/index' '1')
         ImageVersion         = Get-XmlText $d 'image/version'
-        DiskNumber           = [int](Get-XmlText $d 'disk/number' '0')
+        # -1: the first internal disk, picked at deploy (Resolve-TargetDisk). An old file's disk/number is ignored.
+        DiskNumber           = -1
         DiskOption           = Get-XmlText $d 'disk/option' 'Recreate'
         DriverRoot           = Get-XmlText $d 'drivers/root' 'Drivers'
         AppLocation          = Get-XmlText $d 'applications/@location' 'Applications'
@@ -101,7 +101,6 @@ function Read-AnswerFile {
         AdminPasswordEncrypted = Get-XmlText $d 'options/administratorEncryptedPassword' ''
         TaskLocation         = Get-XmlText $d 'tasks/@location' 'Tasks'
         Tasks                = @()
-        Shares               = @()
         Reboot               = ConvertTo-Bool (Get-XmlText $d 'completion/reboot') $true
         Shutdown             = ConvertTo-Bool (Get-XmlText $d 'completion/shutdown') $false
         BitLocker            = Read-BitLockerNode $d
@@ -114,16 +113,8 @@ function Read-AnswerFile {
     $a.Tasks = @($d.SelectNodes('tasks/task') | ForEach-Object {
         [pscustomobject]@{ Phase = $_.GetAttribute('phase').ToUpperInvariant(); Script = $_.GetAttribute('script').Trim(); Command = "$($_.InnerText)".Trim() }
     })
-    $a.Shares = @($d.SelectNodes('shares/share') | ForEach-Object {
-        [pscustomobject]@{
-            LocalName    = Get-XmlText $_ 'localName'
-            RemoteName   = Get-XmlText $_ 'remoteName'
-            Username     = Get-XmlText $_ 'username'
-            Domain       = Get-XmlText $_ 'domain'
-            PasswordFile = Get-XmlText $_ 'passwordFile'
-            PasswordEncrypted = Get-XmlText $_ 'encryptedPassword' ''
-        }
-    })
+    # Extra network shares (<shares>) were removed: everything comes from the content share. An older answer file's
+    # <shares> section is ignored, and dropped the next time it is saved.
 
     ConvertTo-NamePattern $a
     if ($SkipValidation) { return $a }
@@ -157,13 +148,6 @@ function Test-AnswerFile {
         $taskScript = if ($t.PSObject.Properties['Script']) { "$($t.Script)" } else { '' }
         if ($taskScript -and $taskScript -notmatch '^[A-Za-z0-9._-]+$') { "Task '$taskScript' isn't a task library name (letters, digits, dot, dash and underscore)." }
         elseif (-not $taskScript -and -not $t.Command) { "A $($t.Phase) task has no command." }
-    }
-    foreach ($s in $a.Shares) {
-        # S: and W: are the EFI and Windows partitions diskpart creates after the erase (a share there made diskpart
-        # fail on a wiped disk), R: is the status share, X: is WinPE and Z: the content share.
-        if ($s.LocalName -notmatch '^[D-Y]:$' -or $s.LocalName -in 'R:', 'S:', 'X:') { "Share local name '$($s.LocalName)' must be a drive letter from D: to Y:, except R:, S:, W: and X: (the deploy uses them; Z: is the content share)." }
-        if ($s.LocalName -eq 'W:') { "Share local name W: is used for the new Windows partition." }
-        if ($s.RemoteName -notmatch '^\\\\[^\\]+\\.+') { "Share '$($s.RemoteName)' must be a \\server\share path." }
     }
     if ($a.Prefix -and $a.Prefix.Length -gt 14) { 'identification/naming/prefix is longer than a computer name allows.' }
     # Windows Setup reads these in the specialize pass; a bad one stops it at "Getting ready" with
@@ -580,32 +564,18 @@ function Export-AnswerFile {
         "    <task phase=`"$($t.Phase)`"$scriptAttr>$(& $x $t.Command)</task>"
     }
     $taskLocation = if ($a.PSObject.Properties['TaskLocation'] -and $a.TaskLocation) { $a.TaskLocation } else { 'Tasks' }
-    $shares = foreach ($s in $a.Shares) {
-        @"
-    <share>
-      <localName>$(& $x $s.LocalName)</localName>
-      <remoteName>$(& $x $s.RemoteName)</remoteName>
-      <username>$(& $x $s.Username)</username>
-      <domain>$(& $x $s.Domain)</domain>
-      <passwordFile>$(& $x $s.PasswordFile)</passwordFile>
-$(& $e $s 'PasswordEncrypted' 'encryptedPassword' '      ')
-    </share>
-"@
-    }
     $bl = if ($a.BitLocker) { $a.BitLocker } else { Read-BitLockerNode ([xml]'<deployment/>').DocumentElement }
     $text = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Answer file. See config\answer-files\Default.xml in the repo for what each setting does. -->
 <deployment version="1.0">
   <mode>$(& $x $a.Mode)</mode>
-  <unattendDelay>$($a.UnattendDelay)</unattendDelay>
   <image>
     <file>$(& $x $a.ImageFile)</file>
     <index>$($a.ImageIndex)</index>
     <version>$(& $x $a.ImageVersion)</version>
   </image>
   <disk>
-    <number>$($a.DiskNumber)</number>
     <option>$(& $x $a.DiskOption)</option>
   </disk>
   <drivers>
@@ -654,9 +624,6 @@ $(& $e $a 'AdminPasswordEncrypted' 'administratorEncryptedPassword' '    ')
   <tasks location="$(& $x $taskLocation)">
 $($tasks -join "`n")
   </tasks>
-  <shares>
-$($shares -join "`n")
-  </shares>
   <bitlocker>
     <enabled>$(& $b $bl.Enabled)</enabled>
     <usedSpaceOnly>$(& $b $bl.UsedSpaceOnly)</usedSpaceOnly>

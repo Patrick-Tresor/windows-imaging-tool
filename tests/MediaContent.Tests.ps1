@@ -151,6 +151,12 @@ try {
     Assert-Equal ($on.AnswerFiles -join ',') 'Lab,Staff' 'old stick: its answer files'
     Assert-Equal ($on.DriverPacks -join ';') 'Dell\Latitude 5521;HP\EliteBook 840 G9' 'old stick: its driver packs, folder or .wim'
     Assert-Equal "$((Get-StickContentChoice -StickRoot (Join-Path $root 'nothing')).AnswerFiles.Count)" '0' 'a stick without the folders: empty lists'
+
+    # A stick with WINPE and DEPLOY partitions was built by this tool: Build media updates it in place.
+    Assert-Equal (Test-ToolStickLabels @('WINPE', 'DEPLOY')) $true 'WINPE + DEPLOY: built by this tool'
+    Assert-Equal (Test-ToolStickLabels @('deploy', $null, 'WinPE')) $true 'labels in any case'
+    Assert-Equal (Test-ToolStickLabels @('KINGSTON')) $false 'any other stick is erased'
+    Assert-Equal (Test-ToolStickLabels @()) $false 'no partitions: erased'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 

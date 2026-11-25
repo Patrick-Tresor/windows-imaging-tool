@@ -8,9 +8,8 @@
   password (no file is read or written there). Use a join account that can only join computers to one OU.
 -->
 <deployment version="1.0">
-  <!-- Interactive: pick the answer file and type YES. Unattended: start after unattendDelay seconds unless a key is pressed. -->
+  <!-- Interactive: pick the answer file and type YES. Unattended: start after 10 seconds unless a key is pressed. -->
   <mode>Interactive</mode>
-  <unattendDelay>10</unattendDelay>
 
   <image>
     <file>Images\Win11-Enterprise.wim</file>
@@ -21,7 +20,7 @@
   </image>
 
   <disk>
-    <number>0</number>
+    <!-- Windows goes on the first internal disk (NVMe, then SATA), never the USB stick. -->
     <!-- Recreate: wipe the disk and create new GPT partitions (EFI, MSR, Windows, Recovery). UEFI only. -->
     <option>Recreate</option>
   </disk>
@@ -101,17 +100,6 @@
     <!-- <task phase="FIRSTLOGON">powershell -ExecutionPolicy Bypass -File C:\Temp\User.ps1</task> -->
     <!-- <task phase="FIRSTBOOT" script="Set-Wallpaper">-Path C:\Windows\Web\Wallpaper\School.jpg</task> -->
   </tasks>
-
-  <!-- Extra shares mapped in WinPE before the deploy, for images or applications kept elsewhere. -->
-  <shares>
-    <!-- <share>
-      <localName>Y:</localName>
-      <remoteName>\\server\Apps</remoteName>
-      <username>svc-deploy</username>
-      <domain>CORP</domain>
-      <passwordFile>config\secrets\share.txt</passwordFile>
-    </share> -->
-  </shares>
 
   <!-- BitLocker on the OS drive, turned on at first boot as SYSTEM after the applications and FIRSTBOOT tasks.
        The recovery password is backed up first; with requireBackup, BitLocker stays off if no backup worked.

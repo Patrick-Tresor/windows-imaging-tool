@@ -17,7 +17,6 @@
         <ListBoxItem Content="Computer name"/>
         <ListBoxItem Content="Domain or workgroup"/>
         <ListBoxItem Content="Tasks"/>
-        <ListBoxItem Content="Network shares"/>
         <ListBoxItem Content="BitLocker"/>
       </ListBox>
     </Border>
@@ -47,10 +46,8 @@
             <Label Grid.Row="1" Content="Mode"/>
             <StackPanel Grid.Row="1" Grid.Column="1">
               <RadioButton x:Name="RbInteractive" GroupName="Mode" Content="Interactive: the technician picks this answer file and types YES"/>
-              <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a countdown"/>
+              <RadioButton x:Name="RbUnattended" GroupName="Mode" Content="Unattended: start automatically after a 10 second countdown (any key opens the wizard instead)"/>
             </StackPanel>
-            <Label Grid.Row="2" Content="Countdown (seconds)"/>
-            <TextBox x:Name="TxtDelay" Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="Pressing a key during the countdown cancels the deployment."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>
@@ -59,19 +56,17 @@
       <ScrollViewer x:Name="Sec1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Image and disk"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC, and where. The whole disk is erased and repartitioned."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Which image goes on the PC. It goes on the first internal disk (NVMe, then SATA, never the USB stick), which is erased and repartitioned; the technician can pick another disk in the deploy wizard."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Image"/>
-            <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder, or a full path such as Y:\Images\x.wim on an extra share."/>
+            <ComboBox x:Name="CmbImage" Grid.Column="1" IsEditable="True" ToolTip="An image in the Images folder."/>
             <Label Grid.Row="1" Content="Version"/>
             <ComboBox x:Name="CmbVersion" Grid.Row="1" Grid.Column="1" Width="420" HorizontalAlignment="Left" DisplayMemberPath="Display"
                       ToolTip="Current follows the image as it is updated or rolled back. An earlier version keeps this answer file on that copy from Images\Previous."/>
-            <Label Grid.Row="2" Content="Edition (index)"/>
+            <Label x:Name="LblIndex" Grid.Row="2" Content="Edition (index)"/>
             <ComboBox x:Name="CmbIndex" Grid.Row="2" Grid.Column="1" IsEditable="True" Width="420" HorizontalAlignment="Left"/>
-            <Label Grid.Row="3" Content="Target disk number"/>
-            <TextBox x:Name="TxtDisk" Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="0 is the first internal disk on almost every PC."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>
@@ -223,31 +218,8 @@
         </Grid>
       </DockPanel>
 
-      <!-- 7 Network shares -->
-      <DockPanel x:Name="Sec7" Visibility="Collapsed">
-        <StackPanel DockPanel.Dock="Top">
-          <TextBlock Style="{StaticResource Title}" Text="Network shares"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Extra shares mapped in WinPE before the deployment, for images, applications or scripts kept on other servers. Drive letters D: to Y:, except R:, S:, W: and X: (the deploy uses them)."/>
-        </StackPanel>
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
-          <Button x:Name="BtnShareAdd" Content="Add"/>
-          <Button x:Name="BtnShareRemove" Content="Remove"/>
-          <TextBlock Text="Password for the selected share:" VerticalAlignment="Center" Margin="12,0,8,0"/>
-          <PasswordBox x:Name="PwdShare" Width="200" Margin="0" VerticalContentAlignment="Center"/>
-          <TextBlock x:Name="TxtSharePwState" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-        </StackPanel>
-        <DataGrid x:Name="GridShares">
-          <DataGrid.Columns>
-            <DataGridTextColumn Header="Drive" Binding="{Binding LocalName}" Width="60"/>
-            <DataGridTextColumn Header="Share (\\server\share)" Binding="{Binding RemoteName}" Width="2*"/>
-            <DataGridTextColumn Header="User" Binding="{Binding Username}" Width="*"/>
-            <DataGridTextColumn Header="Domain" Binding="{Binding Domain}" Width="*"/>
-          </DataGrid.Columns>
-        </DataGrid>
-      </DockPanel>
-
-      <!-- 8 BitLocker -->
-      <ScrollViewer x:Name="Sec8" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+      <!-- 7 BitLocker -->
+      <ScrollViewer x:Name="Sec7" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="BitLocker"/>
           <TextBlock Style="{StaticResource Hint}" Text="Turned on at first boot, after the applications and tasks. The recovery password is backed up before anything is encrypted. The PC needs a TPM that is turned on in its firmware settings."/>

@@ -241,6 +241,14 @@ function Get-MediaDriverPacks {
     }
 }
 
+function Test-ToolStickLabels {
+    # A stick this tool built has a WINPE and a DEPLOY partition: the Media tab then updates it in place (only what
+    # changed is copied) instead of erasing it.
+    param([AllowEmptyCollection()][AllowNull()][string[]]$Labels)
+    $l = @($Labels | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+    ($l -contains 'WINPE') -and ($l -contains 'DEPLOY')
+}
+
 function Get-StickContentChoice {
     <#
     .SYNOPSIS
@@ -264,4 +272,4 @@ function Get-StickContentChoice {
     [pscustomobject]@{ AnswerFiles = $names; DriverPacks = @($packs | Sort-Object -Unique) }
 }
 
-Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks, Get-StickContentChoice
+Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks, Test-ToolStickLabels, Get-StickContentChoice

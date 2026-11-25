@@ -320,7 +320,6 @@ function Update-Settings {
     $ui.TxtSettingsProblem.Text = ''
     $c = if ($s.PSObject.Properties['checks'] -and $s.checks) { $s.checks } else { [pscustomobject]@{} }
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
-    $ui.ChkChecksEnabled.IsChecked = "$(& $get 'enabled' $true)" -notmatch '^(false|0|no|off)$'
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     $ui.TxtAdServer.Text = "$((Get-AdSettings).server)"
     Update-SettingsState
@@ -442,10 +441,14 @@ function Update-Library {
 }
 
 function Get-UsbDiskChoices {
+    # Ours: a stick this tool built (WINPE and DEPLOY partitions), which Build media updates in place.
     Get-Disk | Where-Object BusType -eq 'USB' | ForEach-Object {
+        $n = $_.Number
+        $labels = @(try { Get-Partition -DiskNumber $n -ErrorAction Stop | Get-Volume -ErrorAction SilentlyContinue | ForEach-Object FileSystemLabel } catch { })
         [pscustomobject]@{
-            Number = $_.Number
-            Label  = '{0}: {1} ({2:N1} GB)' -f $_.Number, $_.FriendlyName, ($_.Size / 1GB)
+            Number = $n
+            Ours   = Test-ToolStickLabels $labels
+            Label  = '{0}: {1} ({2:N1} GB)' -f $n, $_.FriendlyName, ($_.Size / 1GB)
         }
     }
 }
@@ -453,6 +456,31 @@ function Get-UsbDiskChoices {
 function Update-UsbDisks {
     $ui.CmbUsb.ItemsSource = @(Get-UsbDiskChoices)
     if ($ui.CmbUsb.Items.Count) { $ui.CmbUsb.SelectedIndex = 0 }
+    Update-UsbMode
+}
+
+function Initialize-WinPEPassword {
+    # The password of the last build, remembered for this Windows account: no typing it twice for every update.
+    $script:winPeSaved = Read-WinPEPassword
+    $ui.PwdWinPE.Password = $script:winPeSaved
+    $ui.PwdWinPE2.Password = $script:winPeSaved
+    Update-WinPEPasswordAgain
+}
+
+function Update-WinPEPasswordAgain {
+    # "Again" only when the password is new or changed; the remembered one was already typed twice once.
+    $same = $script:winPeSaved -and $ui.PwdWinPE.Password -eq $script:winPeSaved
+    $ui.PnlWinPEAgain.Visibility = if ($same) { 'Collapsed' } else { 'Visible' }
+    if ($same) { $ui.PwdWinPE2.Password = $script:winPeSaved }
+    elseif ($ui.PwdWinPE2.Password -eq $script:winPeSaved) { $ui.PwdWinPE2.Password = '' }
+}
+
+function Update-UsbMode {
+    # Says what Build media will do with the selected stick: update one this tool built, or erase any other.
+    $d = $ui.CmbUsb.SelectedItem
+    $ui.TxtUsbMode.Text = if (-not $d) { '' }
+        elseif ($d.Ours) { 'Built by this tool before: it is updated in place. WinPE is replaced and only the files that changed are copied. To start it fresh, format it in File Explorer and click Refresh.' }
+        else { 'Not built by this tool: everything on it is erased.' }
 }
 
 function Update-StickVersionBanner {
@@ -478,7 +506,7 @@ function Update-BootVersionBanner {
 }
 
 function Select-StickForUpdate {
-    # "Update the stick", one click: the Media tab with the old stick's disk, "Update a stick" ticked, the answer
+    # "Update the stick", one click: the Media tab with the old stick's disk (updated in place, it is ours), the answer
     # files and driver packs the stick already holds checked, and the build started (it still asks before it
     # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
@@ -490,7 +518,6 @@ function Select-StickForUpdate {
         $item = @($ui.CmbUsb.Items | Where-Object { $null -ne $disk -and $_.Number -eq $disk })[0]
         if ($item) { $ui.CmbUsb.SelectedItem = $item }
     }
-    $ui.ChkUsbUpdate.IsChecked = $true
     if (-not $item) { Set-Status 'Pick the stick, check the answer files and driver packs, then click Build media.'; return }
     $on = Get-StickContentChoice -StickRoot $old[0]
     $answers = @($ui.LstMediaAnswers.Items | Where-Object { $on.AnswerFiles -contains $_.Name })
@@ -836,12 +863,16 @@ $ui.BtnImport.Add_Click({ Invoke-Safely {
     $window.Cursor = 'Wait'
     Set-Status "Importing $maker $model..."
     try {
+        # The SKUs / machine types come from the maker's catalog; without them the pack matches by model name.
+        $ids = Find-DriverPackIds -Maker $maker -Model $model
         $result = Import-DriverPack -ContentRoot $script:root -Source $ui.TxtSource.Text -Maker $maker -Model $model `
-            -Sku $ui.TxtSku.Text.Trim() -MachineType $ui.TxtMachineType.Text.Trim()
+            -Sku "$($ids.Sku)" -MachineType "$($ids.MachineType)"
     } finally { $window.Cursor = $null }
     Update-Drivers
-    $ui.TxtModel.Text = ''; $ui.TxtSku.Text = ''; $ui.TxtMachineType.Text = ''; $ui.TxtSource.Text = ''
-    Set-Status "Imported $($result.InfCount) drivers to Drivers\$($result.Path)"
+    $ui.TxtModel.Text = ''; $ui.TxtSource.Text = ''
+    $idText = (@($ids.Sku, $ids.MachineType) | Where-Object { $_ }) -join ', '
+    Set-Status ("Imported $($result.InfCount) drivers to Drivers\$($result.Path)" +
+        $(if ($idText) { " (matches $idText)" } else { ' (not in the maker''s catalog: matches by model name)' }))
     if ($result.InfCount -eq 0) { Show-Error 'No .inf files were found after import. The pack may need extracting first.' }
 } })
 
@@ -1150,6 +1181,8 @@ $ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
 $ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() } })
 $ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
+$ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
+$ui.PwdWinPE.Add_PasswordChanged({ Update-WinPEPasswordAgain })
 $ui.BtnAdkCheck.Add_Click({ Invoke-Safely { $s = Update-AdkStatus; Set-Status $(if ($s.Ready) { 'Windows ADK and WinPE add-on found' } else { 'Windows ADK or WinPE add-on missing' }) } })
 $ui.BtnAdkDownload.Add_Click({ Invoke-Safely { Start-Process (Get-AdkDownloadUrl) } })
 
@@ -1164,7 +1197,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not $disk) { Show-Error 'No USB disk selected. Plug one in and click Refresh.'; return }
     # A stick always has a WinPE password: the answer files' passwords and the key that decrypts them are on it.
     $pePw = $ui.PwdWinPE.Password
-    if (-not $pePw) { Show-Error 'Type the WinPE password, twice. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
+    if (-not $pePw) { Show-Error 'Type the WinPE password. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
     if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; [void]$ui.PwdWinPE2.Focus(); return }
     if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; [void]$ui.PwdWinPE.Focus(); return }
     # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
@@ -1178,14 +1211,14 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
     if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
     if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-    if ($ui.ChkUsbUpdate.IsChecked) {
+    if ($disk.Ours) {
         if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
     } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
     # Deployments the stick holds go to the dashboard first: erasing it would lose them.
     $dashFolder = Get-DashboardFolder
     if ($dashFolder) { Import-StickDashboard $dashFolder }
     $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
-    if ($ui.ChkUsbUpdate.IsChecked) { $buildArgs += '-UpdateOnly' }
+    if ($disk.Ours) { $buildArgs += '-UpdateOnly' }
     $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
     if ($packArgs.ContainsKey('DriverPacks')) {
         if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
@@ -1195,6 +1228,7 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     # Required (checked before anything is asked, see the top of this handler).
     $pwFile = Join-Path $env:TEMP ("winpe-{0}.txt" -f [guid]::NewGuid().ToString('N'))
     [IO.File]::WriteAllText($pwFile, $ui.PwdWinPE.Password, (New-Object Text.UTF8Encoding($false)))
+    try { Save-WinPEPassword -Password $pePw; $script:winPeSaved = $pePw; Update-WinPEPasswordAgain } catch { }
     $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
     # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
@@ -1257,7 +1291,7 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
         -NewPassword $ui.PwdShare.Password
     $s = Get-DeploySettings -ContentRoot $script:root
     $checks = [pscustomobject]@{
-        enabled       = [bool]$ui.ChkChecksEnabled.IsChecked
+        enabled       = $true
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
@@ -1355,5 +1389,6 @@ $script:stickTimer.Start()
 
 Update-All
 Invoke-Safely { Update-UsbDisks }
+Invoke-Safely { Initialize-WinPEPassword }
 Invoke-Safely { Update-AdkStatus | Out-Null }
 [void]$window.ShowDialog()

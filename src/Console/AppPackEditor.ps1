@@ -60,16 +60,14 @@ function Show-AppPackEditor {
         $e.TxtDisplayName.Text = $d.displayName
         $e.TxtVersion.Text = $d.version
         $e.TxtPublisher.Text = $d.publisher
-        $e.TxtNotes.Text = $d.notes
+        # Notes come from the template; they show in the pack's details on the Apps and Tasks tab, not here.
+        $state.Notes = "$($d.notes)"
         if ($d.installer) { $e.CmbInstaller.Text = $d.installer }
         $e.TxtDownloadUrl.Text = $d.downloadUrl
         $e.CmbType.Text = $d.installerType
         $e.TxtCommand.Text = $d.command
-        $e.TxtUninstall.Text = $d.uninstallCommand
         $e.TxtCodes.Text = $d.successCodes -join ', '
-        $e.TxtRebootCodes.Text = $d.rebootCodes -join ', '
         $e.TxtTimeout.Text = $d.timeoutMinutes
-        $e.ChkSkip.IsChecked = $d.skipIfDetected
         $rules.Clear()
         foreach ($r in $d.detection.rules) {
             $row = [DetectionRow]::new()
@@ -82,6 +80,14 @@ function Show-AppPackEditor {
     & $load $def
     $e.GridRules.ItemsSource = $rules
     $e.TxtName.IsEnabled = $isNew
+    # One Name box: the folder under Applications follows it for a new application, and stays once saved.
+    $folderNote = { $e.TxtFolderNote.Text = if ($e.TxtName.Text) { "Saved in Applications\$($e.TxtName.Text)" } else { '' } }
+    $e.TxtDisplayName.Add_TextChanged({
+        if ($isNew -and $e.TxtDisplayName.IsKeyboardFocusWithin) { $e.TxtName.Text = ($e.TxtDisplayName.Text -replace '[^A-Za-z0-9._-]+', '-').Trim('-') }
+        & $folderNote
+    })
+    $e.TxtName.Add_TextChanged({ & $folderNote })
+    & $folderNote
     $e.CmbInstaller.ItemsSource = @(& $folderFiles)
     if ($isNew -and $SuggestedName) {
         # Rebuilding an imported .spk pack by name: preselect its template.
@@ -106,9 +112,8 @@ function Show-AppPackEditor {
             downloadUrl      = $e.TxtDownloadUrl.Text.Trim()
             installerType    = $e.CmbType.Text.Trim()
             command          = $e.TxtCommand.Text.Trim()
-            uninstallCommand = $e.TxtUninstall.Text.Trim()
             successCodes     = ConvertFrom-ListText $e.TxtCodes.Text -Numbers
-            rebootCodes      = ConvertFrom-ListText $e.TxtRebootCodes.Text -Numbers
+            rebootCodes      = @(3010, 1641)     # always: the standard "restart needed" codes
             timeoutMinutes   = if ([int]::TryParse($e.TxtTimeout.Text, [ref]$n)) { $n } else { 60 }
             requirements     = Get-RequirementBoxes -Controls $e
             detection        = [pscustomobject]@{
@@ -116,8 +121,8 @@ function Show-AppPackEditor {
                 rules = @($rules | Where-Object { $_.Type -and $_.Target } | ForEach-Object {
                     [pscustomobject]@{ type = $_.Type; target = $_.Target.Trim(); value = "$($_.Value)".Trim(); operator = $_.Operator; version = "$($_.Version)".Trim() } })
             }
-            skipIfDetected   = [bool]$e.ChkSkip.IsChecked
-            notes            = $e.TxtNotes.Text.Trim()
+            skipIfDetected   = $true             # always skipped when every detection rule matches
+            notes            = "$($state.Notes)"
         }
         ConvertTo-AppDefinition -Name $e.TxtName.Text.Trim() -Json $json
     }
@@ -133,7 +138,6 @@ function Show-AppPackEditor {
         $e.CmbType.Text = $info.Type
         $e.TxtTypeNote.Text = $info.Note
         if (-not $e.TxtCommand.Text -or $e.TxtCommand.Text -eq $state.Suggested) { $e.TxtCommand.Text = $info.Command; $state.Suggested = $info.Command }
-        if ($info.UninstallCommand -and -not $e.TxtUninstall.Text) { $e.TxtUninstall.Text = $info.UninstallCommand }
         if ($info.Detection -and -not $rules.Count) {
             $row = [DetectionRow]::new()
             $row.Type = $info.Detection.type; $row.Target = $info.Detection.target; $row.Operator = $info.Detection.operator
@@ -150,7 +154,7 @@ function Show-AppPackEditor {
         $t = Find-AppTemplate -Installer $info.Installer -Templates $templates
         if ($t) {
             $e.CmbTemplate.SelectedIndex = [array]::IndexOf(@($templates), $t) + 1
-            $e.TxtTemplateNote.Text = "Matches the $($t.name) template: click Apply to use its settings. $($t.notes)"
+            $e.TxtTemplateNote.Text = "Matches the $($t.name) template: its settings are filled in. $($t.notes)"
         }
         $e.TxtProblems.Text = ''
     }
@@ -178,7 +182,8 @@ function Show-AppPackEditor {
         $win.Dispatcher.BeginInvoke([Action]{ if ($e.CmbInstaller.Text) { try { & $inspect } catch { $e.TxtProblems.Text = $_.Exception.Message } } }) | Out-Null
     })
 
-    $e.BtnTemplate.Add_Click({
+    # Picking a template fills the form in at once (no Apply button).
+    $applyTemplate = {
         $t = Get-PickedTemplate -Controls $e -Templates $templates
         if (-not $t) { return }
         $typed = $e.TxtName.Text.Trim()
@@ -196,7 +201,10 @@ function Show-AppPackEditor {
         }
         & $load $d
         $e.TxtProblems.Text = if ($d.command -match 'REPLACE_[A-Z_]+') { "Replace $($Matches[0]) in the install command (Install command)." } else { '' }
-    })
+    }
+    $e.CmbTemplate.Add_SelectionChanged({ & $applyTemplate })
+    # A template picked before the form opened (rebuilding an imported pack by name) is filled in now.
+    if ($e.CmbTemplate.SelectedIndex -gt 0) { & $applyTemplate }
 
     # Another installer type gives its silent command at once (no Suggest button), unless the command was typed by hand.
     $e.CmbType.Add_SelectionChanged({ $win.Dispatcher.BeginInvoke([Action]{

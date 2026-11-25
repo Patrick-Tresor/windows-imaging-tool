@@ -33,7 +33,7 @@
       <ScrollViewer x:Name="Sec0" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Installer"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. Inspect reads its type, name, version and MSI product code, and fills in the silent command and a detection rule. A template gives known settings for common applications."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Pick the installer file, or a folder when it needs other files next to it. It is read at once: type, name, version, publisher and MSI product code, then the silent command and a detection rule. A template gives known settings for common applications."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
@@ -47,24 +47,22 @@
             <ComboBox x:Name="CmbInstaller" Grid.Row="1" Grid.Column="1" IsEditable="True" ToolTip="The file in the application folder that installs it."/>
             <Label Grid.Row="2" Content="Template"/>
             <ComboBox x:Name="CmbTemplate" Grid.Row="2" Grid.Column="1" ToolTip="Known silent switches, detection and PC limits for common applications."/>
-            <Button x:Name="BtnTemplate" Grid.Row="2" Grid.Column="2" Content="Apply" Margin="8,0,0,8"/>
             <TextBlock x:Name="TxtTemplateNote" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="4" Content="Name"/>
-            <TextBox x:Name="TxtName" Grid.Row="4" Grid.Column="1" ToolTip="Folder name under Applications. Letters, digits, dot, dash and underscore."/>
-            <Label Grid.Row="5" Content="Display name"/>
-            <TextBox x:Name="TxtDisplayName" Grid.Row="5" Grid.Column="1"/>
+            <TextBox x:Name="TxtDisplayName" Grid.Row="4" Grid.Column="1" ToolTip="The name shown in the console and the logs."/>
+            <!-- The folder under Applications: made from the name for a new application, fixed once saved. -->
+            <TextBox x:Name="TxtName" Visibility="Collapsed"/>
+            <TextBlock x:Name="TxtFolderNote" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="6" Content="Version"/>
-            <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <TextBox x:Name="TxtVersion" Grid.Row="6" Grid.Column="1" Width="200" HorizontalAlignment="Left" IsReadOnly="True" Foreground="{DynamicResource MutedBrush}" ToolTip="Read from the installer."/>
             <Label Grid.Row="7" Content="Publisher"/>
-            <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1"/>
+            <TextBox x:Name="TxtPublisher" Grid.Row="7" Grid.Column="1" IsReadOnly="True" Foreground="{DynamicResource MutedBrush}" ToolTip="Read from the installer."/>
             <Label Grid.Row="8" Content="Download from"/>
             <TextBox x:Name="TxtDownloadUrl" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2"
                      ToolTip="https:// address of the installer. The PC downloads it at first boot (saved as Installer to run) when it is not in the folder, so you can leave the installer file empty."/>
             <TextBlock Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
-                       Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you Apply it with no installer picked."/>
+                       Text="Optional. With an address here you can leave the installer file empty: each PC downloads it at first boot, so it needs internet then. A template with a download fills it in when you pick it with no installer picked."/>
           </Grid>
-          <Label Content="Notes"/>
-          <TextBox x:Name="TxtNotes" Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>
         </StackPanel>
       </ScrollViewer>
 
@@ -75,20 +73,17 @@
           <TextBlock Style="{StaticResource Hint}" Text="Runs with cmd /c in the application's folder, as SYSTEM, the first time the PC starts. Nobody can click through it, so it must be silent. Exit codes not in the success list mark the app as failed in C:\Windows\Temp\FirstBoot.log."/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Installer type"/>
             <ComboBox x:Name="CmbType" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
             <TextBlock x:Name="TxtTypeNote" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
             <Label Grid.Row="2" Content="Install command"/>
             <TextBox x:Name="TxtCommand" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas"/>
-            <Label Grid.Row="3" Content="Uninstall command"/>
-            <TextBox x:Name="TxtUninstall" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="Consolas" ToolTip="Optional. Kept with the pack for removing the app later."/>
-            <Label Grid.Row="4" Content="Success exit codes"/>
-            <TextBox x:Name="TxtCodes" Grid.Row="4" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
-            <Label Grid.Row="5" Content="Restart exit codes"/>
-            <TextBox x:Name="TxtRebootCodes" Grid.Row="5" Grid.Column="1" Width="200" HorizontalAlignment="Left" ToolTip="Success codes that mean a restart is needed (MSI: 3010, 1641)."/>
-            <Label Grid.Row="6" Content="Timeout (minutes)"/>
-            <TextBox x:Name="TxtTimeout" Grid.Row="6" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
+            <Label Grid.Row="3" Content="Success exit codes"/>
+            <TextBox x:Name="TxtCodes" Grid.Row="3" Grid.Column="1" Width="200" HorizontalAlignment="Left"/>
+            <TextBlock Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" Margin="0,0,0,10" Text="3010 and 1641 always mean the install worked and the PC needs a restart."/>
+            <Label Grid.Row="5" Content="Timeout (minutes)"/>
+            <TextBox x:Name="TxtTimeout" Grid.Row="5" Grid.Column="1" Width="80" HorizontalAlignment="Left" ToolTip="The installer is stopped and marked failed after this long."/>
           </Grid>
         </StackPanel>
       </ScrollViewer>
@@ -97,10 +92,7 @@
       <DockPanel x:Name="Sec2" Visibility="Collapsed">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Style="{StaticResource Title}" Text="Detection"/>
-          <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skip when already there, e.g. in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
-          <StackPanel Orientation="Horizontal">
-            <CheckBox x:Name="ChkSkip" Content="Skip the install when already detected (every rule must match)" Margin="0,4,0,8"/>
-          </StackPanel>
+          <TextBlock Style="{StaticResource Hint}" Text="How to tell the app is installed. Checked before installing (skipped when every rule matches, e.g. already in the image) and after (fail when the installer exited 0 but installed nothing). Target: MSI product code, program name in Programs and Features (wildcards), file path (%ProgramFiles% works), registry key (HKLM\...), MSIX package name, or a .ps1 in the app folder that exits 0 when installed."/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
           <StackPanel Orientation="Horizontal">
