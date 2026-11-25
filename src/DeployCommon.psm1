@@ -757,11 +757,113 @@ function Find-ContentRoot {
 
     Write-DeployLog "Waiting for network to reach $($settings.share.path)"
     Invoke-Native -FilePath 'wpeutil.exe' -ArgumentList @('WaitForNetwork')
+    # WaitForNetwork returns at once even with no cable (GWHZLG3, on Wi-Fi in Windows: "System error 53" 20 s later).
+    $net = Wait-DeployNetwork
+    Write-DeployLog "Network: $($net.Text)"
+    if (-not $net.Ok) { throw (Get-NoNetworkMessage -Adapters $net.Adapters) }
 
     $cred = Get-ShareCredential -SettingsPath $SettingsPath -Decrypt $Decrypt
-    Mount-NetworkShare -LocalName 'Z:' -RemoteName $settings.share.path -User $cred.User -Password $cred.Password
-    Write-DeployLog "Using network content at Z:\"
+    # The server's full name and IP addresses, written when the boot image was built: WinPE may not resolve the short name.
+    $hostsPath = [IO.Path]::Combine((Split-Path $SettingsPath -Parent), 'share-hosts.json')
+    $hosts = @(try { if ([IO.File]::Exists($hostsPath)) { $h = [IO.File]::ReadAllText($hostsPath) | ConvertFrom-Json; @($h.fqdn) + @($h.ips) } } catch { })
+    $used = Connect-DeployShare -LocalName 'Z:' -SharePath $settings.share.path -OtherHosts $hosts -User $cred.User -Password $cred.Password
+    Write-DeployLog "Using network content at Z:\ ($used)"
     'Z:\'
+}
+
+function Get-ShareHosts {
+    <#
+    .SYNOPSIS
+        Build time: the share server's full DNS name and IPv4 addresses, for config\share-hosts.json in boot.wim. WinPE
+        tries them when the short name in the share path does not resolve there (no DNS suffix). $null when unknown.
+    #>
+    param([string]$SharePath, [scriptblock]$Resolve = { param($n) [Net.Dns]::GetHostEntry($n) })
+    if ("$SharePath" -notmatch '^\\\\([^\\]+)') { return $null }
+    $server = $Matches[1]
+    if ($server -match '^\d+(\.\d+){3}$') { return $null }
+    try { $e = & $Resolve $server } catch { return $null }
+    if (-not $e) { return $null }
+    $ips = @($e.AddressList | Where-Object { "$($_.AddressFamily)" -eq 'InterNetwork' } | ForEach-Object { "$_" } |
+        Where-Object { $_ -notlike '127.*' -and $_ -notlike '169.254.*' } | Select-Object -Unique -First 3)
+    [pscustomobject][ordered]@{ server = $server; fqdn = $(if ("$($e.HostName)" -match '\.') { "$($e.HostName)" } else { '' }); ips = @($ips) }
+}
+
+function Get-DeployNetworkState {
+    # The adapters WinPE sees and their IPv4 addresses (not 169.254: no DHCP answer). .NET, since WinPE has no NetTCPIP cmdlets.
+    @(foreach ($n in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        if ("$($n.NetworkInterfaceType)" -in 'Loopback', 'Tunnel') { continue }
+        $ips = @($n.GetIPProperties().UnicastAddresses | Where-Object { "$($_.Address.AddressFamily)" -eq 'InterNetwork' } |
+            ForEach-Object { "$($_.Address)" } | Where-Object { $_ -notlike '169.254.*' })
+        [pscustomobject]@{ Name = "$($n.Description)"; Up = ("$($n.OperationalStatus)" -eq 'Up'); Ips = $ips }
+    })
+}
+
+function Format-DeployNetwork($Adapters) {
+    $a = @($Adapters | Where-Object { $_ })
+    if (-not $a) { return 'no network adapter' }
+    (@($a | ForEach-Object { "$($_.Name): $(if ($_.Ips) { $_.Ips -join ', ' } elseif ($_.Up) { 'no address' } else { 'no cable' })" })) -join '; '
+}
+
+function Wait-DeployNetwork {
+    # Until an adapter has an IPv4 address (DHCP can take a while after the cable or the driver comes up), at most TimeoutSeconds.
+    param([int]$TimeoutSeconds = 90, [scriptblock]$GetState = { Get-DeployNetworkState }, [scriptblock]$Sleep = { Start-Sleep -Seconds 3 })
+    $start = Get-Date
+    while ($true) {
+        $state = @(& $GetState)
+        if (@($state | Where-Object { $_.Ips }).Count) { return [pscustomobject]@{ Ok = $true; Adapters = $state; Text = (Format-DeployNetwork $state) } }
+        if (((Get-Date) - $start).TotalSeconds -ge $TimeoutSeconds) { return [pscustomobject]@{ Ok = $false; Adapters = $state; Text = (Format-DeployNetwork $state) } }
+        & $Sleep
+    }
+}
+
+function Get-NoNetworkMessage($Adapters) {
+    $a = @($Adapters | Where-Object { $_ })
+    if (-not $a) { return 'WinPE found no network adapter it has a driver for. Connect a network cable to a port or dock WinPE knows (Drivers\_WinPE), then restart the PC.' }
+    "WinPE has no network ($(Format-DeployNetwork $a)). WinPE has no Wi-Fi: connect a network cable or dock, then restart the PC."
+}
+
+function Get-ShareCandidates {
+    # The share path, then the same share on each other name or address of its server (full name, IP addresses).
+    param([Parameter(Mandatory)][string]$SharePath, [string[]]$OtherHosts)
+    $out = [Collections.Generic.List[string]]::new()
+    $out.Add($SharePath)
+    if ($SharePath -match '^\\\\([^\\]+)(\\.*)?$') {
+        $server = $Matches[1]; $rest = "$($Matches[2])"
+        foreach ($h in @($OtherHosts | Where-Object { "$_".Trim() })) {
+            $p = "\\$("$h".Trim())$rest"
+            if ("$h".Trim() -ne $server -and -not $out.Contains($p)) { $out.Add($p) }
+        }
+    }
+    @($out)
+}
+
+function Connect-DeployShare {
+    <#
+    .SYNOPSIS
+        Maps the share, trying its other names and addresses (Get-ShareCandidates) and again for RetrySeconds while the
+        error is a network one (53 network path not found, 64, 67, 121, 1231, 1232: the name does not resolve yet, or
+        the network is still coming up). A sign-in error stops at once. Returns the path it mapped.
+    #>
+    param([Parameter(Mandatory)][string]$LocalName, [Parameter(Mandatory)][string]$SharePath, [string[]]$OtherHosts,
+        [string]$User, [string]$Password, [int]$RetrySeconds = 60, [scriptblock]$Mount, [scriptblock]$Sleep = { Start-Sleep -Seconds 5 })
+    if (-not $Mount) { $Mount = { param($Path) Mount-NetworkShare -LocalName $LocalName -RemoteName $Path -User $User -Password $Password } }
+    $paths = Get-ShareCandidates -SharePath $SharePath -OtherHosts $OtherHosts
+    $start = Get-Date
+    $last = $null
+    while ($true) {
+        foreach ($p in $paths) {
+            try { & $Mount $p | Out-Null; return $p }
+            catch {
+                $last = $_.Exception
+                $code = if ($last.Data.Contains('NetUseCode')) { [int]$last.Data['NetUseCode'] } else { -1 }
+                Write-DeployLog "Could not map ${p}: $($last.Message)" -Level WARN
+                if ($code -notin 53, 64, 67, 121, 1231, 1232, 1222) { throw }
+            }
+        }
+        if (((Get-Date) - $start).TotalSeconds -ge $RetrySeconds) { break }
+        & $Sleep
+    }
+    throw "Could not reach $SharePath from WinPE ($($last.Message)). Network: $(Format-DeployNetwork (Get-DeployNetworkState)). Check that this PC's network reaches the server."
 }
 
 function Mount-NetworkShare {
@@ -776,9 +878,17 @@ function Mount-NetworkShare {
     if ($User) { $netArgs += @("/user:$User", $(if ($Password) { $Password } else { '*' })) }
     # Log the command without the password.
     Write-DeployLog "Mapping $LocalName to $RemoteName$(if ($User) { " as $User" })"
+    $out = @()
     if ($User -and -not $Password) { & net.exe @netArgs }   # leave the console attached so the prompt shows
-    else { & net.exe @netArgs 2>&1 | Out-Null }
-    if ($LASTEXITCODE -ne 0) { throw "Could not map $RemoteName (net use exit code $LASTEXITCODE)." }
+    else { $out = @(& net.exe @netArgs 2>&1) }
+    if ($LASTEXITCODE -ne 0) {
+        # The Windows error (System error 53 ...) in the message and in Data, for Connect-DeployShare's retries.
+        $code = Get-NetUseErrorCode -Output $out
+        $text = (@($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) | Select-Object -First 1)
+        $e = New-Object Exception "Could not map $RemoteName$(if ($text) { ": $text" } else { " (net use exit code $LASTEXITCODE)" })"
+        $e.Data['NetUseCode'] = $code
+        throw $e
+    }
 }
 
 # Join account checks already made while WinPE runs (Test-JoinAccount), by domain, account and password hash.
@@ -916,5 +1026,5 @@ function Test-GenericComputerName {
 }
 
 Export-ModuleMember -Function Test-GenericComputerName, Get-WinPEDriverPlan, New-WinPEDriverStaging, Get-WinPEDriverResults, Get-WinPEBuildKey, Get-WinPEBuildCacheDir, Find-WinPEBuildCache, Save-WinPEBuildCache, Get-WinPEPackCopyPlan, Format-ConsoleText, Set-DeployConsole, Test-WinPE, Set-DeployConsoleWindow, Get-NativeProgress, Get-NativeLogLines, Read-SharedText, Get-AddDriverArgs, Get-WinPEDriverInfs, Import-WinPEDrivers, Format-WinPEDriverReport, Write-WinPEDriverReport, Get-DevicesWithoutDriver, Set-DeployLogPath, Write-DeployLog, Invoke-Native, Invoke-NativeWithProgress, Get-HardwareIdentity, Test-UefiBoot, New-DiskpartScript, ConvertTo-CatalogIdentity, Find-DriverCatalogMatch, Find-WinPEFallbackPack, Resolve-DriverPack,
-    Find-ContentRoot, Mount-NetworkShare, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
+    Find-ContentRoot, Mount-NetworkShare, Get-DeployNetworkState, Format-DeployNetwork, Wait-DeployNetwork, Get-NoNetworkMessage, Get-ShareCandidates, Connect-DeployShare, Get-ShareHosts, Get-NetUseErrorCode, Get-JoinCheckResult, Test-JoinAccount, Get-ShareCredential, Get-DiskConversionCommand, Get-OfflineImageState,
     Select-WindowsBootEntry, Get-WindowsBootNextArgs, Set-WindowsBootNext, New-DeployedMarker, Find-UnstartedDeployment

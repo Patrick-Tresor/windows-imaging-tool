@@ -90,9 +90,17 @@ function Get-Network {
     # The adapters with a gateway first (the one the console reaches), then the rest; IPv4 only.
     $nics = @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress })
     $nics = @($nics | Sort-Object { if ($_.DefaultIPGateway) { 0 } else { 1 } }, InterfaceIndex)
+    # Wired: a cable (or dock) is connected. WinPE has no Wi-Fi, so a reimage of a PC on Wi-Fi only can't reach the
+    # share from WinPE (GWHZLG3: "System error 53" in WinPE). $null when Windows can't say.
+    $wired = $null
+    try {
+        $up = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' })
+        $wired = [bool]@($up | Where-Object { "$($_.PhysicalMediaType)" -notmatch '802\.11|Wireless|Wi-?Fi|Bluetooth' }).Count
+    } catch { }
     [pscustomobject]@{
         ipAddresses = @($nics | ForEach-Object { $_.IPAddress } | Where-Object { $_ -match '^\d+(\.\d+){3}$' -and $_ -notlike '169.254.*' })
         macAddress  = $(if ($nics) { "$($nics[0].MACAddress)" } else { '' })
+        wired       = $wired
     }
 }
 

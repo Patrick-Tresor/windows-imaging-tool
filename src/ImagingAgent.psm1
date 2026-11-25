@@ -356,6 +356,7 @@ function New-AgentCheckIn {
         ipAddress      = $(if ($ips) { "$($ips[0])" } else { '' })
         ipAddresses    = @($ips)
         macAddress     = "$(& $get $Network 'macAddress')"
+        wired          = $(& $get $Network 'wired')
         os             = $Os
         userSignedIn   = $UserSignedIn
         # A [Nullable[datetime]] parameter holds a plain date in PowerShell (no .Value): that was GWHZLG3's

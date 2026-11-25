@@ -217,6 +217,11 @@ try {
             try {
                 $problems = @(Test-RemoteTarget -Info (ConvertTo-AgentTargetInfo $agent) -ExpectedName $(if ($p.Local) { '' } else { $p.Name }))
                 if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
+                # WinPE has no Wi-Fi: on Wi-Fi only, the PC would restart into WinPE and not reach the share.
+                if ($agent.PSObject.Properties['wired'] -and $agent.wired -eq $false) {
+                    Write-Host "$($p.Name): its agent says it has no network cable connected (Wi-Fi only). WinPE has no Wi-Fi, so it could not reach the share. Connect a cable or a dock, wait for its next check-in (up to $(if ($agent.checkInMinutes) { $agent.checkInMinutes } else { 5 }) min), then try again."
+                    Stop-Pc $p 'Not reimaged: it is on Wi-Fi only; WinPE needs a network cable or dock (see the log)'; continue
+                }
                 Set-BuildStepProgress $p.Id -Percent 20 -Detail 'Giving the job to its agent'
                 if (-not $bootHash) { $bootHash = (Get-FileHash -LiteralPath $BootWim -Algorithm SHA256).Hash }
                 $p.Serial = "$($agent.serial)"

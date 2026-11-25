@@ -402,6 +402,14 @@ try {
         Copy-Item -LiteralPath $newWallpaper -Destination $wallpaper -Force
     } catch { Write-Warning "WinPE keeps its plain blue background: $($_.Exception.Message)" }
     Copy-Item $SettingsPath "$deployDir\config\deploy-settings.json"
+    # The share server's full name and addresses: WinPE tries them when the short name does not resolve there.
+    try {
+        $shareHosts = Get-ShareHosts -SharePath "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)"
+        if ($shareHosts) {
+            Save-JsonFile -Path "$deployDir\config\share-hosts.json" -InputObject $shareHosts
+            Write-Host "WinPE can also reach the share as: $(@(@($shareHosts.fqdn) + $shareHosts.ips | Where-Object { $_ }) -join ', ')"
+        }
+    } catch { Write-Warning "Could not look up the share server's other names: $($_.Exception.Message)" }
     Save-JsonFile -Path "$deployDir\config\tool-version.json" -InputObject $versionRecord
     # The content root that holds config\secrets: its answer file key decrypts the passwords in the answer files.
     $secretRoot = if ($ContentSource) { $ContentSource } else { Split-Path (Split-Path $SettingsPath -Parent) -Parent }
