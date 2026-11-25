@@ -141,6 +141,27 @@ try {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# The share's rights: the agents write as their computer accounts (Domain Computers).
+Assert-Equal (Get-DomainComputersSid 'S-1-5-21-111-222-333-1104') 'S-1-5-21-111-222-333-515' 'Domain Computers by SID, from any account of the domain'
+Assert-Throws { Get-DomainComputersSid 'S-1-5-18' } 'a local account gives no domain'
+$shares = @{ imager = 'C:\imager'; 'ADMIN$' = 'C:\Windows' }
+$r = Resolve-LocalSharePath -Unc '\\IMAGER\imager\Status' -Shares $shares -ThisPC 'IMAGER'
+Assert-Equal "$($r.Share)|$($r.Path)" 'imager|C:\imager\Status' 'a share on this PC gives its local folder'
+Assert-Equal (Resolve-LocalSharePath -Unc '\\imager.boreal.local\imager\Status' -Shares $shares -ThisPC 'IMAGER').Path 'C:\imager\Status' 'by full name too'
+Assert-Equal ($null -eq (Resolve-LocalSharePath -Unc '\\FILES01\imager\Status' -Shares $shares -ThisPC 'IMAGER')) $true 'a share on another server is left alone'
+Assert-Equal ($null -eq (Resolve-LocalSharePath -Unc '\\IMAGER\other\Status' -Shares $shares -ThisPC 'IMAGER')) $true 'an unknown share is left alone'
+
+# Why an agent did not check in, from its log.
+Assert-Equal (Get-AgentLogProblem -Lines @() -TaskState 'Ready' -TaskResult '0x1') 'The agent never started (task Ready, last result 0x1)' 'no log: it never started'
+Assert-Equal (Get-AgentLogProblem -Lines @() ) 'The agent never started (no task ImagingTool\Agent)' 'no log and no task'
+$denied = @('2026-11-25 13:30:01 Agent started: GWHZLG3, serial GWHZLG3', '2026-11-25 13:30:02 Could not check in to \\IMAGER\imager\Status: Access to the path is denied.')
+Assert-Equal ((Get-AgentLogProblem -Lines $denied) -like "The PC's computer account may not write to the share: Could not check in*") $true 'access denied: the share''s rights'
+Assert-Equal (Get-AgentLogProblem -Lines @('2026-11-25 13:30:01 The BIOS serial ''0'' is not unique to this PC: the agent can''t check in. It stops.')) "The BIOS serial '0' is not unique to this PC: the agent can't check in. It stops." 'the line that says why it stopped'
+Assert-Equal (Get-AgentLogProblem -Lines @('2026-11-25 13:30:01 Agent started: X')) 'Last agent log line: Agent started: X' 'otherwise its last line'
+$install = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Install-RemoteAgent.ps1')
+Assert-Equal ($install -match 'Grant-StatusFolderAccess -StatusFolder \$StatusFolder') $true 'Install agent gives Domain Computers their rights on the Status folder first'
+Assert-Equal ($install -match 'Get-RemoteAgentProblem') $true 'and reads the agent''s log when it does not check in'
+
 # The local channel: the agent restarts its own PC into WinPE with the console's steps.
 Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force
 $ch = Open-RemoteChannel -ComputerName 'PC01' -Method Local

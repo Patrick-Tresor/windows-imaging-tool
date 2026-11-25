@@ -203,6 +203,8 @@ try {
             $agentKey = Get-AgentSigningKey -ContentRoot $(if ($KeyRoot) { $KeyRoot } else { $ContentRoot })
             $checkIns = @(Get-AgentCheckIns -StatusFolder $StatusFolder)
         } catch { Write-Host "Could not read the agents' check-ins in ${StatusFolder}: $($_.Exception.Message)" }
+        # The agents write their job's progress there as their computer accounts.
+        if ($agentKey -and $checkIns) { try { $null = Grant-StatusFolderAccess -StatusFolder $StatusFolder } catch { } }
         if (-not $agentKey -and $checkIns) { Write-Host 'No agent signing key (config\secrets\agent-key.xml) on this content root: the agents are not used.' }
     }
 

@@ -242,7 +242,12 @@ once. The job's folder is readable only by administrators, the console's
 account and that PC's computer account, since boot.wim holds the answer file key.
 
 Needs: `Domain Computers` with modify rights on the share's `Status` folder (as
-for the Dashboard), and PCs in the domain (outside it the share can't tell who
+for the Dashboard), and Change on the share. When the share is on the console
+PC, **Install agent** and **Reimage...** add both by themselves (never taking
+anything away); on another server, set them there. A PC that installs but does
+not check in shows why in its progress row, read from the agent's log over the
+same way in (for example "the PC's computer account may not write to the
+share"). And PCs in the domain (outside it the share can't tell who
 the PC is). Rebuild the sticks and the network boot image once, so deploys put
 the agent on and trust this console's key. The agent comes with each deploy:
 after a tool update, reimage the PC or click Install agent again to update it.

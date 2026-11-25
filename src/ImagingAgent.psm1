@@ -464,6 +464,104 @@ function Get-AgentRowView {
 
 #endregion
 
+#region The share's rights
+
+function Get-DomainComputersSid {
+    # Domain Computers (RID 515) from any account SID of the domain (the console PC's computer account): by SID, so a
+    # French domain's "Ordinateurs du domaine" works the same.
+    param([Parameter(Mandatory)][string]$DomainAccountSid)
+    if ($DomainAccountSid -notmatch '^(S-1-5-21-\d+-\d+-\d+)-\d+$') { throw "Not a domain account SID: $DomainAccountSid" }
+    "$($Matches[1])-515"
+}
+
+function Resolve-LocalSharePath {
+    <#
+    .SYNOPSIS
+        \\IMAGER\imager\Status -> C:\imager\Status when the share is on this PC (its name, full name, localhost or
+        127.0.0.1), else $null. Shares: name -> local path (Get-SmbShare on Windows; tests pass a hashtable).
+    #>
+    param([Parameter(Mandatory)][string]$Unc, [hashtable]$Shares, [string[]]$ThisPC = @($env:COMPUTERNAME))
+    if ($Unc -notmatch '^\\\\([^\\]+)\\([^\\]+)(\\.*)?$') { return $null }
+    $hostName = $Matches[1]; $share = $Matches[2]; $rest = "$($Matches[3])".TrimStart('\')
+    $names = @($ThisPC | Where-Object { $_ } | ForEach-Object { "$_".ToUpperInvariant() }) + 'LOCALHOST', '127.0.0.1'
+    if ($names -notcontains ($hostName.Split('.')[0].ToUpperInvariant()) -and $names -notcontains $hostName.ToUpperInvariant()) { return $null }
+    $key = @($Shares.Keys | Where-Object { "$_" -eq $share })[0]
+    if (-not $key) { return $null }
+    $local = "$($Shares[$key])".TrimEnd('\')
+    [pscustomobject]@{ Share = $key; Path = $(if ($rest) { "$local\$rest" } else { $local }) }
+}
+
+function Grant-StatusFolderAccess {
+    <#
+    .SYNOPSIS
+        Lets the agents (and first boot) write their status: Domain Computers modify rights on the Status folder, and
+        Change on its share, when that share is on this PC. Only adds, never takes anything away. Returns
+        { Changed, Lines }: what it found or did, for the log. Needs admin rights (the console runs with them).
+    #>
+    param([Parameter(Mandatory)][string]$StatusFolder)
+    $lines = [Collections.Generic.List[string]]::new()
+    $changed = $false
+    $shares = @{}
+    try { foreach ($s in @(Get-SmbShare -ErrorAction Stop)) { $shares[$s.Name] = $s.Path } } catch { }
+    $local = Resolve-LocalSharePath -Unc $StatusFolder -Shares $shares -ThisPC @($env:COMPUTERNAME)
+    if (-not $local) {
+        $lines.Add("$StatusFolder is not a share on this PC: on its server, give Domain Computers modify rights on that folder and Change on the share.")
+        return [pscustomobject]@{ Changed = $false; Lines = @($lines) }
+    }
+    $me = ([Security.Principal.NTAccount]"$env:USERDOMAIN\$env:COMPUTERNAME`$").Translate([Security.Principal.SecurityIdentifier]).Value
+    $dc = Get-DomainComputersSid $me
+    $dcName = try { ([Security.Principal.SecurityIdentifier]$dc).Translate([Security.Principal.NTAccount]).Value } catch { $dc }
+    [void][IO.Directory]::CreateDirectory($local.Path)
+    # The folder: an allow rule for Domain Computers with at least Modify, passed on to what is in it.
+    $modify = [Security.AccessControl.FileSystemRights]::Modify
+    $hasNtfs = @((Get-Acl -LiteralPath $local.Path).Access | Where-Object {
+        $_.AccessControlType -eq 'Allow' -and (($_.FileSystemRights -band $modify) -eq $modify) -and
+        $(try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -in $dc, 'S-1-1-0', 'S-1-5-11' } catch { $false })
+    }).Count -gt 0
+    if ($hasNtfs) { $lines.Add("$($local.Path): Domain Computers can already write there.") }
+    else {
+        $o = & icacls.exe $local.Path /grant "*${dc}:(OI)(CI)M" 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Could not give $dcName modify rights on $($local.Path): $(@($o) -join ' ')" }
+        $lines.Add("$($local.Path): gave $dcName modify rights."); $changed = $true
+    }
+    # The share: Change or Full for Domain Computers, Everyone or Authenticated Users.
+    $hasShare = @(Get-SmbShareAccess -Name $local.Share -ErrorAction Stop | Where-Object {
+        $_.AccessControlType -eq 'Allow' -and "$($_.AccessRight)" -in 'Change', 'Full' -and
+        $(try { ([Security.Principal.NTAccount]"$($_.AccountName)").Translate([Security.Principal.SecurityIdentifier]).Value -in $dc, 'S-1-1-0', 'S-1-5-11' } catch { $false })
+    }).Count -gt 0
+    if ($hasShare) { $lines.Add("Share $($local.Share): Domain Computers can already change files there.") }
+    else {
+        Grant-SmbShareAccess -Name $local.Share -AccountName $dcName -AccessRight Change -Force -ErrorAction Stop | Out-Null
+        $lines.Add("Share $($local.Share): gave $dcName Change."); $changed = $true
+    }
+    [pscustomobject]@{ Changed = $changed; Lines = @($lines) }
+}
+
+function Get-AgentLogProblem {
+    <#
+    .SYNOPSIS
+        One line saying why an agent did not check in, from the end of its log (C:\Windows\Temp\ImagingAgent.log) and its
+        task's state. Lines: the log's last lines ($null: no log, it never started). TaskState / TaskResult: from
+        Get-ScheduledTask / Get-ScheduledTaskInfo.
+    #>
+    param([string[]]$Lines, [string]$TaskState, [string]$TaskResult)
+    $Lines = @($Lines | Where-Object { "$_".Trim() })
+    if (-not $Lines) {
+        $t = if ($TaskState) { "task $TaskState$(if ($TaskResult) { ", last result $TaskResult" })" } else { 'no task ImagingTool\Agent' }
+        return "The agent never started ($t)"
+    }
+    $text = { param($l) ($l -replace '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ', '').Trim() }
+    $bad = @($Lines | Where-Object { $_ -match 'Could not check in|stops|stopped|Could not read' }) | Select-Object -Last 1
+    if ($bad) {
+        $t = & $text $bad
+        if ($t -match '(?i)Could not check in' -and $t -match '(?i)denied|refus') { return "The PC's computer account may not write to the share: $t" }
+        return $t
+    }
+    "Last agent log line: $(& $text $Lines[-1])"
+}
+
+#endregion
+
 #region Installing it
 
 function New-AgentConfig {
@@ -556,4 +654,4 @@ Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentRowView,
-    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC
+    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
