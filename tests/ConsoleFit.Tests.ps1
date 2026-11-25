@@ -69,7 +69,7 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     $ui.Controls['GridDash'].ItemsSource = @([pscustomobject]@{
         ComputerName = 'GWHZLG3'; Model = 'Latitude 5521'; Serial = 'GWHZLG3'; IpAddress = '10.10.64.51'; LastSeenText = '1 min ago'
         AnswerFile = 'Windows 11 Finance'; State = 'Running'; Percent = 40; Step = 'Applying the image'; Result = ''; ResultText = ''
-        ResultState = ''; Started = [datetime]'2026-11-25 10:00'; Duration = '12 min'; LastSeen = '10:12'
+        ResultState = ''; Started = [datetime]'2026-11-25 10:00'; Duration = '12 min'
     })
     $win.Show()
     try {

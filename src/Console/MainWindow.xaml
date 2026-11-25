@@ -471,7 +471,11 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Show: History lists deployments removed or cleared from here, with their final log."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC's progress while it deploys, and whether it is ready at the end of first boot. Point here for details." Cursor="Help" ToolTipService.ShowDuration="60000">
+                <TextBlock.ToolTip>
+                  <TextBlock MaxWidth="520" TextWrapping="Wrap" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready (and names any application or task that failed), and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Last seen is the PC's last check-in (its agent once Windows runs). Show: History lists deployments removed or cleared from here, with their final log."/>
+                </TextBlock.ToolTip>
+              </TextBlock>
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
@@ -486,7 +490,7 @@
                 <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Deploying" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
                 <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource SuccessBrush}"/><TextBlock Text="Succeeded" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
                 <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}"/><TextBlock Text="With warnings" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"/><TextBlock Text="Failed or stalled" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"/><TextBlock Text="Need attention" ToolTip="Failed, stalled, or finished but not ready" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
                 <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
               </UniformGrid>
             </StackPanel>
@@ -495,7 +499,7 @@
               <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
                 <ComboBoxItem Content="All"/>
                 <ComboBoxItem Content="Deploying"/>
-                <ComboBoxItem Content="Failed or stalled"/>
+                <ComboBoxItem Content="Need attention"/>
                 <ComboBoxItem Content="Finished"/>
                 <ComboBoxItem Content="History"/>
               </ComboBox>
@@ -511,6 +515,7 @@
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding State}" Value="Failed"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Stalled"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
+                      <DataTrigger Binding="{Binding State}" Value="Not ready"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Warning"><Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Succeeded"><Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/></DataTrigger>
                     </Style.Triggers>
@@ -550,7 +555,6 @@
                   </DataGridTextColumn>
                   <DataGridTextColumn Header="Started" Binding="{Binding Started, StringFormat=MM-dd HH:mm}" Width="85"/>
                   <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70"/>
-                  <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="70"/>
                 </DataGrid.Columns>
               </DataGrid>
               <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>

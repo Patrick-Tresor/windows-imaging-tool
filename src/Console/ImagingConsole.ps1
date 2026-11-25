@@ -391,17 +391,20 @@ function Update-Dashboard {
     } else {
         $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
             1 { 'Running' }
-            2 { 'Failed', 'Stalled' }
-            3 { 'Succeeded', 'Warning', 'Cancelled' }
+            2 { 'Failed', 'Stalled', 'Not ready' }
+            3 { 'Succeeded', 'Warning', 'Not ready', 'Cancelled' }
         })
         if ($states) { $rows = @($rows | Where-Object State -in $states) }
     }
 
-    # The agent's last check-in (by serial): when the PC was last on, and the address it has now.
+    # One Last seen: the agent's last check-in (by serial) when it is newer than the deployment's last report,
+    # otherwise that report; and the address the agent has now.
     $checkIns = Get-ConsoleAgentCheckIns
     foreach ($r in $rows) {
         $a = if ($checkIns -and $r.Serial) { Find-AgentCheckIn -CheckIns $checkIns -Serial "$($r.Serial)" } else { $null }
-        $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue $(if ($a) { $a.LastSeenText } else { '' }) -Force
+        $seen = if ($a -and $a.LastSeen -and (-not $r.Updated -or $a.LastSeen -gt $r.Updated)) { $a.LastSeenText }
+                elseif ($r.Updated) { Format-AgentLastSeen -LastSeen $r.Updated } else { '' }
+        $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue $seen -Force
         if ($a -and $a.Online -and $a.ipAddress) { $r | Add-Member -NotePropertyName IpAddress -NotePropertyValue "$($a.ipAddress)" -Force }
     }
 

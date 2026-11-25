@@ -87,6 +87,23 @@ try {
     Assert-Equal (Format-Duration ([timespan]::FromSeconds(95))) '1m 35s' 'durations under an hour'
     Assert-Equal (Format-Duration 42.4) '42s' 'durations under a minute, also from seconds'
 
+    # State agrees with Result: a finished PC whose checks found a failed application is Not ready, not Warning.
+    $agree = Join-Path $root 'StatusAgree'
+    New-Item -ItemType Directory -Path $agree -Force | Out-Null
+    $t = (Get-Date).AddMinutes(-30).ToString('o')
+    @{ id = 'NR1'; serial = 'NR1'; computerName = 'PC-NR1'; state = 'Warning'; percent = 100; started = $t; updated = $t; finished = $t; driverPack = 'Dell\Latitude 5521'
+       checks = @(@{ name = 'App: Google Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, @{ name = 'App: Zoom'; result = 'Passed'; detail = 'Installed' }) } |
+        ConvertTo-Json -Depth 4 | Set-Content (Join-Path $agree 'NR1.json')
+    @{ id = 'OK1'; serial = 'OK1'; computerName = 'PC-OK1'; state = 'Succeeded'; percent = 100; started = $t; updated = $t; finished = $t; driverPack = 'Dell\Latitude 5521'
+       checks = @(@{ name = 'BitLocker'; result = 'Warning'; detail = 'Off' }) } |
+        ConvertTo-Json -Depth 4 | Set-Content (Join-Path $agree 'OK1.json')
+    $agreeRows = @(Get-DeploymentStatus -Folder $agree)
+    $nr = $agreeRows | Where-Object Id -eq 'NR1'
+    Assert-Equal "$($nr.State)|$($nr.Result)" 'Not ready|Not ready: Google Chrome failed' 'a failed app: State is Not ready and Result names the app'
+    Assert-Equal (($agreeRows | Where-Object Id -eq 'OK1').State) 'Warning' 'a check warning turns Succeeded into Warning'
+    $sum = Get-DeploymentSummary -Rows $agreeRows
+    Assert-Equal "$($sum.Warning)|$($sum.Failed)" '1|1' 'Not ready counts with failed and stalled'
+
     # USB deploys with no network folder: the console moves the stick's status into the dashboard
     $stick = Join-Path $root 'stick'
     $dash = Join-Path $root 'dash'

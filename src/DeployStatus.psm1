@@ -302,6 +302,12 @@ function Get-DeploymentStatus {
                 started = $s.started; finished = $s.finished; state = $state; message = $s.message }
             $result = Get-DeployResultSummary -Deploy $deploy -Checks $(if ($s.PSObject.Properties['checks']) { @($s.checks) } else { @() }) -Now $Now
         } catch { $result = $null }
+        # State and Result say the same thing: a finished deployment whose checks found a problem shows it in State too
+        # (Not ready when something failed, Warning when only warnings), so the row colour and the counts match Result.
+        if ($result -and $state -in 'Succeeded', 'Warning') {
+            if ($result.Result -eq 'NotReady') { $state = 'Not ready' }
+            elseif ($result.Result -eq 'Warning') { $state = 'Warning' }
+        }
         [pscustomobject]@{
             Id           = $s.id
             ComputerName = $s.computerName
@@ -325,7 +331,6 @@ function Get-DeploymentStatus {
             Started      = $started
             Updated      = $updated
             Duration     = if ($started -and $end) { Format-Duration ($end - $started) } else { '' }
-            LastSeen     = if ($updated) { Format-Duration ($Now - $updated) } else { '' }
             LogPath      = if (Test-Path $log) { $log } else { $null }
             LogFile      = if ($s.PSObject.Properties['logFile']) { "$($s.logFile)" } else { '' }
             StatusPath   = $file.FullName
@@ -346,7 +351,7 @@ function Get-DeploymentSummary {
         Running   = & $count @('Running')
         Succeeded = & $count @('Succeeded')
         Warning   = & $count @('Warning')
-        Failed    = & $count @('Failed', 'Stalled')
+        Failed    = & $count @('Failed', 'Stalled', 'Not ready')
         Cancelled = & $count @('Cancelled')
     }
 }
@@ -361,7 +366,7 @@ function Remove-DeploymentStatus {
 }
 
 function Get-ExpiredDeployments {
-    # Finished PCs (Succeeded, Warning, Cancelled) not heard from for -Days: the console moves them off the Dashboard
+    # Finished PCs (Succeeded, Warning, Cancelled; not Failed or Not ready) not heard from for -Days: the console moves them off the Dashboard
     # by itself (there is no Clear finished button). Their final log stays under Show: History.
     param([AllowEmptyCollection()][object[]]$Rows, [int]$Days = 7, [datetime]$Now = (Get-Date))
     @($Rows | Where-Object { $_.State -in 'Succeeded', 'Warning', 'Cancelled' -and $_.Updated -and $_.Updated -lt $Now.AddDays(-$Days) })
@@ -438,6 +443,8 @@ function Get-DeployResultSummary {
     $Checks = @($Checks | Where-Object { $_ })
     $lines = [Collections.Generic.List[object]]::new()
     $add = { param($item, $result, $detail) $lines.Add([pscustomobject]@{ Item = $item; Result = $result; Detail = "$detail" }) }
+    # Applications and tasks that did not pass, by line and result, so the verdict can name them (Not ready: Chrome failed).
+    $named = @{}
     $fromCheck = { param($r) switch ("$r") { 'Passed' { 'OK' } 'Failed' { 'Failed' } 'Warning' { 'Warning' } default { 'Info' } } }
 
     $pc = (@((& $get 'maker'), (& $get 'model')) | Where-Object { $_ }) -join ' '
@@ -460,6 +467,11 @@ function Get-DeployResultSummary {
         $bad = @($list | Where-Object result -ne 'Passed')
         $text = '{0} of {1} {2}' -f ($list.Count - $bad.Count), $list.Count, $kind[2]
         if ($bad) { $text += ': ' + (($bad | ForEach-Object { "$("$($_.name)".Substring($kind[1].Length)) ($($_.detail))" }) -join '; ') }
+        foreach ($b in $bad) {
+            $key = "$($kind[0])|$(if ($b.result -eq 'Failed') { 'Failed' } else { 'Warning' })"
+            if (-not $named[$key]) { $named[$key] = [Collections.Generic.List[string]]::new() }
+            $named[$key].Add("$($b.name)".Substring($kind[1].Length))
+        }
         & $add $kind[0] $(if (@($bad | Where-Object result -eq 'Failed')) { 'Failed' } elseif ($bad) { 'Warning' } else { 'OK' }) $text
     }
     foreach ($name in 'Computer name', 'Domain join', 'Workgroup', 'BitLocker') {
@@ -478,11 +490,16 @@ function Get-DeployResultSummary {
 
     $result = if ($state -eq 'Failed') { 'Failed' } elseif ($state -in 'Running', 'Stalled') { 'Running' }
               elseif (@($lines | Where-Object Result -eq 'Failed')) { 'NotReady' } elseif (@($lines | Where-Object Result -eq 'Warning')) { 'Warning' } else { 'Ready' }
+    # The parts with this result: an application or task line gives the names of those that did not pass.
+    $parts = { param($r) @($lines | Where-Object Result -eq $r | ForEach-Object {
+        $n = $named["$($_.Item)|$r"]
+        if ($n) { $n } else { $_.Item }
+    }) -join ', ' }
     $verdict = switch ($result) {
         'Failed'   { "Deployment failed: $(& $get 'message')".TrimEnd(': ') }
         'Running'  { if ($state -eq 'Stalled') { 'Not finished: the PC stopped reporting' } else { 'Still deploying' } }
-        'NotReady' { 'Not ready: ' + ((@($lines | Where-Object Result -eq 'Failed' | ForEach-Object Item)) -join ', ') + ' failed' }
-        'Warning'  { 'Ready, with warnings: ' + ((@($lines | Where-Object Result -eq 'Warning' | ForEach-Object Item)) -join ', ') }
+        'NotReady' { 'Not ready: ' + (& $parts 'Failed') + ' failed' }
+        'Warning'  { 'Ready, with warnings: ' + (& $parts 'Warning') }
         default    { 'Ready' }
     }
     $head = (@((& $get 'computerName'), $(if ($pc) { "($pc)" })) | Where-Object { $_ }) -join ' '
