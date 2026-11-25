@@ -5,7 +5,7 @@
 # are not used). Each column keeps at least the longest word of its header, header and cell text wrap, and a row
 # grows to three lines instead of cutting its text off.
 
-# The smallest width a column can have: its header's longest word plus the header's padding and gripper.
+# The smallest width a column can have: its header's longest word plus the header's padding.
 function Get-GridHeaderMinWidth {
     param([string]$Header, [Windows.Media.FontFamily]$FontFamily = [Windows.Media.FontFamily]::new('Segoe UI'), [double]$FontSize = 13)
     $face = [Windows.Media.Typeface]::new($FontFamily, [Windows.FontStyles]::Normal, [Windows.FontWeights]::SemiBold, [Windows.FontStretches]::Normal)
@@ -15,7 +15,7 @@ function Get-GridHeaderMinWidth {
             [Windows.FlowDirection]::LeftToRight, $face, $FontSize, [Windows.Media.Brushes]::Black)
         $widest = [Math]::Max($widest, $text.WidthIncludingTrailingWhitespace)
     }
-    [Math]::Max(48, [Math]::Ceiling($widest) + 24)
+    [Math]::Max(40, [Math]::Ceiling($widest) + 20)
 }
 
 # Column widths for $Available pixels: each column gets $Base times one shared factor, kept between its $Min and $Max.
@@ -33,7 +33,14 @@ function Get-FitColumnWidths {
     $lo = 0.0; $hi = 1000.0
     if ((& $at $hi) -le $Available) { $lo = $hi }
     else { for ($k = 0; $k -lt 50; $k++) { $mid = ($lo + $hi) / 2; if ((& $at $mid) -le $Available) { $lo = $mid } else { $hi = $mid } } }
-    ,@(for ($i = 0; $i -lt $n; $i++) { [Math]::Floor([Math]::Min($Max[$i], [Math]::Max($Min[$i], $Base[$i] * $lo))) })
+    $w = @(for ($i = 0; $i -lt $n; $i++) { [Math]::Floor([Math]::Min($Max[$i], [Math]::Max($Min[$i], $Base[$i] * $lo))) })
+    # Whole pixels: what rounding left over goes to the last column that may still grow.
+    $left = [Math]::Floor($Available - ($w | Measure-Object -Sum).Sum)
+    for ($i = $n - 1; $i -ge 0 -and $left -gt 0; $i--) {
+        $add = [Math]::Min($left, $Max[$i] - $w[$i])
+        if ($add -gt 0) { $w[$i] += $add; $left -= $add }
+    }
+    ,$w
 }
 
 # One grid: its columns are sized here, not by the DataGrid, every time the room for them changes. A column with a

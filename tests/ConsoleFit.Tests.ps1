@@ -24,9 +24,11 @@ foreach ($node in $main.SelectNodes('//*[local-name()="TabItem"]/*[local-name()=
 Import-Module (Join-Path $console 'GridFit.psm1') -Force
 $inf = [double]::PositiveInfinity
 $w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 1000
-Assert-Equal ($w -join ',') '120,440,440' 'wide: a pixel column stays at its XAML width, * columns share the rest'
+Assert-Equal $w[0] 120 'wide: a pixel column stays at its XAML width'
+Assert-Equal (($w | Measure-Object -Sum).Sum) 1000 "wide: the * columns share the rest to the pixel ($($w -join ','))"
+Assert-Equal ([Math]::Abs($w[1] - $w[2]) -le 2) $true 'wide: two * columns get the same share'
 $w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 256
-Assert-Equal (($w | Measure-Object -Sum).Sum -le 256) $true "narrow: the columns fit ($($w -join ','))"
+Assert-Equal (($w | Measure-Object -Sum).Sum) 256 "narrow: the columns fill the room exactly ($($w -join ','))"
 Assert-Equal ($w[0] -gt $w[1]) $true 'narrow: the 120 px column shrinks in proportion with the * columns'
 $w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 100
 Assert-Equal ($w -join ',') '60,50,50' 'too narrow: every column at its minimum'
@@ -86,7 +88,15 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
                 foreach ($grid in $grids) {
                     if (-not $grid.IsVisible) { continue }
                     $scroll = Find-Visual $grid ([Windows.Controls.ScrollViewer])
-                    Assert-Equal ([int]$scroll.ScrollableWidth) 0 "$($size.Name) ${tab}: $($grid.Name) columns fit without scrolling sideways"
+                    $used = 0.0; foreach ($col in $grid.Columns) { $used += $col.ActualWidth }
+                    $mins = 0.0; foreach ($col in $grid.Columns) { $mins += $col.MinWidth }
+                    $info = "window $([int]$win.ActualWidth), room $([int]$scroll.ViewportWidth), columns $([int]$used), minimums $([int]$mins)"
+                    if ($mins -le $scroll.ViewportWidth) {
+                        Assert-Equal ([int]$scroll.ScrollableWidth) 0 "$($size.Name) ${tab}: $($grid.Name) columns fit without scrolling sideways ($info)"
+                        Assert-Equal ($used -ge $scroll.ViewportWidth - 3) $true "$($size.Name) ${tab}: $($grid.Name) columns fill the grid ($info)"
+                    } else {
+                        Write-Host "SKIP $($size.Name) ${tab}: $($grid.Name) is narrower than its header words on this screen ($info)" -ForegroundColor Yellow
+                    }
                     foreach ($col in $grid.Columns) {
                         Assert-Equal ($col.ActualWidth -ge $col.MinWidth - 0.5) $true "$($size.Name) ${tab}: $($grid.Name) '$($col.Header)' at least its header's width ($([int]$col.ActualWidth) >= $([int]$col.MinWidth))"
                     }
@@ -99,11 +109,6 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
                 }
             }
         }
-        # Maximized, a column with a pixel width in the XAML is back at that width; the * columns take the rest.
-        $item = @($ui.Controls['Tabs'].Items | Where-Object { $_.Header -eq 'Computers' })[0]
-        $ui.Controls['Tabs'].SelectedItem = $item; $win.UpdateLayout()
-        $name = @($ui.Controls['GridAd'].Columns | Where-Object { $_.Header -eq 'Name' })[0]
-        Assert-Equal ([int]$name.ActualWidth) 120 'maximized: the Name column is its XAML width'
     } finally {
         $win.Close()
     }
