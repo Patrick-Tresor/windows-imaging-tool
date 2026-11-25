@@ -669,8 +669,11 @@ $script:RemoteInfoScript = {
     try { $bl = (Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop).ProtectionStatus.ToString() } catch { }
     [pscustomobject]@{
         ComputerName = $env:COMPUTERNAME
-        # Services may not get firmware_type: PEFirmwareType 2 = UEFI.
-        Firmware     = $(if ($env:firmware_type) { $env:firmware_type } elseif ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control' -ErrorAction SilentlyContinue).PEFirmwareType -eq 2) { 'UEFI' } else { 'Legacy' })
+        # PEFirmwareType is only there in WinPE: in Windows the loader it started from says it (winload.efi = UEFI).
+        Firmware     = $(
+            $bcd = "$(& bcdedit.exe /enum '{current}' 2>$null)"
+            if ($bcd -match 'winload\.efi') { 'UEFI' } elseif ($bcd -match 'winload\.exe') { 'Legacy' }
+            else { try { $null = Confirm-SecureBootUEFI -ErrorAction Stop; 'UEFI' } catch { 'Unknown' } })
         Serial       = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
         Uuid         = "$((Get-CimInstance Win32_ComputerSystemProduct).UUID)".Trim()
         Model        = "$((Get-CimInstance Win32_ComputerSystem).Model)".Trim()
@@ -693,7 +696,8 @@ function Test-RemoteTarget {
     if ($ExpectedName -and "$($Info.ComputerName)" -and $Info.ComputerName -ne $ExpectedName) {
         "its address answers as $($Info.ComputerName), not $ExpectedName (an old DNS record?)"
     }
-    if ($Info.Firmware -ne 'UEFI') { 'it starts Windows in legacy BIOS mode; deploys need UEFI' }
+    # Unknown (could not be read) is let through: WinPE checks again and stops on a legacy BIOS PC before erasing.
+    if ($Info.Firmware -eq 'Legacy') { 'it starts Windows in legacy BIOS mode; deploys need UEFI' }
     if (-not (Test-UsableSerial $Info.Serial)) { "its BIOS serial '$($Info.Serial)' is not unique to one PC" }
     if ($Info.FreeC -and $Info.FreeC -lt 2GB) { "only $([int]($Info.FreeC / 1MB)) MB free on C: (WinPE needs about 1 GB)" }
 }

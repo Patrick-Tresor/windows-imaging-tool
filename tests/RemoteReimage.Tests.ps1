@@ -115,6 +115,7 @@ $ok = [pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'UEFI'; Serial = 'ABC
 Assert-Equal @(Test-RemoteTarget -Info $ok -ExpectedName 'PC01').Count 0 'a UEFI PC with its own name and serial can be reimaged'
 Assert-Equal (@(Test-RemoteTarget -Info ([pscustomobject]@{ ComputerName = 'PC77'; Firmware = 'UEFI'; Serial = 'ABC123'; FreeC = 50GB }) -ExpectedName 'PC01')[0] -like '*answers as PC77*') $true 'an address that answers as another PC is refused'
 Assert-Equal (@(Test-RemoteTarget -Info ([pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'Legacy'; Serial = 'ABC123'; FreeC = 50GB }) -ExpectedName 'PC01')[0] -like '*legacy BIOS*') $true 'a legacy BIOS PC is refused'
+Assert-Equal (@(Test-RemoteTarget -Info ([pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'Unknown'; Serial = 'ABC123'; FreeC = 50GB }) -ExpectedName 'PC01').Count) 0 'a firmware that could not be read is not refused (WinPE checks again)'
 Assert-Equal (@(Test-RemoteTarget -Info ([pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'UEFI'; Serial = 'Default string'; FreeC = 50GB }) -ExpectedName 'PC01')[0] -like '*not unique*') $true 'a shared serial is refused'
 Assert-Equal (@(Test-RemoteTarget -Info ([pscustomobject]@{ ComputerName = 'PC01'; Firmware = 'UEFI'; Serial = 'ABC123'; FreeC = 500MB }) -ExpectedName 'PC01')[0] -like '*free on C:*') $true 'a full C: is refused'
 

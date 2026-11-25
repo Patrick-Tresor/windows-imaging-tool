@@ -348,6 +348,7 @@ function New-AgentCheckIn {
         maker          = "$(& $get $Identity 'maker')"
         model          = "$(& $get $Identity 'model')"
         firmware       = "$(& $get $Identity 'firmware')"
+        firmwareFrom   = "$(& $get $Identity 'firmwareFrom')"
         account        = $Account
         accountSid     = $AccountSid
         ipAddress      = $(if ($ips) { "$($ips[0])" } else { '' })
@@ -428,8 +429,10 @@ function Format-AgentLastSeen {
 function ConvertTo-AgentTargetInfo {
     # A check-in as Get-RemoteComputerInfo's record, so Test-RemoteTarget checks an agent PC the same way.
     param([Parameter(Mandatory)]$CheckIn)
+    # An agent from before firmwareFrom read PEFirmwareType, which Windows does not have: it said Legacy on UEFI PCs.
+    $fw = if ($CheckIn.PSObject.Properties['firmwareFrom'] -and "$($CheckIn.firmwareFrom)") { "$($CheckIn.firmware)" } else { 'Unknown' }
     [pscustomobject]@{
-        ComputerName = "$($CheckIn.computerName)"; Firmware = "$($CheckIn.firmware)"; Serial = "$($CheckIn.serial)"; Uuid = "$($CheckIn.uuid)"
+        ComputerName = "$($CheckIn.computerName)"; Firmware = $fw; Serial = "$($CheckIn.serial)"; Uuid = "$($CheckIn.uuid)"
         Model = "$($CheckIn.model)"; FreeC = $(if ($CheckIn.freeC) { [int64]$CheckIn.freeC } else { $null }); BitLocker = ''
     }
 }

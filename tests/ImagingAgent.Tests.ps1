@@ -27,7 +27,7 @@ try {
 
     # A PC's check-in.
     $now = [datetime]::new(2026, 11, 23, 15, 0, 0, [DateTimeKind]::Local)
-    $identity = [pscustomobject]@{ serial = 'abc123'; uuid = '4C4C4544-0001'; maker = 'Dell Inc.'; model = 'Latitude 5521'; firmware = 'UEFI' }
+    $identity = [pscustomobject]@{ serial = 'abc123'; uuid = '4C4C4544-0001'; maker = 'Dell Inc.'; model = 'Latitude 5521'; firmware = 'UEFI'; firmwareFrom = 'bcdedit' }
     $record = New-AgentCheckIn -Identity $identity -Network ([pscustomobject]@{ ipAddresses = @('10.1.2.34', '192.168.56.1'); macAddress = 'AA-BB' }) `
         -Deploy ([pscustomobject]@{ answerFile = 'Staff-W11'; image = 'Win11.wim'; toolVersion = 'abc1234'; deployedAt = '2026-11-20T10:00:00' }) `
         -AgentId 'agent-1' -ComputerName 'pc01' -Account 'CORP\PC01$' -AccountSid 'S-1-5-21-1-2-3-1104' -FreeC 50GB -Result 'Result: Ready' -Now $now
@@ -65,6 +65,11 @@ try {
     Assert-Equal "$($info.Firmware)|$($info.Serial)|$($info.FreeC)" "UEFI|abc123|$(50GB)" 'a check-in reads like the network check of a PC'
     Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force
     Assert-Equal (@(Test-RemoteTarget -Info $info -ExpectedName 'PC01').Count) 0 'so the same checks run before a reimage'
+    # GWHZLG3: an agent from before the fix read PEFirmwareType (WinPE only) and said Legacy on a UEFI PC.
+    $oldAgent = [pscustomobject]@{ computerName = 'PC01'; firmware = 'Legacy'; serial = 'abc123'; uuid = 'U1'; freeC = 50GB }
+    $info = ConvertTo-AgentTargetInfo $oldAgent
+    Assert-Equal $info.Firmware 'Unknown' 'an old agent firmware value is not trusted'
+    Assert-Equal (@(Test-RemoteTarget -Info $info -ExpectedName 'PC01').Count) 0 'so it does not stop the reimage (WinPE checks again)'
 
     # A signed reimage job, with the network boot image next to it.
     $wim = Join-Path $root 'boot.wim'
