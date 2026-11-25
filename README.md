@@ -235,6 +235,12 @@ the share, written as the computer account, like first boot's status.
   the network as before.
 - **Install agent** puts it on PCs imaged before it existed (over WinRM or the
   admin share, like a reimage), and waits for each one's first check-in.
+- **On a PC the console can't reach** (WinRM and file sharing blocked): on that
+  PC, right-click `\\<server>\<share>\Agent\Install-Agent.cmd` and pick **Run as
+  administrator**. The console keeps that folder up to date (the agent files and
+  `agent.json` with the status folder and its public key, nothing secret) each
+  time the Computers tab opens. It installs the same way and waits for the
+  first check-in.
 
 Security: any domain PC can write in `Status`, so a job only counts when the
 console signed it (RSA 3072, SHA-256) with its private key,

@@ -47,6 +47,9 @@ $owned = $false
 try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) { exit 0 }
 
+# RemoteReimage.psm1 here too, not only inside ImagingAgent.psm1: a module's own imports stay inside it, so this
+# script could not see Invoke-LocalDiskBoot (GWHZLG3's reimage job: "Invoke-LocalDiskBoot is not recognized").
+Import-Module ([IO.Path]::Combine($dir, 'RemoteReimage.psm1')) -Force
 Import-Module ([IO.Path]::Combine($dir, 'ImagingAgent.psm1')) -Force
 
 $configPath = [IO.Path]::Combine($dir, 'agent.json')

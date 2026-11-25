@@ -981,7 +981,27 @@ function Update-Computers {
     # No default answer file: keep the one picked, or the only one there is.
     $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif ($answers.Count -eq 1) { $answers[0] } else { $null }
     Update-AdBootStatus
+    Update-AgentInstaller
     Show-AdRows
+}
+
+function Update-AgentInstaller {
+    # <share>\Agent\Install-Agent.cmd: for a PC the console cannot reach, run on it as administrator. Never fails the tab.
+    try {
+        $share = Get-ReimageShare
+        $statusFolder = Get-DashboardFolder
+        if (-not $share -or $share -notlike '\\*' -or -not $statusFolder -or $statusFolder -notlike '\\*') { return }
+        $settings = Get-DeploySettings -ContentRoot $script:root
+        $cfg = if ($settings -and $settings.PSObject.Properties['agent']) { $settings.agent } else { $null }
+        if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { return }
+        $minutes = if ($cfg -and $cfg.PSObject.Properties['checkInMinutes'] -and $cfg.checkInMinutes) { [int]$cfg.checkInMinutes } else { 5 }
+        $key = Get-AgentPublicKey -ContentRoot $script:root -Create
+        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInMinutes $minutes `
+            -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
+        $folder = Publish-AgentInstaller -Folder "$($share.TrimEnd('\'))\Agent" -SourceDir $srcDir -Config $config
+        $ui.BtnAdAgent.ToolTip = "Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. " +
+            "For a PC the console cannot reach: on that PC, right-click $folder\Install-Agent.cmd and pick Run as administrator."
+    } catch { }
 }
 
 function Search-AdComputers {
