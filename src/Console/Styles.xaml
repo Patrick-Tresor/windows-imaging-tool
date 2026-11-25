@@ -361,6 +361,12 @@
     <Setter Property="Padding" Value="10,8"/>
     <Setter Property="HorizontalContentAlignment" Value="Left"/>
     <Setter Property="SnapsToDevicePixels" Value="True"/>
+    <!-- Headers wrap onto two lines when the window is narrow instead of being cut off. -->
+    <Setter Property="ContentTemplate">
+      <Setter.Value>
+        <DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate>
+      </Setter.Value>
+    </Setter>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="DataGridColumnHeader">
@@ -427,7 +433,8 @@
     <Setter Property="HeadersVisibility" Value="Column"/>
     <Setter Property="GridLinesVisibility" Value="Horizontal"/>
     <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource LineBrush}"/>
-    <Setter Property="RowHeight" Value="32"/>
+    <!-- A row grows when its text wraps (GridFit.psm1); one-line rows stay 32 px. -->
+    <Setter Property="MinRowHeight" Value="32"/>
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
     <Setter Property="RowBackground" Value="Transparent"/>
     <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
