@@ -65,6 +65,20 @@ try {
     Assert-Equal "$($info.Firmware)|$($info.Serial)|$($info.FreeC)" "UEFI|abc123|$(50GB)" 'a check-in reads like the network check of a PC'
     Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force
     Assert-Equal (@(Test-RemoteTarget -Info $info -ExpectedName 'PC01').Count) 0 'so the same checks run before a reimage'
+    # GWHZLG3: DNS gave 10.10.64.51, its agent reported 10.10.2.1. The network fallback tries the agent's first.
+    $known = Get-AgentKnownAddresses -CheckIns $rows -Targets @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01.corp.local' }, [pscustomobject]@{ Name = 'PC09'; Address = 'PC09' })
+    Assert-Equal "$($known.Keys -join ',')|$($known['pc01.corp.local'] -join ',')" 'pc01.corp.local|10.1.2.34,192.168.56.1' 'the addresses its agent reported, by the address the console uses'
+    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress \(Get-AgentKnownAddresses') $true 'a reimage checks the network with them'
+
+    # A PC the console can't reach installs the agent itself from <share>\Agent.
+    $pub = Join-Path $root 'share/Agent'
+    $cfg = New-AgentConfig -StatusFolder '\\srv\Deploy\Status' -PublicKeys @($public) -CheckInMinutes 5
+    Assert-Equal (Publish-AgentInstaller -Folder $pub -SourceDir (Join-Path $repo 'src') -Config $cfg) $pub 'the installer folder is made'
+    foreach ($f in @(Get-AgentFileNames) + 'Install-AgentHere.ps1', 'Install-Agent.cmd', 'agent.json') { Assert-Equal (Test-Path (Join-Path $pub $f)) $true "$f is in it" }
+    Assert-Equal (([IO.File]::ReadAllText((Join-Path $pub 'agent.json')) | ConvertFrom-Json).statusFolder) '\\srv\Deploy\Status' 'agent.json says where to check in'
+    Assert-Equal ((Get-ChildItem $pub -Recurse | Where-Object Name -match 'agent-key') -eq $null) $true 'never the private key'
+    Assert-Equal (Publish-AgentInstaller -Folder $pub -SourceDir (Join-Path $repo 'src') -Config $cfg) $pub 'publishing again changes nothing and does not fail'
+
     # GWHZLG3: an agent from before the fix read PEFirmwareType (WinPE only) and said Legacy on a UEFI PC.
     $oldAgent = [pscustomobject]@{ computerName = 'PC01'; firmware = 'Legacy'; serial = 'abc123'; uuid = 'U1'; freeC = 50GB }
     $info = ConvertTo-AgentTargetInfo $oldAgent
@@ -202,8 +216,32 @@ $xaml = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/MainWindow.x
 Assert-Equal ($xaml -match 'Header="Agent" Binding="\{Binding Agent\}"') $true 'the Computers grid has an Agent column'
 Assert-Equal ($xaml -match 'Header="Last seen" Binding="\{Binding LastSeenText\}"') $true 'the Dashboard has a Last seen column'
 
+# Every tool function the agent scripts call is there after the modules they import: a module's own imports stay
+# inside it (GWHZLG3's reimage job: "Invoke-LocalDiskBoot is not recognized").
+$toolFunctions = @{}
+foreach ($m in Get-ChildItem (Join-Path $repo 'src') -Filter *.psm1) {
+    foreach ($x in [regex]::Matches([IO.File]::ReadAllText($m.FullName), '(?m)^function\s+([\w-]+)')) { $toolFunctions[$x.Groups[1].Value] = $m.Name }
+}
+foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1') },
+                 @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') })) {
+    $text = [IO.File]::ReadAllText((Join-Path $repo $s.File))
+    foreach ($m in $s.Modules) { Assert-Equal ($text -match [regex]::Escape("'$m'")) $true "$($s.File) imports $m" }
+    $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+    $own = @($ast.FindAll({ $args[0] -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)
+    $called = @($ast.FindAll({ $args[0] -is [Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } |
+        Where-Object { $_ -and $toolFunctions.ContainsKey($_) -and $own -notcontains $_ } | Select-Object -Unique)
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($Paths, $Names)
+        foreach ($p in $Paths) { Import-Module $p -Force }
+        @($Names | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+    }).AddArgument(@($s.Modules | ForEach-Object { Join-Path $repo "src/$_" })).AddArgument($called)
+    $missing = @($ps.Invoke()); $ps.Dispose()
+    Assert-Equal ($missing -join ', ') '' "$($s.File) can call every tool function it uses ($($called.Count))"
+}
+
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
-foreach ($f in 'src/ImagingAgent.psm1', 'src/ImagingAgent.ps1', 'src/Install-RemoteAgent.ps1') {
+foreach ($f in 'src/ImagingAgent.psm1', 'src/ImagingAgent.ps1', 'src/Install-RemoteAgent.ps1', 'src/Install-AgentHere.ps1', 'src/Install-Agent.cmd') {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repo $f))
     Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 "$f is ASCII"
 }

@@ -193,8 +193,6 @@ function Start-PcOverNetwork($p) {
 
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $ContentRoot "AnswerFiles\$AnswerFile.xml"))) { throw "Answer file $AnswerFile is not on $ContentRoot." }
-    $up = Get-RemoteOnlineState -ComputerName @($pcs | ForEach-Object Address)
-
     # The agents that checked in lately, and the console's key to sign their jobs.
     $agentKey = $null; $checkIns = @(); $bootHash = $null
     if (-not $NoAgent) {
@@ -207,6 +205,9 @@ try {
         if ($agentKey -and $checkIns) { try { $null = Grant-StatusFolderAccess -StatusFolder $StatusFolder } catch { } }
         if (-not $agentKey -and $checkIns) { Write-Host 'No agent signing key (config\secrets\agent-key.xml) on this content root: the agents are not used.' }
     }
+    # The addresses each PC's agent reported go first: DNS may hold an old one (GWHZLG3: DNS 10.10.64.51, the agent
+    # reported 10.10.2.1), and the network check is the fallback when the agent can't do the job.
+    $up = Get-RemoteOnlineState -ComputerName @($pcs | ForEach-Object Address) -KnownAddress (Get-AgentKnownAddresses -CheckIns $checkIns -Targets $pcs)
 
     # One PC at a time up to its restart: each copy of boot.wim is a few hundred MB.
     foreach ($p in $pcs) {

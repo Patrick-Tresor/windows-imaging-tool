@@ -29,6 +29,8 @@ $script:AgentTaskName = 'ImagingTool\Agent'
 # The files the agent runs from (copied into C:\ProgramData\ImagingTool\Agent, administrators and SYSTEM only).
 $script:AgentFiles = @('ImagingAgent.ps1', 'ImagingAgent.psm1', 'RemoteReimage.psm1', 'JsonFile.psm1', 'AnswerFile.psm1', 'AppPack.psm1',
     'LibraryPack.psm1', 'ScriptLog.psm1')
+# What a PC needs to install the agent by itself (Publish-AgentInstaller puts them in <share>\Agent).
+$script:AgentInstallerFiles = @('Install-AgentHere.ps1', 'Install-Agent.cmd')
 $script:KeyFile = 'config\secrets\agent-key.xml'
 $script:PublicKeyFile = 'config\agent-public-key.xml'
 
@@ -426,6 +428,23 @@ function Format-AgentLastSeen {
     $LastSeen.ToString('yyyy-MM-dd HH:mm')
 }
 
+function Get-AgentKnownAddresses {
+    <#
+    .SYNOPSIS
+        Address -> the IPv4 addresses each PC's agent reported in its last check-in, for Get-RemoteOnlineState
+        -KnownAddress: DNS can hold an old address, the PC's own report is fresher. Targets: objects with Name, Address.
+    #>
+    param($CheckIns, $Targets)
+    $known = @{}
+    foreach ($t in @($Targets | Where-Object { $_ })) {
+        $a = Find-AgentCheckIn -CheckIns @($CheckIns) -ComputerName "$($t.Name)"
+        if (-not $a) { continue }
+        $ips = @(@("$($a.ipAddress)") + @($a.ipAddresses) | Where-Object { "$_" } | ForEach-Object { "$_" } | Select-Object -Unique)
+        if ($ips) { $known["$($t.Address)"] = $ips }
+    }
+    $known
+}
+
 function ConvertTo-AgentTargetInfo {
     # A check-in as Get-RemoteComputerInfo's record, so Test-RemoteTarget checks an agent PC the same way.
     param([Parameter(Mandatory)]$CheckIn)
@@ -637,6 +656,8 @@ function Install-AgentOnRemotePC {
     $acl = @($dir, '/inheritance:r', '/grant:r', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F')
     Invoke-RemoteChannel -Channel $Channel -ArgumentList $dir, $acl -ScriptBlock {
         param($Dir, $AclArgs)
+        # An agent already running keeps its old code (one at a time): stop it, -Register starts the new one.
+        & schtasks.exe /End /TN 'ImagingTool\Agent' 2>&1 | Out-Null
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
         # Administrators and SYSTEM only, before the scripts that run as SYSTEM go in.
         $o = & icacls.exe ([string[]]$AclArgs) 2>&1
@@ -653,10 +674,38 @@ function Install-AgentOnRemotePC {
     } | Out-Null
 }
 
+function Publish-AgentInstaller {
+    <#
+    .SYNOPSIS
+        Console: puts what a PC needs to install the agent by itself in a folder on the share (<share>\Agent): the agent
+        files, agent.json (the status folder and the console's public key, nothing secret) and Install-Agent.cmd.
+        For a PC the console cannot reach: on that PC, run \\server\share\Agent\Install-Agent.cmd as administrator.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][string]$SourceDir,     # the console's src folder
+        [Parameter(Mandatory)]$Config                 # New-AgentConfig
+    )
+    [void][IO.Directory]::CreateDirectory($Folder)
+    foreach ($f in @($script:AgentFiles + $script:AgentInstallerFiles)) {
+        $src = Join-AgentPath $SourceDir $f
+        $dst = Join-AgentPath $Folder $f
+        $si = New-Object IO.FileInfo $src
+        $di = New-Object IO.FileInfo $dst
+        if ($di.Exists -and $di.Length -eq $si.Length -and $di.LastWriteTimeUtc -eq $si.LastWriteTimeUtc) { continue }
+        [IO.File]::Copy($src, $dst, $true)
+    }
+    $json = ConvertTo-Json -InputObject $Config -Depth 6
+    $cfg = Join-AgentPath $Folder 'agent.json'
+    $old = try { [IO.File]::ReadAllText($cfg) } catch { $null }
+    if ($old -ne $json) { [IO.File]::WriteAllText($cfg, $json, (New-Object Text.UTF8Encoding $true)) }
+    $Folder
+}
+
 #endregion
 
 Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
-    New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentRowView,
-    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
+    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
