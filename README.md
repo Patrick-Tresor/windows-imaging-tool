@@ -251,6 +251,12 @@ deploy, so an old job can't reimage it again), expires after an hour, and runs
 once. The job's folder is readable only by administrators, the console's
 account and that PC's computer account, since boot.wim holds the answer file key.
 
+A reimage needs a network cable (or dock) on the PC: WinPE has no Wi-Fi. A PC
+whose agent says it is on Wi-Fi only is not restarted. In WinPE the deploy waits
+up to 90 s for an address, then tries the share by the path as set, the server's
+full name and its IP addresses (recorded in `config\share-hosts.json` when the
+boot image is built), again for a minute.
+
 Needs: `Domain Computers` with modify rights on the share's `Status` folder (as
 for the Dashboard), and Change on the share. When the share is on the console
 PC, **Install agent** and **Reimage...** add both by themselves (never taking
