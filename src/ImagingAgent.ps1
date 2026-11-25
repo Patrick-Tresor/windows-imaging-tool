@@ -120,9 +120,17 @@ function Send-CheckIn {
     $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
     $free = try { [int64](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop).FreeSpace } catch { $null }
     $deploy = if ($config.PSObject.Properties['deploy']) { $config.deploy } else { $null }
-    $record = New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -CheckInMinutes $every `
+    $script:lastCheckIn = Get-Date
+    # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
+    $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -CheckInMinutes $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
-        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob
+        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -ErrorAction Stop
+    } catch {
+        $m = "Could not make the check-in: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
+        if ($script:lastError -ne $m) { Write-Log $m }
+        $script:lastError = $m
+        return
+    }
     try {
         Save-AgentCheckIn -StatusFolder $statusFolder -Record $record
         if ($script:lastError) { Write-Log 'Checked in again' }
@@ -132,7 +140,6 @@ function Send-CheckIn {
         if ($script:lastError -ne $_.Exception.Message) { Write-Log "Could not check in to ${statusFolder}: $($_.Exception.Message)" }
         $script:lastError = $_.Exception.Message
     }
-    $script:lastCheckIn = Get-Date
 }
 
 function Set-JobState($Job, [string]$JobState, [string]$Message) {
@@ -183,8 +190,15 @@ function Invoke-AgentJob {
 
 try {
     while ($true) {
-        if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn }
-        Invoke-AgentJob
+        # One bad round is logged (once while it repeats) and the agent carries on: it must never stop by itself.
+        try {
+            if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn }
+            Invoke-AgentJob
+        } catch {
+            $m = "Error: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
+            if ($script:lastLoopError -ne $m) { Write-Log $m }
+            $script:lastLoopError = $m
+        }
         if ($Once) { break }
         Start-Sleep -Seconds 60
     }

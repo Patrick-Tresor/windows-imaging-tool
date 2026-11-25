@@ -32,6 +32,9 @@ try {
         -Deploy ([pscustomobject]@{ answerFile = 'Staff-W11'; image = 'Win11.wim'; toolVersion = 'abc1234'; deployedAt = '2026-11-20T10:00:00' }) `
         -AgentId 'agent-1' -ComputerName 'pc01' -Account 'CORP\PC01$' -AccountSid 'S-1-5-21-1-2-3-1104' -FreeC 50GB -Result 'Result: Ready' -Now $now
     Assert-Equal $record.computerName 'PC01' 'the name is upper case'
+    # As on GWHZLG3: Windows gives the boot time as a date. A [Nullable[datetime]] parameter holds a plain date.
+    $booted = New-AgentCheckIn -Identity $identity -AgentId 'agent-1' -BootTime $now.AddHours(-2) -FreeC $null -Now $now
+    Assert-Equal $booted.bootTime $now.AddHours(-2).ToString('o') 'a check-in with the boot time is made (no null-valued expression)'
     Assert-Equal $record.ipAddress '10.1.2.34' 'the first address (the adapter with a gateway) is the IP'
     Save-AgentCheckIn -StatusFolder $status -Record $record
     Assert-Equal (Test-Path (Join-Path $status 'Agents/ABC123.json')) $true 'it is saved by serial in Status\Agents'
@@ -173,6 +176,7 @@ Remove-Item $tmp, "$tmp.copy" -Force
 
 # How the rest of the tool uses it.
 $agentPs1 = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/ImagingAgent.ps1')
+Assert-Equal ($agentPs1 -match '(?s)while \(\$true\) \{\s*#[^\n]*\n\s*try \{') $true 'an error in one round never stops the agent'
 Assert-Equal ($agentPs1 -match 'Test-AgentJob') $true 'the agent checks every job before running it'
 Assert-Equal ($agentPs1 -match "Invoke-LocalDiskBoot[^\r\n]+-Method Local") $true 'a reimage job restarts the PC into WinPE through the local channel'
 Assert-Equal ($agentPs1 -match 'bootWimSha256') $true 'the boot image is checked against the signed checksum'

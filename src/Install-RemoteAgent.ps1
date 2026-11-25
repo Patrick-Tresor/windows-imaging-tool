@@ -63,7 +63,7 @@ function Get-RemoteAgentProblem($p) {
     try {
         $r = @(Invoke-RemoteChannel -Channel $ch -ScriptBlock {
             $log = "$env:WINDIR\Temp\ImagingAgent.log"
-            $lines = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log -Tail 15) } else { @() }
+            $lines = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log -Tail 15 -Encoding UTF8) } else { @() }
             $task = Get-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'Agent' -ErrorAction SilentlyContinue
             $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
             [pscustomobject]@{ Lines = $lines; State = $(if ($task) { "$($task.State)" } else { '' }); Result = $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' }) }
