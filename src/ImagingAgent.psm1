@@ -355,7 +355,9 @@ function New-AgentCheckIn {
         macAddress     = "$(& $get $Network 'macAddress')"
         os             = $Os
         userSignedIn   = $UserSignedIn
-        bootTime       = $(if ($BootTime) { $BootTime.Value.ToString('o') } else { '' })
+        # A [Nullable[datetime]] parameter holds a plain date in PowerShell (no .Value): that was GWHZLG3's
+        # "cannot call a method on a null-valued expression" at every start.
+        bootTime       = $(if ($BootTime) { ([datetime]$BootTime).ToString('o') } else { '' })
         freeC          = $FreeC
         answerFile     = "$(& $get $Deploy 'answerFile')"
         image          = "$(& $get $Deploy 'image')"
