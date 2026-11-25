@@ -20,6 +20,19 @@ foreach ($node in $main.SelectNodes('//*[local-name()="TabItem"]/*[local-name()=
     Assert-Equal ($min -le 480) $true "a filling page asks for no more height than a restored window has ($min <= 480)"
 }
 
+# The width sharing itself.
+Import-Module (Join-Path $console 'GridFit.psm1') -Force
+$inf = [double]::PositiveInfinity
+$w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 1000
+Assert-Equal ($w -join ',') '120,440,440' 'wide: a pixel column stays at its XAML width, * columns share the rest'
+$w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 256
+Assert-Equal (($w | Measure-Object -Sum).Sum -le 256) $true "narrow: the columns fit ($($w -join ','))"
+Assert-Equal ($w[0] -gt $w[1]) $true 'narrow: the 120 px column shrinks in proportion with the * columns'
+$w = Get-FitColumnWidths -Base 120, 100, 100 -Min 60, 50, 50 -Max 120, $inf, $inf -Available 100
+Assert-Equal ($w -join ',') '60,50,50' 'too narrow: every column at its minimum'
+$w = Get-FitColumnWidths -Base 90, 60 -Min 50, 50 -Max 90, 60 -Available 1000
+Assert-Equal ($w -join ',') '90,60' 'only pixel columns: none grows past its XAML width'
+
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'
 if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     Write-Host 'SKIP layout checks: WPF needs Windows' -ForegroundColor Yellow

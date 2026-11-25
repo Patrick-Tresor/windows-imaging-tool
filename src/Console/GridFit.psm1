@@ -1,8 +1,9 @@
 # Grids that fit their window. WPF keeps a column with a pixel width at that width, so in a smaller window the grid's
-# other columns are squeezed to nothing and the last ones run off the right edge. Enable-GridFit turns every pixel
-# width into a share of the grid (it never grows past the width in the XAML, and shrinks with the others when room
-# is short), keeps each column at least as wide as the longest word of its header, wraps header and cell text, and
-# lets a row grow to three lines instead of cutting its text off.
+# other columns are squeezed to nothing and the last ones run off the right edge. Enable-GridFit sizes the columns
+# itself whenever the grid's room changes: a pixel width in the XAML is the most that column gets, and it shrinks
+# with the others when room is short (WPF's own * columns don't grow back after a column has a MaxWidth, so they
+# are not used). Each column keeps at least the longest word of its header, header and cell text wrap, and a row
+# grows to three lines instead of cutting its text off.
 
 # The smallest width a column can have: its header's longest word plus the header's padding and gripper.
 function Get-GridHeaderMinWidth {
@@ -17,19 +18,36 @@ function Get-GridHeaderMinWidth {
     [Math]::Max(48, [Math]::Ceiling($widest) + 24)
 }
 
-# One grid: pixel widths become shares, every column gets a header-sized minimum, text columns wrap.
+# Column widths for $Available pixels: each column gets $Base times one shared factor, kept between its $Min and $Max.
+# The factor is the largest one that still fits, so the columns fill the grid; when even the minimums don't fit,
+# every column is at its minimum and the grid scrolls sideways.
+function Get-FitColumnWidths {
+    param([double[]]$Base, [double[]]$Min, [double[]]$Max, [double]$Available)
+    $n = $Base.Count
+    $at = {
+        param([double]$f)
+        $total = 0.0
+        for ($i = 0; $i -lt $n; $i++) { $total += [Math]::Min($Max[$i], [Math]::Max($Min[$i], $Base[$i] * $f)) }
+        $total
+    }
+    $lo = 0.0; $hi = 1000.0
+    if ((& $at $hi) -le $Available) { $lo = $hi }
+    else { for ($k = 0; $k -lt 50; $k++) { $mid = ($lo + $hi) / 2; if ((& $at $mid) -le $Available) { $lo = $mid } else { $hi = $mid } } }
+    ,@(for ($i = 0; $i -lt $n; $i++) { [Math]::Floor([Math]::Min($Max[$i], [Math]::Max($Min[$i], $Base[$i] * $lo))) })
+}
+
+# One grid: its columns are sized here, not by the DataGrid, every time the room for them changes. A column with a
+# pixel width in the XAML never grows past it and shrinks with the others; a * column (100 px a star) takes the
+# rest. Every column keeps at least its header's longest word, and text columns wrap.
 function Set-DataGridFit {
     param([Parameter(Mandatory)][Windows.Controls.DataGrid]$Grid)
+    $plan = @()
     foreach ($col in @($Grid.Columns)) {
         $min = Get-GridHeaderMinWidth -Header $col.Header -FontFamily $Grid.FontFamily -FontSize $Grid.FontSize
+        $min = [Math]::Max($min, $col.MinWidth)
         $width = $col.Width
-        if ($width.IsAbsolute) {
-            # 100 px is worth one star: a 120 px column next to a * column gets a bit more room than it.
-            $px = $width.Value
-            $col.Width = [Windows.Controls.DataGridLength]::new($px / 100, [Windows.Controls.DataGridLengthUnitType]::Star)
-            $col.MaxWidth = [Math]::Max($px, $min)
-        }
-        if ($col.MinWidth -lt $min) { $col.MinWidth = $min }
+        if ($width.IsAbsolute) { $plan += [pscustomobject]@{ Column = $col; Base = $width.Value; Min = $min; Max = [Math]::Max($width.Value, $min) } }
+        elseif ($width.IsStar) { $plan += [pscustomobject]@{ Column = $col; Base = $width.Value * 100; Min = $min; Max = [double]::PositiveInfinity } }
 
         if ($col -is [Windows.Controls.DataGridTextColumn]) {
             $base = $col.ElementStyle
@@ -43,6 +61,38 @@ function Set-DataGridFit {
             $col.ElementStyle = $style
         }
     }
+    if (-not $plan) { return }
+    foreach ($p in $plan) { $p.Column.MinWidth = $p.Min; $p.Column.Width = [Windows.Controls.DataGridLength]::new($p.Base) }
+
+    $fit = ${function:Get-FitColumnWidths}
+    $state = @{ Last = -1.0 }
+    $apply = {
+        param($grid)
+        try {
+            $sv = $grid.Template.FindName('DG_ScrollViewer', $grid)
+            $room = if ($sv -and $sv.ViewportWidth -gt 0) { $sv.ViewportWidth } else { $grid.ActualWidth - $grid.BorderThickness.Left - $grid.BorderThickness.Right }
+            $shown = @($plan | Where-Object { $_.Column.Visibility -eq 'Visible' })
+            # Columns sized another way (Auto) keep their room.
+            foreach ($col in $grid.Columns) { if ($col.Visibility -eq 'Visible' -and -not ($plan.Column -contains $col)) { $room -= $col.ActualWidth } }
+            $room = [Math]::Floor($room) - 1
+            if ($room -le 0 -or -not $shown -or [Math]::Abs($room - $state.Last) -lt 1) { return }
+            $state.Last = $room
+            $widths = & $fit -Base @($shown.Base) -Min @($shown.Min) -Max @($shown.Max) -Available $room
+            for ($i = 0; $i -lt $shown.Count; $i++) { $shown[$i].Column.Width = [Windows.Controls.DataGridLength]::new($widths[$i]) }
+        } catch { }
+    }.GetNewClosure()
+    $Grid.Add_SizeChanged({ param($s, $e) & $apply $s }.GetNewClosure())
+    $Grid.Add_Loaded({
+        param($s, $e)
+        $sv = $s.Template.FindName('DG_ScrollViewer', $s)
+        # The room also changes when the grid's own vertical scroll bar comes or goes.
+        if ($sv -and -not $sv.Tag) {
+            $sv.Tag = 'GridFit'
+            $grid = $s
+            $sv.Add_ScrollChanged({ param($x, $e) if ($e.ViewportWidthChange -ne 0) { & $apply $grid } }.GetNewClosure())
+        }
+        & $apply $s
+    }.GetNewClosure())
 }
 
 # Every DataGrid in the window's XAML, on every tab.
@@ -58,4 +108,4 @@ function Enable-GridFit {
     foreach ($grid in @(Get-LogicalDataGrids $Window)) { Set-DataGridFit -Grid $grid }
 }
 
-Export-ModuleMember -Function Get-GridHeaderMinWidth, Set-DataGridFit, Enable-GridFit
+Export-ModuleMember -Function Get-GridHeaderMinWidth, Get-FitColumnWidths, Set-DataGridFit, Enable-GridFit
