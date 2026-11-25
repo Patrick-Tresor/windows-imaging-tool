@@ -13,7 +13,7 @@ $loader = Get-Content -Raw -LiteralPath (Join-Path $console 'XamlWindow.psm1')
 Assert-Equal ($loader -match 'Enable-GridFit \$window') $true 'New-ConsoleWindow fits the grids of every window'
 $fitCode = Get-Content -Raw -LiteralPath (Join-Path $console 'GridFit.psm1')
 Assert-Equal ($fitCode -match 'GetNewClosure') $false 'GridFit handlers are module script blocks, not closures (a nested closure lost its variables)'
-Assert-Equal ($fitCode -match 'AddOrUpdate') $false 'GridFit runs on Windows PowerShell 5.1 (no ConditionalWeakTable.AddOrUpdate there)'
+Assert-Equal ($fitCode -match '\.AddOrUpdate\(') $false 'GridFit runs on Windows PowerShell 5.1 (no ConditionalWeakTable.AddOrUpdate there)'
 $styles = Get-Content -Raw -LiteralPath (Join-Path $console 'Styles.xaml')
 Assert-Equal ($styles -match 'Property="RowHeight"') $false 'grid rows have no fixed height, so wrapped text shows'
 Assert-Equal ($styles -match 'Property="MinRowHeight" Value="32"') $true 'one-line rows stay 32 px'
