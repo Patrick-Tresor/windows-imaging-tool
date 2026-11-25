@@ -385,7 +385,7 @@ function Update-AgentDeployStatus {
         that app's warning; with nothing failed or warned any more, the deployment goes back to Succeeded.
         -Results: { name, ok, status, message } per app. Returns the record, or $null when there is none.
     #>
-    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][object[]]$Results, [datetime]$Now = (Get-Date))
+    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [datetime]$Now = (Get-Date))
     $id = ($Serial.Trim() -replace '[\\/:*?"<>|\s]', '_')
     $path = Join-AgentPath $StatusFolder "$id.json"
     if (-not [IO.File]::Exists($path)) { return $null }
