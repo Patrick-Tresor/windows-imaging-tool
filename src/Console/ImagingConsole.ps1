@@ -957,8 +957,10 @@ function Show-AdRows {
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
         $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name
         $_ | Add-Member -NotePropertyName Online -NotePropertyValue $view.Online -Force
-        # The address the online check reached, else the one the agent reported; a PC found by IP shows that IP.
-        $ip = if ($check -and $check.Ip) { $check.Ip } elseif ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
+        # The address the online check reached; when the network check got no way in, the one the PC's agent reported
+        # lately (the PC's own word, DNS can be old); a PC found by IP shows that IP.
+        $agentIp = if ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } else { '' }
+        $ip = if ($check -and $check.Ip -and ($check.Online -or -not $agentIp)) { $check.Ip } elseif ($agentIp) { $agentIp } elseif ($check -and $check.Ip) { $check.Ip } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
         $_ | Add-Member -NotePropertyName IpAddress -NotePropertyValue $ip -Force
         $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $view.OnlineDetail -Force
         $_ | Add-Member -NotePropertyName Agent -NotePropertyValue $view.Agent -Force
@@ -1022,7 +1024,15 @@ function Search-AdComputers {
 }
 
 function Update-AdOnline {
-    $script:adOnline = if ($script:adRows) { Get-RemoteOnlineState -ComputerName @($script:adRows | ForEach-Object Address) } else { @{} }
+    # The addresses a PC's agent reported in its last check-in are knocked on first: DNS can be old or give a second
+    # adapter's address.
+    $known = @{}
+    $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
+    foreach ($r in @($script:adRows)) {
+        $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $r.Name
+        if ($a -and $a.Online) { $known[$r.Address] = @(@($a.ipAddresses) + "$($a.ipAddress)" | Where-Object { $_ }) }
+    }
+    $script:adOnline = if ($script:adRows) { Get-RemoteOnlineState -ComputerName @($script:adRows | ForEach-Object Address) -KnownAddress $known } else { @{} }
 }
 
 function Get-AdOnlineSummary {
