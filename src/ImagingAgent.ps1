@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    The agent on an imaged PC: checks in with the imaging console and takes the jobs it signed (reimage).
+    The agent on an imaged PC: checks in with the imaging console and takes the jobs it signed (reimage, and
+    install apps: the Dashboard's Retry failed apps).
 .DESCRIPTION
     Runs as SYSTEM from the scheduled task ImagingTool\Agent (at startup, and every 15 minutes in case it stopped),
     from C:\ProgramData\ImagingTool\Agent (administrators and SYSTEM only). Deploy-Image.ps1 puts it there with
@@ -51,6 +52,8 @@ if (-not $owned) { exit 0 }
 # script could not see Invoke-LocalDiskBoot (GWHZLG3's reimage job: "Invoke-LocalDiskBoot is not recognized").
 Import-Module ([IO.Path]::Combine($dir, 'RemoteReimage.psm1')) -Force
 Import-Module ([IO.Path]::Combine($dir, 'ImagingAgent.psm1')) -Force
+# Install apps jobs: the same app pack code first boot runs (Invoke-AppInstall).
+Import-Module ([IO.Path]::Combine($dir, 'AppPack.psm1')) -Force
 
 $configPath = [IO.Path]::Combine($dir, 'agent.json')
 try { $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json }
@@ -164,6 +167,43 @@ function Set-JobState($Job, [string]$JobState, [string]$Message) {
     Send-CheckIn
 }
 
+function Invoke-AppsJob($Job, [string]$JobDir) {
+    # The Dashboard's Retry failed apps: copy the packs the console put next to the job, check them against the
+    # signed hash, install each one as first boot does, and put the results on the Dashboard row.
+    $names = @(Get-AgentJobApps $Job)
+    Set-JobState $Job 'Running' "Copying $($names -join ', ')"
+    $work = [IO.Path]::Combine($dir, 'Work\Apps')
+    try {
+        if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) }
+        Copy-AgentFolder -Source ([IO.Path]::Combine($JobDir, 'Apps')) -Destination $work
+        $hash = Get-AgentPayloadHash $work
+        if ($hash -ne "$($Job.payloadSha256)".ToUpperInvariant()) { throw "the application packs' SHA-256 ($hash) is not the one the console signed" }
+        $results = @()
+        foreach ($name in $names) {
+            Set-JobState $Job 'Running' "Installing $name"
+            $appDir = [IO.Path]::Combine($work, $name)
+            $r = try {
+                $app = Read-AppPack -AppRoot $work -Name $name
+                Invoke-AppInstall -Definition $app -AppFolder $appDir -LogPath "$env:WINDIR\Temp\App-$name.log" -Log { param($m) Write-Log $m }
+            } catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+            $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
+            Write-Log "  $name $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+            $results += [pscustomobject]@{ name = $name; ok = $ok; status = "$($r.Status)"; message = "$($r.Message)" }
+        }
+        try { $null = Update-AgentDeployStatus -StatusFolder $statusFolder -Serial $identity.serial -Results $results }
+        catch { Write-Log "Could not update the Dashboard: $($_.Exception.Message)" }
+        $bad = @($results | Where-Object { -not $_.ok })
+        $text = if ($bad) { (($bad | ForEach-Object { "$($_.name) failed ($($_.status))" }) -join '; ') } else { "Installed $($names -join ', ')" }
+        Set-JobState $Job $(if ($bad) { 'Failed' } else { 'Done' }) $text
+    } catch {
+        Write-Log "Job $($Job.id) FAILED: $($_.Exception.Message)"
+        Set-JobState $Job 'Failed' $_.Exception.Message
+    } finally {
+        try { [IO.Directory]::Delete($JobDir, $true) } catch { }
+        try { if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) } } catch { }
+    }
+}
+
 function Invoke-AgentJob {
     $job = $null
     try { $job = Get-AgentJob -StatusFolder $statusFolder -Serial $identity.serial } catch { return }
@@ -182,6 +222,7 @@ function Invoke-AgentJob {
     $state.doneJobs = @(@($state.doneJobs) + "$($job.id)" | Select-Object -Last 20)
     Remove-AgentJob -StatusFolder $statusFolder -Serial $identity.serial -JobFileOnly
     Write-Log "Job $($job.id): $($job.action) asked by $($job.requestedBy) at $($job.createdAt)"
+    if ($job.action -eq 'installapps') { Invoke-AppsJob $job $jobDir; return }
     Set-JobState $job 'Running' 'Copying the boot image'
     $work = [IO.Path]::Combine($dir, 'Work')
     $wim = [IO.Path]::Combine($work, 'boot.wim')

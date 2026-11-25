@@ -144,6 +144,42 @@ try {
     Assert-Equal (Test-Path $jobDir) $false 'the console removes the job and its boot image'
     Assert-Equal ($null -eq (Get-AgentJob -StatusFolder $status -Serial 'To be filled by O.E.M.')) $true 'a shared serial never has a job'
 
+    # The Dashboard's Retry failed apps: an install apps job with the packs next to it and one signed hash of them.
+    $appRoot = Join-Path $root 'Applications'
+    New-Item -ItemType Directory -Path (Join-Path $appRoot 'Google Chrome/files') -Force | Out-Null
+    Set-Content (Join-Path $appRoot 'Google Chrome/app.json') '{ "command": "msiexec /i chrome.msi /qn" }'
+    Set-Content (Join-Path $appRoot 'Google Chrome/files/chrome.msi') 'msi bytes'
+    $appsJob = New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Google Chrome') -AppRoot $appRoot -Now $now -SetFolderAccess { param($f, $a) }
+    Assert-Equal (Test-Path (Join-Path $jobDir 'Apps/Google Chrome/files/chrome.msi')) $true 'the app pack is copied next to the job'
+    Assert-Equal (Test-Path (Join-Path $jobDir 'boot.wim')) $false 'no boot image for an install apps job'
+    Assert-Equal $appsJob.payloadSha256 (Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) 'the packs'' hash is in the job'
+    Assert-Equal (Get-AgentPayloadHash (Join-Path $appRoot)) (Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) 'the same files give the same hash'
+    $readApps = Get-AgentJob -StatusFolder $status -Serial 'ABC123'
+    Assert-Equal ($null -eq (Test-AgentJob -Job $readApps -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1))) $true 'the PC takes an install apps job the console signed'
+    Assert-Equal ((Get-AgentJobApps $readApps) -join '|') 'Google Chrome' 'the job names the apps'
+    foreach ($f in 'apps', 'payloadSha256') { Assert-Equal ((Get-AgentJobText $readApps) -match "(?m)^$f=") $true "the signature covers $f" }
+    Assert-Equal ((Get-AgentJobText $read) -match '(?m)^(apps|payloadSha256)=') $false 'a reimage job is signed as before (agents from before still take it)'
+    $j = $readApps | ConvertTo-Json -Depth 4 | ConvertFrom-Json; $j.apps = 'Google Chrome, Evil'
+    Assert-Equal ((Test-AgentJob -Job $j -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1)) -like '*not signed*') $true 'an app added after signing is refused'
+    Set-Content (Join-Path $jobDir 'Apps/Google Chrome/files/chrome.msi') 'other bytes'
+    Assert-Equal ((Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) -ne $appsJob.payloadSha256) $true 'a changed pack file changes the hash (the PC refuses it)'
+    Assert-Throws { New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Nope') -AppRoot $appRoot -SetFolderAccess { param($f, $a) } } '*not in*' 'a missing app pack, no job'
+    Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
+
+    # The agent puts the new results on the Dashboard row.
+    $rec = [ordered]@{ id = 'ABC123'; serial = 'ABC123'; state = 'Warning'; percent = 100; warnings = @('Google Chrome failed (Failed)', 'Post-deploy checks: 1 failed')
+        checks = @(@{ name = 'App: Google Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, @{ name = 'App: Zoom'; result = 'Passed'; detail = 'Installed' }) }
+    $rec | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $status 'ABC123.json')
+    $up = Update-AgentDeployStatus -StatusFolder $status -Serial 'abc123' -Results @([pscustomobject]@{ name = 'Google Chrome'; ok = $true; status = 'Installed'; message = 'exit 0' }) -Now $now
+    $saved = Get-Content -Raw (Join-Path $status 'ABC123.json') | ConvertFrom-Json
+    Assert-Equal (@($saved.checks | Where-Object name -eq 'App: Google Chrome')[0].result) 'Passed' 'the app''s check passes now'
+    Assert-Equal "$($saved.state)|$(@($saved.warnings).Count)" 'Succeeded|0' 'its warnings go, and the deployment is Succeeded again'
+    Assert-Equal ((Get-Content -Raw (Join-Path $status 'ABC123.log')) -match 'Agent: Google Chrome installed') $true 'the live log says so'
+    $null = Update-AgentDeployStatus -StatusFolder $status -Serial 'ABC123' -Results @([pscustomobject]@{ name = 'Zoom'; ok = $false; status = 'Failed'; message = 'exit 1603' }) -Now $now
+    $saved = Get-Content -Raw (Join-Path $status 'ABC123.json') | ConvertFrom-Json
+    Assert-Equal "$(@($saved.checks | Where-Object name -eq 'App: Zoom')[0].result)|$($saved.state)" 'Failed|Succeeded' 'a failed retry marks the app failed (the Dashboard shows Not ready from it)'
+    Assert-Equal ($null -eq (Update-AgentDeployStatus -StatusFolder $status -Serial 'NOPE' -Results @())) $true 'no status for the PC, nothing to update'
+
     # Where a new PC's agent checks in: the folder WinPE reported to, or for a USB deploy that could not reach the
     # share (status kept on the stick), the share's Status folder from the settings.
     $shareSettings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } }
@@ -203,6 +239,7 @@ Assert-Equal ($agentPs1 -match '(?s)while \(\$true\) \{\s*#[^\n]*\n\s*try \{') $
 Assert-Equal ($agentPs1 -match 'Test-AgentJob') $true 'the agent checks every job before running it'
 Assert-Equal ($agentPs1 -match "Invoke-LocalDiskBoot[^\r\n]+-Method Local") $true 'a reimage job restarts the PC into WinPE through the local channel'
 Assert-Equal ($agentPs1 -match 'bootWimSha256') $true 'the boot image is checked against the signed checksum'
+Assert-Equal ($agentPs1 -match '(?s)function Invoke-AppsJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Invoke-AppInstall.*?Update-AgentDeployStatus') $true 'an install apps job checks the packs, installs them and updates the Dashboard'
 Assert-Equal ($agentPs1 -match 'Global\\ImagingToolAgent') $true 'one agent at a time'
 $deploy = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploy -match '(?s)Get-AgentStatusFolder -StatusTarget \$statusTarget.{0,80}Copy-AgentToImage -StatusFolder \$agentStatus') $true 'deploy puts the agent on every PC when a share is set, USB deploys too'
@@ -226,7 +263,7 @@ $toolFunctions = @{}
 foreach ($m in Get-ChildItem (Join-Path $repo 'src') -Filter *.psm1) {
     foreach ($x in [regex]::Matches([IO.File]::ReadAllText($m.FullName), '(?m)^function\s+([\w-]+)')) { $toolFunctions[$x.Groups[1].Value] = $m.Name }
 }
-foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1') },
+foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
                  @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') })) {
     $text = [IO.File]::ReadAllText((Join-Path $repo $s.File))
     foreach ($m in $s.Modules) { Assert-Equal ($text -match [regex]::Escape("'$m'")) $true "$($s.File) imports $m" }

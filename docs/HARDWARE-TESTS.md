@@ -53,6 +53,9 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.13b | On a PC the console cannot reach, run `\\server\share\Agent\Install-Agent.cmd` as administrator | "Done: <PC> checked in"; the Agent column fills in |
 | 2.13c | Reimage a laptop on Wi-Fi only through its agent, then again with a cable | First: "on Wi-Fi only", the PC does not restart. Then: WinPE maps the share (Deploy.log "Network: ..." and "Using network content at Z:\ (...)") |
 | 2.14 | Copy an old `job.json` back into `Status\Agents\Jobs\<serial>` after the reimage | The agent refuses it ("made for an earlier install"), nothing restarts |
+| 2.15 | Dashboard: a PC whose app failed at first boot (agent installed with this version), select it, **Retry failed apps** | Within a minute the details show "Agent job: installapps Running", then Done; the app's line turns green, Result says Ready (or the next problem), and the log has "Agent: <app> installed" |
+| 2.16 | Dashboard: click each count box, then History | The list shows only those PCs, the box is outlined; PCs listed shows them all again |
+| 2.17 | Start a deploy, switch to another tab (or another window) until it ends | A Windows notification "<PC> is ready" (or "not ready", "failed"), the taskbar button flashes; clicking the notification opens the Dashboard on that PC |
 
 ## 3. Features on the deployed PC
 

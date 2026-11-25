@@ -338,6 +338,7 @@ function Get-DeploymentStatus {
             Result       = if ($result) { $result.Verdict } else { '' }
             ResultState  = if ($result) { $result.Result } else { '' }
             ResultText   = if ($result) { $result.Text } else { '' }
+            ResultLines  = if ($result) { @($result.Lines) } else { @() }
         }
     }
     @($rows) | Sort-Object Started -Descending
@@ -367,7 +368,7 @@ function Remove-DeploymentStatus {
 
 function Get-ExpiredDeployments {
     # Finished PCs (Succeeded, Warning, Cancelled; not Failed or Not ready) not heard from for -Days: the console moves them off the Dashboard
-    # by itself (there is no Clear finished button). Their final log stays under Show: History.
+    # by itself (there is no Clear finished button). Their final log stays under History.
     param([AllowEmptyCollection()][object[]]$Rows, [int]$Days = 7, [datetime]$Now = (Get-Date))
     @($Rows | Where-Object { $_.State -in 'Succeeded', 'Warning', 'Cancelled' -and $_.Updated -and $_.Updated -lt $Now.AddDays(-$Days) })
 }
@@ -508,6 +509,67 @@ function Get-DeployResultSummary {
     [pscustomobject]@{ Verdict = $verdict; Result = $result; Lines = $lines.ToArray(); Text = ($textLines -join [Environment]::NewLine) }
 }
 
+function Get-DeployChecklist {
+    <#
+    .SYNOPSIS
+        The Dashboard's details for one PC: one line per part of the result (Windows, Drivers, Domain join, BitLocker,
+        time...), with one line per application and per task instead of their totals, so a failed one shows by name
+        with its reason. Each line: { Item, Result (OK, Warning, Failed, Info), Detail }.
+    #>
+    param([Parameter(Mandatory)]$Row)
+    $checks = @(if ($Row.PSObject.Properties['CheckResults']) { @($Row.CheckResults) | Where-Object { $_ } })
+    $lines = @(if ($Row.PSObject.Properties['ResultLines']) { @($Row.ResultLines) | Where-Object { $_ } })
+    $mark = { param($r) switch ("$r") { 'Passed' { 'OK' } 'Failed' { 'Failed' } 'Warning' { 'Warning' } default { 'Info' } } }
+    foreach ($l in $lines) {
+        $prefix = switch ($l.Item) { 'Applications' { 'App: ' } 'Tasks' { 'Task: ' } default { '' } }
+        $each = if ($prefix) { @($checks | Where-Object { "$($_.name)".StartsWith($prefix) }) } else { @() }
+        if ($each) {
+            # Failed ones first, then warnings, then the rest in their order.
+            $order = { param($c) switch ("$($c.result)") { 'Failed' { 0 } 'Warning' { 1 } default { 2 } } }
+            foreach ($c in @($each | Sort-Object { & $order $_ })) {
+                [pscustomobject]@{ Item = "$($c.name)".Substring($prefix.Length); Result = (& $mark $c.result); Detail = "$($c.detail)" }
+            }
+        } else {
+            [pscustomobject]@{ Item = $l.Item; Result = $l.Result; Detail = "$($l.Detail)" }
+        }
+    }
+}
+
+function Get-FailedApps {
+    # The applications whose post-deploy check did not pass: what Retry failed apps installs again.
+    param([Parameter(Mandatory)]$Row)
+    @(if ($Row.PSObject.Properties['CheckResults']) {
+        @($Row.CheckResults) | Where-Object { $_ -and "$($_.name)".StartsWith('App: ') -and $_.result -ne 'Passed' } | ForEach-Object { "$($_.name)".Substring(5) }
+    })
+}
+
+function Get-DeployNotices {
+    <#
+    .SYNOPSIS
+        What changed since the last Dashboard read that is worth a notification: a PC that finished (Succeeded,
+        Warning, Not ready), failed or stalled. -Previous: Id -> State from the last read ($null on the first read:
+        no notice for what was already there). Returns { Id, Title, Text, Bad }.
+    #>
+    param([object[]]$Rows = @(), [hashtable]$Previous)
+    if ($null -eq $Previous) { return }
+    foreach ($r in $Rows) {
+        $was = $Previous["$($r.Id)"]
+        if ($was -eq $r.State -or $r.State -in 'Running', 'Cancelled') { continue }
+        if ($null -ne $was -and $was -ne 'Running') { continue }
+        $name = if ($r.ComputerName) { $r.ComputerName } else { $r.Serial }
+        $title = switch ($r.State) {
+            'Succeeded' { "$name is ready" }
+            'Warning'   { "$name finished with warnings" }
+            'Not ready' { "$name is not ready" }
+            'Failed'    { "$name failed to deploy" }
+            'Stalled'   { "$name stopped reporting" }
+            default     { "${name}: $($r.State)" }
+        }
+        $text = if ($r.Result) { "$($r.Result)" } elseif ($r.Step) { "$($r.Step)" } else { "$($r.Model)" }
+        [pscustomobject]@{ Id = "$($r.Id)"; Title = $title; Text = $text; Bad = ($r.State -in 'Failed', 'Stalled', 'Not ready') }
+    }
+}
+
 function Get-DeployStickRoots {
     # DEPLOY partitions of sticks this tool built that are plugged into this PC. DriveInfo, not Get-Volume: the
     # dashboard calls this every 10 seconds.
@@ -541,4 +603,5 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
+    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary
