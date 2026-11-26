@@ -301,10 +301,14 @@ the console; the format is documented in the commented
 - **applications** installed in order at first boot (see below).
 - **product key**, **user information**, **regional** settings (time zone and
   locales such as `fr-CA`).
-- **computer name pattern**: `{SERIAL}` is the BIOS serial and `#` a random
-  digit, for example `LAB-{SERIAL}` or `A########`. Older answer files with a
-  serial number WMI query or a prefix are read as that pattern; one with
-  another WMI query (an asset tag) keeps it until a pattern is typed.
+- **computer name**: pick Serial number, Prefix + serial number (`LAB-` gives
+  `LAB-5CG1234XYZ`), Prefix + random digits (`LAB-####`) or Custom (`{SERIAL}`
+  is the BIOS serial and `#` a random digit, for example `A##-{SERIAL}`). The
+  page shows an example name as you type. It is saved as one pattern in
+  `customScheme`. Older answer files with a serial number WMI query or a
+  prefix are read as that pattern; one with another WMI query (an asset tag)
+  keeps it until another choice is made. The deploy wizard shows the name and
+  lets you change it; a PC reimaged from the Computers tab keeps its AD name and OU.
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the

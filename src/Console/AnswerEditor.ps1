@@ -114,13 +114,19 @@ function Show-AnswerEditor {
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
 
-    # One name pattern. An older answer file with a WMI query other than the serial keeps it until a pattern is typed.
+    # Computer name: the pattern ({SERIAL}, #) shown as a choice (Split-NamePattern). An older answer file with a WMI
+    # query other than the serial (an asset tag) keeps it until another choice is made or a custom name is typed.
     $keepWmi = $a.NamingMode -eq 'WMI'
-    $e.TxtScheme.Text = if ($keepWmi) { '' } else { $a.CustomScheme }
+    $e.CmbNameDigits.ItemsSource = @(2..10)
+    $naming = Split-NamePattern $(if ($keepWmi) { '' } else { $a.CustomScheme })
+    $e.TxtNamePrefix.Text = $naming.Prefix
+    $e.CmbNameDigits.SelectedItem = [Math]::Max(2, [Math]::Min(10, $naming.Digits))
+    $e.TxtScheme.Text = if ($naming.Choice -eq 'Custom') { $naming.Pattern } else { '' }
     if ($keepWmi) {
-        $e.TxtNameWmi.Text = "This answer file names PCs with $(if ($a.Prefix) { "the prefix $($a.Prefix) and " })the WMI query $($a.WmiQuery). Type a pattern to replace it."
+        $e.TxtNameWmi.Text = "This answer file names PCs with $(if ($a.Prefix) { "the prefix $($a.Prefix) and " })the WMI query $($a.WmiQuery). Type a custom name to replace it."
         $e.TxtNameWmi.Visibility = 'Visible'
-    }
+        $e.RbNameCustom.IsChecked = $true
+    } else { $e["RbName$($naming.Choice)"].IsChecked = $true }
 
     $e.RbDomain.IsChecked = $a.Membership -eq 'Domain'
     $e.RbWorkgroup.IsChecked = $a.Membership -ne 'Domain'
@@ -209,6 +215,11 @@ function Show-AnswerEditor {
 
 
     # --- Collect and save ------------------------------------------------------------------------------------
+    $nameChoice = { foreach ($c in 'Serial', 'PrefixSerial', 'PrefixRandom', 'Custom') { if ($e["RbName$c"].IsChecked) { return $c } }; 'Serial' }
+    $namePattern = {
+        $digits = if ($e.CmbNameDigits.SelectedItem) { [int]$e.CmbNameDigits.SelectedItem } else { 4 }
+        Join-NamePattern -Choice (& $nameChoice) -Prefix $e.TxtNamePrefix.Text -Digits $digits -Pattern $e.TxtScheme.Text
+    }
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
         $a.Name          = $e.TxtName.Text.Trim()
@@ -227,10 +238,11 @@ function Show-AnswerEditor {
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
-        if (-not $keepWmi -or $e.TxtScheme.Text.Trim()) {
+        $pattern = & $namePattern
+        if (-not $keepWmi -or $pattern) {
             $a.NamingMode   = 'Custom'
             $a.Prefix       = ''
-            $a.CustomScheme = $e.TxtScheme.Text.Trim()
+            $a.CustomScheme = $pattern
         }
         $a.Membership    = if ($e.RbDomain.IsChecked) { 'Domain' } else { 'Workgroup' }
         $a.Domain        = $e.TxtDomain.Text.Trim()
@@ -249,14 +261,35 @@ function Show-AnswerEditor {
         $a.BitLocker.RequireBackup     = $true
     }
 
-    $e.BtnNamePreview.Add_Click({
-        & $collect
-        try {
-            $serial = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
-            $wmi = if ($a.NamingMode -eq 'WMI') { Get-WmiNamingValue -Query $a.WmiQuery } else { $serial }
-            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial $serial
-        } catch { $e.TxtNamePreview.Text = "Could not read this PC: $($_.Exception.Message)" }
-    })
+    # The example updates as the choice, prefix or digits change, with this PC's serial (read once, on first use).
+    $updateNamePreview = {
+        $choice = & $nameChoice
+        foreach ($c in 'LblNamePrefix', 'TxtNamePrefix') { $e[$c].IsEnabled = $choice -in 'PrefixSerial', 'PrefixRandom' }
+        foreach ($c in 'LblNameDigits', 'CmbNameDigits') { $e[$c].IsEnabled = $choice -eq 'PrefixRandom' }
+        foreach ($c in 'LblScheme', 'PnlScheme') { $e[$c].IsEnabled = $choice -eq 'Custom' }
+        $pattern = & $namePattern
+        if ($keepWmi -and -not $pattern) {
+            $e.TxtNamePreview.Text = ''
+            $e.TxtNamePreviewNote.Text = 'Named by the WMI query above.'
+            return
+        }
+        if ($null -eq $state.Serial) {
+            $state.Serial = try { "$((Get-CimInstance Win32_BIOS -ErrorAction Stop).SerialNumber)".Trim() } catch { '' }
+        }
+        $serial = if ($state.Serial) { $state.Serial } else { 'ABC1234' }
+        $sample = [pscustomobject]@{ NamingMode = 'Custom'; Prefix = ''; CustomScheme = $pattern }
+        $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $sample -Serial $serial -Random ([Random]::new(7))
+        $notes = @()
+        if ($pattern -match '\{SERIAL\}' -and $state.Serial) { $notes += "With this PC's serial number ($($state.Serial))." }
+        elseif ($pattern -match '\{SERIAL\}') { $notes += 'With a made-up serial number.' }
+        if ($pattern -match '#') { $notes += 'Random digits change for every PC.' }
+        $notes += 'Letters, digits and dashes only, 15 characters at most.'
+        $e.TxtNamePreviewNote.Text = $notes -join ' '
+    }
+    foreach ($c in 'RbNameSerial', 'RbNamePrefixSerial', 'RbNamePrefixRandom', 'RbNameCustom') { $e[$c].Add_Checked($updateNamePreview) }
+    foreach ($c in 'TxtNamePrefix', 'TxtScheme') { $e[$c].Add_TextChanged($updateNamePreview) }
+    $e.CmbNameDigits.Add_SelectionChanged($updateNamePreview)
+    & $updateNamePreview
 
     $e.BtnCancel.Add_Click({ $win.Close() })
     $e.BtnSave.Add_Click({

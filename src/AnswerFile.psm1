@@ -50,6 +50,33 @@ function ConvertTo-NamePattern {
     }
 }
 
+function Split-NamePattern {
+    # The editor's Computer name page as choices: the pattern read as Serial ({SERIAL}), PrefixSerial (LAB-{SERIAL}),
+    # PrefixRandom (LAB-#### or ########) or Custom (anything else). Join-NamePattern turns a choice back into it.
+    param([string]$Pattern)
+    $p = "$Pattern".Trim()
+    if (-not $p -or $p -ieq '{SERIAL}') { return [pscustomobject]@{ Choice = 'Serial'; Prefix = ''; Digits = 4; Pattern = '{SERIAL}' } }
+    if ($p -match '^([A-Za-z0-9-]+)\{SERIAL\}$') { return [pscustomobject]@{ Choice = 'PrefixSerial'; Prefix = $Matches[1]; Digits = 4; Pattern = $p } }
+    if ($p -match '^([A-Za-z0-9-]*?)(#{2,15})$') { return [pscustomobject]@{ Choice = 'PrefixRandom'; Prefix = $Matches[1]; Digits = $Matches[2].Length; Pattern = $p } }
+    [pscustomobject]@{ Choice = 'Custom'; Prefix = ''; Digits = 4; Pattern = $p }
+}
+
+function Join-NamePattern {
+    param(
+        [ValidateSet('Serial', 'PrefixSerial', 'PrefixRandom', 'Custom')][string]$Choice,
+        [string]$Prefix,
+        [int]$Digits = 4,
+        [string]$Pattern
+    )
+    $Prefix = "$Prefix".Trim()
+    switch ($Choice) {
+        'Serial'       { '{SERIAL}' }
+        'PrefixSerial' { "$Prefix{SERIAL}" }
+        'PrefixRandom' { $Prefix + ('#' * [Math]::Max(1, [Math]::Min(15, $Digits))) }
+        'Custom'       { "$Pattern".Trim() }
+    }
+}
+
 function Read-AnswerFile {
     <#
     .SYNOPSIS
@@ -730,7 +757,7 @@ function Get-AnswerFileUsage {
     $usage
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+Export-ModuleMember -Function Read-AnswerFile, Split-NamePattern, Join-NamePattern, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile,
     Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings
