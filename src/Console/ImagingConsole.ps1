@@ -521,6 +521,7 @@ function Update-DashboardDetail {
     $ui.BtnDashLog.IsEnabled = [bool]($r -and $r.LogPath)
     $ui.BtnDashReimage.IsEnabled = [bool]($live -and $r.ComputerName -and $r.State -ne 'Running')
     $ui.BtnDashRdp.IsEnabled = [bool]($live -and $r.ComputerName)
+    $ui.BtnDashSupport.IsEnabled = [bool]($live -and $r.ComputerName)
     $failed = @(if ($live) { Get-FailedApps -Row $r })
     $ui.BtnDashRetry.IsEnabled = [bool]($failed -and $r.State -notin 'Running', 'Stalled')
     $ui.BtnDashRetry.Content = if ($failed.Count -eq 1) { "Retry $($failed[0])" } else { 'Retry failed apps' }
@@ -1442,6 +1443,18 @@ function Open-RemoteDesktop {
     if ($opened) { Set-Status "Remote Desktop opened to $($opened -join ', ')." }
 }
 
+function Start-RemoteSupport {
+    # Joins the signed-in user's own screen (mstsc /shadow /control): Windows asks them to allow it first.
+    param($Pc)   # { Name, Agent, Check }
+    if (-not $Pc -or -not $Pc.Name) { return }
+    $target = Get-RemoteDesktopTarget -Name $Pc.Name -Agent $Pc.Agent -Check $Pc.Check
+    $plan = Get-RemoteSupportPlan -ComputerName $Pc.Name -Agent $Pc.Agent -Target $target
+    if ($plan.Problem) { Show-Error $plan.Problem; return }
+    if ($plan.Ask -and -not (Confirm-Action $plan.Ask)) { return }
+    Start-Process -FilePath "$env:WINDIR\System32\mstsc.exe" -ArgumentList $plan.Args
+    Set-Status "Remote support: asking $($Pc.Agent.userSignedIn) on $($Pc.Name) to allow it. Their screen opens here once they click Yes."
+}
+
 function Get-AdRemoteDesktopPcs {
     $checkIns = @(Get-ConsoleAgentCheckIns)
     @($ui.GridAd.SelectedItems | ForEach-Object {
@@ -1457,7 +1470,17 @@ $ui.BtnAdRdp.Add_Click({ Invoke-Safely {
     if (-not $ui.GridAd.SelectedItems.Count) { Show-Error 'Select the PC to open Remote Desktop to.'; return }
     Open-RemoteDesktop (Get-AdRemoteDesktopPcs)
 } })
-$ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridAd.SelectedItem) { Open-RemoteDesktop (Get-AdRemoteDesktopPcs | Select-Object -First 1) } } })
+$ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridAd.SelectedItem) { Start-RemoteSupport (Get-AdRemoteDesktopPcs | Select-Object -First 1) } } })
+$ui.BtnAdSupport.Add_Click({ Invoke-Safely {
+    if ($ui.GridAd.SelectedItems.Count -ne 1) { Show-Error 'Select one PC for remote support.'; return }
+    Start-RemoteSupport (Get-AdRemoteDesktopPcs | Select-Object -First 1)
+} })
+$ui.BtnDashSupport.Add_Click({ Invoke-Safely {
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
+    $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
+    Start-RemoteSupport ([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
+} })
 
 $ui.BtnDashRdp.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem
