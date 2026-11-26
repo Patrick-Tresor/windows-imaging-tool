@@ -169,7 +169,7 @@ try {
     $old = Join-Path $root 'old-result.txt'
     Set-Content $old ("PC8 - Ready, with warnings: BitLocker`r`n" + ('  {0,-8} {1,-13} {2}' -f 'WARNING', 'BitLocker', 'Off'))
     Assert-Equal (Update-LocalDeployResult -Results @([pscustomobject]@{ name = 'BitLocker'; result = 'Passed'; detail = 'On' }) -DataPath (Join-Path $root 'none.json') -ResultPath $old) 'PC8 - Ready' 'no deploy-result.json: the BitLocker line changes in place'
-    $merged = @(Merge-CheckResults -Checks @([pscustomobject]@{ name = 'A'; result = 'Failed'; detail = 'x' }) -Results @([pscustomobject]@{ name = 'A'; result = 'Passed'; detail = 'y' }, [pscustomobject]@{ name = 'B'; result = 'Passed'; detail = 'z' }))
+    $merged = Merge-CheckResults -Checks @([pscustomobject]@{ name = 'A'; result = 'Failed'; detail = 'x' }) -Results @([pscustomobject]@{ name = 'A'; result = 'Passed'; detail = 'y' }, [pscustomobject]@{ name = 'B'; result = 'Passed'; detail = 'z' })
     Assert-Equal (($merged | ForEach-Object { $_.name + '=' + $_.result }) -join ',') 'A=Passed,B=Passed' 'checks merge by name'
     # One result file: fields given later are kept, and an app installed again replaces its first boot install.
     $one = Join-Path $root 'one-result.json'
