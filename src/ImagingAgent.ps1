@@ -9,7 +9,9 @@
     was imaged before (Computers tab, Install agent).
     Every checkInSeconds (agent.json, 30 by default) it writes Status\Agents\<serial>.json on the share; every 5
     seconds it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
-    (ImagingAgent.psm1), so the console sees it and its jobs start close to real time. Every 5 minutes, while the deploy result says BitLocker is off, it checks again and
+    (ImagingAgent.psm1), so the console sees it and its jobs start close to real time. It keeps Remote Desktop on, with
+    Network Level Authentication and the firewall open on the Domain network only (agent.json remoteDesktop false
+    leaves it as it is). Every 5 minutes, while the deploy result says BitLocker is off, it checks again and
     updates the result once it is on (a FIRSTLOGON task can turn it on), and installs again the applications that
     failed at first boot (an hour later, then hourly, up to 3 tries: Invoke-AppRetryPlan). Log: C:\Windows\Temp\ImagingAgent.log.
 .PARAMETER Register
@@ -150,6 +152,24 @@ if (-not (Test-UsableSerial $identity.serial)) { Write-Log "The BIOS serial '$($
 
 $script:lastCheckIn = [datetime]::MinValue
 $script:lastError = ''
+# Remote Desktop: turned on (NLA, Domain network only) at start and checked again every 30 minutes, unless agent.json
+# says remoteDesktop false. Its state goes in each check-in for the console's Remote desktop button.
+$script:rdpOff = $config.PSObject.Properties['remoteDesktop'] -and $config.remoteDesktop -eq $false
+$script:rdpText = ''; $script:rdpAt = [datetime]::MinValue; $script:rdpError = ''
+function Sync-RemoteDesktop {
+    if (((Get-Date) - $script:rdpAt).TotalMinutes -lt 30) { return }
+    $script:rdpAt = Get-Date
+    try {
+        $r = Sync-AgentRemoteDesktop -Off:$script:rdpOff
+        if ($r.Changed) { Write-Log "Remote Desktop: $($r.Changed -join '; ')" }
+        if ($r.Text -ne $script:rdpText) { Write-Log "Remote Desktop: $($r.Text)" }
+        $script:rdpText = $r.Text; $script:rdpError = ''
+    } catch {
+        $m = "Could not turn Remote Desktop on: $($_.Exception.Message)"
+        if ($script:rdpError -ne $m) { Write-Log $m }
+        $script:rdpError = $m; $script:rdpText = "Not checked: $m"
+    }
+}
 function Send-CheckIn {
     Get-ComputerAccount
     $net = Get-Network
@@ -158,10 +178,11 @@ function Send-CheckIn {
     $free = try { [int64](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop).FreeSpace } catch { $null }
     $deploy = if ($config.PSObject.Properties['deploy']) { $config.deploy } else { $null }
     $script:lastCheckIn = Get-Date
+    Sync-RemoteDesktop
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
     $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInSeconds $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
-        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -ErrorAction Stop
+        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -RemoteDesktop $script:rdpText -ErrorAction Stop
     } catch {
         $m = "Could not make the check-in: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
         if ($script:lastError -ne $m) { Write-Log $m }

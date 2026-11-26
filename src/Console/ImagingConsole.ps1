@@ -520,6 +520,7 @@ function Update-DashboardDetail {
     $live = $r -and -not $history
     $ui.BtnDashLog.IsEnabled = [bool]($r -and $r.LogPath)
     $ui.BtnDashReimage.IsEnabled = [bool]($live -and $r.ComputerName -and $r.State -ne 'Running')
+    $ui.BtnDashRdp.IsEnabled = [bool]($live -and $r.ComputerName)
     $failed = @(if ($live) { Get-FailedApps -Row $r })
     $ui.BtnDashRetry.IsEnabled = [bool]($failed -and $r.State -notin 'Running', 'Stalled')
     $ui.BtnDashRetry.Content = if ($failed.Count -eq 1) { "Retry $($failed[0])" } else { 'Retry failed apps' }
@@ -1206,7 +1207,7 @@ function Update-AgentInstaller {
         $cfg = if ($settings -and $settings.PSObject.Properties['agent']) { $settings.agent } else { $null }
         if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { return }
         $key = Get-AgentPublicKey -ContentRoot $script:root -Create
-        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInSeconds (Get-AgentCheckInSeconds $settings) `
+        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInSeconds (Get-AgentCheckInSeconds $settings) -RemoteDesktop (Test-AgentRemoteDesktopOn $settings) `
             -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
         $folder = Publish-AgentInstaller -Folder "$($share.TrimEnd('\'))\Agent" -SourceDir $srcDir -Config $config
         $ui.BtnAdAgent.ToolTip = "Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. " +
@@ -1423,6 +1424,48 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     Start-PendingReimage
 } })
 
+function Open-RemoteDesktop {
+    # mstsc to each PC (5 at most), by its DNS name when DNS agrees with its agent, else the IP its agent reported.
+    # A PC whose agent says Remote Desktop is off, or that has no agent checking in, asks first.
+    param([object[]]$Pcs)   # { Name, Agent (check-in or $null), Check (network check or $null) }
+    $Pcs = @($Pcs | Where-Object { $_ -and $_.Name } | Select-Object -First 5)
+    if (-not $Pcs) { return }
+    $problems = @($Pcs | ForEach-Object { Get-RemoteDesktopProblem -ComputerName $_.Name -Agent $_.Agent } | Where-Object { $_ })
+    if ($problems -and -not (Confirm-Action "$($problems -join "`n")`n`nOpen Remote Desktop anyway?")) { return }
+    $opened = @()
+    foreach ($pc in $Pcs) {
+        $target = Get-RemoteDesktopTarget -Name $pc.Name -Agent $pc.Agent -Check $pc.Check
+        if (-not $target) { continue }
+        Start-Process -FilePath "$env:WINDIR\System32\mstsc.exe" -ArgumentList "/v:$target"
+        $opened += $(if ($target -eq $pc.Name) { $target } else { "$($pc.Name) ($target)" })
+    }
+    if ($opened) { Set-Status "Remote Desktop opened to $($opened -join ', ')." }
+}
+
+function Get-AdRemoteDesktopPcs {
+    $checkIns = @(Get-ConsoleAgentCheckIns)
+    @($ui.GridAd.SelectedItems | ForEach-Object {
+        [pscustomobject]@{
+            Name  = "$($_.Name)"
+            Agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
+            Check = $(if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] } else { $null })
+        }
+    })
+}
+
+$ui.BtnAdRdp.Add_Click({ Invoke-Safely {
+    if (-not $ui.GridAd.SelectedItems.Count) { Show-Error 'Select the PC to open Remote Desktop to.'; return }
+    Open-RemoteDesktop (Get-AdRemoteDesktopPcs)
+} })
+$ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridAd.SelectedItem) { Open-RemoteDesktop (Get-AdRemoteDesktopPcs | Select-Object -First 1) } } })
+
+$ui.BtnDashRdp.Add_Click({ Invoke-Safely {
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
+    $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
+    Open-RemoteDesktop @([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
+} })
+
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $rows = @($ui.GridAd.SelectedItems)
@@ -1460,6 +1503,7 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
     Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = ''; local = $false; credentialFile = '' } })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Install-RemoteAgent.ps1"),
         '-ContentRoot', (ConvertTo-Arg $script:root), '-StatusFolder', (ConvertTo-Arg $statusFolder), '-TargetsFile', (ConvertTo-Arg $targetsFile))
+    if (-not (Test-AgentRemoteDesktopOn (Get-DeploySettings -ContentRoot $script:root))) { $runArgs += '-NoRemoteDesktop' }
     $cred = Get-AdCredential
     if ($cred) {
         $credFile = Join-Path $env:TEMP "agent-$stamp-$tag-cred.xml"

@@ -277,6 +277,55 @@ try {
     # agent.json and the task.
     $cfg = New-AgentConfig -StatusFolder '\\server\Deploy\Status' -PublicKeys @($public, '') -CheckInSeconds 0
     Assert-Equal "$($cfg.checkInSeconds)|$(@($cfg.publicKeys).Count)" '10|1' 'agent.json: at least 10 seconds, empty keys left out'
+
+    # Remote Desktop on agent PCs: on with NLA, Domain firewall profile only, never against a group policy.
+    Assert-Equal $cfg.remoteDesktop $true 'agent.json: Remote Desktop on by default'
+    Assert-Equal (New-AgentConfig -StatusFolder '\\s\D\Status' -RemoteDesktop $false).remoteDesktop $false 'agent.json: remoteDesktop false when the settings say so'
+    Assert-Equal (Test-AgentRemoteDesktopOn $null) $true 'no settings: on'
+    Assert-Equal (Test-AgentRemoteDesktopOn ([pscustomobject]@{ agent = [pscustomobject]@{ enabled = $true } })) $true 'no remoteDesktop key: on'
+    Assert-Equal (Test-AgentRemoteDesktopOn ([pscustomobject]@{ agent = [pscustomobject]@{ remoteDesktop = $false } })) $false 'remoteDesktop false: off'
+    $shipped = [IO.File]::ReadAllText((Join-Path $repo 'config/deploy-settings.json')) | ConvertFrom-Json
+    Assert-Equal $shipped.agent.remoteDesktop $true 'the shipped settings have remoteDesktop on'
+    $rules = @(
+        [pscustomobject]@{ name = 'RemoteDesktop-UserMode-In-TCP'; enabled = $false; profile = 'Domain, Private' }
+        [pscustomobject]@{ name = 'RemoteDesktop-UserMode-In-UDP'; enabled = $false; profile = 'Any' }
+        [pscustomobject]@{ name = 'RemoteDesktop-Public-In-TCP'; enabled = $true; profile = 'Public' }
+        [pscustomobject]@{ name = 'RemoteDesktop-Shadow-In-TCP'; enabled = $true; profile = 'Domain' }
+    )
+    $plan = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 1; nla = 0; policyDeny = $null; policyNla = $null; rules = $rules })
+    Assert-Equal "$($plan.Allow)|$($plan.Nla)" 'True|True' 'Remote Desktop off and NLA off: both turned on'
+    Assert-Equal (@($plan.Rules | ForEach-Object { "$($_.name)=$($_.enabled)/$($_.profile)" }) -join ' ') 'RemoteDesktop-UserMode-In-TCP=True/Domain RemoteDesktop-UserMode-In-UDP=True/Domain RemoteDesktop-Public-In-TCP=False/Public' `
+        'rules covering Domain open on Domain only, a Public rule is closed, a rule already right is left alone'
+    Assert-Equal $plan.Text 'On (Network Level Authentication, Domain network only)' 'it reports on'
+    $done = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 0; nla = 1; rules = @([pscustomobject]@{ name = 'a'; enabled = $true; profile = 'Domain' }) })
+    Assert-Equal "$($done.Allow)|$($done.Nla)|$(@($done.Rules).Count)" 'False|False|0' 'already on: nothing changed'
+    $gpo = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 1; nla = 0; policyDeny = 1; rules = $rules })
+    Assert-Equal "$($gpo.Allow)|$($gpo.Nla)|$(@($gpo.Rules).Count)" 'False|False|0' 'a group policy that turns it off: nothing forced'
+    Assert-Equal ($gpo.Text -like 'Off*group policy*') $true 'and the check-in says a group policy turns it off'
+    $gpoNla = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 1; nla = 0; policyNla = 0; rules = $rules })
+    Assert-Equal "$($gpoNla.Allow)|$($gpoNla.Nla)" 'True|False' 'a group policy that turns NLA off is not fought'
+    Assert-Equal ($gpoNla.Text -match 'Network Level Authentication off') $true 'and is reported'
+    $off = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 1; nla = 0; rules = $rules }) -Off
+    Assert-Equal "$($off.Allow)|$($off.Nla)|$(@($off.Rules).Count)|$($off.Text)" 'False|False|0|Off (left as it is: turned off in the agent settings)' 'turned off in the settings: left as it is'
+    $rd = New-AgentCheckIn -Identity $identity -AgentId 'agent-1' -RemoteDesktop 'On (Network Level Authentication, Domain network only)' -Now $now
+    Assert-Equal ($rd.remoteDesktop -like 'On*') $true 'the check-in says whether Remote Desktop is on'
+    $agentOn = [pscustomobject]@{ Online = $true; ipAddress = '10.1.2.34'; ipAddresses = @('10.1.2.34'); remoteDesktop = 'On (...)'; LastSeenText = '2 min ago' }
+    Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $agentOn -Check ([pscustomobject]@{ Ip = '10.1.2.34'; State = 'Yes' })) 'PC01' 'DNS agrees with the agent: by name (Kerberos)'
+    Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $agentOn -Check ([pscustomobject]@{ Ip = '10.9.9.9'; State = 'No answer' })) '10.1.2.34' 'DNS gives another address: the IP the agent reported'
+    Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $agentOn -Check ([pscustomobject]@{ Ip = ''; State = 'Old DNS' })) '10.1.2.34' 'old DNS: the agent IP'
+    Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $null -Check $null) 'PC01' 'no agent: the name'
+    Assert-Equal (Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent $agentOn) '' 'agent on, Remote Desktop on: no question'
+    Assert-Equal ((Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent $null) -match 'no agent') $true 'no agent: asked first'
+    Assert-Equal ((Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent ([pscustomobject]@{ Online = $true; remoteDesktop = $gpo.Text })) -match 'group policy') $true 'off by group policy: asked first, with why'
+    $view = Get-AgentRowView -Agent ([pscustomobject]@{ Online = $true; LastSeen = $now; LastSeenText = '2 min ago'; ipAddress = '10.1.2.34'; remoteDesktop = 'On (x)' }) -Name 'PC01'
+    Assert-Equal ($view.AgentDetail -match 'Remote Desktop: On') $true 'the Agent column tooltip says it'
+    $agentScript = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.ps1'))
+    Assert-Equal ($agentScript -match 'Sync-AgentRemoteDesktop' -and $agentScript -match '-RemoteDesktop \$script:rdpText') $true 'the agent turns it on and reports it'
+    $consoleText = [IO.File]::ReadAllText((Join-Path $repo 'src/Console/ImagingConsole.ps1'))
+    Assert-Equal ($consoleText -match 'mstsc\.exe' -and $consoleText -match 'BtnAdRdp' -and $consoleText -match 'BtnDashRdp') $true 'the Computers tab and the Dashboard open Remote Desktop'
+    $module = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.psm1'))
+    Assert-Equal ($module -match "Set-NetFirewallRule -Name \`$r\.name -Profile Domain -Enabled True") $true 'the firewall opens on the Domain profile only'
+    Assert-Equal ($module -match 'Add-LocalGroupMember|net(\.exe)? localgroup') $false 'who may sign in is never changed'
     $xml = [xml](Get-AgentTaskXml)
     Assert-Equal $xml.Task.Principals.Principal.UserId 'S-1-5-18' 'the task runs as SYSTEM'
     Assert-Equal $xml.Task.Settings.MultipleInstancesPolicy 'IgnoreNew' 'a second start while it runs is ignored'

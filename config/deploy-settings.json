@@ -5,9 +5,10 @@
     "user": "DOMAIN\\svc-deploy"
   },
   "agent": {
-    "_comment": "The agent on each PC deployed while a share is set: checks in to <share>\\Status\\Agents every checkInSeconds (30 by default, at least 10) and takes the reimage jobs the console signs. false leaves it off the PCs.",
+    "_comment": "The agent on each PC deployed while a share is set: checks in to <share>\\Status\\Agents every checkInSeconds (30 by default, at least 10) and takes the reimage jobs the console signs. false leaves it off the PCs. remoteDesktop: the agent turns Remote Desktop on (Network Level Authentication, firewall open on the Domain network only) for the console's Remote desktop button; false leaves it as it is (reaches PCs at their next deploy or Install agent).",
     "enabled": true,
-    "checkInSeconds": 30
+    "checkInSeconds": 30,
+    "remoteDesktop": true
   },
   "checks": {
     "_comment": "Post-deploy checks at the end of first boot, reported to the Dashboard. BitLocker and device driver problems are warnings. ignoreDevices: wildcards for device names or ids to skip.",
