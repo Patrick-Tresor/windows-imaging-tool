@@ -11,7 +11,7 @@
     powershell -ExecutionPolicy Bypass -File \\server\Deploy\Agent\Install-AgentHere.ps1
 #>
 [CmdletBinding()]
-param([int]$WaitMinutes = 3)
+param([int]$WaitMinutes = 6)
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -44,6 +44,10 @@ try {
     while (((Get-Date) - $started).TotalMinutes -lt $WaitMinutes) {
         Start-Sleep -Seconds 5
         try { $fi = New-Object IO.FileInfo $checkIn; if ($fi.Exists -and $fi.LastWriteTime -ge $started.AddMinutes(-1)) { $ok = $true; break } } catch { }
+        # This account may not read the Status folder: the agent's own log says when it checked in.
+        $since = $started.AddMinutes(-1).ToString('yyyy-MM-dd HH:mm:ss')
+        $lines = @(if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 30 -Encoding UTF8 })
+        if (@($lines | Where-Object { $_ -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) Checked in to ' -and $Matches[1] -ge $since }).Count) { $ok = $true; break }
     }
     if ($ok) {
         Write-Step "Done: $env:COMPUTERNAME checked in. The console's Computers tab shows it in the Agent column." Green

@@ -163,7 +163,9 @@ function Send-CheckIn {
     }
     try {
         Save-AgentCheckIn -StatusFolder $statusFolder -Record $record
-        if ($script:lastError) { Write-Log 'Checked in again' }
+        # The first one is logged: a check-in that works said nothing, so D2J14HL3's log looked like it never did.
+        if (-not $script:checkedIn) { Write-Log "Checked in to $(Get-AgentFolder $statusFolder) as $($record.serial).json"; $script:checkedIn = $true }
+        elseif ($script:lastError) { Write-Log 'Checked in again' }
         $script:lastError = ''
     } catch {
         # Logged once until it works again: the share is down, or the computer account can't write there.
