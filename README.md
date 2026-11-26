@@ -60,9 +60,10 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   (Lenovo, `20FR`) from the maker's catalog. A model the catalog doesn't know is
   matched by name.
   **Deployed without a driver pack** shows, on the same page and only when there
-  are any, the models that were deployed without their pack: they got the maker
-  fallback, inbox drivers only, or a catalog entry whose folder is missing, with
-  how many PCs and which ones. **Find its pack** puts the selected model's pack
+  are any, the models without their pack: deployed PCs that got the maker
+  fallback, inbox drivers only, or a catalog entry whose folder is missing, and
+  PCs whose agent checks in with a model the library has no pack for (seen before
+  they are reimaged), with how many PCs and which ones. **Find its pack** puts the selected model's pack
   in the Find a model online list, ready for **Download**. **No pack needed**
   marks a model (a VM, say) as needing no pack.
 - **Media**: build a USB stick in one click (the ISO is made with the network
@@ -74,7 +75,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
   Pick the **USB disk** (a stick this tool built before is updated in place, any other
-  is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
+  is erased; the tab says which), check the **Driver packs on USB** you need (the packs for the
+  models you have, from the Dashboard and the agents' check-ins, start checked), type the
   **WinPE password** (twice the first time; the console remembers it for your Windows
   account on this PC, encrypted) and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.

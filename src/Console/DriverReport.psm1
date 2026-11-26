@@ -15,10 +15,40 @@ function Get-DriverReportDir {
     Get-StatusFolder -ContentRoot $ContentRoot -Settings $settings
 }
 
+function ConvertFrom-AgentCheckInIdentity {
+    # A PC's driver catalog IDs from its agent check-in (Status\Agents\<serial>.json: WMI maker and model only), the
+    # way the deploy reads them (Get-HardwareIdentity): Dell Inc. -> Dell, Hewlett-Packard -> HP, and a Lenovo's
+    # model is its machine type (the first 4 letters of 21HDS0AB00). $null when the maker is not known.
+    param([Parameter(Mandatory)]$CheckIn)
+    $raw = "$($CheckIn.maker)".Trim()
+    $maker = switch -Wildcard ($raw) { 'Dell*' { 'Dell' } 'HP' { 'HP' } 'Hewlett*' { 'HP' } 'LENOVO' { 'Lenovo' } default { $raw } }
+    if (-not $maker) { return $null }
+    $model = "$($CheckIn.model)".Trim()
+    $type = ''
+    if ($maker -eq 'Lenovo') { $type = $model.Substring(0, [Math]::Min(4, $model.Length)).ToUpperInvariant(); $model = '' }
+    $seen = try { ([datetime]$CheckIn.lastSeen).ToString('yyyy-MM-dd HH:mm') } catch { '' }
+    [pscustomobject]@{
+        serial = "$($CheckIn.serial)"; computerName = "$($CheckIn.computerName)"; maker = $maker; model = $model
+        sku = ''; machineType = $type; driverStatus = 'Agent'; date = $seen
+    }
+}
+
+function Get-AgentCheckInRecords {
+    # Every agent's check-in (Status\Agents\*.json) as a driver report record. Unreadable files are skipped.
+    param([string]$StatusFolder)
+    if (-not $StatusFolder) { return }
+    foreach ($f in Get-ChildItem -Path (Join-Path $StatusFolder 'Agents') -Filter *.json -File -ErrorAction SilentlyContinue) {
+        try { $c = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json } catch { continue }
+        if ($c.serial) { ConvertFrom-AgentCheckInIdentity $c }
+    }
+}
+
 function Get-DriverReportRecords {
     # One record per deployed PC (its newest deployment), from the status records. Older tool versions wrote
     # Reports\Drivers\<serial>.json instead; those are still read, and a newer status record of the same PC wins.
     # Cancelled deployments and records without a driver match are left out. Unreadable files are skipped.
+    # PCs that only an agent check-in knows (status record cleared, or imaged before the dashboard) are added from
+    # it, so a model with no pack shows before it is reimaged.
     param([Parameter(Mandatory)][string]$ContentRoot, [string]$StatusFolder)
     if (-not $StatusFolder) { $StatusFolder = Get-DriverReportDir $ContentRoot }
     $all = @(
@@ -35,6 +65,9 @@ function Get-DriverReportRecords {
             try { Get-Content -Raw $f.FullName | ConvertFrom-Json } catch { Write-Warning "Skipping $($f.Name): $($_.Exception.Message)" }
         }
     )
+    $known = @{}
+    foreach ($r in $all) { if ($r.serial) { $known["$($r.serial)"] = $true } }
+    $all += @(Get-AgentCheckInRecords -StatusFolder $StatusFolder | Where-Object { $_ -and -not $known.ContainsKey("$($_.serial)") })
     $all | Group-Object { if ($_.serial) { "$($_.serial)" } else { "$($_.maker)|$($_.model)" } } |
         ForEach-Object { $_.Group | Sort-Object date -Descending | Select-Object -First 1 } |
         # Older deploys reported a Lenovo's SystemSKU text as its SKU: use its machine type, as the catalog does.
@@ -79,6 +112,23 @@ function Get-UnknownModels {
             Serials     = @($pcs.serial)
         }
     } | Sort-Object @{ e = 'PCs'; Descending = $true }, Maker, Model
+}
+
+function Get-FleetDriverPackPaths {
+    <#
+    .SYNOPSIS
+        The catalog driver pack folders (Drivers\ relative, e.g. Dell\Latitude 5521) that the PCs you have use:
+        every PC the dashboard or an agent knows, matched as the deploy would (an exact pack, else its maker's
+        fallback). The Media tab checks these packs for a new stick. Empty when no PC is known yet.
+    #>
+    param([Parameter(Mandatory)][string]$ContentRoot, [string]$StatusFolder)
+    $catalog = Get-DriverCatalog -ContentRoot $ContentRoot
+    $paths = foreach ($r in @(Get-DriverReportRecords -ContentRoot $ContentRoot -StatusFolder $StatusFolder)) {
+        $id = [pscustomobject]@{ Maker = $r.maker; Model = $r.model; Sku = $r.sku; MachineType = $r.machineType }
+        $m = Find-DriverCatalogMatch -Identity $id -Catalog $catalog
+        if ($m.Status -in 'Matched', 'Fallback' -and $m.Path) { ("$($m.Path)" -replace '/', '\').Trim('\') }
+    }
+    @($paths | Sort-Object -Unique)
 }
 
 function Find-VendorPackForModel {
@@ -138,4 +188,5 @@ function Set-UnknownModelInbox {
 }
 
 Export-ModuleMember -Function Get-DriverReportDir, Get-DriverReportRecords, Get-UnknownModels, Find-VendorPackForModel,
+    ConvertFrom-AgentCheckInIdentity, Get-FleetDriverPackPaths,
     Add-UnknownModelPacks, Set-UnknownModelInbox

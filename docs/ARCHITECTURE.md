@@ -399,6 +399,11 @@ One record per PC, so a reimage replaces it. Cancelled deployments are left
 out. Older versions wrote `Reports\Drivers\<serial>.json`; those files are
 still read, and a newer status record of the same PC wins.
 
+Agent check-ins (`Status\Agents\<serial>.json`, maker and model from WMI, read as the deploy reads them: a
+Lenovo's model is its machine type) add the PCs that have no status record, so a model with no pack shows
+before its first reimage. `Get-FleetDriverPackPaths` matches every known PC the same way; the Media tab
+starts with those packs checked (all of them when no PC is known yet).
+
 `src/Console/DriverReport.psm1` reads these records and re-checks each PC against
 the current catalog and `Drivers\` folder, so a model leaves the report as soon
 as the library covers it. The rest are grouped by maker, model and SKU / machine

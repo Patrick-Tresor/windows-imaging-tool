@@ -207,11 +207,9 @@
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
             <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
-                         Text="Check the packs for the models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
+                         Text="The packs for the models you have are checked (from the Dashboard and the agents); check others for models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
-                <Button x:Name="BtnMediaPacksAll" DockPanel.Dock="Left" Content="Check all"/>
-                <Button x:Name="BtnMediaPacksNone" DockPanel.Dock="Left" Content="Uncheck all" Margin="8,0,0,0"/>
-                <TextBlock x:Name="TxtMediaPacks" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock x:Name="TxtMediaPacks" VerticalAlignment="Center" TextWrapping="Wrap"/>
               </DockPanel>
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>

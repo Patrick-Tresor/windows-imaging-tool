@@ -252,13 +252,17 @@ $script:scanTimer.Interval = [timespan]::FromSeconds(1)
 $script:scanTimer.Add_Tick({ try { Complete-ScanExclusions } catch { $script:scanTimer.Stop(); $script:scanRun = $null; Set-Status "Defender exclusions: $($_.Exception.Message)" } })
 
 function Update-MediaPacks {
-    # The Media tab's driver pack list: keeps what was unchecked, checks packs that are new since last time.
+    # The Media tab's driver pack list: keeps what was checked or unchecked by hand; a pack that is new since last
+    # time is checked when a PC you have uses it (the Dashboard's deployments and the agents' check-ins,
+    # Get-FleetDriverPackPaths), or always when no PC is known yet.
     $old = @{}
     foreach ($i in @($ui.LstMediaPacks.Items)) { $old[$i.Path] = $ui.LstMediaPacks.SelectedItems.Contains($i) }
     $packs = @(if (Test-ContentRoot $script:root) { Get-MediaDriverPacks -ContentRoot $script:root })
+    $fleet = @(if ($packs) { try { Get-FleetDriverPackPaths -ContentRoot $script:root -StatusFolder (Get-DashboardFolder) } catch { } })
     $ui.LstMediaPacks.ItemsSource = $packs
     foreach ($p in $packs) {
-        if (-not $old.ContainsKey($p.Path) -or $old[$p.Path]) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
+        $want = if ($old.ContainsKey($p.Path)) { $old[$p.Path] } else { -not $fleet -or $p.Path -in $fleet }
+        if ($want) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
     }
     Update-MediaPackTotal
 }
@@ -298,12 +302,13 @@ function Update-Drivers {
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
     Update-MediaPacks
-    # Models deployed without their driver pack, above the library; hidden when every deployed PC got its pack.
+    # Models deployed (or checking in through the agent) without their driver pack, above the library; hidden when
+    # every PC has its pack.
     $unknown = @()
     if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root) } catch { } }
     $ui.GridUnknown.ItemsSource = $unknown
     $pcs = ($unknown | Measure-Object PCs -Sum).Sum
-    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) deployed without their driver pack. Select one and click Find its pack, then Download."
+    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) without their driver pack (deployed, or checking in through the agent). Select one and click Find its pack, then Download."
     $ui.BdrUnknown.Visibility = if ($unknown) { 'Visible' } else { 'Collapsed' }
 }
 
@@ -1454,8 +1459,6 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
 #region Media
 
 $ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
-$ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() } })
-$ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
 $ui.PwdWinPE.Add_PasswordChanged({ Update-WinPEPasswordAgain })
