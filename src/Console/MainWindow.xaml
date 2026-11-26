@@ -457,6 +457,11 @@
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentDetail}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
+                <DataGridTextColumn Header="Agent version" Binding="{Binding AgentVersion}" Width="90">
+                  <DataGridTextColumn.ElementStyle>
+                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentVersionDetail}"/></Style>
+                  </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Reimage" Binding="{Binding Reimage}" Width="*"/>
                 <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
               </DataGrid.Columns>
@@ -506,6 +511,8 @@
               <Button x:Name="BtnDashHistory" DockPanel.Dock="Right" Content="History" Margin="8,0,0,0" ToolTip="Deployments removed or cleared from the Dashboard, with their final log. Click a count box to go back."/>
               <TextBlock/>
             </DockPanel>
+            <TextBlock x:Name="TxtDashAgents" DockPanel.Dock="Top" Margin="0,0,0,8" TextWrapping="Wrap" Visibility="Collapsed" Foreground="{DynamicResource WarningBrush}"
+                       ToolTip="Agents that checked in before but not in the last day (up to two weeks). The PC is off, off the network, or its agent stopped: a reimage or Retry failed apps would not reach it."/>
             <Grid>
               <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="90"/></Grid.RowDefinitions>
               <DataGrid x:Name="GridDash" IsReadOnly="True">

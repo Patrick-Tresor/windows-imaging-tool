@@ -140,6 +140,8 @@ function Get-DeployResultLine {
 
 $identity = Get-Identity
 $script:agentVersion = if ($config.deploy -and $config.deploy.toolVersion) { "$($config.deploy.toolVersion)" } else { '' }
+# This agent's code version: the console compares it with its own and sends an update job when they differ.
+$script:agentCode = try { Get-AgentCodeHash -Folder $dir } catch { '' }
 Write-Log ("Agent started: {0}, serial {1}, agent id {2}, checks in to {3} every {4} min; {5}" -f $env:COMPUTERNAME, $identity.serial, $state.agentId, $statusFolder, $every,
     $(if ($keys) { "takes jobs signed by console key $(@($keys | ForEach-Object { Get-AgentKeyId $_ }) -join ', ')" } else { 'no console key: takes no jobs' }))
 if (-not (Test-UsableSerial $identity.serial)) { Write-Log "The BIOS serial '$($identity.serial)' is not unique to this PC: the agent can't check in. It stops."; exit 1 }
@@ -164,7 +166,7 @@ function Send-CheckIn {
         $script:lastBitLockerError = $m
     }
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
-    $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -CheckInMinutes $every `
+    $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInMinutes $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
         -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -ErrorAction Stop
     } catch {
@@ -231,6 +233,32 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
     }
 }
 
+function Invoke-UpdateJob($Job, [string]$JobDir) {
+    # The console's new agent: copy its files next to the job, check them against the signed hash, put them in place
+    # of this agent's own, and start again (a new run of the task, a few seconds after this one ends).
+    $work = [IO.Path]::Combine($dir, 'Work\Update')
+    try {
+        Set-JobState $Job 'Running' 'Copying the new agent'
+        if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) }
+        Copy-AgentFolder -Source ([IO.Path]::Combine($JobDir, 'Agent')) -Destination $work
+        $hash = Get-AgentPayloadHash $work
+        if ($hash -ne "$($Job.payloadSha256)".ToUpperInvariant()) { throw "the agent files' SHA-256 ($hash) is not the one the console signed" }
+        $code = Get-AgentCodeHash -Folder $work
+        if (-not $code) { throw 'the new agent is missing some of its files' }
+        foreach ($f in Get-AgentFileNames) { [IO.File]::Copy([IO.Path]::Combine($work, $f), [IO.Path]::Combine($dir, $f), $true) }
+        Write-Log "Agent updated from $script:agentCode to ${code}: starting again"
+        Set-JobState $Job 'Done' "Updated to $code"
+        Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 10 >nul & schtasks /Run /TN `"ImagingTool\Agent`"" -WindowStyle Hidden
+        $script:restart = $true
+    } catch {
+        Write-Log "Job $($Job.id) FAILED: $($_.Exception.Message)"
+        Set-JobState $Job 'Failed' $_.Exception.Message
+    } finally {
+        try { [IO.Directory]::Delete($JobDir, $true) } catch { }
+        try { if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) } } catch { }
+    }
+}
+
 function Invoke-FailedAppsRetry {
     # The applications that failed at first boot (C:\ProgramData\ImagingTool\RetryApps): installed again an hour
     # after first boot, then hourly, up to 3 tries. Skipped while another install runs (it is tried at the next check-in).
@@ -258,6 +286,7 @@ function Invoke-AgentJob {
     Remove-AgentJob -StatusFolder $statusFolder -Serial $identity.serial -JobFileOnly
     Write-Log "Job $($job.id): $($job.action) asked by $($job.requestedBy) at $($job.createdAt)"
     if ($job.action -eq 'installapps') { Invoke-AppsJob $job $jobDir; return }
+    if ($job.action -eq 'update') { Invoke-UpdateJob $job $jobDir; return }
     Set-JobState $job 'Running' 'Copying the boot image'
     $work = [IO.Path]::Combine($dir, 'Work')
     $wim = [IO.Path]::Combine($work, 'boot.wim')
@@ -286,6 +315,7 @@ try {
         try {
             if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn; Invoke-FailedAppsRetry }
             Invoke-AgentJob
+            if ($script:restart) { Write-Log 'The agent stops for its update; the new one starts in a few seconds.'; break }
         } catch {
             $m = "Error: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
             if ($script:lastLoopError -ne $m) { Write-Log $m }

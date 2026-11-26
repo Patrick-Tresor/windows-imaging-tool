@@ -224,7 +224,15 @@ the share, written as the computer account, like first boot's status.
   **Agent** for a PC whose WinRM and file sharing are blocked but whose agent
   checked in, and the IP column uses the agent's address when the network check
   found none. The Dashboard's **Last seen** column shows the same for each
-  deployment.
+  deployment, and a line above its list names the agents that have not checked
+  in for over a day (up to two weeks): those PCs are off or their agent stopped.
+- **Updates**: the **Agent version** column on the Computers tab says Up to
+  date, Updating or Old. While the Computers tab or the Dashboard is open, the
+  console sends each online agent whose code differs from its own the new agent
+  as a signed update job; the agent checks the files, puts them in place and
+  starts again. An agent from before updates (Old) needs **Install agent** once.
+- **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
+  agent installs again the applications that failed at first boot.
 - **Reimage through the agent**: **Reimage...** on a PC whose agent checked in
   within the last 15 minutes needs no WinRM or file sharing. The console writes
   the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
@@ -265,8 +273,8 @@ not check in shows why in its progress row, read from the agent's log over the
 same way in (for example "the PC's computer account may not write to the
 share"). And PCs in the domain (outside it the share can't tell who
 the PC is). Rebuild the sticks and the network boot image once, so deploys put
-the agent on and trust this console's key. The agent comes with each deploy:
-after a tool update, reimage the PC or click Install agent again to update it.
+the agent on and trust this console's key. The agent comes with each deploy,
+and the console updates it after a tool update (see Updates above).
 `deploy-settings.json` `agent.enabled: false` leaves it out, and
 `agent.checkInMinutes` changes how often it checks in. Its log on the PC:
 `C:\Windows\Temp\ImagingAgent.log`. To try it by hand on a PC, as

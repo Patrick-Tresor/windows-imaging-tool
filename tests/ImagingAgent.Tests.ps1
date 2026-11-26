@@ -166,6 +166,32 @@ try {
     Assert-Throws { New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Nope') -AppRoot $appRoot -SetFolderAccess { param($f, $a) } } '*not in*' 'a missing app pack, no job'
     Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
 
+    # Agent updates: the console's agent code (Get-AgentCodeHash of src) goes to an old agent as a signed update job.
+    $code = Get-AgentCodeHash -Folder (Join-Path $repo 'src')
+    Assert-Equal ($code -match '^[0-9A-F]{12}$') $true 'the agent code version is 12 hex digits'
+    Assert-Equal (Get-AgentCodeHash -Folder (Join-Path $repo 'src')) $code 'the same files give the same version'
+    Assert-Equal (Get-AgentCodeHash -Folder $root) '' 'a folder without the agent files has no version'
+    $updJob = New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action update -SourceDir (Join-Path $repo 'src') -Now $now -SetFolderAccess { param($f, $a) }
+    Assert-Equal (Get-AgentCodeHash -Folder (Join-Path $jobDir 'Agent')) $code 'the job carries the console''s agent'
+    Assert-Equal $updJob.payloadSha256 (Get-AgentPayloadHash (Join-Path $jobDir 'Agent')) 'the agent files'' hash is signed'
+    $readUpd = Get-AgentJob -StatusFolder $status -Serial 'ABC123'
+    Assert-Equal ($null -eq (Test-AgentJob -Job $readUpd -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1))) $true 'the PC takes an update job the console signed'
+    $j = $readUpd | ConvertTo-Json -Depth 4 | ConvertFrom-Json; $j.payloadSha256 = 'A' * 64
+    Assert-Equal ((Test-AgentJob -Job $j -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1)) -like '*not signed*') $true 'other agent files than the console signed are refused'
+    Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
+    $mk = { param($c, $online = $true) [pscustomobject]@{ serial = "S-$c"; computerName = "PC-$c"; agentId = 'a'; Online = $online; agentCode = $c } }
+    $preUpdate = [pscustomobject]@{ serial = 'S-OLD'; computerName = 'PC-OLD'; agentId = 'a'; Online = $true }
+    $sent = @{ 'S-111111111111' = $code }
+    $pick = @(Select-AgentsToUpdate -CheckIns @((& $mk $code), (& $mk '111111111111'), (& $mk '222222222222'), (& $mk '333333333333' $false), $preUpdate) -CurrentCode $code -Sent $sent)
+    Assert-Equal (($pick | ForEach-Object computerName) -join ',') 'PC-222222222222' 'only online agents with other code, not sent yet, that know updates'
+    Assert-Equal "$((Get-AgentVersionText -Agent (& $mk $code) -CurrentCode $code).Text)|$((Get-AgentVersionText -Agent (& $mk '222222222222') -CurrentCode $code).Text)|$((Get-AgentVersionText -Agent $preUpdate -CurrentCode $code).Text)" 'Up to date|Updating|Old' 'the Agent version column'
+    Assert-Equal ((Get-AgentVersionText -Agent $preUpdate -CurrentCode $code).Detail -match 'Install agent') $true 'an agent from before updates needs Install agent once'
+    $agentPs1Text = Get-Content -Raw (Join-Path $repo 'src/ImagingAgent.ps1')
+    Assert-Equal ($agentPs1Text -match "(?s)function Invoke-UpdateJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Get-AgentFileNames.*?schtasks /Run") $true 'the agent checks the new files, puts them in place and starts again'
+    # Agents gone quiet for over a day (up to two weeks) show on the Dashboard.
+    $seen = { param($n, $h) [pscustomobject]@{ computerName = $n; LastSeen = $now.AddHours(-$h) } }
+    Assert-Equal ((Get-SilentAgents -CheckIns @((& $seen 'A' 2), (& $seen 'B' 30), (& $seen 'C' 400), (& $seen 'D' 50)) -Now $now | ForEach-Object computerName) -join ',') 'D,B' 'silent for over a day, oldest first; gone over two weeks is left out'
+
     # The agent puts the new results on the Dashboard row.
     $rec = [ordered]@{ id = 'ABC123'; serial = 'ABC123'; state = 'Warning'; percent = 100; warnings = @('Google Chrome failed (Failed)', 'Post-deploy checks: 1 failed')
         checks = @(@{ name = 'App: Google Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, @{ name = 'App: Zoom'; result = 'Passed'; detail = 'Installed' }) }

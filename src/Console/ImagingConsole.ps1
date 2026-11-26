@@ -367,6 +367,31 @@ function Get-ConsoleAgentCheckIns {
     $rows
 }
 
+# The agent the console has (Get-AgentCodeHash of src): an online agent with other code gets it as a signed update
+# job, once per PC while the console runs (Send-AgentUpdates, from the Computers tab and the Dashboard).
+$script:agentCode = try { Get-AgentCodeHash -Folder $srcDir } catch { '' }
+$script:agentUpdatesSent = @{}
+function Send-AgentUpdates([object[]]$CheckIns) {
+    # Never fails the page: an update that can't go now is tried at the next refresh (or the next console start).
+    try {
+        if (-not $script:agentCode -or -not (Test-ContentRoot $script:root)) { return }
+        $todo = @(Select-AgentsToUpdate -CheckIns @($CheckIns) -CurrentCode $script:agentCode -Sent $script:agentUpdatesSent)
+        if (-not $todo) { return }
+        $folder = Get-DashboardFolder
+        $key = Get-AgentSigningKey -ContentRoot $script:root
+        if (-not $folder -or -not $key) { return }
+        foreach ($a in $todo) {
+            # A job already waiting for this PC (a reimage, apps) is left alone: the update goes after it.
+            if ([IO.File]::Exists([IO.Path]::Combine((Get-AgentJobFolder -StatusFolder $folder -Serial "$($a.serial)"), 'job.json'))) { continue }
+            $script:agentUpdatesSent["$($a.serial)"] = $script:agentCode
+            try {
+                $null = New-AgentJob -StatusFolder $folder -PrivateKey $key -CheckIn $a -Action update -SourceDir $srcDir -Message 'Agent update'
+                Set-Status "Sent $($a.computerName) the new agent ($script:agentCode)."
+            } catch { Set-Status "Could not send $($a.computerName) the new agent: $($_.Exception.Message)" }
+        }
+    } catch { }
+}
+
 $script:dashFilter = 'All'   # All, Running, Succeeded, Warning, Attention or History (the count boxes)
 function Update-Dashboard {
     $folder = Get-DashboardFolder
@@ -410,6 +435,14 @@ function Update-Dashboard {
     # One Last seen: the agent's last check-in (by serial) when it is newer than the deployment's last report,
     # otherwise that report; and the address the agent has now.
     $checkIns = Get-ConsoleAgentCheckIns
+    Send-AgentUpdates $checkIns
+    # Agents gone quiet for over a day: a reimage or Retry failed apps would not reach those PCs.
+    $silent = @(Get-SilentAgents -CheckIns @($checkIns))
+    $ui.TxtDashAgents.Text = if ($silent) {
+        $names = @($silent | Select-Object -First 6 | ForEach-Object { "$($_.computerName) ($("$($_.LastSeenText)".ToLowerInvariant()))" })
+        "$($silent.Count) agent(s) have not checked in for over a day: $($names -join ', ')$(if ($silent.Count -gt 6) { ', ...' }). The PC is off or its agent stopped."
+    } else { '' }
+    $ui.TxtDashAgents.Visibility = if ($silent) { 'Visible' } else { 'Collapsed' }
     foreach ($r in $rows) {
         $a = if ($checkIns -and $r.Serial) { Find-AgentCheckIn -CheckIns $checkIns -Serial "$($r.Serial)" } else { $null }
         $seen = if ($a -and $a.LastSeen -and (-not $r.Updated -or $a.LastSeen -gt $r.Updated)) { $a.LastSeenText }
@@ -1080,12 +1113,13 @@ function Show-AdRows {
         if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
     }
     $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
+    Send-AgentUpdates $checkIns
     # Keep the selected PCs selected when Online fills in.
     $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
-        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name
+        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode
         $online = if (-not $check -and $script:adCheck -and $view.Online -ne 'Agent') { 'Checking...' } else { $view.Online }
         $_ | Add-Member -NotePropertyName Online -NotePropertyValue $online -Force
         # The address the online check reached; when the network check got no way in, the one the PC's agent reported
@@ -1096,6 +1130,8 @@ function Show-AdRows {
         $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $view.OnlineDetail -Force
         $_ | Add-Member -NotePropertyName Agent -NotePropertyValue $view.Agent -Force
         $_ | Add-Member -NotePropertyName AgentDetail -NotePropertyValue $view.AgentDetail -Force
+        $_ | Add-Member -NotePropertyName AgentVersion -NotePropertyValue $view.AgentVersion -Force
+        $_ | Add-Member -NotePropertyName AgentVersionDetail -NotePropertyValue $view.AgentVersionDetail -Force
         $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })

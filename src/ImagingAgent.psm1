@@ -180,6 +180,23 @@ function Get-AgentPayloadHash {
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace('-', '') } finally { $sha.Dispose() }
 }
 
+function Get-AgentCodeHash {
+    <#
+    .SYNOPSIS
+        The agent's code version: one SHA-256 (first 12 hex digits) of its files (Get-AgentFileNames) in -Folder: the
+        console's src folder, or C:\ProgramData\ImagingTool\Agent on a PC. '' when one of them is missing.
+    #>
+    param([Parameter(Mandatory)][string]$Folder)
+    $lines = [Collections.Generic.List[string]]::new()
+    foreach ($f in $script:AgentFiles) {
+        $p = Join-AgentPath $Folder $f
+        if (-not [IO.File]::Exists($p)) { return '' }
+        $lines.Add("$($f.ToLowerInvariant())|$((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash)")
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))))).Replace('-', '').Substring(0, 12) } finally { $sha.Dispose() }
+}
+
 function Set-AgentJobSignature {
     # Adds signature (base64 RSA SHA-256 over Get-AgentJobText) to the job.
     param([Parameter(Mandatory)]$Job, [Parameter(Mandatory)][string]$PrivateKey)
@@ -221,7 +238,8 @@ function New-AgentJob {
         [Parameter(Mandatory)][string]$StatusFolder,
         [Parameter(Mandatory)][string]$PrivateKey,
         [Parameter(Mandatory)]$CheckIn,                  # the PC's check-in (Get-AgentCheckIns row or the raw record)
-        [ValidateSet('reimage', 'installapps')][string]$Action = 'reimage',
+        [ValidateSet('reimage', 'installapps', 'update')][string]$Action = 'reimage',
+        [string]$SourceDir,                              # update: the console's src folder (the agent's new files)
         [string]$BootWim,
         [string[]]$Apps,                                 # installapps: the app names; their packs are in -AppRoot
         [string]$AppRoot,
@@ -249,6 +267,13 @@ function New-AgentJob {
             if (-not $BootWim -or -not [IO.File]::Exists($BootWim)) { throw "No network boot image at $BootWim." }
             $hash = if ($BootWimSha256) { $BootWimSha256 } else { (Get-FileHash -LiteralPath $BootWim -Algorithm SHA256).Hash }
             [IO.File]::Copy($BootWim, (Join-AgentPath $dir 'boot.wim'), $true)
+        } elseif ($Action -eq 'update') {
+            # The agent's files go next to the job, and one hash of them all into the signed job.
+            if (-not $SourceDir) { throw 'No folder with the agent files.' }
+            $agentDir = Join-AgentPath $dir 'Agent'
+            [void][IO.Directory]::CreateDirectory($agentDir)
+            foreach ($f in $script:AgentFiles) { [IO.File]::Copy((Join-AgentPath $SourceDir $f), (Join-AgentPath $agentDir $f), $true) }
+            $payload = Get-AgentPayloadHash $agentDir
         } else {
             # The app packs go next to the job (that PC's account only), and one hash of them all into the signed job.
             $Apps = @($Apps | Where-Object { $_ } | Select-Object -Unique)
@@ -276,10 +301,8 @@ function New-AgentJob {
             message       = $Message
             requestedBy   = "$env:USERDOMAIN\$env:USERNAME".Trim('\')
         }
-        if ($Action -eq 'installapps') {
-            $job | Add-Member -NotePropertyName apps -NotePropertyValue ($Apps -join ', ')
-            $job | Add-Member -NotePropertyName payloadSha256 -NotePropertyValue $payload
-        }
+        if ($Action -eq 'installapps') { $job | Add-Member -NotePropertyName apps -NotePropertyValue ($Apps -join ', ') }
+        if ($Action -in 'installapps', 'update') { $job | Add-Member -NotePropertyName payloadSha256 -NotePropertyValue $payload }
         $job = Set-AgentJobSignature -Job $job -PrivateKey $PrivateKey
         Save-JsonFile -Path (Join-AgentPath $dir 'job.json') -InputObject $job
         $job
@@ -357,7 +380,7 @@ function Test-AgentJob {
     if (-not @($PublicKeys | Where-Object { $_ })) { return 'this PC has no console key, so it takes no jobs' }
     if (-not (Test-AgentJobSignature -Job $Job -PublicKeys $PublicKeys)) { return 'it is not signed by the console' }
     if ("$($Job.version)" -ne '1') { return "job version $($Job.version) is not known to this agent" }
-    if ($Job.action -notin 'reimage', 'installapps') { return "action '$($Job.action)' is not known to this agent" }
+    if ($Job.action -notin 'reimage', 'installapps', 'update') { return "action '$($Job.action)' is not known to this agent" }
     if ("$($Job.serial)".Trim().ToUpperInvariant() -ne "$($Identity.serial)".Trim().ToUpperInvariant()) { return "it is for serial $($Job.serial)" }
     if ($Job.uuid -and $Identity.uuid -and "$($Job.uuid)".Trim() -ne "$($Identity.uuid)".Trim()) { return "it is for UUID $($Job.uuid)" }
     # The agent id is new after each deploy, so a job signed for this PC before it was reimaged never runs again.
@@ -370,6 +393,7 @@ function Test-AgentJob {
     if ($expires.ToUniversalTime() -lt $utc.AddMinutes(-$ClockSkewMinutes)) { return "it expired at $($expires.ToLocalTime().ToString('yyyy-MM-dd HH:mm'))" }
     if ($created.ToUniversalTime() -gt $utc.AddMinutes($ClockSkewMinutes)) { return 'it was made in the future (is this PC''s clock right?)' }
     if ($Job.action -eq 'reimage' -and "$($Job.bootWimSha256)" -notmatch '^[0-9A-Fa-f]{64}$') { return 'it has no boot image checksum' }
+    if ($Job.action -eq 'update' -and "$(if ($Job.PSObject.Properties['payloadSha256']) { $Job.payloadSha256 })" -notmatch '^[0-9A-Fa-f]{64}$') { return 'it has no checksum for the agent files' }
     if ($Job.action -eq 'installapps') {
         if (-not (Get-AgentJobApps $Job)) { return 'it names no application' }
         if ("$(if ($Job.PSObject.Properties['payloadSha256']) { $Job.payloadSha256 })" -notmatch '^[0-9A-Fa-f]{64}$') { return 'it has no checksum for the application packs' }
@@ -449,6 +473,7 @@ function New-AgentCheckIn {
         $Deploy,
         [Parameter(Mandatory)][string]$AgentId,
         [string]$AgentVersion,
+        [string]$AgentCode,
         [int]$CheckInMinutes = 5,
         [string]$ComputerName = $env:COMPUTERNAME,
         [string]$Account,
@@ -490,6 +515,7 @@ function New-AgentCheckIn {
         result         = $Result
         agentId        = $AgentId
         agentVersion   = $AgentVersion
+        agentCode      = $AgentCode
         checkInMinutes = $CheckInMinutes
         lastSeen       = $Now.ToUniversalTime().ToString('o')
         job            = $Job
@@ -584,7 +610,7 @@ function Get-AgentRowView {
         (Get-RemoteOnlineState) and its agent's check-in. A PC whose agent checked in lately is Online 'Agent' even when
         WinRM and file sharing are blocked.
     #>
-    param($Check, $Agent, [string]$Name)
+    param($Check, $Agent, [string]$Name, [string]$CurrentCode)
     $online = if ($Check -and $Check.Online) { "$($Check.State)" } elseif ($Agent -and $Agent.Online) { 'Agent' } elseif ($Check) { "$($Check.State)" } else { '' }
     $agentText = if (-not $Agent) { '' } elseif ($Agent.Online) { "$($Agent.LastSeenText)" } else { "Off: $($Agent.LastSeenText)" }
     $detail = @()
@@ -596,6 +622,7 @@ function Get-AgentRowView {
         if ($Agent.job -and $Agent.job.state) { $detail += "Last job: $($Agent.job.action) $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })" }
         if ($Agent.agentVersion) { $detail += "Agent from tool version $($Agent.agentVersion)" }
     }
+    $version = Get-AgentVersionText -Agent $Agent -CurrentCode $CurrentCode
     $onlineDetail = @()
     if ($Check) { $onlineDetail += "$Name $($Check.Detail)" }
     if ($Agent -and $Agent.Online) { $onlineDetail += "Its agent checked in $("$($Agent.LastSeenText)".ToLowerInvariant()): Reimage goes through the agent." }
@@ -604,7 +631,50 @@ function Get-AgentRowView {
         OnlineDetail = $(if ($onlineDetail) { $onlineDetail -join "`n" } else { $null })
         Agent        = $agentText
         AgentDetail  = $(if ($detail) { $detail -join "`n" } else { 'No agent: it is put on each PC deployed while the network share is set, or with Install agent.' })
+        AgentVersion = $version.Text
+        AgentVersionDetail = $version.Detail
     }
+}
+
+function Get-AgentVersionText {
+    <#
+    .SYNOPSIS
+        Console, Computers tab's Agent version column: is a PC's agent the console's (agentCode = Get-AgentCodeHash of
+        the console's src folder)? { Text, Detail }. An old agent that knows update jobs gets the new one by itself
+        (Select-AgentsToUpdate); one from before them needs Install agent once.
+    #>
+    param($Agent, [string]$CurrentCode)
+    if (-not $Agent) { return [pscustomobject]@{ Text = ''; Detail = $null } }
+    $code = if ($Agent.PSObject.Properties['agentCode']) { "$($Agent.agentCode)" } else { '' }
+    $from = if ($Agent.PSObject.Properties['agentVersion'] -and $Agent.agentVersion) { " (tool version $($Agent.agentVersion))" } else { '' }
+    if (-not $code) { return [pscustomobject]@{ Text = 'Old'; Detail = "This agent is from before automatic updates$from. Select the PC and click Install agent once; after that the console updates it by itself." } }
+    if (-not $CurrentCode -or $code -eq $CurrentCode) { return [pscustomobject]@{ Text = 'Up to date'; Detail = "Agent $code$from" } }
+    $job = if ($Agent.PSObject.Properties['job'] -and $Agent.job -and "$($Agent.job.action)" -eq 'update') { " Last update: $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })." } else { '' }
+    [pscustomobject]@{ Text = 'Updating'; Detail = "Agent $code, the console has $CurrentCode. The console sends it the new agent while it is on.$job" }
+}
+
+function Select-AgentsToUpdate {
+    <#
+    .SYNOPSIS
+        Console: the online agents whose code is not the console's and that know update jobs (they report agentCode),
+        not sent the console's code yet (-Sent: serial -> code, kept by the console while it runs).
+    #>
+    param([object[]]$CheckIns = @(), [Parameter(Mandatory)][string]$CurrentCode, [hashtable]$Sent = @{})
+    @($CheckIns | Where-Object {
+        $_ -and $_.Online -and $_.PSObject.Properties['agentCode'] -and "$($_.agentCode)" -and "$($_.agentCode)" -ne $CurrentCode -and
+        $_.agentId -and $Sent["$($_.serial)"] -ne $CurrentCode
+    })
+}
+
+function Get-SilentAgents {
+    <#
+    .SYNOPSIS
+        Console, Dashboard: agents that have not checked in for more than -Days (1) but fewer than -MaxDays (14: a PC
+        gone longer was most likely retired). The PC is off, or its agent stopped: a reimage would not reach it.
+    #>
+    param([object[]]$CheckIns = @(), [double]$Days = 1, [double]$MaxDays = 14, [datetime]$Now = (Get-Date))
+    @($CheckIns | Where-Object { $_ -and $_.LastSeen -and ($Now - $_.LastSeen).TotalDays -gt $Days -and ($Now - $_.LastSeen).TotalDays -le $MaxDays } |
+        Sort-Object LastSeen)
 }
 
 #endregion
@@ -829,6 +899,6 @@ function Publish-AgentInstaller {
 
 Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
-    Get-AgentJobText, Get-AgentPayloadHash, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
+    Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
     New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
