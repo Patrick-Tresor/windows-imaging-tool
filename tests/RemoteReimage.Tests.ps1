@@ -282,10 +282,12 @@ try {
     Assert-Equal $got 'PC-42' 'each address is asked for its name over UDP'
     $ask.Dispose()
 } finally { $nbUdp.Close() }
-Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS' })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
+Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS'; HasAgent = $false })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
 
-$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
-Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes'; HasAgent = $true }, [pscustomobject]@{ Name = '2J14HL3'; State = ''; HasAgent = $true }, [pscustomobject]@{ Name = 'PC3'; State = 'No access'; HasAgent = $false })
+Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*Install agent*') $true 'the status line counts PCs whose agent checks in and names a blocked PC'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes (SMB)'; HasAgent = $false })
+Assert-Equal $t '0 of 1 can be reimaged now. PC1: no agent yet. Select and click Install agent.' 'a PC on without an agent: Install agent'
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Not found' }, [pscustomobject]@{ Name = 'PC2'; State = 'Not found' })
 Assert-Equal ($t -like '*PC1 and 1 more: name not found*DNS*') $true 'the status line says names were not found in DNS'
 Assert-Equal (Get-OnlineSummaryText -Rows @()) '0 of 0 can be reimaged now.' 'no rows, no hint'
@@ -354,7 +356,7 @@ $search = $search.Substring(0, $search.IndexOf("`nfunction "))
 Assert-Equal ($search -match 'Get-RemoteOnlineState') $false 'Search does not wait for the online check'
 Assert-Equal ($search -match 'Start-AdOnlineCheck') $true 'Search starts the online check in the background'
 Assert-Equal ($consoleText -match '\$ps\.BeginInvoke\(\)') $true 'the online check runs asynchronously'
-Assert-Equal ($consoleText -match "'Checking\.\.\.'") $true 'Online says Checking... until the check is done'
+Assert-Equal ($consoleText -match 'Get-AgentRowView[^\r\n]*-Checking:') $true 'the Agent column says None, checking... until the check is done'
 Assert-Equal ($consoleText -match 'Stop-AdOnlineCheck \}\)') $true 'closing the console stops a check still running'
 Assert-Equal ($consoleText -match '\$check\.Ip -and \(\$check\.Online -or -not \$agentIp\)') $true 'a PC the network check could not get into shows the address its agent reported'
 

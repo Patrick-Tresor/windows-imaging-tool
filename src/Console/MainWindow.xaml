@@ -442,19 +442,9 @@
                 <DataGridTextColumn Header="OU" Binding="{Binding OUPath}" Width="*"/>
                 <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystem}" Width="*"/>
                 <DataGridTextColumn Header="Last logon" Binding="{Binding LastLogonText}" Width="110"/>
-                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="80">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding OnlineDetail}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Agent" Binding="{Binding Agent}" Width="110">
+                <DataGridTextColumn Header="Agent" Binding="{Binding Agent}" Width="170">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentDetail}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Agent version" Binding="{Binding AgentVersion}" Width="90">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentVersionDetail}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="Reimage" Binding="{Binding Reimage}" Width="*"/>

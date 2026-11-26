@@ -1123,24 +1123,19 @@ function Show-AdRows {
     }
     $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
     Send-AgentUpdates $checkIns
-    # Keep the selected PCs selected when Online fills in.
+    # Keep the selected PCs selected when the Agent column fills in.
     $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
-        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode
-        $online = if (-not $check -and $script:adCheck -and $view.Online -ne 'Agent') { 'Checking...' } else { $view.Online }
-        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $online -Force
+        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode -Checking:([bool]$script:adCheck)
         # The address the online check reached; when the network check got no way in, the one the PC's agent reported
         # lately (the PC's own word, DNS can be old); a PC found by IP shows that IP.
         $agentIp = if ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } else { '' }
         $ip = if ($check -and $check.Ip -and ($check.Online -or -not $agentIp)) { $check.Ip } elseif ($agentIp) { $agentIp } elseif ($check -and $check.Ip) { $check.Ip } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
         $_ | Add-Member -NotePropertyName IpAddress -NotePropertyValue $ip -Force
-        $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $view.OnlineDetail -Force
         $_ | Add-Member -NotePropertyName Agent -NotePropertyValue $view.Agent -Force
         $_ | Add-Member -NotePropertyName AgentDetail -NotePropertyValue $view.AgentDetail -Force
-        $_ | Add-Member -NotePropertyName AgentVersion -NotePropertyValue $view.AgentVersion -Force
-        $_ | Add-Member -NotePropertyName AgentVersionDetail -NotePropertyValue $view.AgentVersionDetail -Force
         $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
@@ -1213,7 +1208,7 @@ function Search-AdComputers {
             foreach ($r in $found) { $r.Address = $find.Ip }
         }
         $script:adRows = $found
-        # The list shows now; Online fills in when the check in the background is done (Patrick, 2026-11-25: the
+        # The list shows now; the Agent column of PCs with no agent fills in when the check in the background is done (Patrick, 2026-11-25: the
         # tab waited for every PC's network check before it showed anything).
         Start-AdOnlineCheck -Note $localNote
     } finally { $window.Cursor = $null }
@@ -1259,7 +1254,7 @@ function Start-AdOnlineCheck {
 }
 
 function Complete-AdOnlineCheck {
-    # Timer tick: when the background check is done, its answer fills Online and IP address.
+    # Timer tick: when the background check is done, its answer fills the Agent column (PCs with no agent) and IP address.
     $c = $script:adCheck
     if (-not $c) { $script:adCheckTimer.Stop(); return }
     if (-not $c.Handle.IsCompleted) { return }
@@ -1283,9 +1278,9 @@ function Complete-AdOnlineCheck {
 }
 
 function Get-AdOnlineSummary {
-    # One line: how many answer on PowerShell remoting, and what to do about the first one that does not.
-    Get-OnlineSummaryText -Rows @($script:adRows | Where-Object { $script:adOnline[$_.Address] } | ForEach-Object {
-        [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
+    # One line: how many can be reimaged (their agent checks in), and what to do about the first one that can't.
+    Get-OnlineSummaryText -Rows @($script:adRows | Where-Object { $script:adOnline[$_.Address] -or $_.HasAgent } | ForEach-Object {
+        [pscustomobject]@{ Name = $_.Name; State = $(if ($script:adOnline[$_.Address]) { $script:adOnline[$_.Address].State } else { '' }); HasAgent = [bool]$_.HasAgent } })
 }
 
 function Invoke-AdAutoConnect {

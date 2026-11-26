@@ -63,8 +63,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     $win.Width = 1100; $win.Height = 720
     $ui.Controls['GridAd'].ItemsSource = @([pscustomobject]@{
         Name = 'GWHZLG3'; IpAddress = '10.10.64.51'; OUPath = 'corp.local/Workstations/Montreal/Finance'
-        OperatingSystem = 'Windows 11 Enterprise'; LastLogonText = '2026-11-23'; Online = 'Yes (SMB)'; OnlineDetail = ''
-        Agent = '4 min ago'; AgentDetail = ''; Reimage = 'Waiting for the PC to restart into WinPE'; Description = 'Finance laptop, 3rd floor'
+        OperatingSystem = 'Windows 11 Enterprise'; LastLogonText = '2026-11-23'
+        Agent = 'v1.35 updating, seen 4 min ago'; AgentDetail = ''; Reimage = 'Waiting for the PC to restart into WinPE'; Description = 'Finance laptop, 3rd floor'
     })
     $ui.Controls['GridDash'].ItemsSource = @([pscustomobject]@{
         ComputerName = 'GWHZLG3'; Model = 'Latitude 5521'; Serial = 'GWHZLG3'; IpAddress = '10.10.64.51'; LastSeenText = '1 min ago'

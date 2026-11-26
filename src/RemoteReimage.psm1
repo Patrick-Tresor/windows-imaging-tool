@@ -452,7 +452,7 @@ function Get-RemoteOnlineState {
                 'Old DNS'   { "is not at $($r.OldDns.OldIp), the address DNS gives for it: $($r.OldDns.OtherName) answers there now, so the DNS record is old, and $($r.Name) did not answer by name on this network. Search it by its IP address, or wait for DNS to update" }
                 'Not found' { "$($r.Name) does not resolve from this PC: it is not in the DNS this PC uses (this PC on another network, or the PC's DNS record is old)" }
                 'Yes'       { "answers on PowerShell remoting (WinRM, port $Port) at $($r.Ip)" }
-                'Yes (SMB)' { "is on at $($r.Ip): PowerShell remoting is off, so the reimage goes through its admin share (C$, port $SmbPort) and a one-time service" }
+                'Yes (SMB)' { "is on at $($r.Ip): PowerShell remoting is off, so Install agent goes through its admin share (C$, port $SmbPort) and a one-time service" }
                 'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port) nor file sharing (port $SmbPort) answers: turn one on, or allow it in its firewall" }
                 default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
             }
@@ -467,19 +467,23 @@ function Get-RemoteOnlineState {
 }
 
 function Get-OnlineSummaryText {
-    # One line for the console's status bar: how many can be reimaged now, and what to do about the first ones that can't.
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)   # { Name, State }
+    # One line for the console's status bar: how many can be reimaged now (their agent checks in), and what to do
+    # about the first ones that can't.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows)   # { Name, State, HasAgent }
     $rows = @($Rows)
-    $on = @($rows | Where-Object { "$($_.State)" -like 'Yes*' }).Count
+    $on = @($rows | Where-Object { $_.PSObject.Properties['HasAgent'] -and $_.HasAgent }).Count
     $text = "$on of $($rows.Count) can be reimaged now."
     $names = { param($list) "$($list[0].Name)$(if ($list.Count -gt 1) { " and $($list.Count - 1) more" })" }
-    $blocked = @($rows | Where-Object State -eq 'No access')
-    $lost = @($rows | Where-Object State -eq 'Not found')
-    $old = @($rows | Where-Object State -eq 'Old DNS')
-    if ($old) { $text += " $(& $names $old): DNS gives an old address, where another PC answers now. Search it by its IP address." }
-    elseif ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing. Allow one of them (README)." }
+    $rest = @($rows | Where-Object { -not ($_.PSObject.Properties['HasAgent'] -and $_.HasAgent) })
+    $ready = @($rest | Where-Object { "$($_.State)" -like 'Yes*' })
+    $blocked = @($rest | Where-Object State -eq 'No access')
+    $lost = @($rest | Where-Object State -eq 'Not found')
+    $old = @($rest | Where-Object State -eq 'Old DNS')
+    if ($ready) { $text += " $(& $names $ready): no agent yet. Select and click Install agent." }
+    elseif ($old) { $text += " $(& $names $old): DNS gives an old address, where another PC answers now. Search it by its IP address." }
+    elseif ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing, so Install agent can't reach it. Allow one of them, or run Agent\Install-Agent.cmd on it (README)." }
     elseif ($lost) { $text += " $(& $names $lost): name not found in this PC's DNS. Use a domain controller as this PC's DNS server." }
-    elseif ($rows.Count -gt $on) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Online for details.' }
+    elseif ($rest) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Agent for details.' }
     $text
 }
 

@@ -150,31 +150,35 @@ on the ones you pick, with nobody at the PCs.
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the IP address, OU, Windows version, last
    logon and whether the console can reach it, checked on every Search (Search again
-   to check again). The list shows right away; Online says **Checking...** while
-   the network check runs in the background (a few seconds, however many PCs), then
+   to check again). The list shows right away; the **Agent** column of a PC with no agent says
+   **None, checking...** while the network check runs in the background (a few seconds, however many PCs), then
    fills in. The IP is where that PC really answers: each DNS address is
-   asked for its computer name, and one that names another PC is dropped (Online
-   then says **Old DNS** and a reimage never goes there). A PC with several
+   asked for its computer name, and one that names another PC is dropped (its Agent
+   column then says **None, old DNS** and Install agent never goes there). A PC with several
    addresses (a second adapter, a dock, a VPN) is tried at each, and the one that
    answers best is shown; an agent's reported address is tried first. A PC typed by IP that is
    not in Active Directory (a laptop outside the domain) is listed too (it can't
-   have the agent, so reimage it from the USB stick). **Online** says how
-   **Install agent** can reach a PC (point at it for details):
-   - **Yes**: PowerShell remoting (WinRM) answers.
-   - **Yes (SMB)**: remoting is off, but file sharing answers. The console
+   have the agent, so reimage it from the USB stick). The **Agent** column says
+   what each PC's agent last reported, for example **v1.35, seen 2 min ago**
+   (**updating** while the console sends it the new agent, **old** when it needs
+   **Install agent** once, **off** when it has not checked in for 15 minutes).
+   For a PC with no agent it says how **Install agent** can reach it (point at it
+   for details):
+   - **None, PC online**: PowerShell remoting (WinRM) or file sharing answers.
+     Without remoting, the console
      goes through the PC's admin share (`\\PC\ADMIN$`, `\\PC\C$`) and a
      one-time SYSTEM service that it deletes right after, the way Windows admin
      tools do. Some antivirus products block services that start PowerShell;
      the progress window then says the PC did not run the command.
-   - **No access**: the PC is on, but its firewall blocks both. Allow
+   - **None, PC blocked**: the PC is on, but its firewall blocks both. Allow
      *File and Printer Sharing (SMB-In)*, or turn on remoting
      (`Enable-PSRemoting -Force`, or for a whole OU the Group Policy *Computer
      Configuration > Administrative Templates > Windows Components > Windows
      Remote Management > WinRM Service > Allow remote server management
      through WinRM* plus the firewall rule *Windows Remote Management (HTTP-In)*).
-   - **Not found**: its name does not resolve from the console PC. Use a domain
+   - **None, name not found**: its name does not resolve from the console PC. Use a domain
      controller as the console PC's DNS server.
-   - **No answer**: it is off or asleep, or a firewall drops everything.
+   - **None, PC off**: it is off or asleep, or a firewall drops everything.
 3. Once: set **Network share** on the Deploy Settings tab. **Reimage...** builds
    the network boot image first when there is none, or when it is older than the
    tool, maps another share or predates the last Deploy Settings save (a few
@@ -224,18 +228,16 @@ the share, written as the computer account, like first boot's status.
 
 - **Check-in**: every 5 minutes it writes `Status\Agents\<serial>.json`: name,
   serial, IP addresses, model, image and answer file, deploy result, who is
-  signed in, free space on C:. The Computers tab's **Agent** column says when
-  each PC last checked in (point at it for the details), **Online** says
-  **Agent** for a PC whose WinRM and file sharing are blocked but whose agent
-  checked in, and the IP column uses the agent's address when the network check
+  signed in, free space on C:. The Computers tab's **Agent** column says its
+  version and when it last checked in (point at it for the details), and the IP column uses the agent's address when the network check
   found none. The Dashboard's **Last seen** column shows the same for each
   deployment, and a line above its list names the agents that have not checked
   in for over a day (up to two weeks): those PCs are off or their agent stopped.
-- **Updates**: the **Agent version** column on the Computers tab says Up to
-  date, Updating or Old. While the Computers tab or the Dashboard is open, the
+- **Updates**: the **Agent** column on the Computers tab says **updating** or
+  **old** after the version when the agent is not the console's. While the Computers tab or the Dashboard is open, the
   console sends each online agent whose code differs from its own the new agent
   as a signed update job; the agent checks the files, puts them in place and
-  starts again. An agent from before updates (Old) needs **Install agent** once.
+  starts again. An agent from before updates (old) needs **Install agent** once.
 - **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
   agent installs again the applications that failed at first boot.
 - **Reimage through the agent**: **Reimage...** needs an agent that checked in
