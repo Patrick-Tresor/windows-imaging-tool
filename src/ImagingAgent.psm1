@@ -480,8 +480,6 @@ function New-AgentCheckIn {
         [string]$AccountSid,
         [string]$Os,
         [string]$UserSignedIn,
-        [string]$UserSessionId,
-        [string]$RemoteSupport,
         [Nullable[datetime]]$BootTime,
         [Nullable[int64]]$FreeC,
         [string]$Result,
@@ -507,9 +505,6 @@ function New-AgentCheckIn {
         wired          = $(& $get $Network 'wired')
         os             = $Os
         userSignedIn   = $UserSignedIn
-        # The signed-in user's Windows session, which remote support joins (mstsc /shadow).
-        userSessionId  = $UserSessionId
-        remoteSupport  = $RemoteSupport
         # A [Nullable[datetime]] parameter holds a plain date in PowerShell (no .Value): that was GWHZLG3's
         # "cannot call a method on a null-valued expression" at every start.
         bootTime       = $(if ($BootTime) { ([datetime]$BootTime).ToString('o') } else { '' })
@@ -640,7 +635,6 @@ function Get-AgentRowView {
         if ($Agent.result) { $detail += "$($Agent.result)" }
         if ($Agent.userSignedIn) { $detail += "Signed in: $($Agent.userSignedIn)" }
         if ($Agent.PSObject.Properties['remoteDesktop'] -and "$($Agent.remoteDesktop)") { $detail += "Remote Desktop: $($Agent.remoteDesktop)" }
-        if ($Agent.PSObject.Properties['remoteSupport'] -and "$($Agent.remoteSupport)") { $detail += "Remote support: $($Agent.remoteSupport)" }
         if ($Agent.job -and $Agent.job.state) { $detail += "Last job: $($Agent.job.action) $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })" }
         if ($version.Detail) { $detail += $version.Detail }
     } else {
@@ -853,30 +847,17 @@ function Get-RemoteDesktopPlan {
         Remote Desktop group's firewall rules { name, enabled, profile }. Returns { Allow, Nla, Rules (name, enabled,
         profile to set), Text }. A group policy that turns Remote Desktop off or NLA off wins: nothing is forced
         against it, and Text says so.
-        Remote support (joining the signed-in user's own screen, mstsc /shadow): policyShadow is the Terminal Services
-        policy 'Shadow' (0 none, 1 control with the user's permission, 2 control without, 3 view with permission,
-        4 view without). Not set: the agent sets 1, so the user is always asked first. Shadow = set it; SupportText.
     #>
     param([Parameter(Mandatory)]$State, [switch]$Off)
     $get = { param($n) if ($State.PSObject.Properties[$n] -and $null -ne $State.$n -and "$($State.$n)" -ne '') { [int]$State.$n } else { $null } }
-    $deny = & $get 'deny'; $nla = & $get 'nla'; $pDeny = & $get 'policyDeny'; $pNla = & $get 'policyNla'; $pShadow = & $get 'policyShadow'
-    $support = switch ($pShadow) {
-        $null { 'Ready: the user is asked first' }
-        0 { 'Off: a group policy turns remote control off on this PC' }
-        1 { 'Ready: the user is asked first' }
-        2 { 'Ready, but a group policy lets IT take control without asking the user' }
-        3 { 'View only: a group policy allows watching the screen, not control (the user is asked first)' }
-        4 { 'View only, without asking the user (group policy)' }
-        default { "Unknown remote control policy ($pShadow)" }
-    }
+    $deny = & $get 'deny'; $nla = & $get 'nla'; $pDeny = & $get 'policyDeny'; $pNla = & $get 'policyNla'
     $rules = @($State.rules | Where-Object { $_ })
     $on = $(if ($null -ne $pDeny) { $pDeny -eq 0 } else { $deny -eq 0 })
     if ($Off) {
         # Turned off in the agent settings: left as it is, only reported.
-        $s = if ($null -eq $pShadow -or -not $on) { 'Off (left as it is: turned off in the agent settings)' } else { $support }
-        return [pscustomobject]@{ Allow = $false; Nla = $false; Shadow = $false; Rules = @(); Text = "$(if ($on) { 'On' } else { 'Off' }) (left as it is: turned off in the agent settings)"; SupportText = $s }
+        return [pscustomobject]@{ Allow = $false; Nla = $false; Rules = @(); Text = "$(if ($on) { 'On' } else { 'Off' }) (left as it is: turned off in the agent settings)" }
     }
-    if ($pDeny -eq 1) { return [pscustomobject]@{ Allow = $false; Nla = $false; Shadow = $false; Rules = @(); Text = 'Off: a group policy turns Remote Desktop off on this PC'; SupportText = 'Off: a group policy turns Remote Desktop off on this PC' } }
+    if ($pDeny -eq 1) { return [pscustomobject]@{ Allow = $false; Nla = $false; Rules = @(); Text = 'Off: a group policy turns Remote Desktop off on this PC' } }
     $set = @(foreach ($r in $rules) {
         $profile = "$($r.profile)"
         $domain = $profile -match 'Domain|Any' -or $profile -eq '0' -or $profile -eq ''
@@ -890,7 +871,7 @@ function Get-RemoteDesktopPlan {
     $text = if (-not $rules) { 'On, but no Remote Desktop firewall rule was found on this PC' }
         elseif ($pNla -eq 0) { 'On, but a group policy turns Network Level Authentication off' }
         else { 'On (Network Level Authentication, Domain network only)' }
-    [pscustomobject]@{ Allow = ($deny -ne 0 -and $null -eq $pDeny); Nla = ($nla -ne 1 -and $pNla -ne 0); Shadow = ($null -eq $pShadow); Rules = $set; Text = $text; SupportText = $support }
+    [pscustomobject]@{ Allow = ($deny -ne 0 -and $null -eq $pDeny); Nla = ($nla -ne 1 -and $pNla -ne 0); Rules = $set; Text = $text }
 }
 
 function Get-RemoteDesktopState {
@@ -904,7 +885,6 @@ function Get-RemoteDesktopState {
         nla = & $read $script:RdpTcpKey 'UserAuthentication'
         policyDeny = & $read $script:RdpPolicyKey 'fDenyTSConnections'
         policyNla = & $read $script:RdpPolicyKey 'UserAuthentication'
-        policyShadow = & $read $script:RdpPolicyKey 'Shadow'
         rules = $rules
     }
 }
@@ -913,24 +893,18 @@ function Sync-AgentRemoteDesktop {
     <#
     .SYNOPSIS
         On the PC (the agent, as SYSTEM): turns Remote Desktop on with NLA and opens its firewall rules on the Domain
-        profile only, where they are not already, and allows remote support with the user's permission (policy
-        Shadow 1, only when no policy sets it). Returns { Text, SupportText, Changed (what it did, for the log) }.
+        profile only, where they are not already. Returns { Text, Changed (what it did, for the log) }.
     #>
     param([switch]$Off)
     $plan = Get-RemoteDesktopPlan -State (Get-RemoteDesktopState) -Off:$Off
     $changed = @()
     if ($plan.Nla) { Set-ItemProperty -LiteralPath $script:RdpTcpKey -Name UserAuthentication -Value 1 -Type DWord -ErrorAction Stop; $changed += 'Network Level Authentication required' }
     if ($plan.Allow) { Set-ItemProperty -LiteralPath $script:RdpKey -Name fDenyTSConnections -Value 0 -Type DWord -ErrorAction Stop; $changed += 'Remote Desktop turned on' }
-    if ($plan.Shadow) {
-        if (-not (Test-Path -LiteralPath $script:RdpPolicyKey)) { $null = New-Item -Path $script:RdpPolicyKey -Force -ErrorAction Stop }
-        Set-ItemProperty -LiteralPath $script:RdpPolicyKey -Name Shadow -Value 1 -Type DWord -ErrorAction Stop
-        $changed += 'remote support allowed, with the user''s permission'
-    }
     foreach ($r in @($plan.Rules)) {
         if ($r.enabled) { Set-NetFirewallRule -Name $r.name -Profile Domain -Enabled True -ErrorAction Stop; $changed += "firewall rule $($r.name) open on the Domain network only" }
         else { Set-NetFirewallRule -Name $r.name -Enabled False -ErrorAction Stop; $changed += "firewall rule $($r.name) closed" }
     }
-    [pscustomobject]@{ Text = $plan.Text; SupportText = $plan.SupportText; Changed = $changed }
+    [pscustomobject]@{ Text = $plan.Text; Changed = $changed }
 }
 
 function Test-AgentRemoteDesktopOn {
@@ -964,28 +938,6 @@ function Get-RemoteDesktopProblem {
     $rdp = if ($Agent.PSObject.Properties['remoteDesktop']) { "$($Agent.remoteDesktop)" } else { '' }
     if ($rdp -like 'Off*') { return "Remote Desktop on ${ComputerName}: $rdp" }
     ''
-}
-
-function Get-RemoteSupportPlan {
-    <#
-    .SYNOPSIS
-        Console: how to join a PC's signed-in user's screen. { Args (mstsc arguments) , Problem (one line, the
-        reason it can't), Ask (one line to confirm first, or '') }. The user always gets Windows' own prompt to allow
-        it, unless a group policy says otherwise (then Ask says so).
-    #>
-    param([string]$ComputerName, $Agent, [string]$Target)
-    $no = { param($m) [pscustomobject]@{ Args = ''; Problem = $m; Ask = '' } }
-    if (-not $Agent) { return & $no "$ComputerName has no agent checking in: Install agent first (Computers tab)." }
-    if (-not $Agent.Online) { return & $no "$ComputerName's agent last checked in $("$($Agent.LastSeenText)".ToLowerInvariant()): the PC is probably off." }
-    $support = if ($Agent.PSObject.Properties['remoteSupport']) { "$($Agent.remoteSupport)" } else { '' }
-    if (-not $support) { return & $no "$ComputerName's agent is older than remote support: it updates itself within a few minutes, try again then." }
-    if ($support -like 'Off*') { return & $no "Remote support on ${ComputerName}: $support" }
-    $id = if ($Agent.PSObject.Properties['userSessionId']) { "$($Agent.userSessionId)" } else { '' }
-    if (-not "$($Agent.userSignedIn)" -or $id -notmatch '^\d+$') { return & $no "Nobody is signed in on ${ComputerName}: use Remote desktop instead." }
-    $view = $support -like 'View only*'
-    $ask = if ($support -match 'without asking') { "A group policy on $ComputerName lets you in without asking $($Agent.userSignedIn). Join their screen anyway?" } else { '' }
-    $a = "/v:$Target /shadow:$id" + $(if (-not $view) { ' /control' })
-    [pscustomobject]@{ Args = $a; Problem = ''; Ask = $ask }
 }
 
 function New-AgentConfig {
@@ -1090,4 +1042,4 @@ Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
-    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Get-RemoteDesktopPlan, Get-RemoteDesktopState, Sync-AgentRemoteDesktop, Test-AgentRemoteDesktopOn, Get-RemoteDesktopTarget, Get-RemoteDesktopProblem, Get-RemoteSupportPlan, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Get-RemoteDesktopPlan, Get-RemoteDesktopState, Sync-AgentRemoteDesktop, Test-AgentRemoteDesktopOn, Get-RemoteDesktopTarget, Get-RemoteDesktopProblem, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

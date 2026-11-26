@@ -155,7 +155,7 @@ $script:lastError = ''
 # Remote Desktop: turned on (NLA, Domain network only) at start and checked again every 30 minutes, unless agent.json
 # says remoteDesktop false. Its state goes in each check-in for the console's Remote desktop button.
 $script:rdpOff = $config.PSObject.Properties['remoteDesktop'] -and $config.remoteDesktop -eq $false
-$script:rdpText = ''; $script:supportText = ''; $script:rdpAt = [datetime]::MinValue; $script:rdpError = ''
+$script:rdpText = ''; $script:rdpAt = [datetime]::MinValue; $script:rdpError = ''
 function Sync-RemoteDesktop {
     if (((Get-Date) - $script:rdpAt).TotalMinutes -lt 30) { return }
     $script:rdpAt = Get-Date
@@ -163,26 +163,13 @@ function Sync-RemoteDesktop {
         $r = Sync-AgentRemoteDesktop -Off:$script:rdpOff
         if ($r.Changed) { Write-Log "Remote Desktop: $($r.Changed -join '; ')" }
         if ($r.Text -ne $script:rdpText) { Write-Log "Remote Desktop: $($r.Text)" }
-        if ($r.SupportText -ne $script:supportText) { Write-Log "Remote support: $($r.SupportText)" }
-        $script:rdpText = $r.Text; $script:supportText = $r.SupportText; $script:rdpError = ''
+        $script:rdpText = $r.Text; $script:rdpError = ''
     } catch {
         $m = "Could not turn Remote Desktop on: $($_.Exception.Message)"
         if ($script:rdpError -ne $m) { Write-Log $m }
         $script:rdpError = $m; $script:rdpText = "Not checked: $m"
     }
 }
-function Get-UserSessionId([string]$User) {
-    # The Windows session of the user signed in at the screen (remote support joins it): the session of their
-    # explorer.exe. '' when nobody is signed in.
-    if (-not $User) { return '' }
-    $short = ($User -split '\\')[-1]
-    $ids = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
-        $o = try { Invoke-CimMethod -InputObject $_ -MethodName GetOwner -ErrorAction Stop } catch { $null }
-        if ($o -and "$($o.User)" -eq $short) { "$($_.SessionId)" }
-    })
-    if ($ids) { $ids[0] } else { '' }
-}
-
 function Send-CheckIn {
     Get-ComputerAccount
     $net = Get-Network
@@ -195,7 +182,6 @@ function Send-CheckIn {
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
     $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInSeconds $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
-        -UserSessionId (Get-UserSessionId "$($cs.UserName)") -RemoteSupport $script:supportText `
         -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -RemoteDesktop $script:rdpText -ErrorAction Stop
     } catch {
         $m = "Could not make the check-in: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"

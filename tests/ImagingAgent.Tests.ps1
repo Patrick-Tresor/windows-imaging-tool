@@ -326,34 +326,6 @@ try {
     $module = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.psm1'))
     Assert-Equal ($module -match "Set-NetFirewallRule -Name \`$r\.name -Profile Domain -Enabled True") $true 'the firewall opens on the Domain profile only'
     Assert-Equal ($module -match 'Add-LocalGroupMember|net(\.exe)? localgroup') $false 'who may sign in is never changed'
-
-    # Remote support: joining the signed-in user's screen, always with their permission unless a policy says otherwise.
-    Assert-Equal "$($plan.Shadow)|$($plan.SupportText)" 'True|Ready: the user is asked first' 'no remote control policy: set to control with the user''s permission'
-    $s1 = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 0; nla = 1; policyShadow = 1; rules = $rules })
-    Assert-Equal "$($s1.Shadow)|$($s1.SupportText)" 'False|Ready: the user is asked first' 'already with permission: nothing changed'
-    $s0 = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 0; nla = 1; policyShadow = 0; rules = $rules })
-    Assert-Equal "$($s0.Shadow)|$($s0.SupportText -like 'Off*')" 'False|True' 'a policy that turns remote control off is not fought, and reported'
-    $s2 = Get-RemoteDesktopPlan -State ([pscustomobject]@{ deny = 0; nla = 1; policyShadow = 2; rules = $rules })
-    Assert-Equal "$($s2.Shadow)|$($s2.SupportText -match 'without asking')" 'False|True' 'a policy without the user''s permission is reported'
-    Assert-Equal ($gpo.SupportText -like 'Off*') $true 'Remote Desktop off by policy: remote support off too'
-    Assert-Equal "$($off.Shadow)" 'False' 'turned off in the settings: remote control policy left as it is'
-    Assert-Equal ($module -match "-Name Shadow -Value 1 ") $true 'the agent only ever sets control with the user''s permission'
-    $sup = New-AgentCheckIn -Identity $identity -AgentId 'agent-1' -UserSignedIn 'CORP\jdoe' -UserSessionId '2' -RemoteSupport 'Ready: the user is asked first' -Now $now
-    Assert-Equal "$($sup.userSessionId)|$($sup.remoteSupport)" '2|Ready: the user is asked first' 'the check-in has the user''s session and remote support state'
-    $ready = [pscustomobject]@{ Online = $true; LastSeenText = '1 min ago'; userSignedIn = 'CORP\jdoe'; userSessionId = '2'; remoteSupport = 'Ready: the user is asked first' }
-    $p = Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $ready -Target 'PC01'
-    Assert-Equal "$($p.Args)|$($p.Problem)|$($p.Ask)" '/v:PC01 /shadow:2 /control||' 'joins session 2 with control; Windows asks the user (no /noConsentPrompt)'
-    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $null).Problem -match 'no agent') $true 'no agent: refused'
-    $nobody = [pscustomobject]@{ Online = $true; userSignedIn = ''; userSessionId = ''; remoteSupport = 'Ready: the user is asked first' }
-    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $nobody).Problem -match 'Nobody is signed in') $true 'nobody signed in: use Remote desktop'
-    $old = [pscustomobject]@{ Online = $true; userSignedIn = 'CORP\jdoe' }
-    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $old).Problem -match 'older') $true 'an agent from before remote support: wait for its update'
-    $viewOnly = [pscustomobject]@{ Online = $true; userSignedIn = 'CORP\jdoe'; userSessionId = '3'; remoteSupport = $s0.SupportText -replace '.*', 'View only: x' }
-    Assert-Equal (Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $viewOnly -Target '10.1.2.34').Args '/v:10.1.2.34 /shadow:3' 'view only policy: no /control'
-    $silent = [pscustomobject]@{ Online = $true; userSignedIn = 'CORP\jdoe'; userSessionId = '2'; remoteSupport = $s2.SupportText }
-    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $silent -Target 'PC01').Ask -match 'without asking') $true 'a policy that skips the user''s prompt: the console asks you first'
-    Assert-Equal ($consoleText -notmatch 'noConsentPrompt') $true 'the console never skips the user''s prompt'
-    Assert-Equal ($agentScript -match 'Get-UserSessionId' -and $agentScript -match '-RemoteSupport \$script:supportText') $true 'the agent reports the session and remote support'
     $xml = [xml](Get-AgentTaskXml)
     Assert-Equal $xml.Task.Principals.Principal.UserId 'S-1-5-18' 'the task runs as SYSTEM'
     Assert-Equal $xml.Task.Settings.MultipleInstancesPolicy 'IgnoreNew' 'a second start while it runs is ignored'
