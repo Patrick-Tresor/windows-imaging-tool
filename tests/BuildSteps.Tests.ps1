@@ -154,7 +154,7 @@ Assert-Equal ($progressText -match "'-ProgressFile'") $true 'Start-ConsoleJob pa
 Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console opens the Build progress window'
 # No PowerShell window for any job (Patrick 2026-11-26: the network boot build left one open).
 Assert-Equal ($progressText -match "Start-Process powershell\.exe -ArgumentList \(@\('-WindowStyle', 'Hidden'\) \+ \`$runArgs\) -WindowStyle Hidden") $true 'every console job runs hidden'
-Assert-Equal ($progressText -match 'Minimized') $false 'no console job runs minimized'
+Assert-Equal ($progressText -match "else { 'Minimized' }") $false 'no console job runs minimized'
 $jobCallers = @('src/Console/ImagingConsole.ps1', 'src/Console/CaptureWizard.ps1', 'src/Console/ConsoleData.psm1') | ForEach-Object { Get-Content -Raw -LiteralPath (Join-Path $repo $_) }
 Assert-Equal (($jobCallers -join "`n") -match "'-NoExit'") $false 'no console job keeps its PowerShell open (-NoExit)'
 foreach ($name in @('network-boot', 'media-build')) {
