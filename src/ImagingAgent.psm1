@@ -730,7 +730,9 @@ function Install-AgentOnRemotePC {
     Invoke-RemoteChannel -Channel $Channel -ArgumentList $dir, $acl -ScriptBlock {
         param($Dir, $AclArgs)
         # An agent already running keeps its old code (one at a time): stop it, -Register starts the new one.
-        & schtasks.exe /End /TN 'ImagingTool\Agent' 2>&1 | Out-Null
+        # try: with no task yet schtasks writes "file not found" to stderr, and under ErrorAction Stop (the Local and
+        # Smb channels) PowerShell 5.1 makes that a terminating error (D2J14HL3: "Le fichier specifie est introuvable").
+        try { & schtasks.exe /End /TN 'ImagingTool\Agent' 2>&1 | Out-Null } catch { }
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
         # Administrators and SYSTEM only, before the scripts that run as SYSTEM go in.
         $o = & icacls.exe ([string[]]$AclArgs) 2>&1
