@@ -21,7 +21,8 @@ $ErrorActionPreference = 'Continue'
 $dir = $PSScriptRoot
 $log = "$env:WINDIR\Temp\ImagingAgent.log"
 Import-Module ([IO.Path]::Combine($dir, 'ScriptLog.psm1')) -Force
-function Write-Log([string]$Message) { Write-ScriptLog -Path $log -Message $Message }
+# -Once (run by hand) shows each line on the screen too: the agent otherwise only writes its log.
+function Write-Log([string]$Message) { Write-ScriptLog -Path $log -Message $Message; if ($Once) { Write-Host $Message } }
 # An error that stops the script before the main loop is logged too: D2J14HL3's agent started from its task and
 # left no line at all.
 trap { Write-Log "The agent stopped while starting: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"; exit 1 }
@@ -49,7 +50,11 @@ if ($Register) {
 $mutex = New-Object Threading.Mutex($false, 'Global\ImagingToolAgent')
 $owned = $false
 try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
-if (-not $owned) { Write-Log 'Another agent is already running on this PC: this start does nothing.'; exit 0 }
+if (-not $owned) {
+    $others = @(try { Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop | Where-Object { "$($_.CommandLine)" -match 'ImagingAgent\.ps1' -and $_.ProcessId -ne $PID } | ForEach-Object { "$($_.ProcessId)" } } catch { })
+    Write-Log "Another agent is already running on this PC$(if ($others) { " (process $($others -join ', '))" }): this start does nothing."
+    exit 0
+}
 Write-Log "Agent starting: PowerShell $($PSVersionTable.PSVersion) as $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
 
 # RemoteReimage.psm1 here too, not only inside ImagingAgent.psm1: a module's own imports stay inside it, so this
