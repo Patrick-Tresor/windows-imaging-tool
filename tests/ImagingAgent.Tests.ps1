@@ -335,6 +335,8 @@ try {
     Assert-Equal ($agentScript -match "quiet = .*'true'" -and $agentScript -match 'if \(-not \$quiet\)') $true 'a quiet job leaves the Dashboard and the deploy result alone'
     $consoleText = [IO.File]::ReadAllText((Join-Path $repo 'src/Console/ImagingConsole.ps1'))
     Assert-Equal ($consoleText -match 'BtnAdSupport' -and $consoleText -match 'BtnDashSupport' -and $consoleText -match 'Send-RemoteSupportInstalls' -and $consoleText -notmatch 'mstsc') $true 'Remote support opens MeshCentral; no RDP anywhere in the console'
+    Assert-Equal "$([regex]::Matches($consoleText, '-Action installapps -Apps @\(\$Pack\.Settings\.AppPack\)').Count)|$([regex]::Matches($consoleText, 'IT is installing remote support').Count)" '1|1' 'the remote support job is built in one place (automatic install and the button)'
+    Assert-Equal "$([regex]::Matches($consoleText, 'Get-AgentJobFolder -StatusFolder \$folder -Serial').Count)|$($consoleText -match '(?s)function Send-AgentUpdates.*?Send-AgentJobs' -and $consoleText -match '(?s)function Send-RemoteSupportInstalls.*?Send-AgentJobs')" '1|True' 'agent updates and remote support installs go out through one send loop'
     $module = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.psm1'))
     Assert-Equal ($module -match 'fDenyTSConnections -Value 0|-Name Shadow -Value') $false 'the agent never turns Remote Desktop on'
     $xml = [xml](Get-AgentTaskXml)

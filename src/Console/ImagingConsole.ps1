@@ -395,6 +395,22 @@ function Get-ConsoleAgentCheckIns {
     $rows
 }
 
+# Sends signed jobs to agent PCs: skips a PC that already has a job waiting (a reimage, apps; this one goes after
+# it, at a later refresh), marks each in -Sent (serial -> -SentValue) so it goes once while the console runs, and
+# says so in the status bar. -Send { param($Folder, $Key, $Agent) } makes the job. Returns nothing.
+function Send-AgentJobs([object[]]$Agents, [hashtable]$Sent, $SentValue, [string]$What, [scriptblock]$Send) {
+    if (-not @($Agents).Count) { return }
+    $folder = Get-DashboardFolder
+    $key = Get-AgentSigningKey -ContentRoot $script:root
+    if (-not $folder -or -not $key) { return }
+    foreach ($a in @($Agents)) {
+        if ([IO.File]::Exists([IO.Path]::Combine((Get-AgentJobFolder -StatusFolder $folder -Serial "$($a.serial)"), 'job.json'))) { continue }
+        $Sent["$($a.serial)"] = $SentValue
+        try { $null = & $Send $folder $key $a; Set-Status "Sent $($a.computerName) $What." }
+        catch { Set-Status "Could not send $($a.computerName) ${What}: $($_.Exception.Message)" }
+    }
+}
+
 # The agent the console has (Get-AgentCodeHash of src): an online agent with other code gets it as a signed update
 # job, once per PC while the console runs (Send-AgentUpdates, from the Computers tab and the Dashboard).
 $script:agentCode = try { Get-AgentCodeHash -Folder $srcDir } catch { '' }
@@ -404,18 +420,9 @@ function Send-AgentUpdates([object[]]$CheckIns) {
     try {
         if (-not $script:agentCode -or -not (Test-ContentRoot $script:root)) { return }
         $todo = @(Select-AgentsToUpdate -CheckIns @($CheckIns) -CurrentCode $script:agentCode -Sent $script:agentUpdatesSent)
-        if (-not $todo) { return }
-        $folder = Get-DashboardFolder
-        $key = Get-AgentSigningKey -ContentRoot $script:root
-        if (-not $folder -or -not $key) { return }
-        foreach ($a in $todo) {
-            # A job already waiting for this PC (a reimage, apps) is left alone: the update goes after it.
-            if ([IO.File]::Exists([IO.Path]::Combine((Get-AgentJobFolder -StatusFolder $folder -Serial "$($a.serial)"), 'job.json'))) { continue }
-            $script:agentUpdatesSent["$($a.serial)"] = $script:agentCode
-            try {
-                $null = New-AgentJob -StatusFolder $folder -PrivateKey $key -CheckIn $a -Action update -SourceDir $srcDir -Message 'Agent update'
-                Set-Status "Sent $($a.computerName) the new agent ($script:agentCode)."
-            } catch { Set-Status "Could not send $($a.computerName) the new agent: $($_.Exception.Message)" }
+        Send-AgentJobs -Agents $todo -Sent $script:agentUpdatesSent -SentValue $script:agentCode -What "the new agent ($script:agentCode)" -Send {
+            param($Folder, $Key, $Agent)
+            New-AgentJob -StatusFolder $Folder -PrivateKey $Key -CheckIn $Agent -Action update -SourceDir $srcDir -Message 'Agent update'
         }
     } catch { }
     Send-RemoteSupportInstalls $CheckIns
@@ -424,24 +431,28 @@ function Send-AgentUpdates([object[]]$CheckIns) {
 # Remote support (MeshCentral): agent PCs without the MeshCentral agent get its app pack as a quiet signed job, once per
 # PC while the console runs, when remote support is set up (Deploy Settings) and the pack is in Applications.
 $script:supportInstallsSent = @{}
+function Get-RemoteSupportPack {
+    # Remote support's settings and its app pack folder: { Settings; AppRoot; Ready } (Ready: the pack is in Applications).
+    $rs = Get-RemoteSupportSettings (Get-DeploySettings -ContentRoot $script:root)
+    $appRoot = Join-Path $script:root 'Applications'
+    [pscustomobject]@{ Settings = $rs; AppRoot = $appRoot; Ready = [bool](Test-Path -LiteralPath (Join-Path $appRoot $rs.AppPack)) }
+}
+
+function New-RemoteSupportJob($Folder, $Key, $Agent, $Pack) {
+    # The quiet job that installs the MeshCentral agent's app pack (no Dashboard row, no DeployResult.txt change).
+    $script:supportInstallsSent["$($Agent.serial)"] = $true
+    New-AgentJob -StatusFolder $Folder -PrivateKey $Key -CheckIn $Agent -Action installapps -Apps @($Pack.Settings.AppPack) -AppRoot $Pack.AppRoot -Quiet -Message 'IT is installing remote support on this PC.'
+}
+
 function Send-RemoteSupportInstalls([object[]]$CheckIns) {
     try {
         if (-not (Test-ContentRoot $script:root)) { return }
-        $rs = Get-RemoteSupportSettings (Get-DeploySettings -ContentRoot $script:root)
-        $appRoot = Join-Path $script:root 'Applications'
-        if (-not $rs.Url -or -not (Test-Path -LiteralPath (Join-Path $appRoot $rs.AppPack))) { return }
+        $pack = Get-RemoteSupportPack
+        if (-not $pack.Settings.Url -or -not $pack.Ready) { return }
         $todo = @(Select-RemoteSupportInstalls -CheckIns @($CheckIns) -CurrentCode $script:agentCode -Sent $script:supportInstallsSent)
-        if (-not $todo) { return }
-        $folder = Get-DashboardFolder
-        $key = Get-AgentSigningKey -ContentRoot $script:root
-        if (-not $folder -or -not $key) { return }
-        foreach ($a in $todo) {
-            if ([IO.File]::Exists([IO.Path]::Combine((Get-AgentJobFolder -StatusFolder $folder -Serial "$($a.serial)"), 'job.json'))) { continue }
-            $script:supportInstallsSent["$($a.serial)"] = $true
-            try {
-                $null = New-AgentJob -StatusFolder $folder -PrivateKey $key -CheckIn $a -Action installapps -Apps @($rs.AppPack) -AppRoot $appRoot -Quiet -Message 'IT is installing remote support on this PC.'
-                Set-Status "Sent $($a.computerName) the remote support agent."
-            } catch { Set-Status "Could not send $($a.computerName) the remote support agent: $($_.Exception.Message)" }
+        Send-AgentJobs -Agents $todo -Sent $script:supportInstallsSent -SentValue $true -What 'the remote support agent' -Send {
+            param($Folder, $Key, $Agent)
+            New-RemoteSupportJob $Folder $Key $Agent $pack
         }
     } catch { }
 }
@@ -1455,17 +1466,16 @@ function Start-RemoteSupport([string]$Name, $Agent) {
     # Opens the PC's screen on the MeshCentral server in the browser; the person at the PC is asked to allow it (the
     # device group's consent settings). A PC whose agent says the MeshCentral agent is missing gets it first.
     if (-not $Name -or -not (Test-RootReady)) { return }
-    $rs = Get-RemoteSupportSettings (Get-DeploySettings -ContentRoot $script:root)
+    $pack = Get-RemoteSupportPack
+    $rs = $pack.Settings
     $link = Get-RemoteSupportLink -ServerUrl $rs.Url -ComputerName $Name -Agent $Agent
     if ($link.Install) {
-        $appRoot = Join-Path $script:root 'Applications'
-        if (-not (Test-Path -LiteralPath (Join-Path $appRoot $rs.AppPack))) {
+        if (-not $pack.Ready) {
             Show-Error "$($link.Problem) Put the MeshCentral agent installer in Applications\$($rs.AppPack) (Applications tab, New..., template MeshCentral-Agent)."; return
         }
         $key = Get-AgentSigningKey -ContentRoot $script:root
         if (-not $key) { Show-Error 'This content root has no agent key (config\secrets\agent-key.xml): the PCs would not trust the job.'; return }
-        $null = New-AgentJob -StatusFolder (Get-DashboardFolder) -PrivateKey $key -CheckIn $Agent -Action installapps -Apps @($rs.AppPack) -AppRoot $appRoot -Quiet -Message 'IT is installing remote support on this PC.'
-        $script:supportInstallsSent["$($Agent.serial)"] = $true
+        $null = New-RemoteSupportJob (Get-DashboardFolder) $key $Agent $pack
         $script:agentCache = $null
         Set-Status "Installing the remote support agent on $Name. Click Remote support again in a minute or two."
         return
