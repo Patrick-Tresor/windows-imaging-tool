@@ -815,7 +815,9 @@ function Get-ReimageRestartTaskXml {
 function Get-ReimageNoticeTaskXml {
     # Task Scheduler XML for the notice window: no trigger, started at once in the session of every user signed in
     # (group BUILTIN\Users, their own rights).
-    $cmd = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $script:NoticeScriptPath"
+    # conhost --headless: on Windows 11 the default terminal (Windows Terminal) opens powershell.exe in a visible
+    # window and ignores -WindowStyle Hidden (Patrick 2026-11-26: a PowerShell window showed with the notice).
+    $cmd = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $script:NoticeScriptPath"
     @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -832,7 +834,7 @@ function Get-ReimageNoticeTaskXml {
     <Enabled>true</Enabled>
   </Settings>
   <Actions Context="Author">
-    <Exec><Command>powershell.exe</Command><Arguments>$cmd</Arguments></Exec>
+    <Exec><Command>conhost.exe</Command><Arguments>$cmd</Arguments></Exec>
   </Actions>
 </Task>
 "@
