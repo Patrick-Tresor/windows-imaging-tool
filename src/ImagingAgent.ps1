@@ -21,7 +21,11 @@ $ErrorActionPreference = 'Continue'
 $dir = $PSScriptRoot
 $log = "$env:WINDIR\Temp\ImagingAgent.log"
 Import-Module ([IO.Path]::Combine($dir, 'ScriptLog.psm1')) -Force
-function Write-Log([string]$Message) { Write-ScriptLog -Path $log -Message $Message }
+# -Once (run by hand) shows each line on the screen too: the agent otherwise only writes its log.
+function Write-Log([string]$Message) { Write-ScriptLog -Path $log -Message $Message; if ($Once) { Write-Host $Message } }
+# An error that stops the script before the main loop is logged too: D2J14HL3's agent started from its task and
+# left no line at all.
+trap { Write-Log "The agent stopped while starting: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"; exit 1 }
 # The log stays small: over 1 MB, the older half goes.
 try {
     $fi = New-Object IO.FileInfo $log
@@ -46,14 +50,21 @@ if ($Register) {
 $mutex = New-Object Threading.Mutex($false, 'Global\ImagingToolAgent')
 $owned = $false
 try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
-if (-not $owned) { exit 0 }
+if (-not $owned) {
+    $others = @(try { Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop | Where-Object { "$($_.CommandLine)" -match 'ImagingAgent\.ps1' -and $_.ProcessId -ne $PID } | ForEach-Object { "$($_.ProcessId)" } } catch { })
+    Write-Log "Another agent is already running on this PC$(if ($others) { " (process $($others -join ', '))" }): this start does nothing."
+    exit 0
+}
+Write-Log "Agent starting: PowerShell $($PSVersionTable.PSVersion) as $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
 
 # RemoteReimage.psm1 here too, not only inside ImagingAgent.psm1: a module's own imports stay inside it, so this
 # script could not see Invoke-LocalDiskBoot (GWHZLG3's reimage job: "Invoke-LocalDiskBoot is not recognized").
-Import-Module ([IO.Path]::Combine($dir, 'RemoteReimage.psm1')) -Force
-Import-Module ([IO.Path]::Combine($dir, 'ImagingAgent.psm1')) -Force
-# Install apps jobs: the same app pack code first boot runs (Invoke-AppInstall).
-Import-Module ([IO.Path]::Combine($dir, 'AppPack.psm1')) -Force
+# AppPack.psm1: install apps jobs run the same app pack code first boot runs (Invoke-AppInstall).
+# Each one stops the agent with its reason in the log (an antivirus blocking a module says so here).
+foreach ($m in 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') {
+    try { Import-Module ([IO.Path]::Combine($dir, $m)) -Force -ErrorAction Stop }
+    catch { Write-Log "Could not load ${m}: $($_.Exception.Message). The agent stops."; exit 1 }
+}
 
 $configPath = [IO.Path]::Combine($dir, 'agent.json')
 try { $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json }
@@ -152,7 +163,9 @@ function Send-CheckIn {
     }
     try {
         Save-AgentCheckIn -StatusFolder $statusFolder -Record $record
-        if ($script:lastError) { Write-Log 'Checked in again' }
+        # The first one is logged: a check-in that works said nothing, so D2J14HL3's log looked like it never did.
+        if (-not $script:checkedIn) { Write-Log "Checked in to $(Get-AgentFolder $statusFolder) as $($record.serial).json"; $script:checkedIn = $true }
+        elseif ($script:lastError) { Write-Log 'Checked in again' }
         $script:lastError = ''
     } catch {
         # Logged once until it works again: the share is down, or the computer account can't write there.
