@@ -255,14 +255,14 @@ function Show-CaptureWizard {
         $c = & $getChoice
         # Its own process, followed in the Progress window (steps, bars, time left), like a media build.
         $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
-        $job = Start-ConsoleJob -Name "capture-$($c.Name)" -ArgumentList {
+        $job = Start-ConsoleJob -Name "capture-$($c.Name)" -Hidden -ArgumentList {
             param($progressFile, $logPath)
             Get-VMCaptureArguments -ScriptPath (Join-Path $SrcDir 'Capture-VMImage.ps1') `
                 -ContentRoot $ContentRoot -DiskPath $c.DiskFile -Name $c.Name -Description $c.Description -Compression $c.Compression `
                 -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
         }
         $state.HandedOver = $true
-        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)"
+        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)" -Hidden
         $true
     }
 

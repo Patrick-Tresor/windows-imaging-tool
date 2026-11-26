@@ -829,7 +829,7 @@ function Get-VMCaptureArguments {
     if ($ProgressFile) { $cmd += " -ProgressFile $(& $quote $ProgressFile)" }
     if ($LogPath) { $cmd += " -LogPath $(& $quote $LogPath)" }
     $cmd += ' -NoPrompt'   # the console already asked
-    @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
+    @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))
 }
 
 #endregion

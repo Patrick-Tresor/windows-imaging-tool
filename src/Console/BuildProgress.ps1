@@ -65,6 +65,9 @@ function Start-ConsoleJob {
     # in %LOCALAPPDATA%\ImagingConsole\Logs\<Name>-<time>.log for Show-BuildProgress. -ArgumentList is the command
     # line, to which -ProgressFile and -LogPath are added, or a script block that gets both paths and returns it.
     # Returns Process, ProgressFile and LogPath.
+    # Always hidden, never -NoExit (Patrick, 2026-11-26: the network boot build left an 'Administrateur : Windows
+    # PowerShell' window open). The Progress window shows the steps and Open log has every line. -Hidden is kept so
+    # older calls still work.
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)]$ArgumentList,
@@ -76,7 +79,8 @@ function Start-ConsoleJob {
     $logPath = [IO.Path]::Combine($(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $temp }), 'ImagingConsole', 'Logs', "$Name-$stamp.log")
     $runArgs = if ($ArgumentList -is [scriptblock]) { & $ArgumentList $progressFile $logPath }
                else { @($ArgumentList) + @('-ProgressFile', (ConvertTo-Arg $progressFile), '-LogPath', (ConvertTo-Arg $logPath)) }
-    $proc = Start-Process powershell.exe -ArgumentList $runArgs -WindowStyle $(if ($Hidden) { 'Hidden' } else { 'Minimized' }) -PassThru
+    $runArgs = @(@($runArgs) | Where-Object { "$_" -ne '-NoExit' })
+    $proc = Start-Process powershell.exe -ArgumentList (@('-WindowStyle', 'Hidden') + $runArgs) -WindowStyle Hidden -PassThru
     [pscustomobject]@{ Process = $proc; ProgressFile = $progressFile; LogPath = $logPath }
 }
 

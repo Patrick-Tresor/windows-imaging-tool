@@ -152,6 +152,14 @@ $progressText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/Buil
 Assert-Equal ($consoleText -match "Start-ConsoleJob -Name 'media-build'") $true 'the console starts the build with Start-ConsoleJob'
 Assert-Equal ($progressText -match "'-ProgressFile'") $true 'Start-ConsoleJob passes -ProgressFile'
 Assert-Equal ($consoleText -match 'Show-BuildProgress ') $true 'the console opens the Build progress window'
+# No PowerShell window for any job (Patrick 2026-11-26: the network boot build left one open).
+Assert-Equal ($progressText -match "Start-Process powershell\.exe -ArgumentList \(@\('-WindowStyle', 'Hidden'\) \+ \`$runArgs\) -WindowStyle Hidden") $true 'every console job runs hidden'
+Assert-Equal ($progressText -match 'Minimized') $false 'no console job runs minimized'
+$jobCallers = @('src/Console/ImagingConsole.ps1', 'src/Console/CaptureWizard.ps1', 'src/Console/ConsoleData.psm1') | ForEach-Object { Get-Content -Raw -LiteralPath (Join-Path $repo $_) }
+Assert-Equal (($jobCallers -join "`n") -match "'-NoExit'") $false 'no console job keeps its PowerShell open (-NoExit)'
+foreach ($name in @('network-boot', 'media-build')) {
+    Assert-Equal ($consoleText -match "Start-ConsoleJob -Name '$name' [^\n]*-Hidden") $true "$name starts hidden"
+}
 Assert-Equal ($consoleText -match 'BtnShowProgress\.Add_Click\(\{ Invoke-Safely \{ Show-ProgressWindows') $true 'Show progress button reopens the windows'
 Assert-Equal ($consoleText -match '\$window\.Add_Closing\(\{ \$script:ConsoleClosing = \$true') $true 'closing the console closes the hidden progress windows'
 

@@ -1006,10 +1006,10 @@ $ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
     $out = Join-Path $script:root 'Boot'
     New-Item -ItemType Directory -Path $out -Force | Out-Null
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
-    $buildArgs = @('-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
+    $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
-    $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
+    $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
     Set-Status 'Network boot image build started.'
 } })
 
@@ -1142,10 +1142,10 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     [IO.File]::WriteAllText($pwFile, $ui.PwdWinPE.Password, (New-Object Text.UTF8Encoding($false)))
     $buildArgs += @('-WinPEPasswordFile', (ConvertTo-Arg $pwFile))
 
-    # Its own process, minimized: the build takes minutes and must not freeze the console. The Build progress
-    # window shows each step; the build's log (Open log) has every line.
-    $job = Start-ConsoleJob -Name 'media-build' -ArgumentList (@('-NoExit') + $buildArgs)
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)"
+    # Its own hidden process: the build takes minutes and must not freeze the console. The Progress window shows
+    # each step; the build's log (Open log) has every line.
+    $job = Start-ConsoleJob -Name 'media-build' -ArgumentList $buildArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Building USB stick $($disk.Label)" -Hidden
     Set-Status 'Media build started. The Build progress window shows each step.'
 } })
 
