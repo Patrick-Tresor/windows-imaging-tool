@@ -55,6 +55,13 @@ try {
     $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
     $why = Get-AgentLogProblem -Lines $lines -TaskState $(if ($task) { "$($task.State)" } else { '' }) -TaskResult $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' })
     Write-Step "No check-in seen within $WaitMinutes min. $why (log: $log)" Yellow
+    if ($task) { Write-Step "  task ImagingTool\Agent: $($task.State)$(if ($info) { ", last result 0x{0:X}" -f [int64]$info.LastTaskResult })" }
+    # Read only: an antivirus that blocked one of the agent's files in the last hour.
+    try {
+        foreach ($d in @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { $_.InitialDetectionTime -gt $started.AddHours(-1) -and "$($_.Resources)" -match 'ImagingTool|ImagingAgent' })) {
+            Write-Step "  Microsoft Defender blocked: $($d.Resources -join ', ') at $($d.InitialDetectionTime)" Yellow
+        }
+    } catch { }
     Write-Step 'If the log says it checked in, this account just may not read the Status folder: look at the console instead.' Yellow
     exit 1
 } catch {
