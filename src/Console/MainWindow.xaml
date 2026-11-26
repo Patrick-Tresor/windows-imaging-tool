@@ -386,6 +386,15 @@
                        ToolTip="Device names or ids to leave out of the driver check, separated by semicolons. Wildcards work, for example *Smart Card*; PCI\VEN_8086&amp;DEV_9D3A*"/>
             </Grid>
 
+            <!-- 5. Remote support -->
+            <TextBlock Style="{StaticResource SettingsHead}" Text="5. Remote support (MeshCentral)"/>
+            <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6" Text="Your MeshCentral server. The Remote support button (Computers tab, Dashboard) opens a PC's screen there, and every PC with the imaging agent gets the MeshCentral agent from Applications\MeshCentral-Agent. Leave it empty to turn remote support off."/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Label Content="Server"/>
+              <TextBox x:Name="TxtSupportUrl" Grid.Column="1" Width="320" HorizontalAlignment="Left" ToolTip="For example https://imager.corp.local"/>
+            </Grid>
+
             <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
               <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" MaxWidth="700"/>
@@ -431,7 +440,7 @@
                 <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
-                  <Button x:Name="BtnAdRdp" MinWidth="120" Content="Remote desktop" Margin="0,0,10,6" ToolTip="Opens Remote Desktop (mstsc) to the selected PC, signed in as you. The agent keeps Remote Desktop on with Network Level Authentication, reachable on the domain network only; administrators of the PC can sign in. Double-click a PC does the same."/>
+                  <Button x:Name="BtnAdSupport" MinWidth="120" Content="Remote support" Margin="0,0,10,6" ToolTip="Opens the screen of the selected PC on your MeshCentral server, in your browser. The person at the PC is asked to allow it. A PC without the MeshCentral agent gets it first (from Applications). Double-click a PC does the same."/>
                   <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,0,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
                 </WrapPanel>
               </Grid>
@@ -561,7 +570,7 @@
                   <Button x:Name="BtnDashRetry" Content="Retry failed apps" Margin="0,0,8,6" IsEnabled="False"
                           ToolTip="Sends this PC's agent a signed job to install again only the applications that failed, from the packs in Applications, without reimaging. The PC must be on with its agent checking in; an agent installed before this version must be installed again first (Computers tab, Install agent)."/>
                   <Button x:Name="BtnDashLog" Content="Open log" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this deployment's full log in Notepad."/>
-                  <Button x:Name="BtnDashRdp" Content="Remote desktop" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens Remote Desktop (mstsc) to this PC, signed in as you. Its agent keeps Remote Desktop on with Network Level Authentication, on the domain network only."/>
+                  <Button x:Name="BtnDashSupport" Content="Remote support" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this PC's screen on your MeshCentral server, in your browser. The person at the PC is asked to allow it."/>
                   <Button x:Name="BtnDashReimage" Content="Reimage..." Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this PC on the Computers tab, where you choose the answer file and reimage it."/>
                 </WrapPanel>
                 <StackPanel VerticalAlignment="Center">

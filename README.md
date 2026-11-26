@@ -288,6 +288,35 @@ and the console updates it after a tool update (see Updates above).
 `C:\Windows\Temp\ImagingAgent.log`. To try it by hand on a PC, as
 administrator: `powershell -File C:\ProgramData\ImagingTool\Agent\ImagingAgent.ps1 -Once`.
 
+### Remote support (MeshCentral)
+
+**Remote support** (Computers tab, Dashboard, or double-click a PC) opens the
+PC's screen in your browser on your own MeshCentral server, like a remote
+support product: the person at the PC is asked to allow it, sees what you do,
+and you can chat and send files. It does not use Remote Desktop (RDP): the
+MeshCentral agent keeps its own outgoing connection to the server.
+
+Set it up once:
+
+1. On a server the PCs reach (IMAGER works), install Node.js, then
+   `npm install meshcentral` and `node node_modules\meshcentral --install`
+   (it runs as a service on https port 443). Open its page, create the admin
+   account.
+2. Create a device group. In its settings, under **User Consent**, tick
+   **Desktop prompt** (and the notification), so the person at the PC always
+   clicks Allow first.
+3. In that group, **Add Agent**, Windows, download the **Windows x64**
+   executable. On the Applications tab, **New...** with that file: the
+   **MeshCentral-Agent** template fills in the rest (`-fullinstall`).
+4. Deploy Settings, **5. Remote support**: type the server, for example
+   `https://imager.corp.local`, and Save.
+
+From then on, every PC whose agent checks in and has no MeshCentral agent gets
+it as a signed job (it does not show on the Dashboard), and **Remote support**
+on a PC that does not have it yet sends it first. Add **MeshCentral-Agent** to
+an answer file to install it at first boot too. The page opens the PC by the
+name its agent reports; sign in to MeshCentral in that browser once.
+
 ## Answer files
 
 An answer file (`AnswerFiles\<name>.xml`) is one deployment profile. Edit it in
