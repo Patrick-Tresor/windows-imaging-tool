@@ -166,6 +166,32 @@ try {
     Assert-Throws { New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Nope') -AppRoot $appRoot -SetFolderAccess { param($f, $a) } } '*not in*' 'a missing app pack, no job'
     Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
 
+    # Agent updates: the console's agent code (Get-AgentCodeHash of src) goes to an old agent as a signed update job.
+    $code = Get-AgentCodeHash -Folder (Join-Path $repo 'src')
+    Assert-Equal ($code -match '^[0-9A-F]{12}$') $true 'the agent code version is 12 hex digits'
+    Assert-Equal (Get-AgentCodeHash -Folder (Join-Path $repo 'src')) $code 'the same files give the same version'
+    Assert-Equal (Get-AgentCodeHash -Folder $root) '' 'a folder without the agent files has no version'
+    $updJob = New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action update -SourceDir (Join-Path $repo 'src') -Now $now -SetFolderAccess { param($f, $a) }
+    Assert-Equal (Get-AgentCodeHash -Folder (Join-Path $jobDir 'Agent')) $code 'the job carries the console''s agent'
+    Assert-Equal $updJob.payloadSha256 (Get-AgentPayloadHash (Join-Path $jobDir 'Agent')) 'the agent files'' hash is signed'
+    $readUpd = Get-AgentJob -StatusFolder $status -Serial 'ABC123'
+    Assert-Equal ($null -eq (Test-AgentJob -Job $readUpd -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1))) $true 'the PC takes an update job the console signed'
+    $j = $readUpd | ConvertTo-Json -Depth 4 | ConvertFrom-Json; $j.payloadSha256 = 'A' * 64
+    Assert-Equal ((Test-AgentJob -Job $j -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1)) -like '*not signed*') $true 'other agent files than the console signed are refused'
+    Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
+    $mk = { param($c, $online = $true) [pscustomobject]@{ serial = "S-$c"; computerName = "PC-$c"; agentId = 'a'; Online = $online; agentCode = $c } }
+    $preUpdate = [pscustomobject]@{ serial = 'S-OLD'; computerName = 'PC-OLD'; agentId = 'a'; Online = $true }
+    $sent = @{ 'S-111111111111' = $code }
+    $pick = @(Select-AgentsToUpdate -CheckIns @((& $mk $code), (& $mk '111111111111'), (& $mk '222222222222'), (& $mk '333333333333' $false), $preUpdate) -CurrentCode $code -Sent $sent)
+    Assert-Equal (($pick | ForEach-Object computerName) -join ',') 'PC-222222222222' 'only online agents with other code, not sent yet, that know updates'
+    Assert-Equal "$((Get-AgentVersionText -Agent (& $mk $code) -CurrentCode $code).Text)|$((Get-AgentVersionText -Agent (& $mk '222222222222') -CurrentCode $code).Text)|$((Get-AgentVersionText -Agent $preUpdate -CurrentCode $code).Text)" 'Up to date|Updating|Old' 'the Agent version column'
+    Assert-Equal ((Get-AgentVersionText -Agent $preUpdate -CurrentCode $code).Detail -match 'Install agent') $true 'an agent from before updates needs Install agent once'
+    $agentPs1Text = Get-Content -Raw (Join-Path $repo 'src/ImagingAgent.ps1')
+    Assert-Equal ($agentPs1Text -match "(?s)function Invoke-UpdateJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Get-AgentFileNames.*?schtasks /Run") $true 'the agent checks the new files, puts them in place and starts again'
+    # Agents gone quiet for over a day (up to two weeks) show on the Dashboard.
+    $seen = { param($n, $h) [pscustomobject]@{ computerName = $n; LastSeen = $now.AddHours(-$h) } }
+    Assert-Equal ((Get-SilentAgents -CheckIns @((& $seen 'A' 2), (& $seen 'B' 30), (& $seen 'C' 400), (& $seen 'D' 50)) -Now $now | ForEach-Object computerName) -join ',') 'D,B' 'silent for over a day, oldest first; gone over two weeks is left out'
+
     # The agent puts the new results on the Dashboard row.
     $rec = [ordered]@{ id = 'ABC123'; serial = 'ABC123'; state = 'Warning'; percent = 100; warnings = @('Google Chrome failed (Failed)', 'Post-deploy checks: 1 failed')
         checks = @(@{ name = 'App: Google Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, @{ name = 'App: Zoom'; result = 'Passed'; detail = 'Installed' }) }
@@ -206,6 +232,16 @@ try {
     Assert-Equal ($txt -match '(?m)^  OK\s+BitLocker\s+Encrypting') $true 'and its BitLocker line is OK'
     Assert-Equal ((Get-Content -Raw (Join-Path $tool 'last-check.json') | ConvertFrom-Json).result) 'Passed' 'last-check.json passes'
     Assert-Equal ($null -eq (Sync-AgentBitLockerCheck @sync -BitLocker $on)) $true 'once it passed, it is not checked again'
+
+    # The same with this version's one result file (deploy-result.json): no last-check.json, the whole result made again.
+    $tool2 = Join-Path $root 'ToolDir2'; New-Item -ItemType Directory -Path $tool2 -Force | Out-Null
+    $txt2 = Join-Path $root 'DeployResult2.txt'
+    $dep2 = [pscustomobject]@{ computerName = 'GWHZLG3'; maker = 'Dell Inc.'; model = 'Latitude 5521'; driverPack = 'Dell\Latitude 5521'; state = 'Succeeded' }
+    Save-LocalDeployResult -Deploy $dep2 -Checks $blChecks -Fields @{ plan = @{ bitLocker = 'Report' } } -Path (Join-Path $tool2 'deploy-result.json')
+    $bl = Sync-AgentBitLockerCheck -ToolDir $tool2 -ResultPath $txt2 -BitLocker $on -Now $now
+    Assert-Equal "$($bl.result)|$(Test-Path (Join-Path $tool2 'last-check.json'))" 'Passed|False' 'deploy-result.json is the one file: no last-check.json'
+    Assert-Equal ((Get-Content -Raw $txt2) -like 'GWHZLG3 (Dell Inc. Latitude 5521) - Ready*') $true 'DeployResult.txt made again: Ready'
+    Assert-Equal ($null -eq (Sync-AgentBitLockerCheck -ToolDir $tool2 -ResultPath $txt2 -BitLocker $on -Now $now)) $true 'passed in deploy-result.json: not checked again'
 
     # Where a new PC's agent checks in: the folder WinPE reported to, or for a USB deploy that could not reach the
     # share (status kept on the stick), the share's Status folder from the settings.
@@ -266,7 +302,7 @@ Assert-Equal ($agentPs1 -match '(?s)while \(\$true\) \{\s*#[^\n]*\n\s*try \{') $
 Assert-Equal ($agentPs1 -match 'Test-AgentJob') $true 'the agent checks every job before running it'
 Assert-Equal ($agentPs1 -match "Invoke-LocalDiskBoot[^\r\n]+-Method Local") $true 'a reimage job restarts the PC into WinPE through the local channel'
 Assert-Equal ($agentPs1 -match 'bootWimSha256') $true 'the boot image is checked against the signed checksum'
-Assert-Equal ($agentPs1 -match '(?s)function Invoke-AppsJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Invoke-AppInstall.*?Update-AgentDeployStatus') $true 'an install apps job checks the packs, installs them and updates the Dashboard'
+Assert-Equal ($agentPs1 -match '(?s)function Invoke-AppsJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Enter-AppInstallLock.*?Invoke-AppReinstall.*?Update-AgentDeployStatus.*?Update-LocalDeployResult.*?Remove-AppRetry') $true 'an install apps job checks the packs, waits for the logon retry, installs, updates the Dashboard and DeployResult.txt, and takes them out of the logon retry'
 Assert-Equal ($agentPs1 -match 'Global\\ImagingToolAgent') $true 'one agent at a time'
 $deploy = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploy -match '(?s)Get-AgentStatusFolder -StatusTarget \$statusTarget.{0,80}Copy-AgentToImage -StatusFolder \$agentStatus') $true 'deploy puts the agent on every PC when a share is set, USB deploys too'
@@ -290,7 +326,7 @@ $toolFunctions = @{}
 foreach ($m in Get-ChildItem (Join-Path $repo 'src') -Filter *.psm1) {
     foreach ($x in [regex]::Matches([IO.File]::ReadAllText($m.FullName), '(?m)^function\s+([\w-]+)')) { $toolFunctions[$x.Groups[1].Value] = $m.Name }
 }
-foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
+foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'DeployStatus.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
                  @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') },
                  @{ File = 'src/Retry-FailedApps.ps1'; Modules = @('ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') })) {
     $text = [IO.File]::ReadAllText((Join-Path $repo $s.File))

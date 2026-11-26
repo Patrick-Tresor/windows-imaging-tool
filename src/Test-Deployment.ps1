@@ -11,7 +11,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$StatePath = (Join-Path $PSScriptRoot 'checks.json'),
+    [string]$StatePath = (Join-Path $PSScriptRoot 'deploy-result.json'),
     [switch]$NoReport           # check and print only; the dashboard keeps the previous result
 )
 
@@ -19,8 +19,16 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1') -Force
 
+# deploy-result.json: this PC's one result file. A PC deployed before it existed has checks.json (plan in 'checks').
+$oldState = Join-Path $PSScriptRoot 'checks.json'
+if (-not (Test-Path -LiteralPath $StatePath) -and (Test-Path -LiteralPath $oldState)) { $StatePath = $oldState }
 $state = Get-Content -Raw $StatePath | ConvertFrom-Json
-$run = Start-PostDeployCheck -Plan $state.checks -AppResults @($state.appResults) -TaskResults @(if ($state.PSObject.Properties['taskResults']) { $state.taskResults }) -ReportPath (Join-Path $PSScriptRoot 'last-check.json')
+$checkPlan = if ($state.PSObject.Properties['plan']) { $state.plan } else { $state.checks }
+$run = Start-PostDeployCheck -Plan $checkPlan -AppResults @($state.appResults) -TaskResults @(if ($state.PSObject.Properties['taskResults']) { $state.taskResults })
+if ($state.PSObject.Properties['plan']) {
+    # DeployResult.txt made again with these results (the agent reports its first line).
+    try { $null = Update-LocalDeployResult -Results @($run.Results) -DataPath $StatePath } catch { Write-Warning "Could not update DeployResult.txt: $($_.Exception.Message)" }
+}
 
 $colors = @{ Passed = 'Green'; Failed = 'Red'; Warning = 'Yellow'; Skipped = 'Gray' }
 foreach ($r in $run.Results) {

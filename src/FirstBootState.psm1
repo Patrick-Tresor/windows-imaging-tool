@@ -107,9 +107,9 @@ function Get-AdminOnlyAclArgs {
 function New-AppRetryPlan {
     <#
     .SYNOPSIS
-        First boot: what the logon retry needs for the applications that failed to install, or $null when none did.
-        Retry-FailedApps.ps1 installs them again, silently as SYSTEM, a little after someone logs on, up to
-        -MaxAttempts logons, and puts the results on the Dashboard and in DeployResult.txt.
+        First boot: what the retry needs for the applications that failed to install, or $null when none did.
+        Invoke-AppRetryPlan installs them again, silently as SYSTEM (the agent hourly, or the logon task on a PC
+        without it), up to -MaxAttempts tries, and puts the results on the Dashboard and in DeployResult.txt.
         -Applications: firstboot.json's applications (name + app.json fields). -AppResults: { name, ok, status, message }.
         -Deploy and -Checks: what DeployResult.txt was made from. -Status: { folder, id } when the PC reports.
     #>
@@ -120,6 +120,7 @@ function New-AppRetryPlan {
     [pscustomobject][ordered]@{
         apps        = @($apps)
         attempts    = 0
+        created     = (Get-Date).ToUniversalTime().ToString('o')
         maxAttempts = $MaxAttempts
         deploy      = $Deploy
         checks      = @($Checks | Where-Object { $_ })

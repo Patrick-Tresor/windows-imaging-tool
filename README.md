@@ -224,7 +224,15 @@ the share, written as the computer account, like first boot's status.
   **Agent** for a PC whose WinRM and file sharing are blocked but whose agent
   checked in, and the IP column uses the agent's address when the network check
   found none. The Dashboard's **Last seen** column shows the same for each
-  deployment.
+  deployment, and a line above its list names the agents that have not checked
+  in for over a day (up to two weeks): those PCs are off or their agent stopped.
+- **Updates**: the **Agent version** column on the Computers tab says Up to
+  date, Updating or Old. While the Computers tab or the Dashboard is open, the
+  console sends each online agent whose code differs from its own the new agent
+  as a signed update job; the agent checks the files, puts them in place and
+  starts again. An agent from before updates (Old) needs **Install agent** once.
+- **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
+  agent installs again the applications that failed at first boot.
 - **Reimage through the agent**: **Reimage...** on a PC whose agent checked in
   within the last 15 minutes needs no WinRM or file sharing. The console writes
   the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
@@ -265,8 +273,8 @@ not check in shows why in its progress row, read from the agent's log over the
 same way in (for example "the PC's computer account may not write to the
 share"). And PCs in the domain (outside it the share can't tell who
 the PC is). Rebuild the sticks and the network boot image once, so deploys put
-the agent on and trust this console's key. The agent comes with each deploy:
-after a tool update, reimage the PC or click Install agent again to update it.
+the agent on and trust this console's key. The agent comes with each deploy,
+and the console updates it after a tool update (see Updates above).
 `deploy-settings.json` `agent.enabled: false` leaves it out, and
 `agent.checkInMinutes` changes how often it checks in. Its log on the PC:
 `C:\Windows\Temp\ImagingAgent.log`. To try it by hand on a PC, as
@@ -428,7 +436,7 @@ a window and does nothing (no CPU, disk or network) for 5 minutes is waiting for
 a click nobody gives (a wrong silent switch, an error box): it is stopped then
 instead of after its whole timeout, so the PC does not stay on "Please wait"
 (Office's setup is left to its timeout). Results go to
-`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
+`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\DeployResult.txt`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
 First boot starts from `SetupComplete.cmd`. Windows skips that script when it
 activates with an OEM product key (Dell, HP and Lenovo PCs have one in the
@@ -531,7 +539,7 @@ deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
 the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
 `C:\Windows\Temp\Task-<name>.log` on the PC (and `Deploy.log` or
-`FirstBoot.log`), first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`,
+`FirstBoot.log`), first boot results go to `C:\Windows\Temp\DeployResult.txt`,
 and each FIRSTBOOT task is a post-deploy check on the Dashboard. FIRSTLOGON tasks
 are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `Run-LogonTask.ps1` with the same timeout and success codes, logged to
@@ -633,7 +641,11 @@ Not ready or Failed, with one line each for the image, drivers (pack, drivers
 added, device errors), applications, tasks, computer name, domain join,
 BitLocker, total time and tool version. The Dashboard's Result column and the
 PC's details show it, and the PC keeps it in `C:\Windows\Temp\DeployResult.txt`
-(and `FirstBoot.log`).
+(and `FirstBoot.log`). An application that failed at first boot is installed again silently: by the
+PC's agent an hour later, then hourly (up to 3 tries), or on a PC without the
+agent (no network share) 2 minutes after each logon. **Retry failed apps** on
+the Dashboard does it at once. Either way, and when a first-logon task turns
+BitLocker on, the result, the Dashboard and the Computers tab are updated together.
 
 After WinPE the PC restarts into Windows, and `FirstBoot.ps1` carries on from
 90 % while the applications install, then marks it Succeeded. That part needs

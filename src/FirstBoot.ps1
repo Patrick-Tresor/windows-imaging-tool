@@ -145,8 +145,6 @@ foreach ($plain in $plan.applications) {
         Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed ($($r.Status))"
     }
 }
-# Kept after C:\Temp is cleared, for whoever checks the PC (and the deployment dashboard).
-$appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
 if (-not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'options') -ne 'Done') {
     Start-FirstBootStep -Progress $progress -Step 'options'; Save-Progress
@@ -239,8 +237,6 @@ foreach ($t in @($plan.tasks)) {
     $progress.taskResults = @($taskResults)
     Complete-FirstBootStep -Progress $progress -Step $step; Save-Progress
 }
-# Kept after C:\Temp is cleared, next to FirstBoot-apps.json.
-if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
 # Run again when a restart cut it short: it leaves a drive that is already encrypting as it is.
 if ($plan.bitlocker -and -not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'bitlocker') -ne 'Done') {
@@ -259,15 +255,14 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
         $toolDir = "$env:ProgramData\ImagingTool"
         New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
         Copy-Item (Join-Path $deployDir 'PostDeployChecks.psm1'), (Join-Path $deployDir 'DeployStatus.psm1'), (Join-Path $deployDir 'Test-Deployment.ps1') $toolDir -Force
-        [pscustomobject]@{
-            checks     = $plan.checks
-            status     = if ($plan.PSObject.Properties['status']) { $plan.status } else { $null }
-            appResults = $appResults
-            taskResults = @($taskResults)
-        } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $toolDir 'checks.json') -Encoding utf8
+        # One file for this PC's result (deploy-result.json): what Test-Deployment.ps1 needs to check again, and later
+        # what DeployResult.txt is made from.
+        if (-not (Get-Command Save-LocalDeployResult -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $deployDir 'DeployStatus.psm1') }
+        Save-LocalDeployResult -Fields @{ plan = $plan.checks; status = $(if ($plan.PSObject.Properties['status']) { $plan.status } else { $null })
+            appResults = @($appResults); taskResults = @($taskResults) }
 
         Import-Module (Join-Path $toolDir 'PostDeployChecks.psm1') -Force
-        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults -ReportPath (Join-Path $toolDir 'last-check.json')
+        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults
         foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
         Write-Log "Post-deploy checks: $($run.Summary.Text)"
         $script:nextStatusTry = Get-Date; Set-Progress 'Post-deploy checks done' 98   # one more try at the status share first
@@ -329,10 +324,13 @@ try {
     $summary = Get-DeployResultSummary -Deploy $deployInfo -Checks $checkResults
     Set-Content -Path "$env:WINDIR\Temp\DeployResult.txt" -Value $summary.Text -Encoding utf8
     Write-Log ('Deployment result:' + [Environment]::NewLine + $summary.Text)
+    # What it was made from: an app installed again later (logon retry, the agent) or BitLocker turned on makes it again whole.
+    try { Save-LocalDeployResult -Deploy $deployInfo -Checks $checkResults } catch { Write-Log "Could not keep the deployment result's checks: $($_.Exception.Message)" }
 } catch { Write-Log "Could not write the deployment result: $($_.Exception.Message)" }
 
-# Applications that failed are installed again at the next logon, silently as SYSTEM (Retry-FailedApps.ps1, logon task
-# ImagingTool\RetryApps): their packs move to C:\ProgramData\ImagingTool\RetryApps before C:\Temp is cleared.
+# Applications that failed are installed again later, silently as SYSTEM (Invoke-AppRetryPlan): by the agent at its
+# check-ins (an hour from now, then hourly), or on a PC without the agent by the logon task ImagingTool\RetryApps
+# (Retry-FailedApps.ps1). Their packs move to C:\ProgramData\ImagingTool\RetryApps before C:\Temp is cleared.
 try {
     $retry = New-AppRetryPlan -Applications @($plan.applications) -AppResults @($appResults) -Deploy $deployInfo -Checks @($checkResults) `
         -Status $(if ($plan.PSObject.Properties['status']) { $plan.status } else { $null })
@@ -348,8 +346,12 @@ try {
             if (Test-Path $src) { Copy-Item $src "$retryDir\Apps\" -Recurse -Force }
         }
         $retry | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $retryDir 'retry.json') -Encoding utf8
-        & schtasks.exe /Create /F /TN 'ImagingTool\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$retryDir\Retry-FailedApps.ps1`"" 2>&1 | Out-Null
-        Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: installed again at the next logon (task ImagingTool\RetryApps, up to $($retry.maxAttempts) logons): exit $LASTEXITCODE"
+        if (Test-Path "$env:ProgramData\ImagingTool\Agent\ImagingAgent.ps1") {
+            Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: the agent installs them again (in an hour, then hourly, up to $($retry.maxAttempts) tries)"
+        } else {
+            & schtasks.exe /Create /F /TN 'ImagingTool\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$retryDir\Retry-FailedApps.ps1`"" 2>&1 | Out-Null
+            Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: installed again at the next logon (no agent on this PC; task ImagingTool\RetryApps, up to $($retry.maxAttempts) logons): exit $LASTEXITCODE"
+        }
     }
 } catch { Write-Log "Could not set up the logon retry of the failed applications: $($_.Exception.Message)" }
 Write-Log "First boot finished; removing what deploy staged in $deployDir"

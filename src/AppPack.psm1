@@ -1228,6 +1228,139 @@ function Invoke-AppInstall {
 
 #endregion
 
+#region Installing again after first boot
+
+function Invoke-AppReinstall {
+    <#
+    .SYNOPSIS
+        PC: installs applications again after first boot, each the way first boot does (Invoke-AppInstall): the logon
+        retry (Retry-FailedApps.ps1) and the agent's Retry failed apps. -AppRoot holds a folder per app; -Definitions
+        (name -> app.json fields) when the packs' app.json is not there. -OnApp runs before each one.
+        Returns { name, ok, status, message } per app.
+    #>
+    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string[]]$Names, [hashtable]$Definitions = @{},
+          [string]$LogFolder = "$env:WINDIR\Temp", [scriptblock]$Log = { param($m) }, [scriptblock]$OnApp = { param($n) })
+    foreach ($name in @($Names | Where-Object { $_ })) {
+        & $OnApp $name
+        $r = try {
+            $app = if ($Definitions.ContainsKey($name)) { ConvertTo-AppDefinition -Name $name -Json $Definitions[$name] } else { Read-AppPack -AppRoot $AppRoot -Name $name }
+            Invoke-AppInstall -Definition $app -AppFolder ([IO.Path]::Combine($AppRoot, $name)) -LogPath ([IO.Path]::Combine($LogFolder, "App-$name.log")) -Log $Log
+        } catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+        $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
+        & $Log "  $name $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+        [pscustomobject]@{ name = $name; ok = $ok; status = "$($r.Status)"; message = "$($r.Message)" }
+    }
+}
+
+function Enter-AppInstallLock {
+    <#
+    .SYNOPSIS
+        PC: one install at a time between the logon retry and the agent's Retry failed apps (two installers at once
+        fail with 1618). Waits up to -Minutes; returns the mutex to release, or $null when the other one still runs.
+    #>
+    param([int]$Minutes = 30)
+    $m = New-Object Threading.Mutex($false, 'Global\ImagingToolAppInstall')
+    try { if ($m.WaitOne([timespan]::FromMinutes($Minutes))) { return $m } } catch [Threading.AbandonedMutexException] { return $m }
+    $m.Dispose()
+    $null
+}
+
+function Exit-AppInstallLock($Lock) {
+    if ($Lock) { try { $Lock.ReleaseMutex() } catch { }; try { $Lock.Dispose() } catch { } }
+}
+
+function Get-AppRetryFolder {
+    # Where first boot keeps the failed apps' packs and retry.json (administrators and SYSTEM only).
+    [IO.Path]::Combine([Environment]::GetFolderPath('CommonApplicationData'), 'ImagingTool\RetryApps')
+}
+
+function Invoke-AppRetryPlan {
+    <#
+    .SYNOPSIS
+        PC: the one way the applications that failed at first boot are installed again, silently as SYSTEM. The agent
+        runs it at its check-ins (-MinMinutes 60: an hour after first boot, then hourly); a PC without the agent
+        (deployed without a network share) runs it from the logon task ImagingTool\RetryApps (Retry-FailedApps.ps1).
+        Each run is one attempt of retry.json's maxAttempts; once every app is in, or out of attempts, the logon task
+        and the folder go. -OnResults gets the plan and the results (DeployResult.txt and the Dashboard:
+        Publish-AppRetryResults). Never two installs at once (Enter-AppInstallLock). Returns
+        { Ran, Left, Results, Message }.
+    #>
+    param(
+        [string]$Dir = (Get-AppRetryFolder),
+        [string]$By = 'the logon retry',
+        [int]$WaitMinutes = 30,
+        [int]$MinMinutes = 0,
+        [scriptblock]$OnResults = { param($Plan, $Results) },
+        [scriptblock]$Log = { param($m) },
+        [scriptblock]$RemoveTask = { & schtasks.exe /Delete /TN 'ImagingTool\RetryApps' /F 2>&1 | Out-Null },
+        [scriptblock]$RemoveFolder,     # default: delete it now (the logon script deletes itself a moment after it ends)
+        [datetime]$Now = (Get-Date)
+    )
+    $out = { param($ran, $left, $results, $msg) [pscustomobject]@{ Ran = $ran; Left = @($left); Results = @($results); Message = $msg } }
+    $planPath = [IO.Path]::Combine($Dir, 'retry.json')
+    if (-not [IO.File]::Exists($planPath)) { return & $out $false @() @() 'no applications to install again' }
+    $lock = Enter-AppInstallLock -Minutes $WaitMinutes
+    if (-not $lock) { return & $out $false @() @() 'another application install is still running' }
+    try {
+        # The other one may have installed them all while this waited.
+        if (-not [IO.File]::Exists($planPath)) { return & $out $false @() @() 'no applications to install again' }
+        $plan = [IO.File]::ReadAllText($planPath) | ConvertFrom-Json
+        $last = $null
+        foreach ($n in 'lastAttempt', 'created') { if (-not $last -and $plan.PSObject.Properties[$n] -and $plan.$n) { $last = try { [datetime]::Parse("$($plan.$n)", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) } catch { $null } } }
+        if ($MinMinutes -gt 0 -and $last -and ($Now - $last.ToLocalTime()).TotalMinutes -lt $MinMinutes) {
+            return & $out $false @($plan.apps | ForEach-Object { "$($_.name)" }) @() 'not yet: tried less than an hour ago'
+        }
+        $plan.attempts = [int]$plan.attempts + 1
+        $plan | Add-Member -NotePropertyName lastAttempt -NotePropertyValue $Now.ToUniversalTime().ToString('o') -Force
+        [IO.File]::WriteAllText($planPath, (ConvertTo-Json -InputObject $plan -Depth 8), (New-Object Text.UTF8Encoding $true))
+        $names = @($plan.apps | ForEach-Object { "$($_.name)" })
+        & $Log "Retry $($plan.attempts) of $($plan.maxAttempts) by ${By}: installing $($names -join ', ') again"
+        $defs = @{}
+        foreach ($a in @($plan.apps)) { $defs["$($a.name)"] = $a }
+        $results = @(Invoke-AppReinstall -AppRoot ([IO.Path]::Combine($Dir, 'Apps')) -Names $names -Definitions $defs -Log $Log)
+        try { & $OnResults $plan $results } catch { & $Log "Could not report the results: $($_.Exception.Message)" }
+        $left = @($plan.apps | Where-Object { $n = "$($_.name)"; @($results | Where-Object { $_.name -eq $n -and -not $_.ok }).Count })
+        $plan.apps = @($left)
+        [IO.File]::WriteAllText($planPath, (ConvertTo-Json -InputObject $plan -Depth 8), (New-Object Text.UTF8Encoding $true))
+        $leftNames = @($left | ForEach-Object { "$($_.name)" })
+        $msg = if (-not $left) { 'Every application is installed now' }
+               elseif ($plan.attempts -ge [int]$plan.maxAttempts) { "Giving up after $($plan.attempts) tries: $($leftNames -join ', ') still not installed" }
+               else { "Trying $($leftNames -join ', ') again later" }
+        & $Log $msg
+        if (-not $left -or $plan.attempts -ge [int]$plan.maxAttempts) {
+            try { & $RemoveTask } catch { }
+            if ($RemoveFolder) { & $RemoveFolder } else { try { [IO.Directory]::Delete($Dir, $true) } catch { } }
+        }
+        & $out $true $leftNames $results $msg
+    } finally { Exit-AppInstallLock $lock }
+}
+
+function Remove-AppRetry {
+    <#
+    .SYNOPSIS
+        PC: takes applications that are installed now (the agent's Retry failed apps) out of the logon retry
+        (C:\ProgramData\ImagingTool\RetryApps\retry.json), so they are not installed again at the next logon. With
+        none left, the logon task ImagingTool\RetryApps and its folder go. Returns the apps still waiting there.
+    #>
+    param([string[]]$Names = @(), [string]$Dir = (Get-AppRetryFolder),
+          [scriptblock]$RemoveTask = { & schtasks.exe /Delete /TN 'ImagingTool\RetryApps' /F 2>&1 | Out-Null })
+    $planPath = [IO.Path]::Combine($Dir, 'retry.json')
+    if (-not [IO.File]::Exists($planPath)) { return @() }
+    $plan = [IO.File]::ReadAllText($planPath) | ConvertFrom-Json
+    $left = @(@($plan.apps) | Where-Object { $_ -and @($Names) -notcontains "$($_.name)" })
+    if ($left.Count -eq @(@($plan.apps) | Where-Object { $_ }).Count) { return @($left | ForEach-Object { "$($_.name)" }) }
+    if (-not $left) {
+        try { & $RemoveTask } catch { }
+        try { [IO.Directory]::Delete($Dir, $true) } catch { }
+        return @()
+    }
+    $plan.apps = @($left)
+    [IO.File]::WriteAllText($planPath, (ConvertTo-Json -InputObject $plan -Depth 8), (New-Object Text.UTF8Encoding $true))
+    @($left | ForEach-Object { "$($_.name)" })
+}
+
+#endregion
+
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, Copy-AppTemplateFiles,
@@ -1235,4 +1368,5 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Get-HttpErrorStatus, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
     Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
-    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Update-MsiDetectionRule, Invoke-AppInstall
+    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Update-MsiDetectionRule, Invoke-AppInstall,
+    Invoke-AppReinstall, Enter-AppInstallLock, Exit-AppInstallLock, Remove-AppRetry, Get-AppRetryFolder, Invoke-AppRetryPlan

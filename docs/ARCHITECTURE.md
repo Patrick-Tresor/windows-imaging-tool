@@ -234,7 +234,7 @@ before anything is erased, telling the operator to pick the UEFI boot entry.
 On first boot, `FirstBoot.ps1` (as SYSTEM, before logon) installs the
 applications in order through `Invoke-AppInstall` (detect, skip if present, run
 with a timeout, stopped early when stuck on a window for 5 idle minutes (`Invoke-PackProcess -IdleSeconds`, `Get-ProcessTreeActivity`), check exit code, detect again), writes the results to
-`C:\Windows\Temp\FirstBoot-apps.json`, applies the options,
+`C:\ProgramData\ImagingTool\deploy-result.json`, applies the options,
 runs FIRSTBOOT tasks, turns on BitLocker if the answer file asks for it, runs the
 post-deploy checks and removes the files it staged in `C:\Temp` (other files there are left alone).
 It keeps the PC awake until it ends, and `Invoke-PackProcess` times each installer against the
@@ -313,9 +313,11 @@ or Skipped per check, and `Set-DeployCheckResult` (in `DeployStatus.psm1`)
 stores them on the status record as `checks`, `checkResult` and `checkSummary`.
 Failed checks are one warning that starts with `Post-deploy checks:`, so a
 re-run replaces it. FirstBoot copies both modules, `Test-Deployment.ps1` and
-`checks.json` (plan, status folder and id, each app pack's install and detection result) to
-`C:\ProgramData\ImagingTool`, where `Test-Deployment.ps1` re-runs the checks
-and updates the record; it keeps the original finish time.
+`deploy-result.json` to `C:\ProgramData\ImagingTool`: the PC's one result file
+(check plan, status folder and id, each app pack's install result, every check,
+and what WinPE recorded). `DeployResult.txt` is made from it, and the app retry,
+the agent's BitLocker check and `Test-Deployment.ps1` (which re-runs the checks
+and updates the record, keeping the original finish time) all change it.
 
 USB deploys without a network folder (or when WinPE cannot reach it) keep
 their status on the stick's `Status` folder. Whenever a DEPLOY stick is

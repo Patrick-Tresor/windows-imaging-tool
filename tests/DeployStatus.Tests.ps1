@@ -150,6 +150,36 @@ try {
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings $s) '\\srv\Status' 'console reads the status share when set'
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings ([pscustomobject]@{ share = @{} })) (Join-Path $root 'Status') 'console defaults to the content root Status folder'
     Assert-Equal (Get-StatusFolder -ContentRoot $root -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } })) '\\srv\Deploy\Status' 'console reads the share Status folder when a share is set'
+
+    # The result on the PC after first boot: the logon retry, the agent's Retry failed apps and its BitLocker check
+    # each change deploy-result.json, and DeployResult.txt is made again whole, so none undoes another.
+    $data = Join-Path $root 'deploy-result.json'
+    $txt = Join-Path $root 'DeployResult.txt'
+    $dep = [pscustomobject]@{ computerName = 'PC9'; maker = 'Dell Inc.'; model = 'Latitude 5521'; driverPack = 'Dell\5521'; state = 'Succeeded' }
+    $first = @([pscustomobject]@{ name = 'App: Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, [pscustomobject]@{ name = 'BitLocker'; result = 'Warning'; detail = 'Off (FullyDecrypted)' })
+    Save-LocalDeployResult -Deploy $dep -Checks $first -Path $data
+    Set-Content $txt (Get-DeployResultSummary -Deploy $dep -Checks $first).Text
+    Assert-Equal (Update-LocalDeployResult -Results @([pscustomobject]@{ name = 'BitLocker'; result = 'Passed'; detail = 'On (Tpm)' }) -DataPath $data -ResultPath $txt) 'PC9 (Dell Inc. Latitude 5521) - Not ready: Chrome failed' 'BitLocker on: Chrome still fails'
+    $v = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results @([pscustomobject]@{ name = 'Chrome'; ok = $true; status = 'Installed'; message = 'exit 0' }) -By 'the logon retry') -DataPath $data -ResultPath $txt
+    Assert-Equal $v 'PC9 (Dell Inc. Latitude 5521) - Ready' 'Chrome installed by the retry after BitLocker went on: Ready, BitLocker stays on'
+    Assert-Equal ((Get-Content -Raw $txt) -match '(?m)^  OK\s+BitLocker\s+On \(Tpm\)') $true 'DeployResult.txt keeps the BitLocker line the agent passed'
+    Assert-Equal (@((Get-Content -Raw $data | ConvertFrom-Json).checks).Count) 2 'deploy-result.json: one check per name'
+    Assert-Equal ($null -eq (Update-LocalDeployResult -Results @() -DataPath $data -ResultPath $txt)) $true 'nothing new: nothing written'
+    # A PC deployed before deploy-result.json: the line changes in place.
+    $old = Join-Path $root 'old-result.txt'
+    Set-Content $old ("PC8 - Ready, with warnings: BitLocker`r`n" + ('  {0,-8} {1,-13} {2}' -f 'WARNING', 'BitLocker', 'Off'))
+    Assert-Equal (Update-LocalDeployResult -Results @([pscustomobject]@{ name = 'BitLocker'; result = 'Passed'; detail = 'On' }) -DataPath (Join-Path $root 'none.json') -ResultPath $old) 'PC8 - Ready' 'no deploy-result.json: the BitLocker line changes in place'
+    $merged = Merge-CheckResults -Checks @([pscustomobject]@{ name = 'A'; result = 'Failed'; detail = 'x' }) -Results @([pscustomobject]@{ name = 'A'; result = 'Passed'; detail = 'y' }, [pscustomobject]@{ name = 'B'; result = 'Passed'; detail = 'z' })
+    Assert-Equal (($merged | ForEach-Object { $_.name + '=' + $_.result }) -join ',') 'A=Passed,B=Passed' 'checks merge by name'
+    # One result file: fields given later are kept, and an app installed again replaces its first boot install.
+    $one = Join-Path $root 'one-result.json'
+    Save-LocalDeployResult -Fields @{ plan = @{ bitLocker = 'Report' }; appResults = @(@{ name = 'Chrome'; ok = $false; status = 'Failed' }, @{ name = 'Zoom'; ok = $true; status = 'Installed' }) } -Path $one
+    Save-LocalDeployResult -Deploy $dep -Checks @([pscustomobject]@{ name = 'App: Chrome'; result = 'Failed'; detail = 'x' }) -Path $one
+    $null = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results @([pscustomobject]@{ name = 'Chrome'; ok = $true; status = 'Installed' })) `
+        -AppResults @([pscustomobject]@{ name = 'Chrome'; ok = $true; status = 'Installed' }) -DataPath $one -ResultPath (Join-Path $root 'one.txt')
+    $o = Read-LocalDeployResult -Path $one
+    Assert-Equal "$($o.plan.bitLocker)|$($o.deploy.computerName)|$(@($o.checks)[0].result)" 'Report|PC9|Passed' 'plan, deploy and checks live in one file'
+    Assert-Equal ((@($o.appResults) | ForEach-Object { "$($_.name)=$($_.ok)" }) -join ',') 'Zoom=True,Chrome=True' 'Test-Deployment sees the new install of Chrome'
 }
 finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
