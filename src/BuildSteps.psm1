@@ -199,5 +199,42 @@ function Get-BuildStepView {
     }
 }
 
+function Start-BuildLog {
+    # A transcript of the run in -LogPath; returns -LogPath, or '' when it could not be started (the run goes on).
+    param([string]$LogPath)
+    if (-not $LogPath) { return '' }
+    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
+    try { Start-Transcript -Path $LogPath -Append | Out-Null; $LogPath } catch { '' }
+}
+
+function Stop-BuildLog {
+    param([string]$LogPath)
+    if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+}
+
+function Stop-PcStep {
+    # One PC of several failed (Install agent, Reimage): its row shows the first line, the log the whole message.
+    param([Parameter(Mandatory)]$Pc, [string]$Message)
+    $Pc.State = 'Failed'
+    Write-Host "$($Pc.Name): $Message" -ForegroundColor Red
+    Complete-BuildStep $Pc.Id -State failed -Detail (@("$Message" -split "`r?`n")[0])
+}
+
+function Complete-PcRun {
+    <#
+    .SYNOPSIS
+        The end of a run over several PCs: "Done: 3 of 4 <DoneText>." in the log, and the progress window ends, with
+        -OneFailed or -ManyFailed ("{0} of {1} PCs ...") when a PC is not in -DoneState. Returns how many failed.
+    #>
+    param([Parameter(Mandatory)][object[]]$Pcs, [Parameter(Mandatory)][string]$DoneState, [Parameter(Mandatory)][string]$DoneText,
+          [Parameter(Mandatory)][string]$OneFailed, [Parameter(Mandatory)][string]$ManyFailed)
+    $failed = @($Pcs | Where-Object State -ne $DoneState).Count
+    Write-Host "Done: $($Pcs.Count - $failed) of $($Pcs.Count) $DoneText." -ForegroundColor Cyan
+    if (-not $failed) { Stop-BuildProgress }
+    elseif ($Pcs.Count -eq 1) { Stop-BuildProgress -Message $OneFailed }
+    else { Stop-BuildProgress -Message ($ManyFailed -f $failed, $Pcs.Count) }
+    $failed
+}
+
 Export-ModuleMember -Function Start-BuildProgress, Start-BuildStep, Set-BuildStepProgress, Complete-BuildStep, Stop-BuildProgress,
-    Read-BuildProgress, Get-BuildStepView, Format-BuildElapsed, Format-TimeLeft
+    Read-BuildProgress, Get-BuildStepView, Format-BuildElapsed, Format-TimeLeft, Start-BuildLog, Stop-BuildLog, Stop-PcStep, Complete-PcRun

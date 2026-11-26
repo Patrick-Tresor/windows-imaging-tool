@@ -292,6 +292,10 @@ Assert-Equal (Get-AgentLogProblem -Lines @('2026-11-25 13:30:01 Agent started: X
 $install = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Install-RemoteAgent.ps1')
 Assert-Equal ($install -match 'Grant-StatusFolderAccess -StatusFolder \$StatusFolder') $true 'Install agent gives Domain Computers their rights on the Status folder first'
 Assert-Equal ($install -match 'Get-RemoteAgentProblem') $true 'and reads the agent''s log when it does not check in'
+Assert-Equal (Get-AgentLogProblem -State ([pscustomobject]@{ Lines = @(); State = 'Ready'; Result = '0x1' })) 'The agent never started (task Ready, last result 0x1)' 'the state read on the PC gives the same reason'
+$here = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Install-AgentHere.ps1')
+Assert-Equal "$($install -match '-ScriptBlock \(Get-AgentStateScript\)')|$($here -match 'Get-AgentLocalState')" 'True|True' 'both installs read the agent''s log and task the same way'
+Assert-Equal ((Get-AgentStateScript).ToString() -match 'ImagingAgent\.log' -and (Get-AgentStateScript).ToString() -notmatch 'Get-Agent') $true 'the state script uses nothing from the module (it runs on the PC)'
 
 # The local channel: the agent restarts its own PC into WinPE with the console's steps.
 Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force

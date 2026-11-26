@@ -29,21 +29,12 @@ Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImagingAgent.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 
-if ($LogPath) {
-    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
-    try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { $LogPath = $null }
-}
+$LogPath = Start-BuildLog -LogPath $LogPath
 $credential = $null
 if ($CredentialFile) {
     try { $credential = Import-Clixml -LiteralPath $CredentialFile } finally { Remove-Item -LiteralPath $CredentialFile -Force -ErrorAction SilentlyContinue }
 }
-$targets = @()
-if ($TargetsFile) {
-    try { $targets = @(Read-ReimageTargets -Path $TargetsFile) } finally { Remove-Item -LiteralPath $TargetsFile -Force -ErrorAction SilentlyContinue }
-}
-foreach ($c in @($Computers | ForEach-Object { "$_" -split ',' } | ForEach-Object Trim | Where-Object { $_ })) {
-    $targets += [pscustomobject]@{ name = ($c -split '\.')[0].ToUpperInvariant(); address = $c }
-}
+$targets = @(Get-ReimageTargetList -TargetsFile $TargetsFile -Computers $Computers)
 if (-not $targets) { throw 'No computers to put the agent on.' }
 
 $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
@@ -51,26 +42,14 @@ $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
 })
 Start-BuildProgress -Path $ProgressFile -Title "Installing the agent on $($pcs.Count) PC$(if ($pcs.Count -ne 1) { 's' })" -LogPath $LogPath -Steps @($pcs | ForEach-Object { , @($_.Id, $_.Name) })
 
-function Stop-Pc($p, [string]$Message) {
-    $p.State = 'Failed'
-    Write-Host "$($p.Name): $Message" -ForegroundColor Red
-    Complete-BuildStep $p.Id -State failed -Detail (@("$Message" -split "`r?`n")[0])
-}
-
 function Get-RemoteAgentProblem($p) {
     # The last lines of the agent's log and its task's state, over the same way in as the install.
     $ch = Open-RemoteChannel -ComputerName $p.Reached -Credential $credential -Method $p.Method
     try {
-        $r = @(Invoke-RemoteChannel -Channel $ch -ScriptBlock {
-            $log = "$env:WINDIR\Temp\ImagingAgent.log"
-            $lines = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log -Tail 15 -Encoding UTF8) } else { @() }
-            $task = Get-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'Agent' -ErrorAction SilentlyContinue
-            $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
-            [pscustomobject]@{ Lines = $lines; State = $(if ($task) { "$($task.State)" } else { '' }); Result = $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' }) }
-        })[0]
+        $r = @(Invoke-RemoteChannel -Channel $ch -ScriptBlock (Get-AgentStateScript))[0]
     } finally { Close-RemoteChannel $ch }
     foreach ($l in @($r.Lines)) { Write-Host "  $($p.Name) agent log: $l" }
-    Get-AgentLogProblem -Lines @($r.Lines) -TaskState $r.State -TaskResult $r.Result
+    Get-AgentLogProblem -State $r
 }
 
 try {
@@ -83,7 +62,7 @@ try {
     foreach ($p in $pcs) {
         Start-BuildStep $p.Id -Detail 'Reaching the PC'
         $check = $up[$p.Address]
-        if (-not $check -or -not $check.Online) { Stop-Pc $p "Not reached: $(if ($check) { $check.Detail } else { 'not checked' })"; continue }
+        if (-not $check -or -not $check.Online) { Stop-PcStep $p "Not reached: $(if ($check) { $check.Detail } else { 'not checked' })"; continue }
         $method = $check.Method
         if ($method -eq 'WinRM' -and $check.Smb -and $check.Address -match '^\d{1,3}(\.\d{1,3}){3}$') { $method = 'Smb' }
         $ch = $null
@@ -103,7 +82,7 @@ try {
             Set-BuildStepProgress $p.Id -Percent 70 -Detail 'Waiting for its first check-in'
         } catch {
             Write-Host "$($p.Name): $($_.Exception.Message)"
-            Stop-Pc $p (Get-RemotingProblemText -Message $_.Exception.Message -Account $(if ($credential) { $credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
+            Stop-PcStep $p (Get-RemotingProblemText -Message $_.Exception.Message -Account $(if ($credential) { $credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
         } finally { Close-RemoteChannel $ch }
     }
 
@@ -120,20 +99,17 @@ try {
             } elseif ((Get-Date) -gt $p.Since.AddMinutes($WaitMinutes)) {
                 # Installed, but no check-in: read why from the agent's own log and task on the PC.
                 $why = try { Get-RemoteAgentProblem $p } catch { "its log could not be read ($($_.Exception.Message))" }
-                Stop-Pc $p "No check-in within $WaitMinutes min. $why (C:\Windows\Temp\ImagingAgent.log on the PC)"
+                Stop-PcStep $p "No check-in within $WaitMinutes min. $why (C:\Windows\Temp\ImagingAgent.log on the PC)"
             }
         }
         Start-Sleep -Seconds 5
     }
-    $failed = @($pcs | Where-Object State -ne 'Done').Count
-    Write-Host "Done: $($pcs.Count - $failed) of $($pcs.Count) PCs checked in." -ForegroundColor Cyan
-    if ($failed) { Stop-BuildProgress -Message $(if ($pcs.Count -eq 1) { 'The agent is not working on this PC, see the row below.' } else { "$failed of $($pcs.Count) PCs have no working agent, see the rows below." }) }
-    else { Stop-BuildProgress }
+    $null = Complete-PcRun -Pcs $pcs -DoneState 'Done' -DoneText 'PCs checked in' -OneFailed 'The agent is not working on this PC, see the row below.' -ManyFailed '{0} of {1} PCs have no working agent, see the rows below.'
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     Stop-BuildProgress -Message $_.Exception.Message
     throw
 } finally {
-    if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+    Stop-BuildLog -LogPath $LogPath
 }
 if (@($pcs | Where-Object State -ne 'Done').Count) { exit 1 }

@@ -74,13 +74,15 @@ Assert-Equal ((Get-AdminOnlyAclArgs -Path 'W:\Temp\firstboot.json') -join ' ') '
 $deploy = [IO.File]::ReadAllText((Join-Path $repo 'src/Deploy-Image.ps1'))
 $lockApps = $deploy.IndexOf("Protect-StagedItem -Path `$f -Folder")
 Assert-Equal ($lockApps -gt 0 -and $lockApps -lt $deploy.IndexOf("Copy-Item -Path (Join-Path `$appRoot `$app.name)")) $true 'Apps and Tasks are locked before anything is copied in'
-$lockEnd = $deploy.IndexOf('Protect-StagedItem -Path "W:\Temp\$f"')
-$lockList = $deploy.Substring($deploy.LastIndexOf('foreach ($f in', $lockEnd), $lockEnd - $deploy.LastIndexOf('foreach ($f in', $lockEnd))
-foreach ($f in 'FirstBoot.ps1', 'FirstBootState.psm1', 'AppPack.psm1', 'LibraryPack.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
-    Assert-Equal ($lockEnd -gt 0 -and $lockList.Contains("'$f'")) $true "deploy locks $f"
+$staged = @(Get-FirstBootFileNames)
+foreach ($f in 'FirstBoot.ps1', 'FirstBootState.psm1', 'AppPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock', 'deployed.json') {
+    Assert-Equal ($staged -contains $f) $true "the first boot file list has $f"
 }
+Assert-Equal (@(Get-FirstBootFileNames -Scripts | Where-Object { $_ -notmatch '\.ps1$|\.psm1$' }).Count) 0 '-Scripts lists only code'
+foreach ($f in Get-FirstBootFileNames -Scripts) { Assert-Equal (Test-Path (Join-Path $repo "src/$f")) $true "staged script $f is in src" }
+Assert-Equal ($deploy.Contains("Copy-Item (Get-FirstBootFileNames -Scripts | ForEach-Object")) $true 'deploy copies the listed scripts'
+Assert-Equal ($deploy.Contains('foreach ($f in Get-FirstBootFileNames')) $true 'deploy locks the listed files'
 Assert-Equal ($deploy.Contains("Protect-StagedItem -Path 'W:\Temp\deployed.json'")) $true 'deploy locks deployed.json'
-Assert-Equal ($deploy.Contains("(Join-Path `$PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'")) $true 'deploy stages FirstBootState.psm1 next to FirstBoot.ps1'
 
 # FirstBoot.ps1: the startup task stays until first boot has finished, and the PIN file goes at the end.
 $fb = [IO.File]::ReadAllText((Join-Path $repo 'src/FirstBoot.ps1'))
@@ -135,8 +137,7 @@ foreach ($f in 'FirstBoot.ps1', 'Clear-UnattendPasswords.ps1', 'Invoke-SysprepAt
     Assert-Equal ($text -match "ScriptLog\.psm1" -and $text -match 'Write-ScriptLog') $true "$f logs through ScriptLog.psm1"
 }
 foreach ($staged in "(Join-Path `$PSScriptRoot 'SysprepAtDeploy.psm1'), (Join-Path `$PSScriptRoot 'ScriptLog.psm1')",
-                    "(Join-Path `$PSScriptRoot 'Clear-UnattendPasswords.ps1'), (Join-Path `$PSScriptRoot 'ScriptLog.psm1')",
-                    "(Join-Path `$PSScriptRoot 'ScriptLog.psm1'), (Join-Path `$PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'") {
+                    "(Join-Path `$PSScriptRoot 'Clear-UnattendPasswords.ps1'), (Join-Path `$PSScriptRoot 'ScriptLog.psm1')") {
     Assert-Equal ($dp.Contains($staged)) $true "deploy stages ScriptLog.psm1: $staged"
 }
 $logFile = Join-Path ([IO.Path]::GetTempPath()) ("scriptlog-" + [guid]::NewGuid() + "/x/test.log")
@@ -159,7 +160,7 @@ Assert-Equal ($fb.IndexOf('New-AppRetryPlan') -lt $fb.IndexOf('Get-FirstBootClea
 Assert-Equal ($fb -match '(?s)\$retryDir = .{0,300}Get-AdminOnlyAclArgs -Path \$retryDir -Folder') $true 'the retry folder is for admins only before anything goes in'
 Assert-Equal ($clean.Contains('"C:\Temp\Retry-FailedApps.ps1"')) $true 'cleanup removes the staged retry script'
 $dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
-Assert-Equal ($dp -match "'Test-Deployment\.ps1', 'Retry-FailedApps\.ps1'") $true 'deploy stages the retry script for admins only'
+Assert-Equal ((Get-FirstBootFileNames -Scripts) -contains 'Retry-FailedApps.ps1') $true 'deploy stages the retry script for admins only'
 $rs = Get-Content -Raw (Join-Path $repo 'src/Retry-FailedApps.ps1')
 foreach ($m in 'ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') { Assert-Equal ($rs -match [regex]::Escape("'$m'")) $true "the retry imports $m" }
 Assert-Equal ($rs -match '(?s)Invoke-AppRetryPlan.*Publish-AppRetryResults') $true 'the logon retry runs the one retry and reports to DeployResult.txt and the Dashboard'

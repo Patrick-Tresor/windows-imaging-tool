@@ -41,19 +41,9 @@ Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ImagingAgent.psm1') -Force
 
-if ($LogPath) {
-    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
-    try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { $LogPath = $null }
-}
+$LogPath = Start-BuildLog -LogPath $LogPath
 
-$targets = @()
-if ($TargetsFile) {
-    try { $targets = @(Read-ReimageTargets -Path $TargetsFile) } finally { Remove-Item -LiteralPath $TargetsFile -Force -ErrorAction SilentlyContinue }
-}
-# From the console (powershell -File) a list arrives as one comma-separated string.
-foreach ($c in @($Computers | ForEach-Object { "$_" -split ',' } | ForEach-Object Trim | Where-Object { $_ })) {
-    $targets += [pscustomobject]@{ name = ($c -split '\.')[0].ToUpperInvariant(); address = $c; ou = '' }
-}
+$targets = @(Get-ReimageTargetList -TargetsFile $TargetsFile -Computers $Computers)
 if (-not $targets) { throw 'No computers to reimage.' }
 
 $pcs = @(for ($i = 0; $i -lt $targets.Count; $i++) {
@@ -93,12 +83,6 @@ if ($officeApps) {
 }
 Write-Host "Reimaging $($pcs.Count) PC(s) with answer file $AnswerFile from $ContentRoot" -ForegroundColor Cyan
 
-function Stop-Pc($p, [string]$Message) {
-    $p.State = 'Failed'
-    Write-Host "$($p.Name): $Message" -ForegroundColor Red
-    Complete-BuildStep $p.Id -State failed -Detail (@("$Message" -split "`r?`n")[0])
-}
-
 try {
     if (-not (Test-Path -LiteralPath (Join-Path $ContentRoot "AnswerFiles\$AnswerFile.xml"))) { throw "Answer file $AnswerFile is not on $ContentRoot." }
     # The agents that checked in lately, and the console's key to sign their jobs.
@@ -116,19 +100,19 @@ try {
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $p.Name
         if (-not $agent -or -not $agent.agentId) {
             Write-Host "$($p.Name): no agent has checked in from it. Select it and click Install agent on the Computers tab (or run <share>\Agent\Install-Agent.cmd on it as administrator), then reimage it."
-            Stop-Pc $p 'Not reimaged: it has no agent; click Install agent first (see the log)'; continue
+            Stop-PcStep $p 'Not reimaged: it has no agent; click Install agent first (see the log)'; continue
         }
         if (-not $agent.Online) {
             Write-Host "$($p.Name): its agent last checked in $($agent.LastSeenText): the PC is off, asleep or off the network."
-            Stop-Pc $p "Not reimaged: its agent last checked in $($agent.LastSeenText); turn the PC on and try again"; continue
+            Stop-PcStep $p "Not reimaged: its agent last checked in $($agent.LastSeenText); turn the PC on and try again"; continue
         }
         try {
             $problems = @(Test-RemoteTarget -Info (ConvertTo-AgentTargetInfo $agent) -ExpectedName $p.Name)
-            if ($problems) { Stop-Pc $p "Not reimaged: $($problems[0])"; continue }
+            if ($problems) { Stop-PcStep $p "Not reimaged: $($problems[0])"; continue }
             # WinPE has no Wi-Fi: on Wi-Fi only, the PC would restart into WinPE and not reach the share.
             if ($agent.PSObject.Properties['wired'] -and $agent.wired -eq $false) {
                 Write-Host "$($p.Name): its agent says it has no network cable connected (Wi-Fi only). WinPE has no Wi-Fi, so it could not reach the share. Connect a cable or a dock, wait for its next check-in (up to $(if ($agent.checkInMinutes) { $agent.checkInMinutes } else { 5 }) min), then try again."
-                Stop-Pc $p 'Not reimaged: it is on Wi-Fi only; WinPE needs a network cable or dock (see the log)'; continue
+                Stop-PcStep $p 'Not reimaged: it is on Wi-Fi only; WinPE needs a network cable or dock (see the log)'; continue
             }
             Set-BuildStepProgress $p.Id -Percent 20 -Detail 'Giving the job to its agent'
             if (-not $bootHash) { $bootHash = (Get-FileHash -LiteralPath $BootWim -Algorithm SHA256).Hash }
@@ -143,7 +127,7 @@ try {
         } catch {
             Write-Host "$($p.Name): could not give the job to its agent: $($_.Exception.Message)"
             if ($p.Serial) { Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial; Remove-AgentJob -StatusFolder $StatusFolder -Serial $p.Serial }
-            Stop-Pc $p "Not reimaged: could not give the job to its agent (see the log)"
+            Stop-PcStep $p "Not reimaged: could not give the job to its agent (see the log)"
         }
     }
 
@@ -172,7 +156,7 @@ try {
                     Write-Host "$($p.Name): $why"
                     Remove-AgentJob -StatusFolder $StatusFolder -Serial $p.Serial
                     Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial
-                    Stop-Pc $p "Not reimaged: $why (see the log)"
+                    Stop-PcStep $p "Not reimaged: $why (see the log)"
                 }
                 continue
             }
@@ -185,7 +169,7 @@ try {
                 Remove-ReimageJob -ContentRoot $ContentRoot -Serial $p.Serial
                 # Its startup task takes WinPE off the disk at the next Windows start.
                 Remove-AgentJob -StatusFolder $StatusFolder -Serial $p.Serial
-                Stop-Pc $p "WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)"
+                Stop-PcStep $p "WinPE did not start the deploy within $TimeoutMinutes min: check the PC's screen (network, share)"
             } elseif ((Get-Date) -gt $p.RestartAt) {
                 Set-BuildStepProgress $p.Id -Percent 85 -Detail 'Waiting for WinPE to start the deploy'
             }
@@ -193,16 +177,13 @@ try {
         Start-Sleep -Seconds 5
     }
 
-    $failed = @($pcs | Where-Object State -ne 'Started').Count
     Write-Host ''
-    Write-Host "Done: $($pcs.Count - $failed) of $($pcs.Count) started." -ForegroundColor Cyan
-    if ($failed) { Stop-BuildProgress -Message $(if ($pcs.Count -eq 1) { 'The PC was not reimaged, see the row below.' } else { "$failed of $($pcs.Count) PCs were not reimaged, see the rows below." }) }
-    else { Stop-BuildProgress }
+    $null = Complete-PcRun -Pcs $pcs -DoneState 'Started' -DoneText 'started' -OneFailed 'The PC was not reimaged, see the row below.' -ManyFailed '{0} of {1} PCs were not reimaged, see the rows below.'
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     Stop-BuildProgress -Message $_.Exception.Message
     throw
 } finally {
-    if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+    Stop-BuildLog -LogPath $LogPath
 }
 if (@($pcs | Where-Object State -ne 'Started').Count) { exit 1 }

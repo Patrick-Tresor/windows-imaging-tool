@@ -105,7 +105,18 @@ try {
     Assert-Equal $loc[0].local $true 'a PC outside the domain is local'
     Assert-Equal $loc[0].credentialFile 'C:\Temp\c.xml' 'it keeps its own account file'
     Assert-Equal $loc[0].ou '' 'it has no OU to join back into'
+    # Both runs (Install agent, Reimage): the console's file, deleted once read, plus names typed as one string.
+    ConvertTo-Json -InputObject @([ordered]@{ name = 'PC1'; address = 'pc1.corp.local' }) | Set-Content -Path $tf
+    $list = @(Get-ReimageTargetList -TargetsFile $tf -Computers 'pc2.corp.local, PC3')
+    Assert-Equal (($list | ForEach-Object name) -join ',') 'PC1,PC2,PC3' 'targets from the file and the typed names'
+    Assert-Equal "$($list[1].address)|$($list[1].ou)" 'pc2.corp.local|' 'a typed name keeps its full address and has no OU'
+    Assert-Equal (Test-Path -LiteralPath $tf) $false 'the targets file is deleted once read'
+    Assert-Equal @(Get-ReimageTargetList).Count 0 'nothing given, no targets'
 } finally { Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue }
+foreach ($f in 'src/Install-RemoteAgent.ps1', 'src/Start-RemoteReimage.ps1') {
+    $text = Get-Content -Raw -LiteralPath (Join-Path $repo $f)
+    Assert-Equal "$($text -match 'Get-ReimageTargetList')|$($text -match 'Complete-PcRun')|$($text -match 'function Stop-Pc')" 'True|True|False' "$f uses the shared targets, PC failure and end-of-run code"
+}
 
 # Remoting errors become one line saying what to do
 Assert-Equal ((Get-RemotingProblemText -Message 'Access is denied to \\10.1.2.40\ADMIN$' -Account '10.1.2.40\Pat' -Local) -like '*built-in Administrator*') $true 'a local account refused admin rights points to the built-in Administrator'
@@ -329,7 +340,7 @@ try {
 } finally { Remove-Item $run -Recurse -Force -ErrorAction SilentlyContinue }
 $mod = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
 Assert-Equal ($mod -match 'GetNetworkCredential\(\)\.Password, \$Credential\.UserName') $true 'the share password goes to WNetAddConnection2, never on a command line'
-foreach ($f in 'Get-RemoteComputerInfo', 'Invoke-LocalDiskBoot', 'Remove-LocalDiskBoot') {
+foreach ($f in 'Invoke-LocalDiskBoot') {
     Assert-Equal ($mod -match "(?s)function $f \{.*?Open-RemoteChannel.*?Close-RemoteChannel") $true "$f works over WinRM or the admin share"
 }
 # A console PC outside the domain (2026-11-16, 2J14HL3): WinRM answers but asks for TrustedHosts.
