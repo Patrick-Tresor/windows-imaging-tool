@@ -917,8 +917,8 @@ function Remove-LocalDiskBoot {
     try {
         Invoke-RemoteChannel -Channel $ch -ArgumentList "$BootEntry" -ScriptBlock {
             param($Entry)
-            if ($Entry) { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null }
-            foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null }
+            if ($Entry) { try { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null } catch { } }
+            foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { try { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null } catch { } }
             Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
             if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
         } | Out-Null
@@ -1024,8 +1024,8 @@ function Invoke-LocalDiskBoot {
         try {
             Invoke-RemoteChannel -Channel $ch -ArgumentList (, $created) -ScriptBlock {
                 param($Ids)
-                foreach ($id in $Ids) { & bcdedit.exe /delete $id /f 2>&1 | Out-Null }
-                foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null }
+                foreach ($id in $Ids) { try { & bcdedit.exe /delete $id /f 2>&1 | Out-Null } catch { } }
+                foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { try { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null } catch { } }
                 Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
             } | Out-Null
         } catch { }

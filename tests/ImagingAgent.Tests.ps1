@@ -282,6 +282,15 @@ foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1',
     Assert-Equal ($missing -join ', ') '' "$($s.File) can call every tool function it uses ($($called.Count))"
 }
 
+# Deleting or stopping something that may not be there, in a script block the Local and Smb channels run under
+# ErrorAction Stop: PowerShell 5.1 turns the tool's error text into a terminating error, so each one sits in a try
+# (D2J14HL3, Install-Agent.cmd on a PC with no agent task yet: "Le fichier specifie est introuvable").
+foreach ($f in 'src/ImagingAgent.psm1', 'src/RemoteReimage.psm1') {
+    $bad = @([IO.File]::ReadAllLines((Join-Path $repo $f)) | Where-Object {
+        $_ -match '&\s*(schtasks|bcdedit)\.exe' -and $_ -match '/(Delete|delete|End)\b' -and $_ -match 'Out-Null' -and $_ -notmatch 'try \{' })
+    Assert-Equal ($bad -join ' / ') '' "$f ignores a missing task or boot entry without stopping"
+}
+
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/ImagingAgent.psm1', 'src/ImagingAgent.ps1', 'src/Install-RemoteAgent.ps1', 'src/Install-AgentHere.ps1', 'src/Install-Agent.cmd') {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repo $f))
