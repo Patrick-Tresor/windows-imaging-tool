@@ -60,9 +60,10 @@ Write-Log "Agent starting: PowerShell $($PSVersionTable.PSVersion) as $([Securit
 
 # RemoteReimage.psm1 here too, not only inside ImagingAgent.psm1: a module's own imports stay inside it, so this
 # script could not see Invoke-LocalDiskBoot (GWHZLG3's reimage job: "Invoke-LocalDiskBoot is not recognized").
-# AppPack.psm1: install apps jobs run the same app pack code first boot runs (Invoke-AppInstall).
+# DeployStatus.psm1 the same way, before ImagingAgent.psm1 (which then reuses it): Update-LocalDeployResult.
+# AppPack.psm1: install apps jobs run the same app pack code first boot runs (Invoke-AppReinstall).
 # Each one stops the agent with its reason in the log (an antivirus blocking a module says so here).
-foreach ($m in 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') {
+foreach ($m in 'RemoteReimage.psm1', 'DeployStatus.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') {
     try { Import-Module ([IO.Path]::Combine($dir, $m)) -Force -ErrorAction Stop }
     catch { Write-Log "Could not load ${m}: $($_.Exception.Message). The agent stops."; exit 1 }
 }
@@ -192,29 +193,30 @@ function Set-JobState($Job, [string]$JobState, [string]$Message) {
 
 function Invoke-AppsJob($Job, [string]$JobDir) {
     # The Dashboard's Retry failed apps: copy the packs the console put next to the job, check them against the
-    # signed hash, install each one as first boot does, and put the results on the Dashboard row.
+    # signed hash, install each one as first boot does, and put the results on the Dashboard row, in
+    # DeployResult.txt, and out of the logon retry (so they are not installed again at the next logon).
     $names = @(Get-AgentJobApps $Job)
     Set-JobState $Job 'Running' "Copying $($names -join ', ')"
     $work = [IO.Path]::Combine($dir, 'Work\Apps')
+    $lock = $null
     try {
         if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) }
         Copy-AgentFolder -Source ([IO.Path]::Combine($JobDir, 'Apps')) -Destination $work
         $hash = Get-AgentPayloadHash $work
         if ($hash -ne "$($Job.payloadSha256)".ToUpperInvariant()) { throw "the application packs' SHA-256 ($hash) is not the one the console signed" }
-        $results = @()
-        foreach ($name in $names) {
-            Set-JobState $Job 'Running' "Installing $name"
-            $appDir = [IO.Path]::Combine($work, $name)
-            $r = try {
-                $app = Read-AppPack -AppRoot $work -Name $name
-                Invoke-AppInstall -Definition $app -AppFolder $appDir -LogPath "$env:WINDIR\Temp\App-$name.log" -Log { param($m) Write-Log $m }
-            } catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
-            $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
-            Write-Log "  $name $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
-            $results += [pscustomobject]@{ name = $name; ok = $ok; status = "$($r.Status)"; message = "$($r.Message)" }
-        }
+        # Not while the logon retry installs (two installers at once fail with 1618).
+        Set-JobState $Job 'Running' 'Waiting for another install to end'
+        $lock = Enter-AppInstallLock -Minutes 30
+        if (-not $lock) { throw 'another application install on this PC did not end within 30 minutes' }
+        $results = @(Invoke-AppReinstall -AppRoot $work -Names $names -Log { param($m) Write-Log $m } -OnApp { param($n) Set-JobState $Job 'Running' "Installing $n" })
         try { $null = Update-AgentDeployStatus -StatusFolder $statusFolder -Serial $identity.serial -Results $results }
         catch { Write-Log "Could not update the Dashboard: $($_.Exception.Message)" }
+        try { $v = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $results -By 'the agent'); if ($v) { Write-Log "DeployResult.txt now: $v" } }
+        catch { Write-Log "Could not update DeployResult.txt: $($_.Exception.Message)" }
+        try {
+            $ok = @($results | Where-Object ok | ForEach-Object name)
+            if ($ok) { $waiting = @(Remove-AppRetry -Names $ok); Write-Log "Logon retry: $(if ($waiting) { "still to install $($waiting -join ', ')" } else { 'nothing left' })" }
+        } catch { Write-Log "Could not update the logon retry: $($_.Exception.Message)" }
         $bad = @($results | Where-Object { -not $_.ok })
         $text = if ($bad) { (($bad | ForEach-Object { "$($_.name) failed ($($_.status))" }) -join '; ') } else { "Installed $($names -join ', ')" }
         Set-JobState $Job $(if ($bad) { 'Failed' } else { 'Done' }) $text
@@ -222,6 +224,7 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
         Write-Log "Job $($Job.id) FAILED: $($_.Exception.Message)"
         Set-JobState $Job 'Failed' $_.Exception.Message
     } finally {
+        Exit-AppInstallLock $lock
         try { [IO.Directory]::Delete($JobDir, $true) } catch { }
         try { if ([IO.Directory]::Exists($work)) { [IO.Directory]::Delete($work, $true) } } catch { }
     }

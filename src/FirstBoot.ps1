@@ -329,6 +329,8 @@ try {
     $summary = Get-DeployResultSummary -Deploy $deployInfo -Checks $checkResults
     Set-Content -Path "$env:WINDIR\Temp\DeployResult.txt" -Value $summary.Text -Encoding utf8
     Write-Log ('Deployment result:' + [Environment]::NewLine + $summary.Text)
+    # What it was made from: an app installed again later (logon retry, the agent) or BitLocker turned on makes it again whole.
+    try { Save-LocalDeployResult -Deploy $deployInfo -Checks $checkResults } catch { Write-Log "Could not keep the deployment result's checks: $($_.Exception.Message)" }
 } catch { Write-Log "Could not write the deployment result: $($_.Exception.Message)" }
 
 # Applications that failed are installed again at the next logon, silently as SYSTEM (Retry-FailedApps.ps1, logon task

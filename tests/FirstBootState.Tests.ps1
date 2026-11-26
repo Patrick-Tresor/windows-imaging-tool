@@ -162,7 +162,8 @@ $dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($dp -match "'Test-Deployment\.ps1', 'Retry-FailedApps\.ps1'") $true 'deploy stages the retry script for admins only'
 $rs = Get-Content -Raw (Join-Path $repo 'src/Retry-FailedApps.ps1')
 foreach ($m in 'ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') { Assert-Equal ($rs -match [regex]::Escape("'$m'")) $true "the retry imports $m" }
-Assert-Equal ($rs -match '(?s)Invoke-AppInstall.*Set-AppCheckResults.*DeployResult\.txt.*Update-DeployAppResults') $true 'the retry installs, then updates DeployResult.txt and the Dashboard'
+Assert-Equal ($rs -match '(?s)Enter-AppInstallLock.*Invoke-AppReinstall.*Update-LocalDeployResult.*Update-DeployAppResults') $true 'the retry waits for any other install, installs, then updates DeployResult.txt and the Dashboard'
+Assert-Equal ($fb -match '(?s)DeployResult\.txt.{0,400}Save-LocalDeployResult -Deploy \$deployInfo -Checks \$checkResults') $true 'first boot keeps what DeployResult.txt is made from'
 Assert-Equal ($rs -match 'maxAttempts' -and $rs -match 'Remove-RetryApps') $true 'it removes its task and folder when done or out of tries'
 $bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'src/Retry-FailedApps.ps1'))
 Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 'Retry-FailedApps.ps1 is ASCII'
@@ -185,7 +186,12 @@ if ($env:CI -or $env:IMAGING_E2E) {
         -Deploy ([pscustomobject]@{ computerName = 'RETRY-PC'; state = 'Succeeded'; driverPack = 'Dell\x' }) `
         -Checks @([pscustomobject]@{ name = 'App: Retry-App'; result = 'Failed'; detail = 'Failed: exit 1' }) -Status ([pscustomobject]@{ folder = $status; id = 'RETRY1' })
     $plan | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $kit 'retry.json') -Encoding utf8
+    # A PC deployed before deploy-result.json: the retry starts it from its plan.
+    $dataFile = Join-Path $env:ProgramData 'ImagingTool\deploy-result.json'
+    Remove-Item -LiteralPath $dataFile -Force -ErrorAction SilentlyContinue
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $kit 'Retry-FailedApps.ps1')
+    Assert-Equal (Test-Path $dataFile) $true 'the retry keeps what DeployResult.txt is made from'
+    Remove-Item -LiteralPath $dataFile -Force -ErrorAction SilentlyContinue
     $retryLog = Get-Content -Raw "$env:WINDIR\Temp\RetryApps.log"
     Assert-Equal (Test-Path $marker) $true "the retry installs the failed app (log: $retryLog)"
     Assert-Equal ($retryLog -match 'Every application is installed now') $true 'the log says it is done'

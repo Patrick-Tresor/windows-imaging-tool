@@ -438,6 +438,20 @@ Installers:
     $plan = [pscustomobject]@{ applications = @($vlc) } | ConvertTo-Json -Depth 8 | ConvertFrom-Json
     $again = ConvertTo-AppDefinition -Name $plan.applications[0].name -Json $plan.applications[0]
     Assert-Equal "$($again.detection.rules[0].type)|$($again.detection.rules[0].target)|$($again.timeoutMinutes)" "file|$($vlc.detection.rules[0].target)|15" 'definition survives the first boot plan JSON'
+
+    # The agent's Retry failed apps takes what it installed out of the logon retry; with nothing left, the task and folder go.
+    $rdir = Join-Path $tmp 'RetryApps'
+    New-Item -ItemType Directory -Path $rdir -Force | Out-Null
+    [pscustomobject]@{ apps = @([pscustomobject]@{ name = 'Chrome'; command = 'c.cmd' }, [pscustomobject]@{ name = 'Zoom'; command = 'z.cmd' }); attempts = 1; maxAttempts = 3 } |
+        ConvertTo-Json -Depth 5 | Set-Content (Join-Path $rdir 'retry.json')
+    $script:taskGone = $false
+    $noTask = { $script:taskGone = $true }
+    Assert-Equal ((Remove-AppRetry -Names @('Teams') -Dir $rdir -RemoveTask $noTask) -join ',') 'Chrome,Zoom' 'an app the retry does not hold changes nothing'
+    Assert-Equal ((Remove-AppRetry -Names @('Chrome') -Dir $rdir -RemoveTask $noTask) -join ',') 'Zoom' 'Chrome installed by the agent: only Zoom is left'
+    Assert-Equal ((@((Get-Content -Raw (Join-Path $rdir 'retry.json') | ConvertFrom-Json).apps) | ForEach-Object name) -join ',') 'Zoom' 'retry.json holds Zoom only'
+    Assert-Equal (@(Remove-AppRetry -Names @('Zoom') -Dir $rdir -RemoveTask $noTask).Count) 0 'nothing left'
+    Assert-Equal "$script:taskGone|$(Test-Path $rdir)" 'True|False' 'the logon task and its folder go'
+    Assert-Equal (@(Remove-AppRetry -Names @('Zoom') -Dir $rdir -RemoveTask $noTask).Count) 0 'no logon retry on this PC: nothing to do'
 }
 finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

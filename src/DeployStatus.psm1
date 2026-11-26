@@ -509,6 +509,32 @@ function Get-DeployResultSummary {
     [pscustomobject]@{ Verdict = $verdict; Result = $result; Lines = $lines.ToArray(); Text = ($textLines -join [Environment]::NewLine) }
 }
 
+function Merge-CheckResults {
+    # A check list with each new check in place of the old one of the same name (added at the end when new).
+    param([AllowEmptyCollection()][object[]]$Checks = @(), [AllowEmptyCollection()][object[]]$Results = @())
+    $list = [Collections.Generic.List[object]]::new()
+    foreach ($c in @($Checks)) { if ($c) { $list.Add($c) } }
+    foreach ($x in @($Results)) {
+        if (-not $x) { continue }
+        $new = [pscustomobject]@{ name = "$($x.name)"; result = "$($x.result)"; detail = "$($x.detail)" }
+        $old = @($list | Where-Object name -eq $new.name) | Select-Object -First 1
+        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
+    }
+    ,$list.ToArray()
+}
+
+function ConvertTo-AppChecks {
+    # Apps installed again after first boot ({ name, ok, status, message }) as checks ('App: <name>', Passed or Failed).
+    param([AllowEmptyCollection()][object[]]$Results = @(), [string]$By = 'a retry', [datetime]$Now = (Get-Date))
+    @(foreach ($x in @($Results | Where-Object { $_ })) {
+        [pscustomobject]@{
+            name   = "App: $($x.name)"
+            result = $(if ($x.ok) { 'Passed' } else { 'Failed' })
+            detail = $(if ($x.ok) { "Installed by $By $($Now.ToString('yyyy-MM-dd HH:mm'))$(if ($x.message) { ": $($x.message)" })" } else { "$($x.status): $($x.message)" })
+        }
+    })
+}
+
 function Set-AppCheckResults {
     <#
     .SYNOPSIS
@@ -516,17 +542,7 @@ function Set-AppCheckResults {
         installed again after first boot (the logon retry, or the agent's Retry failed apps). Returns the new list.
     #>
     param([AllowEmptyCollection()][object[]]$Checks = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry', [datetime]$Now = (Get-Date))
-    $list = [Collections.Generic.List[object]]::new()
-    foreach ($c in @($Checks)) { if ($c) { $list.Add($c) } }
-    foreach ($x in $Results) {
-        $name = "App: $($x.name)"
-        $result = if ($x.ok) { 'Passed' } else { 'Failed' }
-        $detail = if ($x.ok) { "Installed by $By $($Now.ToString('yyyy-MM-dd HH:mm'))$(if ($x.message) { ": $($x.message)" })" } else { "$($x.status): $($x.message)" }
-        $old = @($list | Where-Object name -eq $name) | Select-Object -First 1
-        $new = [pscustomobject]@{ name = $name; result = $result; detail = $detail }
-        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
-    }
-    ,$list.ToArray()
+    Merge-CheckResults -Checks $Checks -Results (ConvertTo-AppChecks -Results $Results -By $By -Now $Now)
 }
 
 function Update-DeployAppResults {
@@ -539,62 +555,43 @@ function Update-DeployAppResults {
     #>
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
           [string]$By = 'a retry', [datetime]$Now = (Get-Date))
-    $file = ($Id.Trim() -replace '[\\/:*?"<>|\s]', '_')
-    $path = [IO.Path]::Combine($StatusFolder, "$file.json")
-    if (-not [IO.File]::Exists($path)) { return $null }
-    $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-    $checks = Set-AppCheckResults -Checks @(if ($r.PSObject.Properties['checks']) { @($r.checks) }) -Results $Results -By $By -Now $Now
-    $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
-    foreach ($x in @($Results | Where-Object { $_.ok })) { $warnings = @($warnings | Where-Object { "$_" -notlike "$($x.name) failed*" }) }
-    if (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) { $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) }
     $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
-    $logLines = @($Results | ForEach-Object {
+    $logLines = @($Results | Where-Object { $_ } | ForEach-Object {
         '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} {3} ({4}){5}' -f $Now, $who, $_.name, $(if ($_.ok) { 'installed' } else { 'FAILED' }), $_.status, $(if ($_.message) { ": $($_.message)" })
     })
-    $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
-    & $set 'checks' @($checks)
-    & $set 'warnings' @($warnings)
-    & $set 'updated' $Now.ToString('o')
-    if ("$($r.state)" -in 'Succeeded', 'Warning') { & $set 'state' $(if ($warnings) { 'Warning' } else { 'Succeeded' }) }
-    $tmp = "$path.tmp"
-    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
-    [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
-    if ($logLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($logLines -join "`r`n") + "`r`n")) } catch { } }
-    $r
+    Update-DeployCheckResults -StatusFolder $StatusFolder -Id $Id -Results @(ConvertTo-AppChecks -Results $Results -By $By -Now $Now) -By $By -Now $Now `
+        -FixedApps @($Results | Where-Object { $_ -and $_.ok } | ForEach-Object { "$($_.name)" }) -LogLines $logLines
 }
 
 function Update-DeployCheckResults {
     <#
     .SYNOPSIS
-        PC: puts checks run again after first boot (the agent's BitLocker check, once a FIRSTLOGON task turned it on)
-        into this PC's deployment status (<status folder>\<id>.json, the Dashboard's row) and a line in its live log.
-        Each result replaces the check of the same name. -CheckWarning gets the whole new list and returns the
-        'Post-deploy checks: ...' warning (or nothing); without it that warning only goes once nothing fails or warns.
+        PC: puts checks made again after first boot (an app installed again, the agent's BitLocker check once a
+        FIRSTLOGON task turned it on) into this PC's deployment status (<status folder>\<id>.json, the Dashboard's
+        row) and a line each in its live log. Each result replaces the check of the same name. -CheckWarning gets
+        the whole new list and returns the 'Post-deploy checks: ...' warning (or nothing); without it that warning
+        only goes once nothing fails or warns. -FixedApps: apps installed now, whose '<app> failed' warning goes.
         Returns the record, or $null when there is none.
     #>
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
-          [scriptblock]$CheckWarning, [string]$By = 'the agent', [datetime]$Now = (Get-Date))
+          [scriptblock]$CheckWarning, [string[]]$FixedApps = @(), [string[]]$LogLines, [string]$By = 'the agent', [datetime]$Now = (Get-Date))
     $file = ($Id.Trim() -replace '[\\/:*?"<>|\s]', '_')
     $path = [IO.Path]::Combine($StatusFolder, "$file.json")
     if (-not [IO.File]::Exists($path)) { return $null }
     $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-    $list = [Collections.Generic.List[object]]::new()
-    foreach ($c in @(if ($r.PSObject.Properties['checks']) { @($r.checks) })) { if ($c) { $list.Add($c) } }
-    foreach ($x in $Results) {
-        $old = @($list | Where-Object name -eq $x.name) | Select-Object -First 1
-        $new = [pscustomobject]@{ name = "$($x.name)"; result = "$($x.result)"; detail = "$($x.detail)" }
-        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
-    }
-    $checks = $list.ToArray()
+    $checks = Merge-CheckResults -Checks @(if ($r.PSObject.Properties['checks']) { @($r.checks) }) -Results $Results
     $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
+    foreach ($n in @($FixedApps | Where-Object { $_ })) { $warnings = @($warnings | Where-Object { "$_" -notlike "$n failed*" }) }
     if ($CheckWarning) {
         $w = & $CheckWarning $checks
         $warnings = @(@($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) + @($w | Where-Object { $_ }))
     } elseif (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) {
         $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' })
     }
-    $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
-    $logLines = @($Results | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} check {3}: {4}' -f $Now, $who, $_.name, $_.result, $_.detail })
+    if (-not $PSBoundParameters.ContainsKey('LogLines')) {
+        $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
+        $LogLines = @($Results | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} check {3}: {4}' -f $Now, $who, $_.name, $_.result, $_.detail })
+    }
     $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
     & $set 'checks' @($checks)
     & $set 'warnings' @($warnings)
@@ -604,8 +601,56 @@ function Update-DeployCheckResults {
     $tmp = "$path.tmp"
     [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
     [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
-    if ($logLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($logLines -join "`r`n") + "`r`n")) } catch { } }
+    if ($LogLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($LogLines -join "`r`n") + "`r`n")) } catch { } }
     $r
+}
+
+function Get-LocalDeployResultPath {
+    # Where a deployed PC keeps what C:\Windows\Temp\DeployResult.txt is made from (deploy facts and every check).
+    [IO.Path]::Combine([Environment]::GetFolderPath('CommonApplicationData'), 'ImagingTool\deploy-result.json')
+}
+
+function Save-LocalDeployResult {
+    <#
+    .SYNOPSIS
+        First boot: keeps what DeployResult.txt was made from (-Deploy and -Checks of Get-DeployResultSummary), so a
+        later change (an app installed again, BitLocker turned on) makes the whole result again instead of one line.
+    #>
+    param([Parameter(Mandatory)]$Deploy, [AllowEmptyCollection()][object[]]$Checks = @(), [string]$Path = (Get-LocalDeployResultPath))
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
+    $data = [pscustomobject][ordered]@{ deploy = $Deploy; checks = @($Checks | Where-Object { $_ }) }
+    [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $data -Depth 8), (New-Object Text.UTF8Encoding $true))
+}
+
+function Update-LocalDeployResult {
+    <#
+    .SYNOPSIS
+        PC: new check results (an app installed again, BitLocker checked again) into C:\Windows\Temp\DeployResult.txt,
+        the result the agent reports. Each one replaces the check of the same name in deploy-result.json and the whole
+        result is made again, so the logon retry, the agent's Retry failed apps and its BitLocker check never undo one
+        another. A PC deployed before deploy-result.json existed gets each line changed in place (apps excepted).
+        Returns the new first line, or $null when there was nothing to update.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$DataPath = (Get-LocalDeployResultPath),
+          [string]$ResultPath = "$env:WINDIR\Temp\DeployResult.txt")
+    $Results = @($Results | Where-Object { $_ })
+    if (-not $Results) { return $null }
+    if ([IO.File]::Exists($DataPath)) {
+        $data = [IO.File]::ReadAllText($DataPath) | ConvertFrom-Json
+        $checks = Merge-CheckResults -Checks @($data.checks) -Results $Results
+        Save-LocalDeployResult -Deploy $data.deploy -Checks $checks -Path $DataPath
+        $summary = Get-DeployResultSummary -Deploy $data.deploy -Checks $checks
+        [IO.File]::WriteAllText($ResultPath, $summary.Text, (New-Object Text.UTF8Encoding $true))
+        return ($summary.Text -split '\r?\n')[0]
+    }
+    if (-not [IO.File]::Exists($ResultPath)) { return $null }
+    $text = [IO.File]::ReadAllText($ResultPath)
+    foreach ($x in @($Results | Where-Object { -not "$($_.name)".StartsWith('App: ') -and -not "$($_.name)".StartsWith('Task: ') })) {
+        $mark = switch ("$($x.result)") { 'Passed' { 'OK' } 'Failed' { 'Failed' } default { 'Warning' } }
+        $text = Update-DeployResultText -Text $text -Item "$($x.name)" -Result $mark -Detail "$($x.detail)"
+    }
+    [IO.File]::WriteAllText($ResultPath, $text, (New-Object Text.UTF8Encoding $true))
+    ($text -split '\r?\n')[0]
 }
 
 function Update-DeployResultText {
@@ -732,4 +777,5 @@ Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeploySt
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
     Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
+    Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Save-LocalDeployResult, Update-LocalDeployResult,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

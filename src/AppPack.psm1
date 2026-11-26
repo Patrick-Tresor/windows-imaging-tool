@@ -1228,6 +1228,73 @@ function Invoke-AppInstall {
 
 #endregion
 
+#region Installing again after first boot
+
+function Invoke-AppReinstall {
+    <#
+    .SYNOPSIS
+        PC: installs applications again after first boot, each the way first boot does (Invoke-AppInstall): the logon
+        retry (Retry-FailedApps.ps1) and the agent's Retry failed apps. -AppRoot holds a folder per app; -Definitions
+        (name -> app.json fields) when the packs' app.json is not there. -OnApp runs before each one.
+        Returns { name, ok, status, message } per app.
+    #>
+    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string[]]$Names, [hashtable]$Definitions = @{},
+          [string]$LogFolder = "$env:WINDIR\Temp", [scriptblock]$Log = { param($m) }, [scriptblock]$OnApp = { param($n) })
+    foreach ($name in @($Names | Where-Object { $_ })) {
+        & $OnApp $name
+        $r = try {
+            $app = if ($Definitions.ContainsKey($name)) { ConvertTo-AppDefinition -Name $name -Json $Definitions[$name] } else { Read-AppPack -AppRoot $AppRoot -Name $name }
+            Invoke-AppInstall -Definition $app -AppFolder ([IO.Path]::Combine($AppRoot, $name)) -LogPath ([IO.Path]::Combine($LogFolder, "App-$name.log")) -Log $Log
+        } catch { [pscustomobject]@{ Status = 'Failed'; ExitCode = $null; RebootNeeded = $false; Message = $_.Exception.Message } }
+        $ok = $r.Status -in 'Installed', 'AlreadyInstalled'
+        & $Log "  $name $(if ($ok) { 'OK' } else { 'FAILED' }) ($($r.Status)): $($r.Message)"
+        [pscustomobject]@{ name = $name; ok = $ok; status = "$($r.Status)"; message = "$($r.Message)" }
+    }
+}
+
+function Enter-AppInstallLock {
+    <#
+    .SYNOPSIS
+        PC: one install at a time between the logon retry and the agent's Retry failed apps (two installers at once
+        fail with 1618). Waits up to -Minutes; returns the mutex to release, or $null when the other one still runs.
+    #>
+    param([int]$Minutes = 30)
+    $m = New-Object Threading.Mutex($false, 'Global\ImagingToolAppInstall')
+    try { if ($m.WaitOne([timespan]::FromMinutes($Minutes))) { return $m } } catch [Threading.AbandonedMutexException] { return $m }
+    $m.Dispose()
+    $null
+}
+
+function Exit-AppInstallLock($Lock) {
+    if ($Lock) { try { $Lock.ReleaseMutex() } catch { }; try { $Lock.Dispose() } catch { } }
+}
+
+function Remove-AppRetry {
+    <#
+    .SYNOPSIS
+        PC: takes applications that are installed now (the agent's Retry failed apps) out of the logon retry
+        (C:\ProgramData\ImagingTool\RetryApps\retry.json), so they are not installed again at the next logon. With
+        none left, the logon task ImagingTool\RetryApps and its folder go. Returns the apps still waiting there.
+    #>
+    param([string[]]$Names = @(), [string]$Dir = [IO.Path]::Combine([Environment]::GetFolderPath('CommonApplicationData'), 'ImagingTool\RetryApps'),
+          [scriptblock]$RemoveTask = { & schtasks.exe /Delete /TN 'ImagingTool\RetryApps' /F 2>&1 | Out-Null })
+    $planPath = [IO.Path]::Combine($Dir, 'retry.json')
+    if (-not [IO.File]::Exists($planPath)) { return @() }
+    $plan = [IO.File]::ReadAllText($planPath) | ConvertFrom-Json
+    $left = @(@($plan.apps) | Where-Object { $_ -and @($Names) -notcontains "$($_.name)" })
+    if ($left.Count -eq @(@($plan.apps) | Where-Object { $_ }).Count) { return @($left | ForEach-Object { "$($_.name)" }) }
+    if (-not $left) {
+        & $RemoveTask
+        try { [IO.Directory]::Delete($Dir, $true) } catch { }
+        return @()
+    }
+    $plan.apps = @($left)
+    [IO.File]::WriteAllText($planPath, (ConvertTo-Json -InputObject $plan -Depth 8), (New-Object Text.UTF8Encoding $true))
+    @($left | ForEach-Object { "$($_.name)" })
+}
+
+#endregion
+
 Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, Read-AppPack, ConvertTo-AppJson, Test-AppPack,
     Find-InstallerFramework, Get-SilentInstallCommand, Get-InstallerTypeNote, Get-InstallerInfo, Get-MsiProperties, Get-MsixIdentity,
     Get-AppTemplates, Copy-AppTemplateFiles,
@@ -1235,4 +1302,5 @@ Export-ModuleMember -Function ConvertTo-AppDefinition, ConvertTo-DetectionRule, 
     New-AppDefinitionFromWinget, New-AppFromWinget, Find-AppTemplate, New-AppDefinitionFromTemplate, Get-AppDownload, Get-HttpErrorStatus, Test-AppDownloadFile, Test-AppSignerMatch, Get-AppExpectedSigners,
     Get-MediaAppDownloads, Add-MediaCopyItems, Test-OfficeDeploymentCommand, Get-OfficeConfigPath, New-OfficeDeployConfig, Get-OfficeSourceVersion, Remove-OldOfficeSource, Update-OfficeSource, Update-OfficeSources,
     Save-AppPack,
-    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Update-MsiDetectionRule, Invoke-AppInstall
+    Compare-AppVersion, Get-UninstallEntries, Test-DetectionRule, Test-AppDetection, Update-MsiDetectionRule, Invoke-AppInstall,
+    Invoke-AppReinstall, Enter-AppInstallLock, Exit-AppInstallLock, Remove-AppRetry

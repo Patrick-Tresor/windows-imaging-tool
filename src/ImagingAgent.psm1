@@ -23,7 +23,7 @@
 
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1')   # ConvertTo-SerialKey, Invoke-LocalDiskBoot
-Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults, Update-DeployCheckResults
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults, Update-DeployCheckResults, Update-LocalDeployResult
 Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') # Get-BitLockerCheck (BitLocker checked again)
 
 $script:AgentDir = 'C:\ProgramData\ImagingTool\Agent'
@@ -382,7 +382,7 @@ function Test-AgentJob {
 function Update-AgentDeployStatus {
     # PC: after an install apps job, each app's new result on this PC's Dashboard row (Update-DeployAppResults).
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [datetime]$Now = (Get-Date))
-    Update-DeployAppResults -StatusFolder $StatusFolder -Id $Serial -Results $Results -By 'the agent' -Now $Now
+    Update-DeployAppResults -StatusFolder $StatusFolder -Id (Get-StatusId -Serial $Serial) -Results $Results -By 'the agent' -Now $Now
 }
 
 function Sync-AgentBitLockerCheck {
@@ -416,10 +416,8 @@ function Sync-AgentBitLockerCheck {
         $null = Update-DeployCheckResults -StatusFolder $StatusFolder -Id (Get-StatusId -Serial $Serial) -Results @($check) -By 'the agent' -Now $Now `
             -CheckWarning { param($all) ConvertTo-CheckWarning (Get-PostDeployCheckSummary -Results @($all)) }
     }
-    if ([IO.File]::Exists($ResultPath)) {
-        $text = Update-DeployResultText -Text ([IO.File]::ReadAllText($ResultPath)) -Item 'BitLocker' -Result 'OK' -Detail $check.detail
-        [IO.File]::WriteAllText($ResultPath, $text, (New-Object Text.UTF8Encoding $true))
-    }
+    # The whole result made again from deploy-result.json (one line changed on PCs deployed before it existed).
+    $null = Update-LocalDeployResult -Results @($check) -DataPath ([IO.Path]::Combine($ToolDir, 'deploy-result.json')) -ResultPath $ResultPath
     $checks = @(@($report.checks) | Where-Object { $_ } | ForEach-Object { if ($_.name -eq 'BitLocker') { $check } else { $_ } })
     $summary = Get-PostDeployCheckSummary -Results $checks
     $saved = [pscustomobject]@{ checked = $Now.ToString('o'); result = $summary.Result; summary = $summary.Text; checks = $checks }

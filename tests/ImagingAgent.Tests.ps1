@@ -266,7 +266,7 @@ Assert-Equal ($agentPs1 -match '(?s)while \(\$true\) \{\s*#[^\n]*\n\s*try \{') $
 Assert-Equal ($agentPs1 -match 'Test-AgentJob') $true 'the agent checks every job before running it'
 Assert-Equal ($agentPs1 -match "Invoke-LocalDiskBoot[^\r\n]+-Method Local") $true 'a reimage job restarts the PC into WinPE through the local channel'
 Assert-Equal ($agentPs1 -match 'bootWimSha256') $true 'the boot image is checked against the signed checksum'
-Assert-Equal ($agentPs1 -match '(?s)function Invoke-AppsJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Invoke-AppInstall.*?Update-AgentDeployStatus') $true 'an install apps job checks the packs, installs them and updates the Dashboard'
+Assert-Equal ($agentPs1 -match '(?s)function Invoke-AppsJob.*?Get-AgentPayloadHash.*?payloadSha256.*?Enter-AppInstallLock.*?Invoke-AppReinstall.*?Update-AgentDeployStatus.*?Update-LocalDeployResult.*?Remove-AppRetry') $true 'an install apps job checks the packs, waits for the logon retry, installs, updates the Dashboard and DeployResult.txt, and takes them out of the logon retry'
 Assert-Equal ($agentPs1 -match 'Global\\ImagingToolAgent') $true 'one agent at a time'
 $deploy = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($deploy -match '(?s)Get-AgentStatusFolder -StatusTarget \$statusTarget.{0,80}Copy-AgentToImage -StatusFolder \$agentStatus') $true 'deploy puts the agent on every PC when a share is set, USB deploys too'
@@ -290,7 +290,7 @@ $toolFunctions = @{}
 foreach ($m in Get-ChildItem (Join-Path $repo 'src') -Filter *.psm1) {
     foreach ($x in [regex]::Matches([IO.File]::ReadAllText($m.FullName), '(?m)^function\s+([\w-]+)')) { $toolFunctions[$x.Groups[1].Value] = $m.Name }
 }
-foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
+foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'DeployStatus.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
                  @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') },
                  @{ File = 'src/Retry-FailedApps.ps1'; Modules = @('ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') })) {
     $text = [IO.File]::ReadAllText((Join-Path $repo $s.File))

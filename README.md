@@ -633,7 +633,11 @@ Not ready or Failed, with one line each for the image, drivers (pack, drivers
 added, device errors), applications, tasks, computer name, domain join,
 BitLocker, total time and tool version. The Dashboard's Result column and the
 PC's details show it, and the PC keeps it in `C:\Windows\Temp\DeployResult.txt`
-(and `FirstBoot.log`).
+(and `FirstBoot.log`). An application installed again later (the silent retry at
+the next logon, or **Retry failed apps** on the Dashboard) or BitLocker turned on
+by a first-logon task updates that result, the Dashboard and the Computers tab
+together; the two app retries never run at the same time, and an app the
+Dashboard's retry installed is not installed again at the next logon.
 
 After WinPE the PC restarts into Windows, and `FirstBoot.ps1` carries on from
 90 % while the applications install, then marks it Succeeded. That part needs
