@@ -428,7 +428,7 @@ a window and does nothing (no CPU, disk or network) for 5 minutes is waiting for
 a click nobody gives (a wrong silent switch, an error box): it is stopped then
 instead of after its whole timeout, so the PC does not stay on "Please wait"
 (Office's setup is left to its timeout). Results go to
-`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\FirstBoot-apps.json`, and
+`C:\Windows\Temp\FirstBoot.log` and `C:\Windows\Temp\DeployResult.txt`, and
 each installer's own output to `C:\Windows\Temp\App-<name>.log`, as a task's does.
 First boot starts from `SetupComplete.cmd`. Windows skips that script when it
 activates with an OEM product key (Dell, HP and Lenovo PCs have one in the
@@ -531,7 +531,7 @@ deployment in WinPE before the disk is erased. USB sticks get the whole `Tasks`
 folder with the answer files. The deploy summary (wizard and `Deploy.log`) lists
 the tasks. POSTIMAGE and FIRSTBOOT runs are logged to
 `C:\Windows\Temp\Task-<name>.log` on the PC (and `Deploy.log` or
-`FirstBoot.log`), first boot results go to `C:\Windows\Temp\FirstBoot-tasks.json`,
+`FirstBoot.log`), first boot results go to `C:\Windows\Temp\DeployResult.txt`,
 and each FIRSTBOOT task is a post-deploy check on the Dashboard. FIRSTLOGON tasks
 are kept in `C:\ProgramData\ImagingTool\Tasks` and run through
 `Run-LogonTask.ps1` with the same timeout and success codes, logged to

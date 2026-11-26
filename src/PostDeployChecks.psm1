@@ -247,16 +247,11 @@ function Get-PostDeployCheckSummary {
 }
 
 function Start-PostDeployCheck {
-    # Reads the PC, runs the checks and saves the report next to the state file. Used by FirstBoot.ps1 and Test-Deployment.ps1.
-    param([Parameter(Mandatory)]$Plan, [object[]]$AppResults = @(), [object[]]$TaskResults = @(), [string]$ReportPath)
+    # Reads the PC and runs the checks. Used by FirstBoot.ps1 and Test-Deployment.ps1, which keep the results in the
+    # PC's one result file (deploy-result.json, DeployStatus.psm1).
+    param([Parameter(Mandatory)]$Plan, [object[]]$AppResults = @(), [object[]]$TaskResults = @())
     $results = Invoke-PostDeployCheck -Plan $Plan -Facts (Get-PostDeployFacts) -AppResults $AppResults -TaskResults $TaskResults
     $summary = Get-PostDeployCheckSummary -Results $results
-    if ($ReportPath) {
-        try {
-            [pscustomobject]@{ checked = (Get-Date).ToString('o'); result = $summary.Result; summary = $summary.Text; checks = $results } |
-                ConvertTo-Json -Depth 4 | Set-Content -Path $ReportPath -Encoding utf8 -ErrorAction Stop
-        } catch { Write-Warning "Could not save the check report to $ReportPath`: $($_.Exception.Message)" }
-    }
     [pscustomobject]@{ Results = $results; Summary = $summary }
 }
 

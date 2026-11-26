@@ -212,7 +212,7 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
         $results = @(Invoke-AppReinstall -AppRoot $work -Names $names -Log { param($m) Write-Log $m } -OnApp { param($n) Set-JobState $Job 'Running' "Installing $n" })
         try { $null = Update-AgentDeployStatus -StatusFolder $statusFolder -Serial $identity.serial -Results $results }
         catch { Write-Log "Could not update the Dashboard: $($_.Exception.Message)" }
-        try { $v = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $results -By 'the agent'); if ($v) { Write-Log "DeployResult.txt now: $v" } }
+        try { $v = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $results -By 'the agent') -AppResults $results; if ($v) { Write-Log "DeployResult.txt now: $v" } }
         catch { Write-Log "Could not update DeployResult.txt: $($_.Exception.Message)" }
         try {
             $ok = @($results | Where-Object ok | ForEach-Object name)

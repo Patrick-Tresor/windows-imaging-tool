@@ -145,8 +145,6 @@ foreach ($plain in $plan.applications) {
         Set-Progress "Installed $($app.name)" (91 + [int](7 * $n / [Math]::Max(1, $total))) "$($app.name) failed ($($r.Status))"
     }
 }
-# Kept after C:\Temp is cleared, for whoever checks the PC (and the deployment dashboard).
-$appResults | ConvertTo-Json -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-apps.json" -Encoding utf8
 
 if (-not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'options') -ne 'Done') {
     Start-FirstBootStep -Progress $progress -Step 'options'; Save-Progress
@@ -239,8 +237,6 @@ foreach ($t in @($plan.tasks)) {
     $progress.taskResults = @($taskResults)
     Complete-FirstBootStep -Progress $progress -Step $step; Save-Progress
 }
-# Kept after C:\Temp is cleared, next to FirstBoot-apps.json.
-if ($taskResults) { ConvertTo-Json -InputObject @($taskResults) -Depth 3 | Set-Content "$env:WINDIR\Temp\FirstBoot-tasks.json" -Encoding utf8 }
 
 # Run again when a restart cut it short: it leaves a drive that is already encrypting as it is.
 if ($plan.bitlocker -and -not $giveUp -and (Get-FirstBootStepState -Progress $progress -Step 'bitlocker') -ne 'Done') {
@@ -259,15 +255,14 @@ if ($plan.PSObject.Properties['checks'] -and $plan.checks) {
         $toolDir = "$env:ProgramData\ImagingTool"
         New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
         Copy-Item (Join-Path $deployDir 'PostDeployChecks.psm1'), (Join-Path $deployDir 'DeployStatus.psm1'), (Join-Path $deployDir 'Test-Deployment.ps1') $toolDir -Force
-        [pscustomobject]@{
-            checks     = $plan.checks
-            status     = if ($plan.PSObject.Properties['status']) { $plan.status } else { $null }
-            appResults = $appResults
-            taskResults = @($taskResults)
-        } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $toolDir 'checks.json') -Encoding utf8
+        # One file for this PC's result (deploy-result.json): what Test-Deployment.ps1 needs to check again, and later
+        # what DeployResult.txt is made from.
+        if (-not (Get-Command Save-LocalDeployResult -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $deployDir 'DeployStatus.psm1') }
+        Save-LocalDeployResult -Fields @{ plan = $plan.checks; status = $(if ($plan.PSObject.Properties['status']) { $plan.status } else { $null })
+            appResults = @($appResults); taskResults = @($taskResults) }
 
         Import-Module (Join-Path $toolDir 'PostDeployChecks.psm1') -Force
-        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults -ReportPath (Join-Path $toolDir 'last-check.json')
+        $run = Start-PostDeployCheck -Plan $plan.checks -AppResults $appResults -TaskResults $taskResults
         foreach ($r in $run.Results) { Write-Log ("  check {0,-8} {1}: {2}" -f $r.result, $r.name, $r.detail) }
         Write-Log "Post-deploy checks: $($run.Summary.Text)"
         $script:nextStatusTry = Get-Date; Set-Progress 'Post-deploy checks done' 98   # one more try at the status share first

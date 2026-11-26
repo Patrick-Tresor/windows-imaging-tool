@@ -391,8 +391,9 @@ function Sync-AgentBitLockerCheck {
         PC: checks BitLocker again while the deploy result still says it is off. First boot's checks run before the
         first logon, so a FIRSTLOGON task that turns BitLocker on (GWHZLG3: "Ready, with warnings: BitLocker") was
         never seen. Once the drive is protected (or encrypting with a protector), the BitLocker check passes in
-        last-check.json, C:\Windows\Temp\DeployResult.txt and this PC's Dashboard row. Returns the new check when
-        it changed, else $null. A share it can't reach is tried again next time (last-check.json is saved last).
+        deploy-result.json (last-check.json on a PC deployed before it existed), C:\Windows\Temp\DeployResult.txt
+        and this PC's Dashboard row. Returns the new check when it changed, else $null. A share it can't reach is
+        tried again next time (the PC's own file is saved last).
     #>
     param(
         [string]$ToolDir = "$env:ProgramData\ImagingTool",
@@ -402,10 +403,13 @@ function Sync-AgentBitLockerCheck {
         $BitLocker,                  # Get-BitLockerFacts' answer; read from the PC when not given (tests give it)
         [datetime]$Now = (Get-Date)
     )
+    $dataPath = [IO.Path]::Combine($ToolDir, 'deploy-result.json')
     $reportPath = [IO.Path]::Combine($ToolDir, 'last-check.json')
-    if (-not [IO.File]::Exists($reportPath)) { return $null }
-    $report = [IO.File]::ReadAllText($reportPath) | ConvertFrom-Json
-    $old = @(@($report.checks) | Where-Object { $_ -and $_.name -eq 'BitLocker' }) | Select-Object -First 1
+    $data = Read-LocalDeployResult -Path $dataPath
+    $report = if (-not $data -and [IO.File]::Exists($reportPath)) { [IO.File]::ReadAllText($reportPath) | ConvertFrom-Json } else { $null }
+    $source = if ($data) { $data } else { $report }
+    if (-not $source) { return $null }
+    $old = @(@(if ($source.PSObject.Properties['checks']) { $source.checks }) | Where-Object { $_ -and $_.name -eq 'BitLocker' }) | Select-Object -First 1
     if (-not $old -or "$($old.result)" -eq 'Passed') { return $null }
     if (-not $PSBoundParameters.ContainsKey('BitLocker')) { $BitLocker = Get-BitLockerFacts }
     $check = Get-BitLockerCheck -BitLocker $BitLocker -Outcome "$($old.result)"
@@ -417,11 +421,14 @@ function Sync-AgentBitLockerCheck {
             -CheckWarning { param($all) ConvertTo-CheckWarning (Get-PostDeployCheckSummary -Results @($all)) }
     }
     # The whole result made again from deploy-result.json (one line changed on PCs deployed before it existed).
-    $null = Update-LocalDeployResult -Results @($check) -DataPath ([IO.Path]::Combine($ToolDir, 'deploy-result.json')) -ResultPath $ResultPath
-    $checks = @(@($report.checks) | Where-Object { $_ } | ForEach-Object { if ($_.name -eq 'BitLocker') { $check } else { $_ } })
-    $summary = Get-PostDeployCheckSummary -Results $checks
-    $saved = [pscustomobject]@{ checked = $Now.ToString('o'); result = $summary.Result; summary = $summary.Text; checks = $checks }
-    [IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $saved -Depth 4), (New-Object Text.UTF8Encoding $true))
+    $null = Update-LocalDeployResult -Results @($check) -DataPath $dataPath -ResultPath $ResultPath
+    $checks = Merge-CheckResults -Checks @($source.checks) -Results @($check)
+    if ($data) { Save-LocalDeployResult -Checks $checks -Path $dataPath }
+    else {
+        $summary = Get-PostDeployCheckSummary -Results $checks
+        $saved = [pscustomobject]@{ checked = $Now.ToString('o'); result = $summary.Result; summary = $summary.Text; checks = $checks }
+        [IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $saved -Depth 4), (New-Object Text.UTF8Encoding $true))
+    }
     $check
 }
 

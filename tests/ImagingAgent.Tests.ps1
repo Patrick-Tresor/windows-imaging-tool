@@ -207,6 +207,16 @@ try {
     Assert-Equal ((Get-Content -Raw (Join-Path $tool 'last-check.json') | ConvertFrom-Json).result) 'Passed' 'last-check.json passes'
     Assert-Equal ($null -eq (Sync-AgentBitLockerCheck @sync -BitLocker $on)) $true 'once it passed, it is not checked again'
 
+    # The same with this version's one result file (deploy-result.json): no last-check.json, the whole result made again.
+    $tool2 = Join-Path $root 'ToolDir2'; New-Item -ItemType Directory -Path $tool2 -Force | Out-Null
+    $txt2 = Join-Path $root 'DeployResult2.txt'
+    $dep2 = [pscustomobject]@{ computerName = 'GWHZLG3'; maker = 'Dell Inc.'; model = 'Latitude 5521'; driverPack = 'Dell\Latitude 5521'; state = 'Succeeded' }
+    Save-LocalDeployResult -Deploy $dep2 -Checks $blChecks -Fields @{ plan = @{ bitLocker = 'Report' } } -Path (Join-Path $tool2 'deploy-result.json')
+    $bl = Sync-AgentBitLockerCheck -ToolDir $tool2 -ResultPath $txt2 -BitLocker $on -Now $now
+    Assert-Equal "$($bl.result)|$(Test-Path (Join-Path $tool2 'last-check.json'))" 'Passed|False' 'deploy-result.json is the one file: no last-check.json'
+    Assert-Equal ((Get-Content -Raw $txt2) -like 'GWHZLG3 (Dell Inc. Latitude 5521) - Ready*') $true 'DeployResult.txt made again: Ready'
+    Assert-Equal ($null -eq (Sync-AgentBitLockerCheck -ToolDir $tool2 -ResultPath $txt2 -BitLocker $on -Now $now)) $true 'passed in deploy-result.json: not checked again'
+
     # Where a new PC's agent checks in: the folder WinPE reported to, or for a USB deploy that could not reach the
     # share (status kept on the stick), the share's Status folder from the settings.
     $shareSettings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } }

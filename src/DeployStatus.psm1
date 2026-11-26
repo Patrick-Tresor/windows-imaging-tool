@@ -606,19 +606,33 @@ function Update-DeployCheckResults {
 }
 
 function Get-LocalDeployResultPath {
-    # Where a deployed PC keeps what C:\Windows\Temp\DeployResult.txt is made from (deploy facts and every check).
+    # The one file where a deployed PC keeps its result: C:\ProgramData\ImagingTool\deploy-result.json.
     [IO.Path]::Combine([Environment]::GetFolderPath('CommonApplicationData'), 'ImagingTool\deploy-result.json')
+}
+
+function Read-LocalDeployResult {
+    # deploy-result.json, or $null when this PC has none (deployed before it existed, or no first boot yet).
+    param([string]$Path = (Get-LocalDeployResultPath))
+    if (-not [IO.File]::Exists($Path)) { return $null }
+    [IO.File]::ReadAllText($Path) | ConvertFrom-Json
 }
 
 function Save-LocalDeployResult {
     <#
     .SYNOPSIS
-        First boot: keeps what DeployResult.txt was made from (-Deploy and -Checks of Get-DeployResultSummary), so a
-        later change (an app installed again, BitLocker turned on) makes the whole result again instead of one line.
+        A deployed PC's one result file (deploy-result.json), changed in place: what DeployResult.txt is made from
+        (-Deploy: what WinPE recorded; -Checks: every check, apps and tasks too) and what Test-Deployment.ps1 needs to
+        check again (-Fields plan, status, appResults, taskResults). Only what is given changes. Replaces the old
+        checks.json, last-check.json, FirstBoot-apps.json and FirstBoot-tasks.json.
     #>
-    param([Parameter(Mandatory)]$Deploy, [AllowEmptyCollection()][object[]]$Checks = @(), [string]$Path = (Get-LocalDeployResultPath))
+    param($Deploy, [AllowEmptyCollection()][object[]]$Checks, [hashtable]$Fields = @{}, [string]$Path = (Get-LocalDeployResultPath))
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
-    $data = [pscustomobject][ordered]@{ deploy = $Deploy; checks = @($Checks | Where-Object { $_ }) }
+    $data = Read-LocalDeployResult -Path $Path
+    if (-not $data) { $data = [pscustomobject]@{} }
+    $set = { param($n, $v) $data | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
+    if ($PSBoundParameters.ContainsKey('Deploy')) { & $set 'deploy' $Deploy }
+    if ($PSBoundParameters.ContainsKey('Checks')) { & $set 'checks' @($Checks | Where-Object { $_ }) }
+    foreach ($k in $Fields.Keys) { & $set $k $Fields[$k] }
     [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $data -Depth 8), (New-Object Text.UTF8Encoding $true))
 }
 
@@ -629,15 +643,23 @@ function Update-LocalDeployResult {
         the result the agent reports. Each one replaces the check of the same name in deploy-result.json and the whole
         result is made again, so the logon retry, the agent's Retry failed apps and its BitLocker check never undo one
         another. A PC deployed before deploy-result.json existed gets each line changed in place (apps excepted).
-        Returns the new first line, or $null when there was nothing to update.
+        -AppResults: the installs behind App: results ({ name, ok, status, message }), so Test-Deployment.ps1 checks
+        those apps again from their new install, not first boot's. Returns the new first line, or $null when there
+        was nothing to update.
     #>
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$DataPath = (Get-LocalDeployResultPath),
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [object[]]$AppResults = @(), [string]$DataPath = (Get-LocalDeployResultPath),
           [string]$ResultPath = "$env:WINDIR\Temp\DeployResult.txt")
     $Results = @($Results | Where-Object { $_ })
     if (-not $Results) { return $null }
-    if ([IO.File]::Exists($DataPath)) {
-        $data = [IO.File]::ReadAllText($DataPath) | ConvertFrom-Json
-        $checks = Merge-CheckResults -Checks @($data.checks) -Results $Results
+    $data = Read-LocalDeployResult -Path $DataPath
+    if ($data -and @($AppResults | Where-Object { $_ })) {
+        $runs = [Collections.Generic.List[object]]::new()
+        foreach ($a in @(if ($data.PSObject.Properties['appResults']) { @($data.appResults) })) { if ($a -and @($AppResults | Where-Object { $_ -and "$($_.name)" -eq "$($a.name)" }).Count -eq 0) { $runs.Add($a) } }
+        foreach ($a in @($AppResults | Where-Object { $_ })) { $runs.Add([pscustomobject]@{ name = "$($a.name)"; status = "$($a.status)"; ok = [bool]$a.ok; exitCode = $null; message = "$($a.message)" }) }
+        Save-LocalDeployResult -Fields @{ appResults = $runs.ToArray() } -Path $DataPath
+    }
+    if ($data -and $data.PSObject.Properties['deploy'] -and $data.deploy) {
+        $checks = Merge-CheckResults -Checks @(if ($data.PSObject.Properties['checks']) { @($data.checks) }) -Results $Results
         Save-LocalDeployResult -Deploy $data.deploy -Checks $checks -Path $DataPath
         $summary = Get-DeployResultSummary -Deploy $data.deploy -Checks $checks
         [IO.File]::WriteAllText($ResultPath, $summary.Text, (New-Object Text.UTF8Encoding $true))
@@ -663,10 +685,11 @@ function Publish-AppRetryResults {
     param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry',
           [string]$DataPath = (Get-LocalDeployResultPath), [string]$ResultPath = "$env:WINDIR\Temp\DeployResult.txt", [scriptblock]$Log = { param($m) })
     try {
-        if (-not [IO.File]::Exists($DataPath) -and $Plan.PSObject.Properties['deploy'] -and $Plan.deploy) {
+        $have = Read-LocalDeployResult -Path $DataPath
+    if (-not ($have -and $have.PSObject.Properties['deploy'] -and $have.deploy) -and $Plan.PSObject.Properties['deploy'] -and $Plan.deploy) {
             Save-LocalDeployResult -Deploy $Plan.deploy -Checks @(if ($Plan.PSObject.Properties['checks']) { @($Plan.checks) }) -Path $DataPath
         }
-        $verdict = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $Results -By $By) -DataPath $DataPath -ResultPath $ResultPath
+        $verdict = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $Results -By $By) -AppResults $Results -DataPath $DataPath -ResultPath $ResultPath
         if ($verdict) { & $Log "DeployResult.txt now: $verdict" }
     } catch { & $Log "Could not update DeployResult.txt: $($_.Exception.Message)" }
     $status = if ($Plan.PSObject.Properties['status']) { $Plan.status } else { $null }
@@ -802,5 +825,5 @@ Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeploySt
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
     Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
-    Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Save-LocalDeployResult, Update-LocalDeployResult, Publish-AppRetryResults,
+    Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Read-LocalDeployResult, Save-LocalDeployResult, Update-LocalDeployResult, Publish-AppRetryResults,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

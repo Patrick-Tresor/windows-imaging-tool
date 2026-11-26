@@ -170,6 +170,15 @@ try {
     Set-Content $old ("PC8 - Ready, with warnings: BitLocker`r`n" + ('  {0,-8} {1,-13} {2}' -f 'WARNING', 'BitLocker', 'Off'))
     Assert-Equal (Update-LocalDeployResult -Results @([pscustomobject]@{ name = 'BitLocker'; result = 'Passed'; detail = 'On' }) -DataPath (Join-Path $root 'none.json') -ResultPath $old) 'PC8 - Ready' 'no deploy-result.json: the BitLocker line changes in place'
     Assert-Equal "$(@(Merge-CheckResults -Checks @(@{ name = 'A'; result = 'Failed'; detail = 'x' }) -Results @(@{ name = 'A'; result = 'Passed'; detail = 'y' }, @{ name = 'B'; result = 'Passed'; detail = 'z' }) | ForEach-Object { "$($_.name)=$($_.result)" }) -join ',')" 'A=Passed,B=Passed' 'checks merge by name'
+    # One result file: fields given later are kept, and an app installed again replaces its first boot install.
+    $one = Join-Path $root 'one-result.json'
+    Save-LocalDeployResult -Fields @{ plan = @{ bitLocker = 'Report' }; appResults = @(@{ name = 'Chrome'; ok = $false; status = 'Failed' }, @{ name = 'Zoom'; ok = $true; status = 'Installed' }) } -Path $one
+    Save-LocalDeployResult -Deploy $dep -Checks @([pscustomobject]@{ name = 'App: Chrome'; result = 'Failed'; detail = 'x' }) -Path $one
+    $null = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results @([pscustomobject]@{ name = 'Chrome'; ok = $true; status = 'Installed' })) `
+        -AppResults @([pscustomobject]@{ name = 'Chrome'; ok = $true; status = 'Installed' }) -DataPath $one -ResultPath (Join-Path $root 'one.txt')
+    $o = Read-LocalDeployResult -Path $one
+    Assert-Equal "$($o.plan.bitLocker)|$($o.deploy.computerName)|$(@($o.checks)[0].result)" 'Report|PC9|Passed' 'plan, deploy and checks live in one file'
+    Assert-Equal ((@($o.appResults) | ForEach-Object { "$($_.name)=$($_.ok)" }) -join ',') 'Zoom=True,Chrome=True' 'Test-Deployment sees the new install of Chrome'
 }
 finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
