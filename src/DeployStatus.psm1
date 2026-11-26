@@ -509,6 +509,60 @@ function Get-DeployResultSummary {
     [pscustomobject]@{ Verdict = $verdict; Result = $result; Lines = $lines.ToArray(); Text = ($textLines -join [Environment]::NewLine) }
 }
 
+function Set-AppCheckResults {
+    <#
+    .SYNOPSIS
+        A check list with each app's new result in place of its old one ('App: <name>', Passed or Failed), for an app
+        installed again after first boot (the logon retry, or the agent's Retry failed apps). Returns the new list.
+    #>
+    param([AllowEmptyCollection()][object[]]$Checks = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry', [datetime]$Now = (Get-Date))
+    $list = [Collections.Generic.List[object]]::new()
+    foreach ($c in @($Checks)) { if ($c) { $list.Add($c) } }
+    foreach ($x in $Results) {
+        $name = "App: $($x.name)"
+        $result = if ($x.ok) { 'Passed' } else { 'Failed' }
+        $detail = if ($x.ok) { "Installed by $By $($Now.ToString('yyyy-MM-dd HH:mm'))$(if ($x.message) { ": $($x.message)" })" } else { "$($x.status): $($x.message)" }
+        $old = @($list | Where-Object name -eq $name) | Select-Object -First 1
+        $new = [pscustomobject]@{ name = $name; result = $result; detail = $detail }
+        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
+    }
+    ,$list.ToArray()
+}
+
+function Update-DeployAppResults {
+    <#
+    .SYNOPSIS
+        PC: puts each app's new result (installed again after first boot) into this PC's deployment status
+        (<status folder>\<id>.json, the Dashboard's row) and a line in its live log. A check that passes now drops that
+        app's warning; with nothing failed or warned any more, the deployment goes back to Succeeded.
+        -Results: { name, ok, status, message } per app. Returns the record, or $null when there is none.
+    #>
+    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+          [string]$By = 'a retry', [datetime]$Now = (Get-Date))
+    $file = ($Id.Trim() -replace '[\\/:*?"<>|\s]', '_')
+    $path = [IO.Path]::Combine($StatusFolder, "$file.json")
+    if (-not [IO.File]::Exists($path)) { return $null }
+    $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+    $checks = Set-AppCheckResults -Checks @(if ($r.PSObject.Properties['checks']) { @($r.checks) }) -Results $Results -By $By -Now $Now
+    $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
+    foreach ($x in @($Results | Where-Object { $_.ok })) { $warnings = @($warnings | Where-Object { "$_" -notlike "$($x.name) failed*" }) }
+    if (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) { $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) }
+    $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
+    $logLines = @($Results | ForEach-Object {
+        '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} {3} ({4}){5}' -f $Now, $who, $_.name, $(if ($_.ok) { 'installed' } else { 'FAILED' }), $_.status, $(if ($_.message) { ": $($_.message)" })
+    })
+    $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
+    & $set 'checks' @($checks)
+    & $set 'warnings' @($warnings)
+    & $set 'updated' $Now.ToString('o')
+    if ("$($r.state)" -in 'Succeeded', 'Warning') { & $set 'state' $(if ($warnings) { 'Warning' } else { 'Succeeded' }) }
+    $tmp = "$path.tmp"
+    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
+    [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
+    if ($logLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($logLines -join "`r`n") + "`r`n")) } catch { } }
+    $r
+}
+
 function Get-DeployChecklist {
     <#
     .SYNOPSIS
@@ -603,5 +657,5 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices,
+    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

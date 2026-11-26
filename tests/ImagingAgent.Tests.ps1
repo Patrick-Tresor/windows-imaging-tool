@@ -264,7 +264,8 @@ foreach ($m in Get-ChildItem (Join-Path $repo 'src') -Filter *.psm1) {
     foreach ($x in [regex]::Matches([IO.File]::ReadAllText($m.FullName), '(?m)^function\s+([\w-]+)')) { $toolFunctions[$x.Groups[1].Value] = $m.Name }
 }
 foreach ($s in @(@{ File = 'src/ImagingAgent.ps1'; Modules = @('ScriptLog.psm1', 'RemoteReimage.psm1', 'ImagingAgent.psm1', 'AppPack.psm1') },
-                 @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') })) {
+                 @{ File = 'src/Install-AgentHere.ps1'; Modules = @('RemoteReimage.psm1', 'ImagingAgent.psm1') },
+                 @{ File = 'src/Retry-FailedApps.ps1'; Modules = @('ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') })) {
     $text = [IO.File]::ReadAllText((Join-Path $repo $s.File))
     foreach ($m in $s.Modules) { Assert-Equal ($text -match [regex]::Escape("'$m'")) $true "$($s.File) imports $m" }
     $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)

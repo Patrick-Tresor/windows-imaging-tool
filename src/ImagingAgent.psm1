@@ -23,12 +23,13 @@
 
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1')   # ConvertTo-SerialKey, Invoke-LocalDiskBoot
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults
 
 $script:AgentDir = 'C:\ProgramData\ImagingTool\Agent'
 $script:AgentTaskName = 'ImagingTool\Agent'
 # The files the agent runs from (copied into C:\ProgramData\ImagingTool\Agent, administrators and SYSTEM only).
 $script:AgentFiles = @('ImagingAgent.ps1', 'ImagingAgent.psm1', 'RemoteReimage.psm1', 'JsonFile.psm1', 'AnswerFile.psm1', 'AppPack.psm1',
-    'LibraryPack.psm1', 'ScriptLog.psm1')
+    'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1')
 # What a PC needs to install the agent by itself (Publish-AgentInstaller puts them in <share>\Agent).
 $script:AgentInstallerFiles = @('Install-AgentHere.ps1', 'Install-Agent.cmd')
 $script:KeyFile = 'config\secrets\agent-key.xml'
@@ -378,43 +379,9 @@ function Test-AgentJob {
 }
 
 function Update-AgentDeployStatus {
-    <#
-    .SYNOPSIS
-        PC: after an install apps job, puts each app's new result into this PC's deployment status
-        (<status folder>\<serial>.json, the Dashboard's row) and a line in its live log. A check that passes now drops
-        that app's warning; with nothing failed or warned any more, the deployment goes back to Succeeded.
-        -Results: { name, ok, status, message } per app. Returns the record, or $null when there is none.
-    #>
+    # PC: after an install apps job, each app's new result on this PC's Dashboard row (Update-DeployAppResults).
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [datetime]$Now = (Get-Date))
-    $id = ($Serial.Trim() -replace '[\\/:*?"<>|\s]', '_')
-    $path = Join-AgentPath $StatusFolder "$id.json"
-    if (-not [IO.File]::Exists($path)) { return $null }
-    $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-    $checks = [Collections.Generic.List[object]]::new()
-    if ($r.PSObject.Properties['checks']) { foreach ($c in @($r.checks)) { if ($c) { $checks.Add($c) } } }
-    $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
-    $logLines = @()
-    foreach ($x in $Results) {
-        $name = "App: $($x.name)"
-        $detail = if ($x.ok) { "Installed by the agent $($Now.ToString('yyyy-MM-dd HH:mm'))$(if ($x.message) { ": $($x.message)" })" } else { "$($x.status): $($x.message)" }
-        $c = @($checks | Where-Object name -eq $name) | Select-Object -First 1
-        if ($c) { $c.result = $(if ($x.ok) { 'Passed' } else { 'Failed' }); $c.detail = $detail }
-        else { $checks.Add([pscustomobject]@{ name = $name; result = $(if ($x.ok) { 'Passed' } else { 'Failed' }); detail = $detail }) }
-        if ($x.ok) { $warnings = @($warnings | Where-Object { "$_" -notlike "$($x.name) failed*" }) }
-        $logLines += '{0:yyyy-MM-dd HH:mm:ss} [INFO] Agent: {1} {2} ({3}){4}' -f $Now, $x.name, $(if ($x.ok) { 'installed' } else { 'FAILED' }), $x.status, $(if ($x.message) { ": $($x.message)" })
-    }
-    if (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) { $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) }
-    $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
-    & $set 'checks' @($checks)
-    & $set 'warnings' @($warnings)
-    & $set 'updated' $Now.ToString('o')
-    if ("$($r.state)" -in 'Succeeded', 'Warning') { & $set 'state' $(if ($warnings) { 'Warning' } else { 'Succeeded' }) }
-    $tmp = "$path.tmp"
-    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
-    [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
-    $log = [IO.Path]::ChangeExtension($path, '.log')
-    try { [IO.File]::AppendAllText($log, (($logLines -join "`r`n") + "`r`n")) } catch { }
-    $r
+    Update-DeployAppResults -StatusFolder $StatusFolder -Id $Serial -Results $Results -By 'the agent' -Now $Now
 }
 
 #endregion

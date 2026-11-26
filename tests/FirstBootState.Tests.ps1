@@ -146,4 +146,56 @@ Write-ScriptLog -Path '' -Message 'nowhere'
 Assert-Equal ((Get-Content $logFile) -match '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[INFO\] hello$') $true 'a log line: time, prefix, message; the folder is made'
 Remove-Item (Split-Path (Split-Path $logFile)) -Recurse -Force
 
+# Failed applications: installed again silently at the next logon (Retry-FailedApps.ps1, SYSTEM logon task).
+$apps = @([pscustomobject]@{ name = 'Google Chrome'; command = 'chrome.cmd' }, [pscustomobject]@{ name = 'Zoom'; command = 'zoom.cmd' })
+$results = @([pscustomobject]@{ name = 'Google Chrome'; ok = $false; status = 'Failed'; message = 'exit 1603' }, [pscustomobject]@{ name = 'Zoom'; ok = $true; status = 'Installed' })
+$rp = New-AppRetryPlan -Applications $apps -AppResults $results -Deploy ([pscustomobject]@{ computerName = 'PC1' }) -Checks @() -Status ([pscustomobject]@{ folder = '\\srv\s\Status'; id = 'ABC' })
+Assert-Equal "$(@($rp.apps).Count)|$($rp.apps[0].name)|$($rp.apps[0].command)|$($rp.attempts)|$($rp.maxAttempts)" '1|Google Chrome|chrome.cmd|0|3' 'only the failed app is retried, with its app.json, up to 3 logons'
+Assert-Equal ($null -eq (New-AppRetryPlan -Applications $apps -AppResults @($results[1]))) $true 'nothing failed: no retry'
+$fb = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
+Assert-Equal ($fb -match "/TN 'ImagingTool\\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM") $true 'first boot makes the SYSTEM logon task, 2 minutes after logon'
+Assert-Equal ($fb -match '-WindowStyle Hidden -File `"\$retryDir\\Retry-FailedApps\.ps1`"') $true 'it runs hidden'
+Assert-Equal ($fb.IndexOf('New-AppRetryPlan') -lt $fb.IndexOf('Get-FirstBootCleanupCommand $deployDir')) $true 'the failed packs move before C:\Temp is cleared'
+Assert-Equal ($fb -match '(?s)\$retryDir = .{0,300}Get-AdminOnlyAclArgs -Path \$retryDir -Folder') $true 'the retry folder is for admins only before anything goes in'
+Assert-Equal ($clean.Contains('"C:\Temp\Retry-FailedApps.ps1"')) $true 'cleanup removes the staged retry script'
+$dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
+Assert-Equal ($dp -match "'Test-Deployment\.ps1', 'Retry-FailedApps\.ps1'") $true 'deploy stages the retry script for admins only'
+$rs = Get-Content -Raw (Join-Path $repo 'src/Retry-FailedApps.ps1')
+foreach ($m in 'ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') { Assert-Equal ($rs -match [regex]::Escape("'$m'")) $true "the retry imports $m" }
+Assert-Equal ($rs -match '(?s)Invoke-AppInstall.*Set-AppCheckResults.*DeployResult\.txt.*Update-DeployAppResults') $true 'the retry installs, then updates DeployResult.txt and the Dashboard'
+Assert-Equal ($rs -match 'maxAttempts' -and $rs -match 'Remove-RetryApps') $true 'it removes its task and folder when done or out of tries'
+$bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'src/Retry-FailedApps.ps1'))
+Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 'Retry-FailedApps.ps1 is ASCII'
+
+# The retry itself, on this PC: a folder like first boot makes, one app that installs now. Only on CI (it writes
+# C:\Windows\Temp\DeployResult.txt and RetryApps.log, as on a deployed PC).
+if ($env:CI -or $env:IMAGING_E2E) {
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ('retry-' + [guid]::NewGuid().ToString('N'))
+  try {
+    $kit = Join-Path $tmp 'RetryApps'
+    New-Item -ItemType Directory -Path (Join-Path $kit 'Apps\Retry-App') -Force | Out-Null
+    foreach ($f in 'Retry-FailedApps.ps1', 'AppPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1') { Copy-Item (Join-Path $repo "src/$f") $kit }
+    $marker = Join-Path $tmp 'retry-installed.txt'
+    $status = Join-Path $tmp 'Status'
+    New-Item -ItemType Directory -Path $status -Force | Out-Null
+    @{ id = 'RETRY1'; serial = 'RETRY1'; state = 'Warning'; warnings = @('Retry-App failed (Failed)')
+       checks = @(@{ name = 'App: Retry-App'; result = 'Failed'; detail = 'Failed: exit 1' }) } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $status 'RETRY1.json')
+    $plan = New-AppRetryPlan -Applications @([pscustomobject]@{ name = 'Retry-App'; command = "echo installed> `"$marker`"" }) `
+        -AppResults @([pscustomobject]@{ name = 'Retry-App'; ok = $false; status = 'Failed'; message = 'exit 1' }) `
+        -Deploy ([pscustomobject]@{ computerName = 'RETRY-PC'; state = 'Succeeded'; driverPack = 'Dell\x' }) `
+        -Checks @([pscustomobject]@{ name = 'App: Retry-App'; result = 'Failed'; detail = 'Failed: exit 1' }) -Status ([pscustomobject]@{ folder = $status; id = 'RETRY1' })
+    $plan | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $kit 'retry.json') -Encoding utf8
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $kit 'Retry-FailedApps.ps1')
+    $retryLog = Get-Content -Raw "$env:WINDIR\Temp\RetryApps.log"
+    Assert-Equal (Test-Path $marker) $true "the retry installs the failed app (log: $retryLog)"
+    Assert-Equal ($retryLog -match 'Every application is installed now') $true 'the log says it is done'
+    $row = Get-Content -Raw (Join-Path $status 'RETRY1.json') | ConvertFrom-Json
+    Assert-Equal "$($row.state)|$(@($row.checks)[0].result)|$(@($row.warnings).Count)" 'Succeeded|Passed|0' 'the Dashboard row is Succeeded, the app passes'
+    Assert-Equal ((Get-Content -Raw (Join-Path $status 'RETRY1.log')) -match 'Logon Retry: Retry-App installed') $true 'its live log says so'
+    Assert-Equal ((Get-Content -Raw "$env:WINDIR\Temp\DeployResult.txt") -match '^RETRY-PC - Ready') $true 'DeployResult.txt says Ready now'
+    Start-Sleep -Seconds 8
+    Assert-Equal (Test-Path $kit) $false 'the retry folder is removed once every app is in'
+  } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+} else { Write-Host 'SKIP running the logon retry: it writes to C:\Windows\Temp (set IMAGING_E2E=1).' -ForegroundColor Yellow }
+
 Complete-Tests 'All first boot state tests passed.'

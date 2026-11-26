@@ -737,7 +737,7 @@ try {
         Save-JsonFile -Path (Join-Path $logonDir 'logon-tasks.json') -InputObject $logonPlan -Depth 8
     }
     Copy-Item (Join-Path $PSScriptRoot 'FirstBoot.ps1'), (Join-Path $PSScriptRoot 'DeployStatus.psm1'),
-        (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'),
+        (Join-Path $PSScriptRoot 'PostDeployChecks.psm1'), (Join-Path $PSScriptRoot 'Test-Deployment.ps1'), (Join-Path $PSScriptRoot 'Retry-FailedApps.ps1'),
         (Join-Path $PSScriptRoot 'AppPack.psm1'), (Join-Path $PSScriptRoot 'TaskPack.psm1'), (Join-Path $PSScriptRoot 'LibraryPack.psm1'),
         (Join-Path $PSScriptRoot 'ScriptLog.psm1'), (Join-Path $PSScriptRoot 'FirstBootState.psm1') 'W:\Temp\'
     # Removes the passwords from unattend.xml once OOBE is over (FirstBoot.ps1 sets up the logon task that runs it).
@@ -773,7 +773,7 @@ try {
     # open so only one run goes at a time).
     Set-Content -Path 'W:\Temp\firstboot-progress.json' -Value '{}' -Encoding ascii
     Set-Content -Path 'W:\Temp\firstboot.lock' -Value '' -Encoding ascii
-    foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1',
+    foreach ($f in 'FirstBoot.ps1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'Retry-FailedApps.ps1', 'AppPack.psm1', 'TaskPack.psm1',
                    'LibraryPack.psm1', 'ScriptLog.psm1', 'FirstBootState.psm1', 'firstboot.json', 'firstboot-progress.json', 'firstboot.lock') {
         Protect-StagedItem -Path "W:\Temp\$f"
     }
