@@ -30,12 +30,11 @@
       </DockPanel>
     </Border>
 
-    <!-- Shown when a USB stick plugged into this PC, or the network boot image, was built with an older version of the tool. -->
+    <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
     <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
-          <Button x:Name="BtnBootOldRebuild" Content="Rebuild network boot image" Margin="8,0,0,0" Visibility="Collapsed"/>
           <Button x:Name="BtnStickOldHide" Content="Not now" Margin="8,0,0,0"/>
         </StackPanel>
         <TextBlock x:Name="TxtStickOld" TextWrapping="Wrap" VerticalAlignment="Center"/>
@@ -187,7 +186,7 @@
             </DockPanel>
           </Border>
 
-          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Build network boot image on the Computers tab also makes Boot\Deploy-WinPE.iso, which loads everything from the share."/>
+          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Reimage on the Computers tab builds the network boot image, which also makes Boot\Deploy-WinPE.iso: it loads everything from the share."/>
 
           <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -395,7 +394,7 @@
             </StackPanel>
             <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
               <DockPanel>
-                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks before the next deploy (the Computers tab's Reimage rebuilds its network boot image by itself)."/>
               </DockPanel>
             </Border>
           </StackPanel>
@@ -434,9 +433,7 @@
                 <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
-                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,10,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
-                  <Button x:Name="BtnAdBuildBoot" Content="Build network boot image" Margin="0,0,0,6"
-                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root: boot.wim for reimaging, and Deploy-WinPE.iso of the same WinPE to boot a VM or a PC without a stick. Rebuild it after updating the tool or the share settings."/>
+                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,0,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
                 </WrapPanel>
               </Grid>
             </GroupBox>

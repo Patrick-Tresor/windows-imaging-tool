@@ -32,8 +32,8 @@ the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 The header shows the tool's version, `v1.NN`, where NN counts the pull requests merged since v1.00
 (from `src\version.txt` in a downloaded zip, or git in a clone). The same number is written on every
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
-plugged-in stick or the network boot image is older than the console, with **Update the stick** or
-**Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
+plugged-in stick is older than the console, with **Update the stick** (an older network boot image is
+rebuilt by **Reimage...** itself). Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
 by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens
 it again after you close it.
@@ -172,13 +172,13 @@ on the ones you pick, with nobody at the PCs.
    - **Not found**: its name does not resolve from the console PC. Use a domain
      controller as the console PC's DNS server.
    - **No answer**: it is off or asleep, or a firewall drops everything.
-3. Once: set **Network share** on the Deploy Settings tab, then click **Build
-   network boot image**. It builds WinPE with the deploy tool into `Boot\` on
-   the content root, without a WinPE password (nobody is there to type it).
-   The same build writes `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
-   Rebuild it after updating the tool or the share settings: a banner at the top
-   of the console says when it is older than the console, with a **Rebuild
-   network boot image** button.
+3. Once: set **Network share** on the Deploy Settings tab. **Reimage...** builds
+   the network boot image first when there is none, or when it is older than the
+   tool, maps another share or predates the last Deploy Settings save (a few
+   minutes, a card in the Progress window; the reimage starts when it is done).
+   It is WinPE with the deploy tool in `Boot\` on the content root, without a
+   WinPE password (nobody is there to type it). The same build writes
+   `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
    **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
 

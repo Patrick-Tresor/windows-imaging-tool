@@ -63,16 +63,19 @@ try {
     $settings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy' } }
     $boot = Get-NetworkBootImage -ContentRoot $root
     Assert-Equal $boot.Exists $false 'no network boot image yet'
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like 'No network boot image*') $true 'a missing boot image stops the reimage'
+    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot $boot).Count 0 'a missing boot image does not stop the reimage (it is built first)'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot $boot) 'there is none yet' 'a missing boot image is built first'
     Assert-Equal (@(Get-RemoteReimageProblems -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '' } }) -Boot $boot)[0] -like 'No deployment share*') $true 'no share stops the reimage'
     New-Item -ItemType Directory -Path (Join-Path $root 'Boot') -Force | Out-Null
     Set-Content -Path (Join-Path $root 'Boot/boot.wim') -Value 'x'
     '{ "built": "2026-11-11 10:00", "share": "\\\\old\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
     $boot = Get-NetworkBootImage -ContentRoot $root
     Assert-Equal $boot.Built '2026-11-11 10:00' 'the boot image build time is read'
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like '*maps \\old\Deploy*') $true 'a boot image for another share stops the reimage'
+    Assert-Equal ((Get-NetworkBootRebuildReason -Settings $settings -Boot $boot) -like '*maps \\old\Deploy*') $true 'a boot image for another share is rebuilt first'
     '{ "built": "2026-11-11 10:00", "share": "\\\\srv\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
-    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)).Count 0 'a boot image for the current share is ready'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)) $null 'a boot image for the current share is ready'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root) -Stale 'older') 'it was built with an older version of the tool' 'an older boot image is rebuilt first'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root) -SettingsNewer) 'the deploy settings changed since it was built' 'settings saved after the build: rebuilt first'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

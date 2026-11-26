@@ -132,7 +132,6 @@ $ui = $form.Controls
 $script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
 $ui.TxtToolVersion.Text = if ($script:toolVersion.Release) { $script:toolVersion.Release } else { "version $($script:toolVersion.Text)" }
 $script:stickOldHidden = ''
-$script:bootOldMsg = $null
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -647,23 +646,14 @@ function Update-UsbMode {
 function Update-StickVersionBanner {
     # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
     # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
-    # The network boot image gets the same banner, with a Rebuild button (checked on refresh, not on the timer).
-    $stick = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
-    $msg = (@($stick, $script:bootOldMsg) | Where-Object { $_ }) -join ' '
+    # (An older network boot image needs no banner: Reimage rebuilds it first.)
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
-        $ui.BtnStickOldUpdate.Visibility = if ($stick) { 'Visible' } else { 'Collapsed' }
-        $ui.BtnBootOldRebuild.Visibility = if ($script:bootOldMsg) { 'Visible' } else { 'Collapsed' }
         $ui.BdrStickOld.Visibility = 'Visible'
     } else {
         $ui.BdrStickOld.Visibility = 'Collapsed'
     }
-}
-
-function Update-BootVersionBanner {
-    # Is <content root>\Boot\boot.wim older than this console? Then the banner says so (Update-StickVersionBanner).
-    $script:bootOldMsg = if ($script:root) { try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null } }
-    Update-StickVersionBanner
 }
 
 function Select-StickForUpdate {
@@ -710,7 +700,6 @@ function Update-AdkStatus {
 function Update-All {
     $ui.TxtRoot.Text = $script:root
     Update-Answers; Update-Images; Update-Library; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
-    try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -1098,12 +1087,26 @@ function Get-ReimageShare {
     "$((Get-DeploySettings -ContentRoot $script:root).share.path)".Trim()
 }
 
+function Get-NetworkBootRebuild {
+    # Why Reimage must build the network boot image first, or $null when it is ready (Get-NetworkBootRebuildReason).
+    $stale = try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null }
+    $boot = Get-NetworkBootImage -ContentRoot $script:root
+    $settingsFile = Join-Path $script:root 'config\deploy-settings.json'
+    $newer = $boot.Exists -and (Test-Path -LiteralPath $settingsFile) -and
+        (Get-Item -LiteralPath $settingsFile).LastWriteTime -gt (Get-Item -LiteralPath $boot.Path).LastWriteTime
+    Get-NetworkBootRebuildReason -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot -Stale "$stale" -SettingsNewer:$newer
+}
+
 function Update-AdBootStatus {
     if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
-    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
+    $rebuild = if (-not $problems) { Get-NetworkBootRebuild }
+    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] }
+        elseif ($script:bootBuilding) { 'Building the network boot image (Progress window); the reimage starts when it is done.' }
+        elseif ($rebuild) { "Network boot image: $rebuild. Reimage builds it first (a few minutes)." }
+        else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
+    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } elseif ($rebuild -or $script:bootBuilding) { 'MutedBrush' } else { 'SuccessBrush' }))
 }
 
 function Show-AdRows {
@@ -1294,20 +1297,39 @@ function Invoke-AdAutoConnect {
 $ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
 $ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke-Safely { Search-AdComputers } } })
 
-$ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
+function Start-NetworkBootBuild {
+    # Builds the network boot image, then starts the reimage waiting in $script:pendingReimage. Reimage calls it when
+    # the image is missing, maps another share or is older than the tool (there is no button for it).
     $adk = Update-AdkStatus
-    if (-not $adk.Ready) { Show-Error ("Can't build media on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return }
-    if (-not (Get-ReimageShare)) { Show-Error 'Set Network share on the Deploy Settings tab first: WinPE loads the image from there.'; return }
+    if (-not $adk.Ready) { Show-Error ("Can't build the network boot image on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return $false }
     $out = Join-Path $script:root 'Boot'
     New-Item -ItemType Directory -Path $out -Force | Out-Null
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
-    Set-Status 'Network boot image build started.'
-} })
+    $script:bootBuilding = $true
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished {
+        $script:bootBuilding = $false
+        try { Update-AdBootStatus } catch { }
+        Invoke-Safely { Start-PendingReimage }
+    }
+    Set-Status 'Building the network boot image first; the reimage starts when it is done.'
+    $true
+}
+
+function Start-PendingReimage {
+    # The reimage prepared by Reimage..., once the network boot image is ready.
+    $p = $script:pendingReimage
+    $script:pendingReimage = $null
+    if (-not $p) { return }
+    $why = Get-NetworkBootRebuild
+    if ($why) { Show-Error "The reimage did not start: the network boot image build did not finish ($why). Its log is in the Progress window."; return }
+    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $p.RunArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title $p.Title `
+        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
+    Set-Status "Reimage of $($p.Count) PC(s) started. Each deploy then shows on the Dashboard."
+}
 
 $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1317,8 +1339,10 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not $answer) { Show-Error 'Choose the answer file to deploy.'; return }
     $self = @($rows | Where-Object { $_.Name -eq "$env:COMPUTERNAME".ToUpperInvariant() })
     if ($self) { Show-Error "$($self[0].Name) is this PC, the one running the console: reimage it from the USB stick."; return }
-    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot (Get-NetworkBootImage -ContentRoot $script:root))
+    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root))
     if ($problems) { Show-Error $problems[0]; return }
+    if ($script:bootBuilding -or $script:pendingReimage) { Show-Error 'A reimage is already waiting for the network boot image build. Try again when it has started.'; return }
+    $rebuild = Get-NetworkBootRebuild
     $share = Get-ReimageShare
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
@@ -1327,6 +1351,7 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
     if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
+    if ($rebuild) { $text += "`n`nThe network boot image is built first ($rebuild), which takes a few minutes." }
     if (-not (Confirm-Action $text)) { return }
 
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
@@ -1366,10 +1391,13 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
         $cred | Export-Clixml -Path $credFile
         $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
     }
-    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $runArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Reimaging $($rows.Count) PC(s) with $answer" `
-        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
-    Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard."
+    $script:pendingReimage = @{ RunArgs = $runArgs; Count = $rows.Count; Title = "Reimaging $($rows.Count) PC(s) with $answer" }
+    if ($rebuild) {
+        if (-not (Start-NetworkBootBuild)) { $script:pendingReimage = $null }
+        Update-AdBootStatus
+        return
+    }
+    Start-PendingReimage
 } })
 
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
@@ -1684,7 +1712,6 @@ $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
-$ui.BtnBootOldRebuild.Add_Click({ $ui.BtnAdBuildBoot.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) })
 $ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
 $script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:stickTimer.Interval = [timespan]::FromSeconds(5)

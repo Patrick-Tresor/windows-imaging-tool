@@ -1058,11 +1058,27 @@ function Get-NetworkBootImage {
 function Get-RemoteReimageProblems {
     # What stops a reimage from the Computers tab, before any PC is touched. Settings: the content root's
     # deploy-settings.json. Boot: Get-NetworkBootImage.
-    param([Parameter(Mandatory)]$Settings, [Parameter(Mandatory)]$Boot)
+    # The network boot image is not one: Reimage builds it first when Get-NetworkBootRebuildReason says so.
+    param([Parameter(Mandatory)]$Settings, $Boot)
     $share = "$($Settings.share.path)".Trim()
-    if (-not $share) { 'No deployment share: set Network share on the Deploy Settings tab (the PCs load the image from there), then build the network boot image.' }
-    if (-not $Boot.Exists) { 'No network boot image yet: click Build network boot image.' }
-    elseif ($share -and $Boot.Share -and $Boot.Share -ne $share) { "The network boot image maps $($Boot.Share), but the share is now $share`: click Build network boot image." }
+    if (-not $share) { 'No deployment share: set Network share on the Deploy Settings tab (the PCs load the image from there).' }
+}
+
+function Get-NetworkBootRebuildReason {
+    <#
+    .SYNOPSIS
+        Why the network boot image must be built (again) before a reimage, in a few words, or $null when it is ready:
+        there is none, it maps another share, it was built with an older version of the tool (-Stale, the
+        message of Get-StaleBootImageMessage) or before the deploy settings were last saved (-SettingsNewer: WinPE
+        reads them from the boot image). Reimage then builds it first, so there is no button for it.
+    #>
+    param([Parameter(Mandatory)]$Settings, [Parameter(Mandatory)]$Boot, [string]$Stale, [switch]$SettingsNewer)
+    $share = "$($Settings.share.path)".Trim()
+    if (-not $Boot.Exists) { return 'there is none yet' }
+    if ($share -and $Boot.Share -and $Boot.Share -ne $share) { return "it maps $($Boot.Share), but the share is now $share" }
+    if ($Stale) { return 'it was built with an older version of the tool' }
+    if ($SettingsNewer) { return 'the deploy settings changed since it was built' }
+    $null
 }
 
 #endregion
@@ -1129,4 +1145,4 @@ function Read-ReimageTargets {
 Export-ModuleMember -Function Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Wait-PortProbes, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
     Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
-    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems
+    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems, Get-NetworkBootRebuildReason
