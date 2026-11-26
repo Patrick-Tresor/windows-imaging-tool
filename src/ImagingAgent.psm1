@@ -484,6 +484,7 @@ function New-AgentCheckIn {
         [Nullable[int64]]$FreeC,
         [string]$Result,
         $Job,
+        [string]$RemoteDesktop,
         [datetime]$Now = (Get-Date)
     )
     $get = { param($o, $n) if ($o -and $o.PSObject.Properties[$n]) { $o.$n } else { $null } }
@@ -513,6 +514,7 @@ function New-AgentCheckIn {
         toolVersion    = "$(& $get $Deploy 'toolVersion')"
         deployedAt     = "$(& $get $Deploy 'deployedAt')"
         result         = $Result
+        remoteDesktop  = $RemoteDesktop
         agentId        = $AgentId
         agentVersion   = $AgentVersion
         agentCode      = $AgentCode
@@ -626,6 +628,7 @@ function Get-AgentRowView {
         if ($Agent.answerFile -or $Agent.image) { $detail += "Deployed with $((@("$($Agent.answerFile)", "$($Agent.image)") | Where-Object { $_ }) -join ', ')$(if ($Agent.deployedAt) { " on $("$($Agent.deployedAt)".Substring(0, [Math]::Min(10, "$($Agent.deployedAt)".Length)))" })" }
         if ($Agent.result) { $detail += "$($Agent.result)" }
         if ($Agent.userSignedIn) { $detail += "Signed in: $($Agent.userSignedIn)" }
+        if ($Agent.PSObject.Properties['remoteDesktop'] -and "$($Agent.remoteDesktop)") { $detail += "Remote Desktop: $($Agent.remoteDesktop)" }
         if ($Agent.job -and $Agent.job.state) { $detail += "Last job: $($Agent.job.action) $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })" }
         if ($version.Detail) { $detail += $version.Detail }
     } else {
@@ -811,18 +814,132 @@ function Get-AgentLogProblem {
 
 #region Installing it
 
+# Remote Desktop on agent PCs: the agent turns it on (Network Level Authentication required, firewall open on the
+# Domain profile only) unless agent.json says remoteDesktop false, and says in its check-in whether it is on. The
+# console's Remote desktop button then opens mstsc to the PC. Who may sign in is not changed: the PC's
+# Administrators (Domain Admins on a domain PC) and its Remote Desktop Users group, which is empty unless IT fills it.
+$script:RdpKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+$script:RdpTcpKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+$script:RdpPolicyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+# The built-in "Remote Desktop" firewall rules, by their group's resource name (the same on every Windows language).
+$script:RdpFirewallGroup = '@FirewallAPI.dll,-28752'
+
+function Get-RemoteDesktopPlan {
+    <#
+    .SYNOPSIS
+        What the agent changes to have Remote Desktop on with NLA, reachable on the Domain firewall profile only, and
+        what it reports. -State: { deny, nla, policyDeny, policyNla } (registry DWORDs or $null) and rules: the
+        Remote Desktop group's firewall rules { name, enabled, profile }. Returns { Allow, Nla, Rules (name, enabled,
+        profile to set), Text }. A group policy that turns Remote Desktop off or NLA off wins: nothing is forced
+        against it, and Text says so.
+    #>
+    param([Parameter(Mandatory)]$State, [switch]$Off)
+    $get = { param($n) if ($State.PSObject.Properties[$n] -and $null -ne $State.$n -and "$($State.$n)" -ne '') { [int]$State.$n } else { $null } }
+    $deny = & $get 'deny'; $nla = & $get 'nla'; $pDeny = & $get 'policyDeny'; $pNla = & $get 'policyNla'
+    $rules = @($State.rules | Where-Object { $_ })
+    $on = $(if ($null -ne $pDeny) { $pDeny -eq 0 } else { $deny -eq 0 })
+    if ($Off) {
+        # Turned off in the agent settings: left as it is, only reported.
+        return [pscustomobject]@{ Allow = $false; Nla = $false; Rules = @(); Text = "$(if ($on) { 'On' } else { 'Off' }) (left as it is: turned off in the agent settings)" }
+    }
+    if ($pDeny -eq 1) { return [pscustomobject]@{ Allow = $false; Nla = $false; Rules = @(); Text = 'Off: a group policy turns Remote Desktop off on this PC' } }
+    $set = @(foreach ($r in $rules) {
+        $profile = "$($r.profile)"
+        $domain = $profile -match 'Domain|Any' -or $profile -eq '0' -or $profile -eq ''
+        # Rules that cover the Domain profile are opened for it only; the others (Private, Public) stay closed.
+        $wantEnabled = [bool]$domain
+        $wantProfile = if ($domain) { 'Domain' } else { $profile }
+        if ([bool]$r.enabled -ne $wantEnabled -or ($domain -and $profile -ne 'Domain')) {
+            [pscustomobject]@{ name = "$($r.name)"; enabled = $wantEnabled; profile = $wantProfile }
+        }
+    })
+    $text = if (-not $rules) { 'On, but no Remote Desktop firewall rule was found on this PC' }
+        elseif ($pNla -eq 0) { 'On, but a group policy turns Network Level Authentication off' }
+        else { 'On (Network Level Authentication, Domain network only)' }
+    [pscustomobject]@{ Allow = ($deny -ne 0 -and $null -eq $pDeny); Nla = ($nla -ne 1 -and $pNla -ne 0); Rules = $set; Text = $text }
+}
+
+function Get-RemoteDesktopState {
+    # This PC's Remote Desktop settings for Get-RemoteDesktopPlan (as SYSTEM or an administrator).
+    $read = { param($key, $name) try { $v = (Get-ItemProperty -LiteralPath $key -Name $name -ErrorAction Stop).$name; if ($null -ne $v) { [int]$v } } catch { $null } }
+    $rules = @(Get-NetFirewallRule -Group $script:RdpFirewallGroup -PolicyStore PersistentStore -ErrorAction SilentlyContinue | ForEach-Object {
+        [pscustomobject]@{ name = "$($_.Name)"; enabled = ("$($_.Enabled)" -eq 'True'); profile = "$($_.Profile)" }
+    })
+    [pscustomobject]@{
+        deny = & $read $script:RdpKey 'fDenyTSConnections'
+        nla = & $read $script:RdpTcpKey 'UserAuthentication'
+        policyDeny = & $read $script:RdpPolicyKey 'fDenyTSConnections'
+        policyNla = & $read $script:RdpPolicyKey 'UserAuthentication'
+        rules = $rules
+    }
+}
+
+function Sync-AgentRemoteDesktop {
+    <#
+    .SYNOPSIS
+        On the PC (the agent, as SYSTEM): turns Remote Desktop on with NLA and opens its firewall rules on the Domain
+        profile only, where they are not already. Returns { Text, Changed (what it did, for the log) }.
+    #>
+    param([switch]$Off)
+    $plan = Get-RemoteDesktopPlan -State (Get-RemoteDesktopState) -Off:$Off
+    $changed = @()
+    if ($plan.Nla) { Set-ItemProperty -LiteralPath $script:RdpTcpKey -Name UserAuthentication -Value 1 -Type DWord -ErrorAction Stop; $changed += 'Network Level Authentication required' }
+    if ($plan.Allow) { Set-ItemProperty -LiteralPath $script:RdpKey -Name fDenyTSConnections -Value 0 -Type DWord -ErrorAction Stop; $changed += 'Remote Desktop turned on' }
+    foreach ($r in @($plan.Rules)) {
+        if ($r.enabled) { Set-NetFirewallRule -Name $r.name -Profile Domain -Enabled True -ErrorAction Stop; $changed += "firewall rule $($r.name) open on the Domain network only" }
+        else { Set-NetFirewallRule -Name $r.name -Enabled False -ErrorAction Stop; $changed += "firewall rule $($r.name) closed" }
+    }
+    [pscustomobject]@{ Text = $plan.Text; Changed = $changed }
+}
+
+function Test-AgentRemoteDesktopOn {
+    # deploy-settings.json agent.remoteDesktop: on unless it is false.
+    param($Settings)
+    $cfg = if ($Settings -and $Settings.PSObject.Properties['agent']) { $Settings.agent } else { $null }
+    -not ($cfg -and $cfg.PSObject.Properties['remoteDesktop'] -and $cfg.remoteDesktop -eq $false)
+}
+
+function Get-RemoteDesktopTarget {
+    <#
+    .SYNOPSIS
+        Console: what mstsc connects to for a PC. Its DNS name when DNS gives an address the agent reported (Kerberos
+        signs in with NLA); else the IP its agent reported (DNS is old or the PC moved); else the name. -Check: the
+        network check (Get-RemoteOnlineState: Ip = what DNS gives). Returns '' when there is nothing to connect to.
+    #>
+    param([string]$Name, $Agent, $Check)
+    $agentIps = @(if ($Agent -and $Agent.Online) { @($Agent.ipAddresses) + "$($Agent.ipAddress)" | Where-Object { "$_" } })
+    $dnsIp = if ($Check -and $Check.PSObject.Properties['Ip']) { "$($Check.Ip)" } else { '' }
+    $stale = $Check -and $Check.PSObject.Properties['State'] -and "$($Check.State)" -in 'Old DNS', 'Not found'
+    if ($Name -and $Name -notmatch '^\d+(\.\d+){3}$' -and -not $stale -and (-not $agentIps -or -not $dnsIp -or $agentIps -contains $dnsIp)) { return $Name }
+    if ($agentIps) { return "$($agentIps[0])" }
+    "$Name"
+}
+
+function Get-RemoteDesktopProblem {
+    # Console: why Remote desktop to a PC would not work, in one line, or '' (try it). From its agent's check-in.
+    param([string]$ComputerName, $Agent)
+    if (-not $Agent) { return "$ComputerName has no agent checking in, so Remote Desktop may be off on it." }
+    if (-not $Agent.Online) { return "$ComputerName's agent last checked in $("$($Agent.LastSeenText)".ToLowerInvariant()): the PC is probably off." }
+    $rdp = if ($Agent.PSObject.Properties['remoteDesktop']) { "$($Agent.remoteDesktop)" } else { '' }
+    if ($rdp -like 'Off*') { return "Remote Desktop on ${ComputerName}: $rdp" }
+    ''
+}
+
 function New-AgentConfig {
     # agent.json next to the agent: where to check in, the console keys it trusts, and what this deploy was.
     param(
         [Parameter(Mandatory)][string]$StatusFolder,
         [string[]]$PublicKeys,
         [int]$CheckInMinutes = 5,
-        $Deploy
+        $Deploy,
+        [bool]$RemoteDesktop = $true
     )
     [pscustomobject][ordered]@{
         statusFolder   = $StatusFolder
         checkInMinutes = [Math]::Max(1, $CheckInMinutes)
         publicKeys     = @($PublicKeys | Where-Object { $_ } | ForEach-Object { "$_".Trim() })
+        # Remote Desktop on, with NLA, Domain network only (Sync-AgentRemoteDesktop). Missing = on.
+        remoteDesktop  = $RemoteDesktop
         deploy         = $Deploy
     }
 }
@@ -910,4 +1027,4 @@ Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
-    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    New-AgentConfig, Get-AgentTaskXml, Get-RemoteDesktopPlan, Get-RemoteDesktopState, Sync-AgentRemoteDesktop, Test-AgentRemoteDesktopOn, Get-RemoteDesktopTarget, Get-RemoteDesktopProblem, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

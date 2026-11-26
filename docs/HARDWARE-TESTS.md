@@ -58,6 +58,8 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.18 | Deploy a PC with an app that fails (agent on), wait an hour | `ImagingAgent.log` has "Retry 1 of 3 by the agent"; once it installs, the Dashboard row and `DeployResult.txt` say Ready, BitLocker stays OK if a first-logon task turned it on; no `ImagingTool\RetryApps` task on that PC |
 | 2.19 | After updating the console, open the Computers tab with a PC whose agent is from the previous version (but has automatic updates) | The Agent column says "v1.x updating, ...", then "v1.y, seen ..." within a few minutes; `ImagingAgent.log` says "Agent updated from ... to ..." and the agent checks in again |
 | 2.20 | Turn a PC with the agent off for over a day, open the Dashboard | A line above the list names it ("have not checked in for over a day") |
+| 2.21 | A PC with this version's agent (it updates itself): Computers tab, select it, **Remote desktop** (or double-click it); then the Dashboard's **Remote desktop** | `ImagingAgent.log` has "Remote Desktop: On (Network Level Authentication, Domain network only)"; the Agent column tooltip says the same; mstsc opens to the PC by name and signs in with your domain admin account. On the PC, `Get-NetFirewallRule -Group '@FirewallAPI.dll,-28752' \| ft Name,Enabled,Profile` shows only Domain rules enabled |
+| 2.22 | Same, on a PC where a group policy turns Remote Desktop off | The console asks first and says a group policy turns it off; the agent changes nothing |
 
 ## 3. Features on the deployed PC
 
