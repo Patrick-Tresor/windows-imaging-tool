@@ -57,6 +57,18 @@ try {
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-AB12-') 'AB12' 'leading and trailing dashes are dropped'
     $n.Prefix = 'ABCDEFGHIJKLMN'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-X') 'ABCDEFGHIJKLMN' 'a name cut at 15 characters does not end with a dash'
+    # The editor's Computer name choices read and write the same pattern.
+    foreach ($case in @(
+            @('{SERIAL}', 'Serial', ''), @('', 'Serial', ''), @('LAB-{SERIAL}', 'PrefixSerial', 'LAB-'),
+            @('LAB-####', 'PrefixRandom', 'LAB-'), @('########', 'PrefixRandom', ''), @('A##-{SERIAL}', 'Custom', ''))) {
+        $split = Split-NamePattern $case[0]
+        Assert-Equal "$($split.Choice)|$($split.Prefix)" "$($case[1])|$($case[2])" "name pattern '$($case[0])' shows as $($case[1])"
+        $back = Join-NamePattern -Choice $split.Choice -Prefix $split.Prefix -Digits $split.Digits -Pattern $split.Pattern
+        $expected = if ($case[0]) { $case[0] } else { '{SERIAL}' }
+        Assert-Equal $back $expected "choice $($case[1]) saves the pattern '$expected' again"
+    }
+    Assert-Equal (Join-NamePattern -Choice PrefixRandom -Prefix ' LAB- ' -Digits 6) 'LAB-######' 'prefix + 6 random digits'
+    Assert-Equal (Join-NamePattern -Choice PrefixSerial -Prefix '') '{SERIAL}' 'prefix + serial with no prefix is the serial'
     foreach ($bad in '', '1234567', 'PC_01', 'ABCDEFGHIJKLMNOP', '-PC', 'PC-') {
         Assert-Equal ([bool](Test-UnattendComputerName $bad)) $true "computer name '$bad' is rejected"
     }
