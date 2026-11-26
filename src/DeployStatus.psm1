@@ -653,6 +653,31 @@ function Update-LocalDeployResult {
     ($text -split '\r?\n')[0]
 }
 
+function Publish-AppRetryResults {
+    <#
+    .SYNOPSIS
+        PC: the results of a retry of the failed apps (Invoke-AppRetryPlan) in DeployResult.txt (Update-LocalDeployResult;
+        a PC deployed before deploy-result.json existed starts it from the plan) and on the Dashboard row the plan names
+        (as the computer account; a share that can't be reached is tried at the next retry).
+    #>
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry',
+          [string]$DataPath = (Get-LocalDeployResultPath), [string]$ResultPath = "$env:WINDIR\Temp\DeployResult.txt", [scriptblock]$Log = { param($m) })
+    try {
+        if (-not [IO.File]::Exists($DataPath) -and $Plan.PSObject.Properties['deploy'] -and $Plan.deploy) {
+            Save-LocalDeployResult -Deploy $Plan.deploy -Checks @(if ($Plan.PSObject.Properties['checks']) { @($Plan.checks) }) -Path $DataPath
+        }
+        $verdict = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $Results -By $By) -DataPath $DataPath -ResultPath $ResultPath
+        if ($verdict) { & $Log "DeployResult.txt now: $verdict" }
+    } catch { & $Log "Could not update DeployResult.txt: $($_.Exception.Message)" }
+    $status = if ($Plan.PSObject.Properties['status']) { $Plan.status } else { $null }
+    if ($status -and $status.folder) {
+        try {
+            $row = Update-DeployAppResults -StatusFolder $status.folder -Id "$($status.id)" -Results $Results -By $By
+            & $Log $(if ($row) { "Dashboard updated in $($status.folder)" } else { "No status for this PC in $($status.folder) any more; Dashboard not updated" })
+        } catch { & $Log "Could not update the Dashboard: $($_.Exception.Message)" }
+    }
+}
+
 function Update-DeployResultText {
     <#
     .SYNOPSIS
@@ -777,5 +802,5 @@ Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeploySt
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
     Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
-    Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Save-LocalDeployResult, Update-LocalDeployResult,
+    Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Save-LocalDeployResult, Update-LocalDeployResult, Publish-AppRetryResults,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

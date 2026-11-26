@@ -162,9 +162,12 @@ $dp = Get-Content -Raw (Join-Path $repo 'src/Deploy-Image.ps1')
 Assert-Equal ($dp -match "'Test-Deployment\.ps1', 'Retry-FailedApps\.ps1'") $true 'deploy stages the retry script for admins only'
 $rs = Get-Content -Raw (Join-Path $repo 'src/Retry-FailedApps.ps1')
 foreach ($m in 'ScriptLog.psm1', 'AppPack.psm1', 'DeployStatus.psm1') { Assert-Equal ($rs -match [regex]::Escape("'$m'")) $true "the retry imports $m" }
-Assert-Equal ($rs -match '(?s)Enter-AppInstallLock.*Invoke-AppReinstall.*Update-LocalDeployResult.*Update-DeployAppResults') $true 'the retry waits for any other install, installs, then updates DeployResult.txt and the Dashboard'
+Assert-Equal ($rs -match '(?s)Invoke-AppRetryPlan.*Publish-AppRetryResults') $true 'the logon retry runs the one retry and reports to DeployResult.txt and the Dashboard'
+Assert-Equal ($fb -match '(?s)ImagingAgent\.ps1"\) \{.{0,300}the agent installs them again.{0,200}\} else \{.{0,90}ImagingTool\\RetryApps') $true 'with the agent there is no logon task: the agent retries'
+$agentText = Get-Content -Raw (Join-Path $repo 'src/ImagingAgent.ps1')
+Assert-Equal ($agentText -match "Invoke-AppRetryPlan -By 'the agent' -WaitMinutes 0 -MinMinutes 60") $true 'the agent retries hourly and never waits on another install'
 Assert-Equal ($fb -match '(?s)DeployResult\.txt.{0,400}Save-LocalDeployResult -Deploy \$deployInfo -Checks \$checkResults') $true 'first boot keeps what DeployResult.txt is made from'
-Assert-Equal ($rs -match 'maxAttempts' -and $rs -match 'Remove-RetryApps') $true 'it removes its task and folder when done or out of tries'
+Assert-Equal ($rs -match '-RemoveFolder \{ Start-Process -FilePath cmd\.exe') $true 'it removes its own folder a moment after it ends'
 $bytes = [IO.File]::ReadAllBytes((Join-Path $repo 'src/Retry-FailedApps.ps1'))
 Assert-Equal (@($bytes | Where-Object { $_ -gt 127 }).Count) 0 'Retry-FailedApps.ps1 is ASCII'
 

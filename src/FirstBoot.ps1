@@ -333,8 +333,9 @@ try {
     try { Save-LocalDeployResult -Deploy $deployInfo -Checks $checkResults } catch { Write-Log "Could not keep the deployment result's checks: $($_.Exception.Message)" }
 } catch { Write-Log "Could not write the deployment result: $($_.Exception.Message)" }
 
-# Applications that failed are installed again at the next logon, silently as SYSTEM (Retry-FailedApps.ps1, logon task
-# ImagingTool\RetryApps): their packs move to C:\ProgramData\ImagingTool\RetryApps before C:\Temp is cleared.
+# Applications that failed are installed again later, silently as SYSTEM (Invoke-AppRetryPlan): by the agent at its
+# check-ins (an hour from now, then hourly), or on a PC without the agent by the logon task ImagingTool\RetryApps
+# (Retry-FailedApps.ps1). Their packs move to C:\ProgramData\ImagingTool\RetryApps before C:\Temp is cleared.
 try {
     $retry = New-AppRetryPlan -Applications @($plan.applications) -AppResults @($appResults) -Deploy $deployInfo -Checks @($checkResults) `
         -Status $(if ($plan.PSObject.Properties['status']) { $plan.status } else { $null })
@@ -350,8 +351,12 @@ try {
             if (Test-Path $src) { Copy-Item $src "$retryDir\Apps\" -Recurse -Force }
         }
         $retry | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $retryDir 'retry.json') -Encoding utf8
-        & schtasks.exe /Create /F /TN 'ImagingTool\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$retryDir\Retry-FailedApps.ps1`"" 2>&1 | Out-Null
-        Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: installed again at the next logon (task ImagingTool\RetryApps, up to $($retry.maxAttempts) logons): exit $LASTEXITCODE"
+        if (Test-Path "$env:ProgramData\ImagingTool\Agent\ImagingAgent.ps1") {
+            Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: the agent installs them again (in an hour, then hourly, up to $($retry.maxAttempts) tries)"
+        } else {
+            & schtasks.exe /Create /F /TN 'ImagingTool\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$retryDir\Retry-FailedApps.ps1`"" 2>&1 | Out-Null
+            Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: installed again at the next logon (no agent on this PC; task ImagingTool\RetryApps, up to $($retry.maxAttempts) logons): exit $LASTEXITCODE"
+        }
     }
 } catch { Write-Log "Could not set up the logon retry of the failed applications: $($_.Exception.Message)" }
 Write-Log "First boot finished; removing what deploy staged in $deployDir"

@@ -10,7 +10,8 @@
     Every CheckInMinutes (agent.json, 5 by default) it writes Status\Agents\<serial>.json on the share; every minute
     it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
     (ImagingAgent.psm1). At each check-in, while the deploy result says BitLocker is off, it checks again and
-    updates the result once it is on (a FIRSTLOGON task can turn it on). Log: C:\Windows\Temp\ImagingAgent.log.
+    updates the result once it is on (a FIRSTLOGON task can turn it on), and installs again the applications that
+    failed at first boot (an hour later, then hourly, up to 3 tries: Invoke-AppRetryPlan). Log: C:\Windows\Temp\ImagingAgent.log.
 .PARAMETER Register
     Makes (or replaces) the ImagingTool\Agent task from agent-task.xml next to this script, starts it, and exits.
 .PARAMETER Once
@@ -230,6 +231,14 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
     }
 }
 
+function Invoke-FailedAppsRetry {
+    # The applications that failed at first boot (C:\ProgramData\ImagingTool\RetryApps): installed again an hour
+    # after first boot, then hourly, up to 3 tries. Skipped while another install runs (it is tried at the next check-in).
+    $r = Invoke-AppRetryPlan -By 'the agent' -WaitMinutes 0 -MinMinutes 60 -Log { param($m) Write-Log $m } `
+        -OnResults { param($Plan, $Results) Publish-AppRetryResults -Plan $Plan -Results $Results -By 'the agent' -Log { param($m) Write-Log $m } }
+    if ($r.Ran) { Send-CheckIn }
+}
+
 function Invoke-AgentJob {
     $job = $null
     try { $job = Get-AgentJob -StatusFolder $statusFolder -Serial $identity.serial } catch { return }
@@ -275,7 +284,7 @@ try {
     while ($true) {
         # One bad round is logged (once while it repeats) and the agent carries on: it must never stop by itself.
         try {
-            if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn }
+            if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn; Invoke-FailedAppsRetry }
             Invoke-AgentJob
         } catch {
             $m = "Error: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
