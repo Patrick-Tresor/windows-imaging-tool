@@ -6,6 +6,19 @@
 
 $script:MaxRuns = 5   # the first run and 4 restarts; an installer that restarts the PC every time gives up there
 
+# What Deploy-Image stages in <Windows>\Temp for first boot. One list for the copy, the admins-only lock and
+# FirstBoot.ps1's cleanup, so a file added here is copied, locked and deleted alike.
+$script:FirstBootScripts = @('FirstBoot.ps1', 'FirstBootState.psm1', 'DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1',
+    'Retry-FailedApps.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1')
+$script:FirstBootDataFiles = @('firstboot.json', 'firstboot-progress.json', 'firstboot.lock', 'deployed.json')
+
+function Get-FirstBootFileNames {
+    # -Scripts: the code copied from src; otherwise that plus the files deploy writes (plan, progress, lock, marker).
+    param([switch]$Scripts)
+    if ($Scripts) { return $script:FirstBootScripts }
+    $script:FirstBootScripts + $script:FirstBootDataFiles
+}
+
 function New-FirstBootProgress {
     [pscustomobject]@{ runs = 0; started = @(); done = @(); appResults = @(); taskResults = @() }
 }
@@ -128,6 +141,6 @@ function New-AppRetryPlan {
     }
 }
 
-Export-ModuleMember -Function New-AppRetryPlan, New-FirstBootProgress, Read-FirstBootProgress, Save-FirstBootProgress, Get-FirstBootStepState,
+Export-ModuleMember -Function Get-FirstBootFileNames, New-AppRetryPlan, New-FirstBootProgress, Read-FirstBootProgress, Save-FirstBootProgress, Get-FirstBootStepState,
     Start-FirstBootStep, Complete-FirstBootStep, Test-FirstBootRunsLeft, Get-InterruptedAppResult, Get-InterruptedTaskResult,
     Get-FirstBootLock, Get-AdminOnlyAclArgs

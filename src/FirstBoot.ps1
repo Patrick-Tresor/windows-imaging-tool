@@ -34,8 +34,8 @@ function Get-FirstBootCleanupCommand([string]$Dir, [switch]$KeepScript) {
     # firstboot-progress.json stays as the record that first boot finished.
     $d = $Dir.TrimEnd('\')
     $folders = 'Apps', 'Tasks' | ForEach-Object { "rd /s /q `"$d\$_`"" }
-    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'Retry-FailedApps.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
-    if (-not $KeepScript) { $names = @('FirstBoot.ps1', 'FirstBootState.psm1') + $names }
+    $keep = @('firstboot-progress.json') + @(if ($KeepScript) { 'FirstBoot.ps1', 'FirstBootState.psm1' })
+    $names = @(Get-FirstBootFileNames | Where-Object { $keep -notcontains $_ })
     $files = $names | ForEach-Object { "del /f /q `"$d\$_`"" }
     (@($folders) + @($files)) -join ' & '
 }

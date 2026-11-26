@@ -280,4 +280,23 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
     }
 }
 
+# A run over several PCs (Install agent, Reimage): one failed row, and the end message.
+$pcDir = Join-Path ([IO.Path]::GetTempPath()) ("pcrun-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $pcDir | Out-Null
+try {
+    $pf = Join-Path $pcDir 'p.json'
+    $pcs = @([pscustomobject]@{ Id = 'pc0'; Name = 'PC1'; State = 'Done' }, [pscustomobject]@{ Id = 'pc1'; Name = 'PC2'; State = 'Pending' })
+    Start-BuildProgress -Path $pf -Title 'PCs' -Steps @(@('pc0', 'PC1'), @('pc1', 'PC2'))
+    Stop-PcStep -Pc $pcs[1] -Message "Not reached`nsecond line" 6>$null
+    $d = Read-BuildProgress -Path $pf
+    Assert-Equal "$($pcs[1].State)|$($d.steps[1].state)|$($d.steps[1].detail)" 'Failed|failed|Not reached' 'a failed PC: its row shows the first line'
+    $n = Complete-PcRun -Pcs $pcs -DoneState 'Done' -DoneText 'PCs checked in' -OneFailed 'one' -ManyFailed '{0} of {1} PCs failed' 6>$null
+    Assert-Equal "$n|$((Read-BuildProgress -Path $pf).error)" '1|1 of 2 PCs failed' 'the end message counts the failed PCs'
+    Start-BuildProgress -Path $pf -Title 'PCs' -Steps @(, @('pc0', 'PC1'))
+    $n = Complete-PcRun -Pcs @($pcs[0]) -DoneState 'Done' -DoneText 'x' -OneFailed 'one' -ManyFailed 'many' 6>$null
+    Assert-Equal "$n|$((Read-BuildProgress -Path $pf).error)" '0|' 'all done: no error'
+    Start-BuildProgress -Path ''
+} finally { Remove-Item $pcDir -Recurse -Force -ErrorAction SilentlyContinue }
+Assert-Equal (Start-BuildLog -LogPath '') '' 'no log path: no transcript'
+
 Complete-Tests 'All build step checks passed.'

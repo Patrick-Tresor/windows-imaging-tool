@@ -22,10 +22,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Console\ConsoleData.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Console\DriverPacks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BuildSteps.psm1') -Force
-if ($LogPath) {
-    New-Item -ItemType Directory -Path (Split-Path $LogPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
-    try { Start-Transcript -Path $LogPath -Append | Out-Null } catch { $LogPath = $null }
-}
+$LogPath = Start-BuildLog -LogPath $LogPath
 if (-not (Test-ContentRoot $ContentRoot)) { throw "$ContentRoot is not a content root. Create it in the console first." }
 
 $packs = @(Get-Content -Raw $JobFile | ConvertFrom-Json)
@@ -76,7 +73,7 @@ try {
     throw
 } finally {
     Remove-Item $JobFile -Force -ErrorAction SilentlyContinue
-    if ($LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+    Stop-BuildLog -LogPath $LogPath
 }
 Write-Host "`nDone: $($packs.Count - $failed) installed, $failed failed. Click Refresh on the console's Driver Library tab."
 if ($failed) { exit 1 }

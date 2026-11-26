@@ -53,13 +53,11 @@ try {
         Write-Step "Done: $env:COMPUTERNAME checked in. The console's Computers tab shows it in the Agent column." Green
         exit 0
     }
-    $lines = @(if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 15 -Encoding UTF8 })
-    foreach ($l in $lines) { Write-Step "  agent log: $l" }
-    $task = Get-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'Agent' -ErrorAction SilentlyContinue
-    $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
-    $why = Get-AgentLogProblem -Lines $lines -TaskState $(if ($task) { "$($task.State)" } else { '' }) -TaskResult $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' })
+    $state = Get-AgentLocalState
+    foreach ($l in @($state.Lines)) { Write-Step "  agent log: $l" }
+    $why = Get-AgentLogProblem -State $state
     Write-Step "No check-in seen within $WaitMinutes min. $why (log: $log)" Yellow
-    if ($task) { Write-Step "  task ImagingTool\Agent: $($task.State)$(if ($info) { ", last result 0x{0:X}" -f [int64]$info.LastTaskResult })" }
+    if ($state.State) { Write-Step "  task ImagingTool\Agent: $($state.State)$(if ($state.Result) { ", last result $($state.Result)" })" }
     # Read only: an antivirus that blocked one of the agent's files in the last hour.
     try {
         foreach ($d in @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { $_.InitialDetectionTime -gt $started.AddHours(-1) -and "$($_.Resources)" -match 'ImagingTool|ImagingAgent' })) {

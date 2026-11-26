@@ -593,7 +593,7 @@ function Get-AgentKnownAddresses {
 }
 
 function ConvertTo-AgentTargetInfo {
-    # A check-in as Get-RemoteComputerInfo's record, so Test-RemoteTarget checks an agent PC the same way.
+    # A check-in as the record Test-RemoteTarget checks (ComputerName, Firmware, Serial, Model, FreeC, BitLocker).
     param([Parameter(Mandatory)]$CheckIn)
     # An agent from before firmwareFrom read PEFirmwareType, which Windows does not have: it said Legacy on UEFI PCs.
     $fw = if ($CheckIn.PSObject.Properties['firmwareFrom'] -and "$($CheckIn.firmwareFrom)") { "$($CheckIn.firmware)" } else { 'Unknown' }
@@ -763,6 +763,25 @@ function Grant-StatusFolderAccess {
     [pscustomobject]@{ Changed = $changed; Lines = @($lines) }
 }
 
+# Runs on the PC (here, or sent over a remote channel, so it uses nothing from this module): the last -Tail lines of
+# the agent's log and its task's state and last result.
+$script:AgentStateScript = {
+    param([int]$Tail = 15)
+    $log = "$env:WINDIR\Temp\ImagingAgent.log"
+    $lines = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log -Tail $Tail -Encoding UTF8) } else { @() }
+    $task = Get-ScheduledTask -TaskPath '\ImagingTool\' -TaskName 'Agent' -ErrorAction SilentlyContinue
+    $info = if ($task) { $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue }
+    [pscustomobject]@{ Lines = $lines; State = $(if ($task) { "$($task.State)" } else { '' }); Result = $(if ($info) { '0x{0:X}' -f [int64]$info.LastTaskResult } else { '' }) }
+}
+
+function Get-AgentStateScript { $script:AgentStateScript }
+
+function Get-AgentLocalState {
+    # This PC's agent: { Lines; State; Result } (Install-AgentHere.ps1). Over the network: Get-AgentStateScript.
+    param([int]$Tail = 15)
+    & $script:AgentStateScript $Tail
+}
+
 function Get-AgentLogProblem {
     <#
     .SYNOPSIS
@@ -770,7 +789,9 @@ function Get-AgentLogProblem {
         task's state. Lines: the log's last lines ($null: no log, it never started). TaskState / TaskResult: from
         Get-ScheduledTask / Get-ScheduledTaskInfo.
     #>
-    param([string[]]$Lines, [string]$TaskState, [string]$TaskResult)
+    param([string[]]$Lines, [string]$TaskState, [string]$TaskResult,
+          $State)   # or what Get-AgentLocalState / Get-AgentStateScript returned
+    if ($State) { $Lines = @($State.Lines); $TaskState = "$($State.State)"; $TaskResult = "$($State.Result)" }
     $Lines = @($Lines | Where-Object { "$_".Trim() })
     if (-not $Lines) {
         $t = if ($TaskState) { "task $TaskState$(if ($TaskResult) { ", last result $TaskResult" })" } else { 'no task ImagingTool\Agent' }
@@ -813,34 +834,11 @@ function Get-AgentTaskXml {
         start while it runs is ignored). No time limit: it keeps running and checks in on its own.
     #>
     param([string]$ScriptPath = "$script:AgentDir\ImagingAgent.ps1")
-    $cmd = [Security.SecurityElement]::Escape("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`"")
-    @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Imaging tool agent: tells the imaging console this PC is on, and takes the jobs the console signed (reimage).</Description></RegistrationInfo>
-  <Triggers>
-    <BootTrigger><Enabled>true</Enabled><Delay>PT1M</Delay></BootTrigger>
-    <TimeTrigger><StartBoundary>2020-01-01T00:00:00</StartBoundary><Repetition><Interval>PT15M</Interval></Repetition><Enabled>true</Enabled></TimeTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure><Interval>PT5M</Interval><Count>3</Count></RestartOnFailure>
-    <Priority>7</Priority>
-    <Enabled>true</Enabled>
-  </Settings>
-  <Actions Context="Author">
-    <Exec><Command>powershell.exe</Command><Arguments>$cmd</Arguments></Exec>
-  </Actions>
-</Task>
-"@
+    New-TaskXml -Description 'Imaging tool agent: tells the imaging console this PC is on, and takes the jobs the console signed (reimage).' `
+        -Triggers ("<BootTrigger><Enabled>true</Enabled><Delay>PT1M</Delay></BootTrigger>`r`n    " +
+                   '<TimeTrigger><StartBoundary>2020-01-01T00:00:00</StartBoundary><Repetition><Interval>PT15M</Interval></Repetition><Enabled>true</Enabled></TimeTrigger>') `
+        -TimeLimit 'PT0S' -Settings '<StartWhenAvailable>true</StartWhenAvailable>', '<RestartOnFailure><Interval>PT5M</Interval><Count>3</Count></RestartOnFailure>', '<Priority>7</Priority>' `
+        -Command 'powershell.exe' -Arguments "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
 }
 
 function Install-AgentOnRemotePC {
@@ -908,7 +906,7 @@ function Publish-AgentInstaller {
 
 #endregion
 
-Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
+Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,

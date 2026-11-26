@@ -667,34 +667,8 @@ function Copy-ToRemoteChannel {
     }
 }
 
-$script:RemoteInfoScript = {
-    # Runs on the target PC.
-    $bl = $null
-    try { $bl = (Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop).ProtectionStatus.ToString() } catch { }
-    [pscustomobject]@{
-        ComputerName = $env:COMPUTERNAME
-        # PEFirmwareType is only there in WinPE: in Windows the loader it started from says it (winload.efi = UEFI).
-        Firmware     = $(
-            $bcd = "$(& bcdedit.exe /enum '{current}' 2>$null)"
-            if ($bcd -match 'winload\.efi') { 'UEFI' } elseif ($bcd -match 'winload\.exe') { 'Legacy' }
-            else { try { $null = Confirm-SecureBootUEFI -ErrorAction Stop; 'UEFI' } catch { 'Unknown' } })
-        Serial       = "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim()
-        Uuid         = "$((Get-CimInstance Win32_ComputerSystemProduct).UUID)".Trim()
-        Model        = "$((Get-CimInstance Win32_ComputerSystem).Model)".Trim()
-        FreeC        = [int64](Get-PSDrive C).Free
-        BitLocker    = $bl
-    }
-}
-
-function Get-RemoteComputerInfo {
-    # Reads a running PC (WinRM, or the admin share and a one-time service). Needs admin rights on it.
-    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb')][string]$Method = 'WinRM')
-    $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
-    try { @(Invoke-RemoteChannel -Channel $ch -ScriptBlock $script:RemoteInfoScript -TimeoutSeconds 120)[0] } finally { Close-RemoteChannel $ch }
-}
-
 function Test-RemoteTarget {
-    # Problems that stop a reimage, from Get-RemoteComputerInfo, before anything is changed on the PC.
+    # Problems that stop a reimage, from the agent's check-in (ConvertTo-AgentTargetInfo), before anything is changed on the PC.
     # ExpectedName: the computer name in Active Directory. A stale DNS record can point at another PC.
     param([Parameter(Mandatory)]$Info, [string]$ExpectedName)
     if ($ExpectedName -and "$($Info.ComputerName)" -and $Info.ComputerName -ne $ExpectedName) {
@@ -782,38 +756,60 @@ function Get-ReimageRestartCommand {
     "/c schtasks /Delete /TN $script:NoticeTaskName /F & shutdown.exe /r /t 0 /f /d p:4:1"
 }
 
+function New-TaskXml {
+    <#
+    .SYNOPSIS
+        Task Scheduler XML (UTF-16, for schtasks /Create /XML): the frame the imaging tool's tasks share. Runs as SYSTEM
+        (highest rights), or with -Users in the session of every signed-in user (BUILTIN\Users, their own rights).
+        -Triggers: the <Triggers> content ('' = started on demand only). -Settings: extra <Settings> elements.
+        -Arguments is escaped here.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Description,
+        [string]$Triggers = '',
+        [switch]$Users,
+        [string]$MultipleInstances = 'IgnoreNew',
+        [Parameter(Mandatory)][string]$TimeLimit,       # ISO 8601: PT10M, PT2H, PT0S (none)
+        [string[]]$Settings = @(),
+        [Parameter(Mandatory)][string]$Command,
+        [string]$Arguments = ''
+    )
+    $principal = if ($Users) { '<GroupId>S-1-5-32-545</GroupId><RunLevel>LeastPrivilege</RunLevel>' }
+                 else { '<UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel>' }
+    $trig = if ($Triggers) { "`r`n  <Triggers>`r`n    $($Triggers.Trim())`r`n  </Triggers>" } else { '' }
+    $extra = (@($Settings) | ForEach-Object { "`r`n    $_" }) -join ''
+    @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>$([Security.SecurityElement]::Escape($Description))</Description></RegistrationInfo>$trig
+  <Principals>
+    <Principal id="Author">$principal</Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>$MultipleInstances</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowStartOnDemand>true</AllowStartOnDemand>$extra
+    <ExecutionTimeLimit>$TimeLimit</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec><Command>$([Security.SecurityElement]::Escape($Command))</Command><Arguments>$([Security.SecurityElement]::Escape($Arguments))</Arguments></Exec>
+  </Actions>
+</Task>
+"@
+}
+
 function Get-ReimageRestartTaskXml {
     <#
     .SYNOPSIS
         Task Scheduler XML for the SYSTEM task that restarts the PC into WinPE. {START} and {END} are filled on the PC
         with its own clock (local time): it runs once at {START}, and deletes itself after {END} if Windows comes back.
     #>
-    $actionArgs = [Security.SecurityElement]::Escape((Get-ReimageRestartCommand))
-    @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Restarts this PC into WinPE to reinstall Windows (imaging console).</Description></RegistrationInfo>
-  <Triggers>
-    <TimeTrigger><StartBoundary>{START}</StartBoundary><EndBoundary>{END}</EndBoundary><Enabled>true</Enabled></TimeTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>
-    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
-    <Enabled>true</Enabled>
-  </Settings>
-  <Actions Context="Author">
-    <Exec><Command>cmd.exe</Command><Arguments>$actionArgs</Arguments></Exec>
-  </Actions>
-</Task>
-"@
+    New-TaskXml -Description 'Restarts this PC into WinPE to reinstall Windows (imaging console).' `
+        -Triggers '<TimeTrigger><StartBoundary>{START}</StartBoundary><EndBoundary>{END}</EndBoundary><Enabled>true</Enabled></TimeTrigger>' `
+        -TimeLimit 'PT10M' -Settings '<StartWhenAvailable>true</StartWhenAvailable>', '<DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>' `
+        -Command 'cmd.exe' -Arguments (Get-ReimageRestartCommand)
 }
 
 function Get-ReimageNoticeTaskXml {
@@ -821,27 +817,9 @@ function Get-ReimageNoticeTaskXml {
     # (group BUILTIN\Users, their own rights).
     # conhost --headless: on Windows 11 the default terminal (Windows Terminal) opens powershell.exe in a visible
     # window and ignores -WindowStyle Hidden (Patrick 2026-11-26: a PowerShell window showed with the notice).
-    $cmd = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $script:NoticeScriptPath"
-    @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Tells the user this PC restarts to reinstall Windows (imaging console).</Description></RegistrationInfo>
-  <Principals>
-    <Principal id="Author"><GroupId>S-1-5-32-545</GroupId><RunLevel>LeastPrivilege</RunLevel></Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
-    <Enabled>true</Enabled>
-  </Settings>
-  <Actions Context="Author">
-    <Exec><Command>conhost.exe</Command><Arguments>$cmd</Arguments></Exec>
-  </Actions>
-</Task>
-"@
+    New-TaskXml -Description 'Tells the user this PC restarts to reinstall Windows (imaging console).' -Users -MultipleInstances 'Parallel' `
+        -TimeLimit 'PT2H' -Command 'conhost.exe' `
+        -Arguments "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $script:NoticeScriptPath"
 }
 
 function Get-ReimageNoticeScript {
@@ -915,21 +893,6 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 }
 
 #endregion
-
-function Remove-LocalDiskBoot {
-    # Takes WinPE off a PC that is back in Windows without being reimaged: the folder, the boot entry and the task.
-    param([Parameter(Mandatory)][string]$ComputerName, [string]$BootEntry, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb', 'Local')][string]$Method = 'WinRM')
-    $ch = Open-RemoteChannel -ComputerName $ComputerName -Credential $Credential -Method $Method
-    try {
-        Invoke-RemoteChannel -Channel $ch -ArgumentList "$BootEntry" -ScriptBlock {
-            param($Entry)
-            if ($Entry) { try { & bcdedit.exe /delete $Entry /f 2>&1 | Out-Null } catch { } }
-            foreach ($t in 'RemoveImagingBoot', 'ReimageRestart', 'ReimageNotice') { try { & schtasks.exe /Delete /TN "ImagingTool\$t" /F 2>&1 | Out-Null } catch { } }
-            Remove-Item 'C:\_ImagingBoot' -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path 'C:\_ImagingBoot') { throw 'C:\_ImagingBoot could not be removed.' }
-        } | Out-Null
-    } finally { Close-RemoteChannel $ch }
-}
 
 function Invoke-LocalDiskBoot {
     <#
@@ -1146,7 +1109,21 @@ function Read-ReimageTargets {
     })
 }
 
-Export-ModuleMember -Function Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
+function Get-ReimageTargetList {
+    # The PCs Install-RemoteAgent.ps1 and Start-RemoteReimage.ps1 work on: -TargetsFile (from the console, deleted once
+    # read) plus -Computers, names or addresses (from the console as one comma-separated string).
+    param([string]$TargetsFile, [string[]]$Computers)
+    $targets = @()
+    if ($TargetsFile) {
+        try { $targets = @(Read-ReimageTargets -Path $TargetsFile) } finally { Remove-Item -LiteralPath $TargetsFile -Force -ErrorAction SilentlyContinue }
+    }
+    foreach ($c in @($Computers | ForEach-Object { "$_" -split ',' } | ForEach-Object Trim | Where-Object { $_ })) {
+        $targets += [pscustomobject]@{ name = ($c -split '\.')[0].ToUpperInvariant(); address = $c; ou = '' }
+    }
+    $targets
+}
+
+Export-ModuleMember -Function Get-ReimageTargetList, New-TaskXml, Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Wait-PortProbes, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
-    Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Get-RemoteComputerInfo,
-    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Remove-LocalDiskBoot, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems, Get-NetworkBootRebuildReason
+    Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel,
+    Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems, Get-NetworkBootRebuildReason
