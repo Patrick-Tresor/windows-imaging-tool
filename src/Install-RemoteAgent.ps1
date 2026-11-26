@@ -18,7 +18,7 @@ param(
     [string]$TargetsFile,           # JSON from the console: [{ name, address }]; deleted once read
     [string[]]$Computers,
     [string]$CredentialFile,        # Export-Clixml of a PSCredential (only this user can read it); deleted once read
-    [int]$CheckInMinutes = 5,
+    [int]$CheckInSeconds = 30,
     [int]$WaitMinutes = 3,
     [string]$ProgressFile,
     [string]$LogPath
@@ -54,7 +54,7 @@ function Get-RemoteAgentProblem($p) {
 
 try {
     $publicKey = Get-AgentPublicKey -ContentRoot $ContentRoot -Create
-    Write-Host "Console key $(Get-AgentKeyId $publicKey); the agents check in to $StatusFolder every $CheckInMinutes min" -ForegroundColor Cyan
+    Write-Host "Console key $(Get-AgentKeyId $publicKey); the agents check in to $StatusFolder every $CheckInSeconds s" -ForegroundColor Cyan
     # The agents write there as their computer accounts: when the share is on this PC, make sure Domain Computers may.
     try { foreach ($l in (Grant-StatusFolderAccess -StatusFolder $StatusFolder).Lines) { Write-Host $l } }
     catch { Write-Host "Could not check the rights on ${StatusFolder}: $($_.Exception.Message)" -ForegroundColor Yellow }
@@ -74,7 +74,7 @@ try {
                 $ch = Open-RemoteChannel -ComputerName $check.Address -Credential $credential -Method 'Smb'
             }
             Set-BuildStepProgress $p.Id -Percent 30 -Detail 'Copying the agent'
-            $config = New-AgentConfig -StatusFolder $StatusFolder -PublicKeys @($publicKey) -CheckInMinutes $CheckInMinutes `
+            $config = New-AgentConfig -StatusFolder $StatusFolder -PublicKeys @($publicKey) -CheckInSeconds $CheckInSeconds `
                 -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
             Install-AgentOnRemotePC -Channel $ch -SourceDir $PSScriptRoot -Config $config
             Write-Host "$($p.Name): agent installed over $($ch.Method); waiting for its first check-in"

@@ -474,7 +474,7 @@ function New-AgentCheckIn {
         [Parameter(Mandatory)][string]$AgentId,
         [string]$AgentVersion,
         [string]$AgentCode,
-        [int]$CheckInMinutes = 5,
+        [int]$CheckInSeconds = 30,
         [string]$ComputerName = $env:COMPUTERNAME,
         [string]$Account,
         [string]$AccountSid,
@@ -516,7 +516,9 @@ function New-AgentCheckIn {
         agentId        = $AgentId
         agentVersion   = $AgentVersion
         agentCode      = $AgentCode
-        checkInMinutes = $CheckInMinutes
+        # Minutes too, rounded up: a console from before checkInSeconds reads only that.
+        checkInMinutes = [int][Math]::Max(1, [Math]::Ceiling($CheckInSeconds / 60))
+        checkInSeconds = $CheckInSeconds
         lastSeen       = $Now.ToUniversalTime().ToString('o')
         job            = $Job
     }
@@ -532,7 +534,8 @@ function Save-AgentCheckIn {
 function Get-AgentCheckIns {
     <#
     .SYNOPSIS
-        Console: every PC's last check-in, with LastSeen (local time), Online (checked in within 3 check-in intervals)
+        Console: every PC's last check-in, with LastSeen (local time), Online (checked in within 3 check-in intervals,
+        plus 30 s for a slow share: about 2 minutes at the 30-second default)
         and LastSeenText. One per computer name: the newest when a PC got a new serial (board swap).
     #>
     param([Parameter(Mandatory)][string]$StatusFolder, [datetime]$Now = (Get-Date))
@@ -543,9 +546,12 @@ function Get-AgentCheckIns {
         $seen = ConvertFrom-AgentTime $r.lastSeen
         if (-not $seen) { continue }
         $seen = $seen.ToLocalTime()
-        $every = [Math]::Max(1, [int]$(if ($r.checkInMinutes) { $r.checkInMinutes } else { 5 }))
+        # An agent from before checkInSeconds checks in every checkInMinutes.
+        $every = if ($r.PSObject.Properties['checkInSeconds'] -and $r.checkInSeconds) { [Math]::Max(10, [int]$r.checkInSeconds) }
+                 else { 60 * [Math]::Max(1, [int]$(if ($r.checkInMinutes) { $r.checkInMinutes } else { 5 })) }
         $r | Add-Member -NotePropertyName LastSeen -NotePropertyValue $seen -Force
-        $r | Add-Member -NotePropertyName Online -NotePropertyValue (($Now - $seen).TotalMinutes -le (3 * $every + 1)) -Force
+        $r | Add-Member -NotePropertyName CheckInSeconds -NotePropertyValue $every -Force
+        $r | Add-Member -NotePropertyName Online -NotePropertyValue (($Now - $seen).TotalSeconds -le (3 * $every + 30)) -Force
         $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue (Format-AgentLastSeen -LastSeen $seen -Now $Now) -Force
         $r
     })
@@ -567,7 +573,7 @@ function Format-AgentLastSeen {
     # 'Just now', '7 min ago', '3 h ago', 'Yesterday 14:05', '2026-11-20 09:12'.
     param([Parameter(Mandatory)][datetime]$LastSeen, [datetime]$Now = (Get-Date))
     $ago = $Now - $LastSeen
-    if ($ago.TotalMinutes -lt 2) { return 'Just now' }
+    if ($ago.TotalMinutes -lt 1) { return 'Just now' }
     if ($ago.TotalMinutes -lt 60) { return "$([int][Math]::Floor($ago.TotalMinutes)) min ago" }
     if ($ago.TotalHours -lt 12) { return "$([int][Math]::Floor($ago.TotalHours)) h ago" }
     if ($LastSeen.Date -eq $Now.Date.AddDays(-1)) { return "Yesterday $($LastSeen.ToString('HH:mm'))" }
@@ -811,17 +817,26 @@ function Get-AgentLogProblem {
 
 #region Installing it
 
+function Get-AgentCheckInSeconds {
+    # deploy-settings.json agent.checkInSeconds: how often the agents check in (30 by default, at least 10). The old
+    # checkInMinutes setting is not read: at 5 minutes the console could not show the PCs close to real time.
+    param($Settings)
+    $cfg = if ($Settings -and $Settings.PSObject.Properties['agent']) { $Settings.agent } else { $null }
+    if ($cfg -and $cfg.PSObject.Properties['checkInSeconds'] -and $cfg.checkInSeconds) { return [Math]::Max(10, [int]$cfg.checkInSeconds) }
+    30
+}
+
 function New-AgentConfig {
     # agent.json next to the agent: where to check in, the console keys it trusts, and what this deploy was.
     param(
         [Parameter(Mandatory)][string]$StatusFolder,
         [string[]]$PublicKeys,
-        [int]$CheckInMinutes = 5,
+        [int]$CheckInSeconds = 30,
         $Deploy
     )
     [pscustomobject][ordered]@{
         statusFolder   = $StatusFolder
-        checkInMinutes = [Math]::Max(1, $CheckInMinutes)
+        checkInSeconds = [Math]::Max(10, $CheckInSeconds)
         publicKeys     = @($PublicKeys | Where-Object { $_ } | ForEach-Object { "$_".Trim() })
         deploy         = $Deploy
     }
@@ -910,4 +925,4 @@ Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
-    New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

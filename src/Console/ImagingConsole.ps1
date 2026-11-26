@@ -359,13 +359,36 @@ function Import-StickDashboard([string]$Folder) {
 }
 
 $script:agentCache = $null
+$script:agentStamp = ''
+$script:agentStampPause = [datetime]::MinValue
+function Test-AgentFolderChanged {
+    # True when an agent wrote its check-in since the last look: only the names and times of Status\Agents\*.json
+    # are listed (no file is read), every 3 seconds. A share that is slow or can't be reached is left alone for a minute,
+    # so the console never hangs on it.
+    $folder = Get-DashboardFolder
+    if (-not $folder -or (Get-Date) -lt $script:agentStampPause) { return $false }
+    $started = Get-Date
+    $stamp = $null
+    try {
+        $di = New-Object IO.DirectoryInfo (Get-AgentFolder $folder)
+        if ($di.Exists) { $stamp = (@($di.GetFiles('*.json')) | ForEach-Object { "$($_.Name):$($_.LastWriteTimeUtc.Ticks)" }) -join '|' }
+    } catch { }
+    if ($null -eq $stamp -or ((Get-Date) - $started).TotalSeconds -gt 2) { $script:agentStampPause = (Get-Date).AddMinutes(1) }
+    if ($null -eq $stamp -or $stamp -eq $script:agentStamp) { return $false }
+    $first = -not $script:agentStamp
+    $script:agentStamp = $stamp
+    if ($first) { return $false }
+    $script:agentCache = $null
+    $true
+}
+
 function Get-ConsoleAgentCheckIns {
     # Every agent's last check-in (Status\Agents on the share); none when it can't be read. Read again at most every
-    # 30 seconds: the Dashboard refreshes often, and the agents check in every few minutes.
+    # 10 seconds (sooner when Test-AgentFolderChanged sees a new check-in): the agents check in every 30 seconds.
     $folder = Get-DashboardFolder
     if (-not $folder) { return @() }
     $c = $script:agentCache
-    if ($c -and $c.Folder -eq $folder -and ((Get-Date) - $c.At).TotalSeconds -lt 30) { return $c.Rows }
+    if ($c -and $c.Folder -eq $folder -and ((Get-Date) - $c.At).TotalSeconds -lt 10) { return $c.Rows }
     $rows = try { @(Get-AgentCheckIns -StatusFolder $folder) } catch { @() }
     $script:agentCache = [pscustomobject]@{ Folder = $folder; At = Get-Date; Rows = $rows }
     $rows
@@ -1125,7 +1148,28 @@ function Show-AdRows {
     Send-AgentUpdates $checkIns
     # Keep the selected PCs selected when the Agent column fills in.
     $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
-    $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
+    $ui.GridAd.ItemsSource = @(Set-AdRowValues -States $states -CheckIns $checkIns)
+    if ($picked) { foreach ($row in @($ui.GridAd.ItemsSource | Where-Object { $picked -contains $_.Name })) { [void]$ui.GridAd.SelectedItems.Add($row) } }
+}
+
+function Update-AdRowsLive {
+    # While the Computers tab is open, each time an agent checks in (and every 30 s, for PCs that went offline): the
+    # Agent, IP and Reimage columns from the latest check-ins, on the
+    # same rows (no new list: the scroll position, sort and selection stay). The network check is not run again.
+    if (-not $script:adRows -or $script:adCheck -or -not $ui.GridAd.ItemsSource) { return }
+    $states = @{}
+    $share = Get-ReimageShare
+    if ($share) { try { $states = Get-ReimageStates -ContentRoot $share } catch { } }
+    $checkIns = @(Get-ConsoleAgentCheckIns)
+    Send-AgentUpdates $checkIns
+    $null = Set-AdRowValues -States $states -CheckIns $checkIns
+    try { $ui.GridAd.Items.Refresh() } catch { }
+}
+
+function Set-AdRowValues($States, $CheckIns) {
+    $checkIns = @($CheckIns)
+    $states = if ($States) { $States } else { @{} }
+    @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
         $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode -Checking:([bool]$script:adCheck)
@@ -1139,7 +1183,6 @@ function Show-AdRows {
         $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
-    if ($picked) { foreach ($row in @($ui.GridAd.ItemsSource | Where-Object { $picked -contains $_.Name })) { [void]$ui.GridAd.SelectedItems.Add($row) } }
 }
 
 function Update-Computers {
@@ -1162,9 +1205,8 @@ function Update-AgentInstaller {
         $settings = Get-DeploySettings -ContentRoot $script:root
         $cfg = if ($settings -and $settings.PSObject.Properties['agent']) { $settings.agent } else { $null }
         if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { return }
-        $minutes = if ($cfg -and $cfg.PSObject.Properties['checkInMinutes'] -and $cfg.checkInMinutes) { [int]$cfg.checkInMinutes } else { 5 }
         $key = Get-AgentPublicKey -ContentRoot $script:root -Create
-        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInMinutes $minutes `
+        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInSeconds (Get-AgentCheckInSeconds $settings) `
             -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
         $folder = Publish-AgentInstaller -Folder "$($share.TrimEnd('\'))\Agent" -SourceDir $srcDir -Config $config
         $ui.BtnAdAgent.ToolTip = "Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. " +
@@ -1640,6 +1682,9 @@ $script:dashTimer.Interval = [timespan]::FromSeconds(10)
 $script:dashTick = 0
 $script:dashTimer.Add_Tick({
     $script:dashTick++
+    if ($ui.Tabs.SelectedItem -eq $ui.TabComputers -and -not ($script:dashTick % 3)) {
+        try { Update-AdRowsLive } catch { Set-Status "Computers refresh failed: $($_.Exception.Message)" }
+    }
     if ($ui.Tabs.SelectedItem -ne $ui.TabDashboard) {
         # On another tab: every 30 seconds, only look for PCs that finished or failed, to tell you.
         if ($script:dashTick % 3) { return }
@@ -1649,6 +1694,18 @@ $script:dashTimer.Add_Tick({
     try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
 })
 $script:dashTimer.Start()
+# Close to real time: every 3 seconds, while the Dashboard or Computers tab is open, a new check-in refreshes it.
+$script:agentTimer = [Windows.Threading.DispatcherTimer]::new()
+$script:agentTimer.Interval = [timespan]::FromSeconds(3)
+$script:agentTimer.Add_Tick({
+    $tab = $ui.Tabs.SelectedItem
+    if ($tab -ne $ui.TabComputers -and $tab -ne $ui.TabDashboard) { return }
+    try {
+        if (-not (Test-AgentFolderChanged)) { return }
+        if ($tab -eq $ui.TabComputers) { Update-AdRowsLive } else { Update-Dashboard }
+    } catch { Set-Status "Refresh failed: $($_.Exception.Message)" }
+})
+$script:agentTimer.Start()
 $ui.Tabs.Add_SelectionChanged({
     param($sender, $e)
     # SelectionChanged bubbles up from the grids and combo boxes inside the tabs; only react to tab switches.
@@ -1686,7 +1743,7 @@ $window.Dispatcher.Add_UnhandledException({
 $window.Add_Closing({ $script:ConsoleClosing = $true })
 $window.Add_Closed({ Close-ProgressHub })
 $window.Add_Closed({ if ($script:dashNotifyIcon) { try { $script:dashNotifyIcon.Visible = $false; $script:dashNotifyIcon.Dispose() } catch { } } })
-$window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop(); Stop-AdOnlineCheck })
+$window.Add_Closed({ $script:dashTimer.Stop(); $script:agentTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop(); Stop-AdOnlineCheck })
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })

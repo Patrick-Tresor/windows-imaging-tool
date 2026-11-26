@@ -284,7 +284,7 @@ the PC is). Rebuild the sticks and the network boot image once, so deploys put
 the agent on and trust this console's key. The agent comes with each deploy,
 and the console updates it after a tool update (see Updates above).
 `deploy-settings.json` `agent.enabled: false` leaves it out, and
-`agent.checkInMinutes` changes how often it checks in. Its log on the PC:
+`agent.checkInSeconds` changes how often it checks in (30 seconds by default). Its log on the PC:
 `C:\Windows\Temp\ImagingAgent.log`. To try it by hand on a PC, as
 administrator: `powershell -File C:\ProgramData\ImagingTool\Agent\ImagingAgent.ps1 -Once`.
 

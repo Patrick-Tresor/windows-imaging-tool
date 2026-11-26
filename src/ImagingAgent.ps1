@@ -7,9 +7,9 @@
     from C:\ProgramData\ImagingTool\Agent (administrators and SYSTEM only). Deploy-Image.ps1 puts it there with
     agent.json; FirstBoot.ps1 runs it once with -Register to make the task. The console can also put it on a PC that
     was imaged before (Computers tab, Install agent).
-    Every CheckInMinutes (agent.json, 5 by default) it writes Status\Agents\<serial>.json on the share; every minute
-    it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
-    (ImagingAgent.psm1). At each check-in, while the deploy result says BitLocker is off, it checks again and
+    Every checkInSeconds (agent.json, 30 by default) it writes Status\Agents\<serial>.json on the share; every 5
+    seconds it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
+    (ImagingAgent.psm1), so the console sees it and its jobs start close to real time. Every 5 minutes, while the deploy result says BitLocker is off, it checks again and
     updates the result once it is on (a FIRSTLOGON task can turn it on), and installs again the applications that
     failed at first boot (an hour later, then hourly, up to 3 tries: Invoke-AppRetryPlan). Log: C:\Windows\Temp\ImagingAgent.log.
 .PARAMETER Register
@@ -74,7 +74,9 @@ try { $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json }
 catch { Write-Log "Could not read ${configPath}: $($_.Exception.Message). The agent stops."; exit 1 }
 $statusFolder = "$($config.statusFolder)"
 $keys = @($config.publicKeys | Where-Object { $_ })
-$every = [Math]::Max(1, [int]$(if ($config.checkInMinutes) { $config.checkInMinutes } else { 5 }))
+# Seconds between check-ins. An agent.json from before (checkInMinutes, 5) is not read: an agent the console
+# updates checks in every 30 s from then on, so the console shows it close to real time.
+$every = if ($config.PSObject.Properties['checkInSeconds'] -and $config.checkInSeconds) { [Math]::Max(10, [int]$config.checkInSeconds) } else { 30 }
 
 # This install's id: new after every deploy, so a job signed for this PC before it was reimaged is never taken.
 $statePath = [IO.Path]::Combine($dir, 'state.json')
@@ -142,7 +144,7 @@ $identity = Get-Identity
 $script:agentVersion = if ($config.deploy -and $config.deploy.toolVersion) { "$($config.deploy.toolVersion)" } else { '' }
 # This agent's code version: the console compares it with its own and sends an update job when they differ.
 $script:agentCode = try { Get-AgentCodeHash -Folder $dir } catch { '' }
-Write-Log ("Agent started: {0}, serial {1}, agent id {2}, checks in to {3} every {4} min; {5}" -f $env:COMPUTERNAME, $identity.serial, $state.agentId, $statusFolder, $every,
+Write-Log ("Agent started: {0}, serial {1}, agent id {2}, checks in to {3} every {4} s; {5}" -f $env:COMPUTERNAME, $identity.serial, $state.agentId, $statusFolder, $every,
     $(if ($keys) { "takes jobs signed by console key $(@($keys | ForEach-Object { Get-AgentKeyId $_ }) -join ', ')" } else { 'no console key: takes no jobs' }))
 if (-not (Test-UsableSerial $identity.serial)) { Write-Log "The BIOS serial '$($identity.serial)' is not unique to this PC: the agent can't check in. It stops."; exit 1 }
 
@@ -156,17 +158,8 @@ function Send-CheckIn {
     $free = try { [int64](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop).FreeSpace } catch { $null }
     $deploy = if ($config.PSObject.Properties['deploy']) { $config.deploy } else { $null }
     $script:lastCheckIn = Get-Date
-    # BitLocker again while the result says it is off: a FIRSTLOGON task may have turned it on after first boot.
-    try {
-        $bl = Sync-AgentBitLockerCheck -StatusFolder $statusFolder -Serial $identity.serial
-        if ($bl) { Write-Log "BitLocker is on now ($($bl.detail)): deploy result and Dashboard updated" }
-    } catch {
-        $m = "Could not update the BitLocker result: $($_.Exception.Message)"
-        if ($script:lastBitLockerError -ne $m) { Write-Log $m }
-        $script:lastBitLockerError = $m
-    }
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
-    $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInMinutes $every `
+    $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInSeconds $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
         -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -ErrorAction Stop
     } catch {
@@ -259,9 +252,26 @@ function Invoke-UpdateJob($Job, [string]$JobDir) {
     }
 }
 
+$script:lastSlowRound = [datetime]::MinValue
+function Invoke-SlowRound {
+    # Every 5 minutes, not at each check-in (every 30 s): the BitLocker check and the failed apps.
+    if (((Get-Date) - $script:lastSlowRound).TotalMinutes -lt 5) { return }
+    $script:lastSlowRound = Get-Date
+    # BitLocker again while the result says it is off: a FIRSTLOGON task may have turned it on after first boot.
+    try {
+        $bl = Sync-AgentBitLockerCheck -StatusFolder $statusFolder -Serial $identity.serial
+        if ($bl) { Write-Log "BitLocker is on now ($($bl.detail)): deploy result and Dashboard updated"; Send-CheckIn }
+    } catch {
+        $m = "Could not update the BitLocker result: $($_.Exception.Message)"
+        if ($script:lastBitLockerError -ne $m) { Write-Log $m }
+        $script:lastBitLockerError = $m
+    }
+    Invoke-FailedAppsRetry
+}
+
 function Invoke-FailedAppsRetry {
     # The applications that failed at first boot (C:\ProgramData\ImagingTool\RetryApps): installed again an hour
-    # after first boot, then hourly, up to 3 tries. Skipped while another install runs (it is tried at the next check-in).
+    # after first boot, then hourly, up to 3 tries. Skipped while another install runs (it is tried 5 minutes later).
     $r = Invoke-AppRetryPlan -By 'the agent' -WaitMinutes 0 -MinMinutes 60 -Log { param($m) Write-Log $m } `
         -OnResults { param($Plan, $Results) Publish-AppRetryResults -Plan $Plan -Results $Results -By 'the agent' -Log { param($m) Write-Log $m } }
     if ($r.Ran) { Send-CheckIn }
@@ -275,7 +285,7 @@ function Invoke-AgentJob {
     $why = Test-AgentJob -Job $job -PublicKeys $keys -Identity $ident -DoneIds @($state.doneJobs)
     $jobDir = Get-AgentJobFolder -StatusFolder $statusFolder -Serial $identity.serial
     if ($why) {
-        # Refused once: the job file goes, so it is not read every minute. The console sees why in the check-in.
+        # Refused once: the job file goes, so it is not read every 5 seconds. The console sees why in the check-in.
         Write-Log "Job $($job.id) ($($job.action)) refused: $why"
         Remove-AgentJob -StatusFolder $statusFolder -Serial $identity.serial -JobFileOnly
         Set-JobState $job 'Refused' $why
@@ -313,7 +323,9 @@ try {
     while ($true) {
         # One bad round is logged (once while it repeats) and the agent carries on: it must never stop by itself.
         try {
-            if (((Get-Date) - $script:lastCheckIn).TotalMinutes -ge $every) { Send-CheckIn; Invoke-FailedAppsRetry }
+            # A job is looked for every 5 seconds (one small file check on the share), so it starts within seconds.
+            if (((Get-Date) - $script:lastCheckIn).TotalSeconds -ge $every) { Send-CheckIn }
+            Invoke-SlowRound
             Invoke-AgentJob
             if ($script:restart) { Write-Log 'The agent stops for its update; the new one starts in a few seconds.'; break }
         } catch {
@@ -322,7 +334,7 @@ try {
             $script:lastLoopError = $m
         }
         if ($Once) { break }
-        Start-Sleep -Seconds 60
+        Start-Sleep -Seconds 5
     }
 } catch {
     Write-Log "The agent stopped: $($_.Exception.Message)"
