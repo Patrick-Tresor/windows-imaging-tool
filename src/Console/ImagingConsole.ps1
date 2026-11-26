@@ -326,6 +326,7 @@ function Update-Settings {
     $get = { param($name, $default) if ($c.PSObject.Properties[$name] -and "$($c.$name)" -ne '') { $c.$name } else { $default } }
     $ui.TxtCheckIgnore.Text = @(& $get 'ignoreDevices' @()) -join '; '
     $ui.TxtAdServer.Text = "$((Get-AdSettings).server)"
+    $ui.TxtSupportUrl.Text = (Get-RemoteSupportSettings $s).Url
     Update-SettingsState
 }
 
@@ -415,6 +416,32 @@ function Send-AgentUpdates([object[]]$CheckIns) {
                 $null = New-AgentJob -StatusFolder $folder -PrivateKey $key -CheckIn $a -Action update -SourceDir $srcDir -Message 'Agent update'
                 Set-Status "Sent $($a.computerName) the new agent ($script:agentCode)."
             } catch { Set-Status "Could not send $($a.computerName) the new agent: $($_.Exception.Message)" }
+        }
+    } catch { }
+    Send-RemoteSupportInstalls $CheckIns
+}
+
+# Remote support (MeshCentral): agent PCs without the MeshCentral agent get its app pack as a quiet signed job, once per
+# PC while the console runs, when remote support is set up (Deploy Settings) and the pack is in Applications.
+$script:supportInstallsSent = @{}
+function Send-RemoteSupportInstalls([object[]]$CheckIns) {
+    try {
+        if (-not (Test-ContentRoot $script:root)) { return }
+        $rs = Get-RemoteSupportSettings (Get-DeploySettings -ContentRoot $script:root)
+        $appRoot = Join-Path $script:root 'Applications'
+        if (-not $rs.Url -or -not (Test-Path -LiteralPath (Join-Path $appRoot $rs.AppPack))) { return }
+        $todo = @(Select-RemoteSupportInstalls -CheckIns @($CheckIns) -CurrentCode $script:agentCode -Sent $script:supportInstallsSent)
+        if (-not $todo) { return }
+        $folder = Get-DashboardFolder
+        $key = Get-AgentSigningKey -ContentRoot $script:root
+        if (-not $folder -or -not $key) { return }
+        foreach ($a in $todo) {
+            if ([IO.File]::Exists([IO.Path]::Combine((Get-AgentJobFolder -StatusFolder $folder -Serial "$($a.serial)"), 'job.json'))) { continue }
+            $script:supportInstallsSent["$($a.serial)"] = $true
+            try {
+                $null = New-AgentJob -StatusFolder $folder -PrivateKey $key -CheckIn $a -Action installapps -Apps @($rs.AppPack) -AppRoot $appRoot -Quiet -Message 'IT is installing remote support on this PC.'
+                Set-Status "Sent $($a.computerName) the remote support agent."
+            } catch { Set-Status "Could not send $($a.computerName) the remote support agent: $($_.Exception.Message)" }
         }
     } catch { }
 }
@@ -520,7 +547,6 @@ function Update-DashboardDetail {
     $live = $r -and -not $history
     $ui.BtnDashLog.IsEnabled = [bool]($r -and $r.LogPath)
     $ui.BtnDashReimage.IsEnabled = [bool]($live -and $r.ComputerName -and $r.State -ne 'Running')
-    $ui.BtnDashRdp.IsEnabled = [bool]($live -and $r.ComputerName)
     $ui.BtnDashSupport.IsEnabled = [bool]($live -and $r.ComputerName)
     $failed = @(if ($live) { Get-FailedApps -Row $r })
     $ui.BtnDashRetry.IsEnabled = [bool]($failed -and $r.State -notin 'Running', 'Stalled')
@@ -1208,7 +1234,7 @@ function Update-AgentInstaller {
         $cfg = if ($settings -and $settings.PSObject.Properties['agent']) { $settings.agent } else { $null }
         if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { return }
         $key = Get-AgentPublicKey -ContentRoot $script:root -Create
-        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInSeconds (Get-AgentCheckInSeconds $settings) -RemoteDesktop (Test-AgentRemoteDesktopOn $settings) `
+        $config = New-AgentConfig -StatusFolder $statusFolder -PublicKeys @($key) -CheckInSeconds (Get-AgentCheckInSeconds $settings) `
             -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
         $folder = Publish-AgentInstaller -Folder "$($share.TrimEnd('\'))\Agent" -SourceDir $srcDir -Config $config
         $ui.BtnAdAgent.ToolTip = "Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. " +
@@ -1425,69 +1451,48 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     Start-PendingReimage
 } })
 
-function Open-RemoteDesktop {
-    # mstsc to each PC (5 at most), by its DNS name when DNS agrees with its agent, else the IP its agent reported.
-    # A PC whose agent says Remote Desktop is off, or that has no agent checking in, asks first.
-    param([object[]]$Pcs)   # { Name, Agent (check-in or $null), Check (network check or $null) }
-    $Pcs = @($Pcs | Where-Object { $_ -and $_.Name } | Select-Object -First 5)
-    if (-not $Pcs) { return }
-    $problems = @($Pcs | ForEach-Object { Get-RemoteDesktopProblem -ComputerName $_.Name -Agent $_.Agent } | Where-Object { $_ })
-    if ($problems -and -not (Confirm-Action "$($problems -join "`n")`n`nOpen Remote Desktop anyway?")) { return }
-    $opened = @()
-    foreach ($pc in $Pcs) {
-        $target = Get-RemoteDesktopTarget -Name $pc.Name -Agent $pc.Agent -Check $pc.Check
-        if (-not $target) { continue }
-        Start-Process -FilePath "$env:WINDIR\System32\mstsc.exe" -ArgumentList "/v:$target"
-        $opened += $(if ($target -eq $pc.Name) { $target } else { "$($pc.Name) ($target)" })
-    }
-    if ($opened) { Set-Status "Remote Desktop opened to $($opened -join ', ')." }
-}
-
-function Start-RemoteSupport {
-    # Joins the signed-in user's own screen (mstsc /shadow /control): Windows asks them to allow it first.
-    param($Pc)   # { Name, Agent, Check }
-    if (-not $Pc -or -not $Pc.Name) { return }
-    $target = Get-RemoteDesktopTarget -Name $Pc.Name -Agent $Pc.Agent -Check $Pc.Check
-    $plan = Get-RemoteSupportPlan -ComputerName $Pc.Name -Agent $Pc.Agent -Target $target
-    if ($plan.Problem) { Show-Error $plan.Problem; return }
-    if ($plan.Ask -and -not (Confirm-Action $plan.Ask)) { return }
-    Start-Process -FilePath "$env:WINDIR\System32\mstsc.exe" -ArgumentList $plan.Args
-    Set-Status "Remote support: asking $($Pc.Agent.userSignedIn) on $($Pc.Name) to allow it. Their screen opens here once they click Yes."
-}
-
-function Get-AdRemoteDesktopPcs {
-    $checkIns = @(Get-ConsoleAgentCheckIns)
-    @($ui.GridAd.SelectedItems | ForEach-Object {
-        [pscustomobject]@{
-            Name  = "$($_.Name)"
-            Agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
-            Check = $(if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] } else { $null })
+function Start-RemoteSupport([string]$Name, $Agent) {
+    # Opens the PC's screen on the MeshCentral server in the browser; the person at the PC is asked to allow it (the
+    # device group's consent settings). A PC whose agent says the MeshCentral agent is missing gets it first.
+    if (-not $Name -or -not (Test-RootReady)) { return }
+    $rs = Get-RemoteSupportSettings (Get-DeploySettings -ContentRoot $script:root)
+    $link = Get-RemoteSupportLink -ServerUrl $rs.Url -ComputerName $Name -Agent $Agent
+    if ($link.Install) {
+        $appRoot = Join-Path $script:root 'Applications'
+        if (-not (Test-Path -LiteralPath (Join-Path $appRoot $rs.AppPack))) {
+            Show-Error "$($link.Problem) Put the MeshCentral agent installer in Applications\$($rs.AppPack) (Applications tab, New..., template MeshCentral-Agent)."; return
         }
-    })
+        $key = Get-AgentSigningKey -ContentRoot $script:root
+        if (-not $key) { Show-Error 'This content root has no agent key (config\secrets\agent-key.xml): the PCs would not trust the job.'; return }
+        $null = New-AgentJob -StatusFolder (Get-DashboardFolder) -PrivateKey $key -CheckIn $Agent -Action installapps -Apps @($rs.AppPack) -AppRoot $appRoot -Quiet -Message 'IT is installing remote support on this PC.'
+        $script:supportInstallsSent["$($Agent.serial)"] = $true
+        $script:agentCache = $null
+        Set-Status "Installing the remote support agent on $Name. Click Remote support again in a minute or two."
+        return
+    }
+    if ($link.Problem) { Show-Error $link.Problem; return }
+    Start-Process $link.Url
+    Set-Status "Remote support: opening $Name on $($rs.Url). The person at the PC is asked to allow it."
 }
 
-$ui.BtnAdRdp.Add_Click({ Invoke-Safely {
-    if (-not $ui.GridAd.SelectedItems.Count) { Show-Error 'Select the PC to open Remote Desktop to.'; return }
-    Open-RemoteDesktop (Get-AdRemoteDesktopPcs)
-} })
-$ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridAd.SelectedItem) { Start-RemoteSupport (Get-AdRemoteDesktopPcs | Select-Object -First 1) } } })
+function Get-AdSupportPc {
+    $row = $ui.GridAd.SelectedItem
+    if (-not $row) { return $null }
+    [pscustomobject]@{ Name = "$($row.Name)"; Agent = Find-AgentCheckIn -CheckIns @(Get-ConsoleAgentCheckIns) -ComputerName $row.Name }
+}
+
 $ui.BtnAdSupport.Add_Click({ Invoke-Safely {
     if ($ui.GridAd.SelectedItems.Count -ne 1) { Show-Error 'Select one PC for remote support.'; return }
-    Start-RemoteSupport (Get-AdRemoteDesktopPcs | Select-Object -First 1)
+    $pc = Get-AdSupportPc; Start-RemoteSupport $pc.Name $pc.Agent
 } })
+$ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { $pc = Get-AdSupportPc; if ($pc) { Start-RemoteSupport $pc.Name $pc.Agent } } })
 $ui.BtnDashSupport.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem
     if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
     $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
-    Start-RemoteSupport ([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
+    Start-RemoteSupport "$($r.ComputerName)".ToUpperInvariant() $agent
 } })
 
-$ui.BtnDashRdp.Add_Click({ Invoke-Safely {
-    $r = $ui.GridDash.SelectedItem
-    if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
-    $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
-    Open-RemoteDesktop @([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
-} })
 
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1526,7 +1531,6 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
     Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = ''; local = $false; credentialFile = '' } })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Install-RemoteAgent.ps1"),
         '-ContentRoot', (ConvertTo-Arg $script:root), '-StatusFolder', (ConvertTo-Arg $statusFolder), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    if (-not (Test-AgentRemoteDesktopOn (Get-DeploySettings -ContentRoot $script:root))) { $runArgs += '-NoRemoteDesktop' }
     $cred = Get-AdCredential
     if ($cred) {
         $credFile = Join-Path $env:TEMP "agent-$stamp-$tag-cred.xml"
@@ -1649,6 +1653,8 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $problems = @(Get-DeploySettingsProblems -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
         -PasswordSaved $script:sharePwSaved -NewPassword $ui.PwdShare.Password)
+    $urlProblem = Test-RemoteSupportUrl $ui.TxtSupportUrl.Text
+    if ($urlProblem) { $problems = @($problems) + $urlProblem }
     if ($problems) { $ui.TxtSettingsProblem.Text = $problems[0]; Set-Status "Not saved: $($problems[0])"; return }
     $ui.TxtSettingsProblem.Text = ''
     $r = Save-DeploySettingsPage -ContentRoot $script:root -SharePath $ui.TxtSharePath.Text -ShareUser $ui.TxtShareUser.Text `
@@ -1659,6 +1665,8 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
         ignoreDevices = @($ui.TxtCheckIgnore.Text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
+    $support = [pscustomobject]@{ url = "$($ui.TxtSupportUrl.Text)".Trim().TrimEnd('/'); appPack = (Get-RemoteSupportSettings $s).AppPack }
+    $s | Add-Member -NotePropertyName remoteSupport -NotePropertyValue $support -Force
     Save-DeploySettings -ContentRoot $script:root -Settings $s
     # The domain controller is this console's own (console.json). The Computers tab's next Search uses this account
     # and domain controller.

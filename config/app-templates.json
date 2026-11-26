@@ -192,6 +192,33 @@
       "timeoutMinutes": 15,
       "verify": true,
       "notes": "Generic softphone entry: the builder suggests switches from the installer type. Set the detection name to the product's name in Programs and Features."
+    },
+    {
+      "name": "MeshCentral-Agent",
+      "aliases": [
+        "MeshCentral",
+        "Mesh Agent",
+        "Remote support"
+      ],
+      "match": [
+        "meshagent*.exe"
+      ],
+      "displayName": "MeshCentral agent (remote support)",
+      "publisher": "MeshCentral",
+      "installerType": "exe",
+      "command": "\"{installer}\" -fullinstall",
+      "detection": {
+        "match": "any",
+        "rules": [
+          {
+            "type": "file",
+            "target": "%ProgramFiles%\\Mesh Agent\\MeshAgent.exe"
+          }
+        ]
+      },
+      "timeoutMinutes": 10,
+      "verify": false,
+      "notes": "Remote support. On your MeshCentral server, open the device group, Add Agent, Windows, and download the Windows x64 executable: it already knows your server and group. The console sends it to every PC with the imaging agent; add it to an answer file to install it at first boot too."
     }
   ]
 }

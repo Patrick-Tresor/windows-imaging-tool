@@ -19,7 +19,6 @@ param(
     [string[]]$Computers,
     [string]$CredentialFile,        # Export-Clixml of a PSCredential (only this user can read it); deleted once read
     [int]$CheckInSeconds = 30,
-    [switch]$NoRemoteDesktop,                       # deploy-settings agent.remoteDesktop false: the agent leaves Remote Desktop as it is
     [int]$WaitMinutes = 3,
     [string]$ProgressFile,
     [string]$LogPath
@@ -75,7 +74,7 @@ try {
                 $ch = Open-RemoteChannel -ComputerName $check.Address -Credential $credential -Method 'Smb'
             }
             Set-BuildStepProgress $p.Id -Percent 30 -Detail 'Copying the agent'
-            $config = New-AgentConfig -StatusFolder $StatusFolder -PublicKeys @($publicKey) -CheckInSeconds $CheckInSeconds -RemoteDesktop (-not $NoRemoteDesktop) `
+            $config = New-AgentConfig -StatusFolder $StatusFolder -PublicKeys @($publicKey) -CheckInSeconds $CheckInSeconds `
                 -Deploy ([pscustomobject]@{ answerFile = ''; image = ''; toolVersion = ''; deployedAt = '' })
             Install-AgentOnRemotePC -Channel $ch -SourceDir $PSScriptRoot -Config $config
             Write-Host "$($p.Name): agent installed over $($ch.Method); waiting for its first check-in"
