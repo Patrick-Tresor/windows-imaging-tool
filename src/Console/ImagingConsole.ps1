@@ -132,7 +132,6 @@ $ui = $form.Controls
 $script:toolVersion = Get-ToolVersion -SourceRoot $srcDir
 $ui.TxtToolVersion.Text = if ($script:toolVersion.Release) { $script:toolVersion.Release } else { "version $($script:toolVersion.Text)" }
 $script:stickOldHidden = ''
-$script:bootOldMsg = $null
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
@@ -253,13 +252,17 @@ $script:scanTimer.Interval = [timespan]::FromSeconds(1)
 $script:scanTimer.Add_Tick({ try { Complete-ScanExclusions } catch { $script:scanTimer.Stop(); $script:scanRun = $null; Set-Status "Defender exclusions: $($_.Exception.Message)" } })
 
 function Update-MediaPacks {
-    # The Media tab's driver pack list: keeps what was unchecked, checks packs that are new since last time.
+    # The Media tab's driver pack list: keeps what was checked or unchecked by hand; a pack that is new since last
+    # time is checked when a PC you have uses it (the Dashboard's deployments and the agents' check-ins,
+    # Get-FleetDriverPackPaths), or always when no PC is known yet.
     $old = @{}
     foreach ($i in @($ui.LstMediaPacks.Items)) { $old[$i.Path] = $ui.LstMediaPacks.SelectedItems.Contains($i) }
     $packs = @(if (Test-ContentRoot $script:root) { Get-MediaDriverPacks -ContentRoot $script:root })
+    $fleet = @(if ($packs) { try { Get-FleetDriverPackPaths -ContentRoot $script:root -StatusFolder (Get-DashboardFolder) } catch { } })
     $ui.LstMediaPacks.ItemsSource = $packs
     foreach ($p in $packs) {
-        if (-not $old.ContainsKey($p.Path) -or $old[$p.Path]) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
+        $want = if ($old.ContainsKey($p.Path)) { $old[$p.Path] } else { -not $fleet -or $p.Path -in $fleet }
+        if ($want) { [void]$ui.LstMediaPacks.SelectedItems.Add($p) }
     }
     Update-MediaPackTotal
 }
@@ -299,12 +302,13 @@ function Update-Drivers {
     }
     $ui.GridDrivers.ItemsSource = $script:drivers
     Update-MediaPacks
-    # Models deployed without their driver pack, above the library; hidden when every deployed PC got its pack.
+    # Models deployed (or checking in through the agent) without their driver pack, above the library; hidden when
+    # every PC has its pack.
     $unknown = @()
     if (Test-ContentRoot $script:root) { try { $unknown = @(Get-UnknownModels -ContentRoot $script:root) } catch { } }
     $ui.GridUnknown.ItemsSource = $unknown
     $pcs = ($unknown | Measure-Object PCs -Sum).Sum
-    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) deployed without their driver pack. Select one and click Find its pack, then Download."
+    $ui.TxtUnknown.Text = "$($unknown.Count) model(s) on $pcs PC(s) without their driver pack (deployed, or checking in through the agent). Select one and click Find its pack, then Download."
     $ui.BdrUnknown.Visibility = if ($unknown) { 'Visible' } else { 'Collapsed' }
 }
 
@@ -524,7 +528,8 @@ function Update-DashboardDetail {
         if ($r.Warnings) { $lines += [pscustomobject]@{ Item = 'Warnings'; Result = 'Warning'; Detail = "$($r.Warnings)" } }
         if (-not $lines) { $lines = @([pscustomobject]@{ Item = 'Progress'; Result = 'Info'; Detail = "$($r.StatusText) ($($r.Percent) %)" }) }
         $ui.LstDashChecks.ItemsSource = $lines
-        Set-DashboardLogVisible ([bool]$ui.ChkDashLog.IsChecked)
+        # The details only; the whole log opens with Open log (History shows the final log here).
+        Set-DashboardLogVisible $false
     }
     if ($ui.TxtDashLog.Visibility -eq 'Visible') {
         $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
@@ -647,23 +652,14 @@ function Update-UsbMode {
 function Update-StickVersionBanner {
     # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
     # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
-    # The network boot image gets the same banner, with a Rebuild button (checked on refresh, not on the timer).
-    $stick = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
-    $msg = (@($stick, $script:bootOldMsg) | Where-Object { $_ }) -join ' '
+    # (An older network boot image needs no banner: Reimage rebuilds it first.)
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
-        $ui.BtnStickOldUpdate.Visibility = if ($stick) { 'Visible' } else { 'Collapsed' }
-        $ui.BtnBootOldRebuild.Visibility = if ($script:bootOldMsg) { 'Visible' } else { 'Collapsed' }
         $ui.BdrStickOld.Visibility = 'Visible'
     } else {
         $ui.BdrStickOld.Visibility = 'Collapsed'
     }
-}
-
-function Update-BootVersionBanner {
-    # Is <content root>\Boot\boot.wim older than this console? Then the banner says so (Update-StickVersionBanner).
-    $script:bootOldMsg = if ($script:root) { try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null } }
-    Update-StickVersionBanner
 }
 
 function Select-StickForUpdate {
@@ -710,7 +706,6 @@ function Update-AdkStatus {
 function Update-All {
     $ui.TxtRoot.Text = $script:root
     Update-Answers; Update-Images; Update-Library; Update-Drivers; Update-Settings; Update-Computers; Update-Dashboard
-    try { Update-BootVersionBanner } catch { }
     Set-Status $(if (Test-ContentRoot $script:root) { "Loaded $($script:root)" } else { 'Choose a content root to start' })
 }
 
@@ -1098,12 +1093,26 @@ function Get-ReimageShare {
     "$((Get-DeploySettings -ContentRoot $script:root).share.path)".Trim()
 }
 
+function Get-NetworkBootRebuild {
+    # Why Reimage must build the network boot image first, or $null when it is ready (Get-NetworkBootRebuildReason).
+    $stale = try { Get-StaleBootImageMessage -Console $script:toolVersion -ContentRoot $script:root } catch { $null }
+    $boot = Get-NetworkBootImage -ContentRoot $script:root
+    $settingsFile = Join-Path $script:root 'config\deploy-settings.json'
+    $newer = $boot.Exists -and (Test-Path -LiteralPath $settingsFile) -and
+        (Get-Item -LiteralPath $settingsFile).LastWriteTime -gt (Get-Item -LiteralPath $boot.Path).LastWriteTime
+    Get-NetworkBootRebuildReason -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot -Stale "$stale" -SettingsNewer:$newer
+}
+
 function Update-AdBootStatus {
     if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
     $boot = Get-NetworkBootImage -ContentRoot $script:root
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] } else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
-    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } else { 'SuccessBrush' }))
+    $rebuild = if (-not $problems) { Get-NetworkBootRebuild }
+    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] }
+        elseif ($script:bootBuilding) { 'Building the network boot image (Progress window); the reimage starts when it is done.' }
+        elseif ($rebuild) { "Network boot image: $rebuild. Reimage builds it first (a few minutes)." }
+        else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
+    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } elseif ($rebuild -or $script:bootBuilding) { 'MutedBrush' } else { 'SuccessBrush' }))
 }
 
 function Show-AdRows {
@@ -1114,24 +1123,19 @@ function Show-AdRows {
     }
     $checkIns = @(if ($script:adRows) { Get-ConsoleAgentCheckIns })
     Send-AgentUpdates $checkIns
-    # Keep the selected PCs selected when Online fills in.
+    # Keep the selected PCs selected when the Agent column fills in.
     $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
     $ui.GridAd.ItemsSource = @($script:adRows | ForEach-Object {
         $check = if ($script:adOnline.ContainsKey($_.Address)) { $script:adOnline[$_.Address] }
         $agent = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name
-        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode
-        $online = if (-not $check -and $script:adCheck -and $view.Online -ne 'Agent') { 'Checking...' } else { $view.Online }
-        $_ | Add-Member -NotePropertyName Online -NotePropertyValue $online -Force
+        $view = Get-AgentRowView -Check $check -Agent $agent -Name $_.Name -CurrentCode $script:agentCode -Checking:([bool]$script:adCheck)
         # The address the online check reached; when the network check got no way in, the one the PC's agent reported
         # lately (the PC's own word, DNS can be old); a PC found by IP shows that IP.
         $agentIp = if ($agent -and $agent.Online -and $agent.ipAddress) { "$($agent.ipAddress)" } else { '' }
         $ip = if ($check -and $check.Ip -and ($check.Online -or -not $agentIp)) { $check.Ip } elseif ($agentIp) { $agentIp } elseif ($check -and $check.Ip) { $check.Ip } elseif ($_.Address -match '^\d+(\.\d+){3}$') { $_.Address } else { '' }
         $_ | Add-Member -NotePropertyName IpAddress -NotePropertyValue $ip -Force
-        $_ | Add-Member -NotePropertyName OnlineDetail -NotePropertyValue $view.OnlineDetail -Force
         $_ | Add-Member -NotePropertyName Agent -NotePropertyValue $view.Agent -Force
         $_ | Add-Member -NotePropertyName AgentDetail -NotePropertyValue $view.AgentDetail -Force
-        $_ | Add-Member -NotePropertyName AgentVersion -NotePropertyValue $view.AgentVersion -Force
-        $_ | Add-Member -NotePropertyName AgentVersionDetail -NotePropertyValue $view.AgentVersionDetail -Force
         $_ | Add-Member -NotePropertyName HasAgent -NotePropertyValue ([bool]($agent -and $agent.Online)) -Force
         $_ | Add-Member -NotePropertyName Reimage -NotePropertyValue $(if ($states.ContainsKey($_.Name)) { $states[$_.Name] } else { '' }) -Force -PassThru
     })
@@ -1204,7 +1208,7 @@ function Search-AdComputers {
             foreach ($r in $found) { $r.Address = $find.Ip }
         }
         $script:adRows = $found
-        # The list shows now; Online fills in when the check in the background is done (Patrick, 2026-11-25: the
+        # The list shows now; the Agent column of PCs with no agent fills in when the check in the background is done (Patrick, 2026-11-25: the
         # tab waited for every PC's network check before it showed anything).
         Start-AdOnlineCheck -Note $localNote
     } finally { $window.Cursor = $null }
@@ -1250,7 +1254,7 @@ function Start-AdOnlineCheck {
 }
 
 function Complete-AdOnlineCheck {
-    # Timer tick: when the background check is done, its answer fills Online and IP address.
+    # Timer tick: when the background check is done, its answer fills the Agent column (PCs with no agent) and IP address.
     $c = $script:adCheck
     if (-not $c) { $script:adCheckTimer.Stop(); return }
     if (-not $c.Handle.IsCompleted) { return }
@@ -1274,9 +1278,9 @@ function Complete-AdOnlineCheck {
 }
 
 function Get-AdOnlineSummary {
-    # One line: how many answer on PowerShell remoting, and what to do about the first one that does not.
-    Get-OnlineSummaryText -Rows @($script:adRows | Where-Object { $script:adOnline[$_.Address] } | ForEach-Object {
-        [pscustomobject]@{ Name = $_.Name; State = $script:adOnline[$_.Address].State } })
+    # One line: how many can be reimaged (their agent checks in), and what to do about the first one that can't.
+    Get-OnlineSummaryText -Rows @($script:adRows | Where-Object { $script:adOnline[$_.Address] -or $_.HasAgent } | ForEach-Object {
+        [pscustomobject]@{ Name = $_.Name; State = $(if ($script:adOnline[$_.Address]) { $script:adOnline[$_.Address].State } else { '' }); HasAgent = [bool]$_.HasAgent } })
 }
 
 function Invoke-AdAutoConnect {
@@ -1294,20 +1298,39 @@ function Invoke-AdAutoConnect {
 $ui.BtnAdSearch.Add_Click({ Invoke-Safely { Search-AdComputers } })
 $ui.TxtAdName.Add_KeyDown({ param($sender, $e) if ($e.Key -eq 'Return') { Invoke-Safely { Search-AdComputers } } })
 
-$ui.BtnAdBuildBoot.Add_Click({ Invoke-Safely {
-    if (-not (Test-RootReady)) { return }
+function Start-NetworkBootBuild {
+    # Builds the network boot image, then starts the reimage waiting in $script:pendingReimage. Reimage calls it when
+    # the image is missing, maps another share or is older than the tool (there is no button for it).
     $adk = Update-AdkStatus
-    if (-not $adk.Ready) { Show-Error ("Can't build media on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return }
-    if (-not (Get-ReimageShare)) { Show-Error 'Set Network share on the Deploy Settings tab first: WinPE loads the image from there.'; return }
+    if (-not $adk.Ready) { Show-Error ("Can't build the network boot image on this PC yet:`n`n" + ($adk.Problems -join "`n`n")); return $false }
     $out = Join-Path $script:root 'Boot'
     New-Item -ItemType Directory -Path $out -Force | Out-Null
     # No WinPE password: nobody is at the PCs to type it. The share password goes in encrypted with the answer file key.
     $buildArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (ConvertTo-Arg "$srcDir\New-DeploymentMedia.ps1"),
         '-SettingsPath', (ConvertTo-Arg (Join-Path $script:root 'config\deploy-settings.json')), '-Target', 'Wim', '-OutputPath', (ConvertTo-Arg $out))
     $job = Start-ConsoleJob -Name 'network-boot' -ArgumentList $buildArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished { try { Update-AdBootStatus; Update-BootVersionBanner } catch { } }
-    Set-Status 'Network boot image build started.'
-} })
+    $script:bootBuilding = $true
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished {
+        $script:bootBuilding = $false
+        try { Update-AdBootStatus } catch { }
+        Invoke-Safely { Start-PendingReimage }
+    }
+    Set-Status 'Building the network boot image first; the reimage starts when it is done.'
+    $true
+}
+
+function Start-PendingReimage {
+    # The reimage prepared by Reimage..., once the network boot image is ready.
+    $p = $script:pendingReimage
+    $script:pendingReimage = $null
+    if (-not $p) { return }
+    $why = Get-NetworkBootRebuild
+    if ($why) { Show-Error "The reimage did not start: the network boot image build did not finish ($why). Its log is in the Progress window."; return }
+    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $p.RunArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title $p.Title `
+        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
+    Set-Status "Reimage of $($p.Count) PC(s) started. Each deploy then shows on the Dashboard."
+}
 
 $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1317,59 +1340,45 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not $answer) { Show-Error 'Choose the answer file to deploy.'; return }
     $self = @($rows | Where-Object { $_.Name -eq "$env:COMPUTERNAME".ToUpperInvariant() })
     if ($self) { Show-Error "$($self[0].Name) is this PC, the one running the console: reimage it from the USB stick."; return }
-    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot (Get-NetworkBootImage -ContentRoot $script:root))
+    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root))
     if ($problems) { Show-Error $problems[0]; return }
+    if ($script:bootBuilding -or $script:pendingReimage) { Show-Error 'A reimage is already waiting for the network boot image build. Try again when it has started.'; return }
+    $rebuild = Get-NetworkBootRebuild
     $share = Get-ReimageShare
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
     }
-    $off = @($rows | Where-Object { -not $_.HasAgent -and $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address].Online })
+    # Reimage goes through each PC's agent only: a PC without one gets it with Install agent first.
+    $noAgent = @($rows | Where-Object { -not $_.HasAgent })
+    if ($noAgent) {
+        $names = (@($noAgent | Select-Object -First 5 | ForEach-Object Name) -join ', ') + $(if ($noAgent.Count -gt 5) { ', ...' })
+        Show-Error "No agent checking in from $names. Select it and click Install agent (or turn it on), then Reimage. A PC outside the domain is reimaged from the USB stick."; return
+    }
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
-    if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
+    if ($rebuild) { $text += "`n`nThe network boot image is built first ($rebuild), which takes a few minutes." }
     if (-not (Confirm-Action $text)) { return }
 
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    # PCs outside the domain sign in with their own local administrator account, asked for each one. For the hidden
-    # process each goes in a file protected with this Windows account (DPAPI), deleted as soon as it is read.
-    $localCreds = @{}
-    $n = 0
-    foreach ($r in @($rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })) {
-        $c = Get-Credential -UserName 'Administrator' -Message ("Local administrator account on $($r.Name) ($($r.Address)), which is not in the domain. " +
-            'Its built-in Administrator works; another local admin account needs remote admin allowed on that PC.')
-        if (-not $c) { Set-Status 'Reimage cancelled: no account given.'; return }
-        $c = [pscredential]::new((ConvertTo-LocalAccountName -User $c.UserName -Computer $r.Address), $c.Password)
-        $f = Join-Path $env:TEMP "reimage-$stamp-$tag-local$n.xml"; $n++
-        $c | Export-Clixml -Path $f
-        $localCreds[$r.Address] = $f
-    }
-    # Also for PCs with an agent: the network is the way in when the agent does not take its job.
-    $cred = if (@($rows | Where-Object { -not $localCreds.ContainsKey($_.Address) })) { Get-AdCredential } else { $null }
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
-    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object {
-        $local = $localCreds.ContainsKey($_.Address)
-        [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU; local = $local; credentialFile = $(if ($local) { $localCreds[$_.Address] } else { '' }) }
-    })
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    # PCs with an agent go through it: it checks in to the Dashboard's folder, and jobs are signed with this content
+    # Each PC's agent takes the job: it checks in to the Dashboard's folder, and jobs are signed with this content
     # root's key.
     $statusFolder = Get-DashboardFolder
     if ($statusFolder) { $runArgs += @('-StatusFolder', (ConvertTo-Arg $statusFolder), '-KeyRoot', (ConvertTo-Arg $script:root)) }
     # Each PC keeps its name and joins back into the OU it is in now.
     $runArgs += @('-KeepNames', '-KeepOU')
-    if ($cred) {
-        # For the hidden process: protected with this Windows account (DPAPI), deleted as soon as it is read.
-        $credFile = Join-Path $env:TEMP "reimage-$stamp-$tag-cred.xml"
-        $cred | Export-Clixml -Path $credFile
-        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
+    $script:pendingReimage = @{ RunArgs = $runArgs; Count = $rows.Count; Title = "Reimaging $($rows.Count) PC(s) with $answer" }
+    if ($rebuild) {
+        if (-not (Start-NetworkBootBuild)) { $script:pendingReimage = $null }
+        Update-AdBootStatus
+        return
     }
-    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $runArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Reimaging $($rows.Count) PC(s) with $answer" `
-        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
-    Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard."
+    Start-PendingReimage
 } })
 
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
@@ -1426,8 +1435,6 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
 #region Media
 
 $ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
-$ui.BtnMediaPacksAll.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.SelectAll() } })
-$ui.BtnMediaPacksNone.Add_Click({ Invoke-Safely { $ui.LstMediaPacks.UnselectAll() } })
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
 $ui.PwdWinPE.Add_PasswordChanged({ Update-WinPEPasswordAgain })
@@ -1562,7 +1569,6 @@ foreach ($card in $ui.CardDashRunning, $ui.CardDashSucceeded, $ui.CardDashWarnin
     $card.Add_MouseLeftButtonUp({ param($sender, $e) Invoke-Safely { $script:dashFilter = "$($sender.Tag)"; Update-Dashboard } })
 }
 $ui.BtnDashHistory.Add_Click({ Invoke-Safely { $script:dashFilter = 'History'; Update-Dashboard } })
-$ui.ChkDashLog.Add_Click({ Invoke-Safely { Update-DashboardDetail } })
 
 $ui.BtnDashLog.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem
@@ -1684,7 +1690,6 @@ $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
 $ui.BtnStickOldUpdate.Add_Click({ Invoke-Safely { Select-StickForUpdate } })
-$ui.BtnBootOldRebuild.Add_Click({ $ui.BtnAdBuildBoot.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) })
 $ui.BtnStickOldHide.Add_Click({ $script:stickOldHidden = $ui.TxtStickOld.Text; $ui.BdrStickOld.Visibility = 'Collapsed' })
 $script:stickTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:stickTimer.Interval = [timespan]::FromSeconds(5)

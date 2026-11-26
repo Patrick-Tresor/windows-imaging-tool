@@ -63,16 +63,19 @@ try {
     $settings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy' } }
     $boot = Get-NetworkBootImage -ContentRoot $root
     Assert-Equal $boot.Exists $false 'no network boot image yet'
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like 'No network boot image*') $true 'a missing boot image stops the reimage'
+    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot $boot).Count 0 'a missing boot image does not stop the reimage (it is built first)'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot $boot) 'there is none yet' 'a missing boot image is built first'
     Assert-Equal (@(Get-RemoteReimageProblems -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '' } }) -Boot $boot)[0] -like 'No deployment share*') $true 'no share stops the reimage'
     New-Item -ItemType Directory -Path (Join-Path $root 'Boot') -Force | Out-Null
     Set-Content -Path (Join-Path $root 'Boot/boot.wim') -Value 'x'
     '{ "built": "2026-11-11 10:00", "share": "\\\\old\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
     $boot = Get-NetworkBootImage -ContentRoot $root
     Assert-Equal $boot.Built '2026-11-11 10:00' 'the boot image build time is read'
-    Assert-Equal (@(Get-RemoteReimageProblems -Settings $settings -Boot $boot)[0] -like '*maps \\old\Deploy*') $true 'a boot image for another share stops the reimage'
+    Assert-Equal ((Get-NetworkBootRebuildReason -Settings $settings -Boot $boot) -like '*maps \\old\Deploy*') $true 'a boot image for another share is rebuilt first'
     '{ "built": "2026-11-11 10:00", "share": "\\\\srv\\Deploy" }' | Set-Content -Path (Join-Path $root 'Boot/boot.json')
-    Assert-Equal @(Get-RemoteReimageProblems -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)).Count 0 'a boot image for the current share is ready'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root)) $null 'a boot image for the current share is ready'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root) -Stale 'older') 'it was built with an older version of the tool' 'an older boot image is rebuilt first'
+    Assert-Equal (Get-NetworkBootRebuildReason -Settings $settings -Boot (Get-NetworkBootImage -ContentRoot $root) -SettingsNewer) 'the deploy settings changed since it was built' 'settings saved after the build: rebuilt first'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -164,7 +167,7 @@ $aclAt = $reimage.IndexOf('& icacls.exe ([string[]]$AclArgs)'); $copyAt = $reima
 Assert-Equal ($aclAt -gt 0 -and $aclAt -lt $copyAt) $true 'the folder is locked before boot.wim is copied in'
 Assert-Equal ($reimage -match "schtasks\.exe /Create /TN 'ImagingTool\\RemoveImagingBoot'") $true 'the cleanup task is created with the boot entry'
 $start = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($start -match 'Remove-LocalDiskBoot -ComputerName \$p\.Address') $true 'a time-out takes WinPE off the PC when it answers'
+Assert-Equal ($start -match '(?s)did not start the deploy within.{0,300}|Remove-AgentJob[^\r\n]*\r?\n[^\r\n]*did not start the deploy') $true 'a time-out removes the agent job (its startup task takes WinPE off the disk)'
 Assert-Equal ($start -match 'Get-StartedJob -ContentRoot \$ContentRoot -Serial \$p\.Serial -RequestedAt') $true 'the console matches the started job by its own time stamp'
 
 # The build gives WinPE this PC's time zone.
@@ -279,12 +282,12 @@ try {
     Assert-Equal $got 'PC-42' 'each address is asked for its name over UDP'
     $ask.Dispose()
 } finally { $nbUdp.Close() }
-Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS' })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
-$rr = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($rr -match "State -eq 'Old DNS'\) \{ Stop-Pc") $true 'a reimage never goes to the old DNS address'
+Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS'; HasAgent = $false })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
 
-$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
-Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes'; HasAgent = $true }, [pscustomobject]@{ Name = '2J14HL3'; State = ''; HasAgent = $true }, [pscustomobject]@{ Name = 'PC3'; State = 'No access'; HasAgent = $false })
+Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*Install agent*') $true 'the status line counts PCs whose agent checks in and names a blocked PC'
+$t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes (SMB)'; HasAgent = $false })
+Assert-Equal $t '0 of 1 can be reimaged now. PC1: no agent yet. Select and click Install agent.' 'a PC on without an agent: Install agent'
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Not found' }, [pscustomobject]@{ Name = 'PC2'; State = 'Not found' })
 Assert-Equal ($t -like '*PC1 and 1 more: name not found*DNS*') $true 'the status line says names were not found in DNS'
 Assert-Equal (Get-OnlineSummaryText -Rows @()) '0 of 0 can be reimaged now.' 'no rows, no hint'
@@ -329,14 +332,11 @@ Assert-Equal ($mod -match 'GetNetworkCredential\(\)\.Password, \$Credential\.Use
 foreach ($f in 'Get-RemoteComputerInfo', 'Invoke-LocalDiskBoot', 'Remove-LocalDiskBoot') {
     Assert-Equal ($mod -match "(?s)function $f \{.*?Open-RemoteChannel.*?Close-RemoteChannel") $true "$f works over WinRM or the admin share"
 }
-Assert-Equal ($start -match '-Method \$p\.Method') $true 'Start-RemoteReimage uses the way in the check found'
 # A console PC outside the domain (2026-11-16, 2J14HL3): WinRM answers but asks for TrustedHosts.
 $trusted = 'Connecting to remote server 2J14HL3.borealc.on.ca failed with the following error message : The WinRM client cannot process the request. If the authentication scheme is different from Kerberos, or if the client computer is not joined to a domain, then HTTPS transport must be used or the destination machine must be added to the TrustedHosts configuration setting.'
 Assert-Equal (Test-WinRMSignInError $trusted) $true 'the TrustedHosts error is a sign-in error'
 Assert-Equal (Test-WinRMSignInError 'Access is denied.') $false 'access denied is not (the account is wrong, not the console PC)'
 Assert-Equal ($mod -match '(?s)Test-WinRMSignInError.*?-Authentication Kerberos') $true 'WinRM tries Kerberos with the account given before giving up'
-Assert-Equal ($start -match "(?s)Test-WinRMSignInError.*?\`$p\.Method = 'Smb'") $true 'when WinRM still will not sign in, the reimage goes through the admin share'
-Assert-Equal ($start -match '\$check\.Smb') $true 'only when file sharing answered'
 
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {
@@ -356,7 +356,7 @@ $search = $search.Substring(0, $search.IndexOf("`nfunction "))
 Assert-Equal ($search -match 'Get-RemoteOnlineState') $false 'Search does not wait for the online check'
 Assert-Equal ($search -match 'Start-AdOnlineCheck') $true 'Search starts the online check in the background'
 Assert-Equal ($consoleText -match '\$ps\.BeginInvoke\(\)') $true 'the online check runs asynchronously'
-Assert-Equal ($consoleText -match "'Checking\.\.\.'") $true 'Online says Checking... until the check is done'
+Assert-Equal ($consoleText -match 'Get-AgentRowView[^\r\n]*-Checking:') $true 'the Agent column says None, checking... until the check is done'
 Assert-Equal ($consoleText -match 'Stop-AdOnlineCheck \}\)') $true 'closing the console stops a check still running'
 Assert-Equal ($consoleText -match '\$check\.Ip -and \(\$check\.Online -or -not \$agentIp\)') $true 'a PC the network check could not get into shows the address its agent reported'
 

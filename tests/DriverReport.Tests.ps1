@@ -137,6 +137,26 @@ try {
     Set-UnknownModelInbox -ContentRoot $root -Model ($unknown | Where-Object Maker -eq HP)
     Assert-Equal ((Get-DriverCatalog -ContentRoot $root).entries[0].sku) '8A86' 'inbox: keyed on the SKU when there is one'
     Assert-Equal @(Get-UnknownModels -ContentRoot $root).Count 0 'report: empty once everything is handled'
+
+    # The packs your PCs use, for the Media tab: exact packs and maker fallbacks of every PC known.
+    $fleet = @(Get-FleetDriverPackPaths -ContentRoot $root)
+    Assert-Equal ($fleet -join '|') 'Dell\Latitude 5440|Dell\Latitude 5540' 'fleet: the packs deployed PCs use (the HP was set to inbox drivers above)'
+    Assert-Equal ($fleet -contains 'Lenovo\ThinkPad T14 Gen 4') $false 'fleet: a pack no PC uses is left out'
+
+    # Agent check-ins: PCs the dashboard has no record of count too, and an agent-only model with no pack is reported.
+    $agents = Join-Path $root 'Status/Agents'
+    New-Item -ItemType Directory -Path $agents -Force | Out-Null
+    '{ "serial": "SN-LEN", "computerName": "PC-LEN", "maker": "LENOVO", "model": "21HDS0AB00", "lastSeen": "2026-11-26T10:00:00Z" }' | Set-Content (Join-Path $agents 'SN-LEN.json')
+    '{ "serial": "SN-NEW", "computerName": "PC-NEW", "maker": "Dell Inc.", "model": "Latitude 7777", "lastSeen": "2026-11-26T10:00:00Z" }' | Set-Content (Join-Path $agents 'SN-NEW.json')
+    '{ "serial": "SN-1", "computerName": "PC-1", "maker": "Dell Inc.", "model": "Latitude 5540", "lastSeen": "2026-11-26T10:00:00Z" }' | Set-Content (Join-Path $agents 'SN-1.json')
+    $id = ConvertFrom-AgentCheckInIdentity ([pscustomobject]@{ serial = 'x'; maker = 'LENOVO'; model = '21HDS0AB00' })
+    Assert-Equal "$($id.maker)|$($id.machineType)|$($id.model)" 'Lenovo|21HD|' 'agent: a Lenovo model is its machine type'
+    Assert-Equal (@(Get-FleetDriverPackPaths -ContentRoot $root) -contains 'Lenovo\ThinkPad T14 Gen 4') $true 'fleet: a PC known only by its agent counts'
+    $records = @(Get-DriverReportRecords -ContentRoot $root)
+    Assert-Equal @($records | Where-Object serial -eq 'SN-1').Count 1 'agent: a PC with a status record is not added twice'
+    New-Item -ItemType Directory -Path (Join-Path $drivers 'Lenovo/ThinkPad T14 Gen 4') -Force | Out-Null
+    $u = @(Get-UnknownModels -ContentRoot $root)
+    Assert-Equal "$($u.Model -join ',')|$($u.Drivers -join ',')" 'Latitude 7777|Maker fallback' 'agent: a checked-in model with no pack is reported before any deploy'
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }

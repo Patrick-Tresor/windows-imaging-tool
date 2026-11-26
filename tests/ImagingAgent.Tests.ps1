@@ -56,15 +56,21 @@ try {
     Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddHours(3)) '3 h ago' 'hours'
     Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddDays(1).AddHours(-1)) "Yesterday 15:00" 'yesterday'
 
-    # The Computers tab: a PC whose WinRM and file sharing are blocked is still online through its agent.
+    # The Computers tab's one Agent column: a PC whose WinRM and file sharing are blocked is reimaged through its agent.
     $view = Get-AgentRowView -Check ([pscustomobject]@{ Online = $false; State = 'No access'; Detail = 'blocks WinRM' }) -Agent $pc1 -Name 'PC01'
-    Assert-Equal $view.Online 'Agent' 'blocked on the network, but its agent checked in: Online says Agent'
-    Assert-Equal $view.Agent '4 min ago' 'the Agent column says when it last checked in'
-    Assert-Equal ($view.AgentDetail -match 'Staff-W11' -and $view.AgentDetail -match 'Result: Ready') $true 'the tooltip has the image and the deploy result'
+    Assert-Equal $view.Agent 'Agent old, seen 4 min ago' 'an agent from before updates: old (Install agent once), and when it last checked in'
+    Assert-Equal ($view.AgentDetail -match 'Staff-W11' -and $view.AgentDetail -match 'Result: Ready' -and $view.AgentDetail -match 'blocks WinRM') $true 'the tooltip has the image, the deploy result and the network check'
+    $pc1v = $pc1.PSObject.Copy(); $pc1v.agentVersion = 'v1.35'; $pc1v | Add-Member -NotePropertyName agentCode -NotePropertyValue 'c1' -Force
+    Assert-Equal (Get-AgentRowView -Check $null -Agent $pc1v -Name 'PC01' -CurrentCode 'c1').Agent 'v1.35, seen 4 min ago' 'the Agent column: its version (v1.x) and when it last checked in'
+    Assert-Equal (Get-AgentRowView -Check $null -Agent $pc1v -Name 'PC01' -CurrentCode 'c2').Agent 'v1.35 updating, seen 4 min ago' 'an agent the console is updating'
+    $pc1v.agentVersion = 'abc1234 (2026-11-26 10:00)'
+    Assert-Equal (Get-AgentRowView -Check $null -Agent $pc1v -Name 'PC01' -CurrentCode 'c1').Agent 'abc1234, seen 4 min ago' 'a commit shows without its date'
     $view = Get-AgentRowView -Check ([pscustomobject]@{ Online = $true; State = 'Yes'; Detail = 'WinRM answers' }) -Agent $null -Name 'PC03'
-    Assert-Equal "$($view.Online)|$($view.Agent)" 'Yes|' 'no agent: the network check alone'
+    Assert-Equal "$($view.Agent)|$($view.AgentDetail -match 'Install agent')" 'None, PC online|True' 'no agent, PC on: Install agent can reach it'
+    Assert-Equal (Get-AgentRowView -Check $null -Agent $null -Name 'PC04' -Checking).Agent 'None, checking...' 'no agent while the network check runs'
+    Assert-Equal (Get-AgentRowView -Check ([pscustomobject]@{ Online = $false; State = 'No answer'; Detail = 'x' }) -Agent $null -Name 'PC05').Agent 'None, PC off' 'no agent, PC off'
     $view = Get-AgentRowView -Check $null -Agent (Find-AgentCheckIn -CheckIns $rows -ComputerName 'PC02') -Name 'PC02'
-    Assert-Equal ($view.Agent -like 'Off: *') $true 'an agent that stopped checking in shows as off'
+    Assert-Equal ($view.Agent -like '*, off (seen *)') $true 'an agent that stopped checking in shows as off'
     $info = ConvertTo-AgentTargetInfo $pc1
     Assert-Equal "$($info.Firmware)|$($info.Serial)|$($info.FreeC)" "UEFI|abc123|$(50GB)" 'a check-in reads like the network check of a PC'
     Import-Module (Join-Path $repo 'src/RemoteReimage.psm1') -Force
@@ -72,7 +78,7 @@ try {
     # GWHZLG3: DNS gave 10.10.64.51, its agent reported 10.10.2.1. The network fallback tries the agent's first.
     $known = Get-AgentKnownAddresses -CheckIns $rows -Targets @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01.corp.local' }, [pscustomobject]@{ Name = 'PC09'; Address = 'PC09' })
     Assert-Equal "$($known.Keys -join ',')|$($known['pc01.corp.local'] -join ',')" 'pc01.corp.local|10.1.2.34,192.168.56.1' 'the addresses its agent reported, by the address the console uses'
-    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress \(Get-AgentKnownAddresses') $true 'a reimage checks the network with them'
+    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress') $true 'the Computers tab checks the network with them'
 
     # A PC the console can't reach installs the agent itself from <share>\Agent.
     $pub = Join-Path $root 'share/Agent'
@@ -312,12 +318,15 @@ Assert-Equal ($firstBoot -match '(?s)Agent\\ImagingAgent\.ps1.{0,200}-File \$age
 $media = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($media -match 'agent-public-key\.xml') $true 'the build puts the console''s public key in boot.wim'
 $start = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($start -match '(?s)New-AgentJob.*?Start-PcOverNetwork \$p') $true 'reimage goes through the agent, and over the network when it does not take the job'
+Assert-Equal ($start -match 'New-AgentJob' -and $start -notmatch 'Invoke-LocalDiskBoot|Get-RemoteComputerInfo|Start-PcOverNetwork') $true 'reimage goes through the agent only, never over WinRM or the admin share'
+Assert-Equal ($start -match "Not reimaged: it has no agent") $true 'a PC without an agent is skipped, with nothing changed on it'
 $console = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
+Assert-Equal ($console -match 'No agent checking in from') $true 'the console refuses to reimage a PC without an agent'
 Assert-Equal ($console -match "'-StatusFolder'.*'-KeyRoot'") $true 'the console tells the reimage where the agents check in and which key signs'
 Assert-Equal ($console -match 'Install-RemoteAgent\.ps1') $true 'Install agent puts it on PCs imaged before'
 $xaml = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/MainWindow.xaml')
 Assert-Equal ($xaml -match 'Header="Agent" Binding="\{Binding Agent\}"') $true 'the Computers grid has an Agent column'
+Assert-Equal ($xaml -match 'Header="(Online|Agent version)"') $false 'and no Online or Agent version column: the Agent column says it all'
 Assert-Equal ($xaml -match 'Header="Last seen" Binding="\{Binding LastSeenText\}"') $true 'the Dashboard has a Last seen column'
 
 # Every tool function the agent scripts call is there after the modules they import: a module's own imports stay

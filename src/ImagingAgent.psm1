@@ -606,40 +606,51 @@ function ConvertTo-AgentTargetInfo {
 function Get-AgentRowView {
     <#
     .SYNOPSIS
-        Console, Computers tab: what the Online and Agent columns show for a PC, from the network check
-        (Get-RemoteOnlineState) and its agent's check-in. A PC whose agent checked in lately is Online 'Agent' even when
-        WinRM and file sharing are blocked.
+        Console, Computers tab: what the one Agent column shows for a PC, from its agent's check-in and the network
+        check (Get-RemoteOnlineState). A reimage goes through the agent only, so the column leads with it: "v1.35, seen
+        2 min ago", "v1.30 updating, ...", "v1.20 old, ..." (needs Install agent once), "v1.35, off (seen yesterday ...)";
+        a PC with no agent shows what the network check found ("None, PC online": Install agent can reach it).
+        -Checking: the network check is still running.
     #>
-    param($Check, $Agent, [string]$Name, [string]$CurrentCode)
-    $online = if ($Check -and $Check.Online) { "$($Check.State)" } elseif ($Agent -and $Agent.Online) { 'Agent' } elseif ($Check) { "$($Check.State)" } else { '' }
-    $agentText = if (-not $Agent) { '' } elseif ($Agent.Online) { "$($Agent.LastSeenText)" } else { "Off: $($Agent.LastSeenText)" }
+    param($Check, $Agent, [string]$Name, [string]$CurrentCode, [switch]$Checking)
+    $version = Get-AgentVersionText -Agent $Agent -CurrentCode $CurrentCode
     $detail = @()
     if ($Agent) {
+        $v = if ($Agent.PSObject.Properties['agentVersion'] -and $Agent.agentVersion) { "$($Agent.agentVersion)" -replace '\s*\(.*\)$' } else { 'Agent' }
+        if ($version.Text -eq 'Updating') { $v += ' updating' } elseif ($version.Text -eq 'Old') { $v += ' old' }
+        $seen = "$($Agent.LastSeenText)"
+        if ($seen -notmatch '^\d') { $seen = $seen.Substring(0, 1).ToLowerInvariant() + $seen.Substring(1) }
+        $text = if ($Agent.Online) { "$v, seen $seen" } else { "$v, off (seen $seen)" }
+        $detail += $(if ($Agent.Online) { "Its agent checked in ${seen}: Reimage goes through it." } else { "Its agent has not checked in since ${seen}: turn the PC on (and connect it to the network) before Reimage." })
         $detail += "Last check-in $($Agent.LastSeen.ToString('yyyy-MM-dd HH:mm')) from $(if ($Agent.ipAddress) { $Agent.ipAddress } else { 'no IPv4 address' })"
         if ($Agent.answerFile -or $Agent.image) { $detail += "Deployed with $((@("$($Agent.answerFile)", "$($Agent.image)") | Where-Object { $_ }) -join ', ')$(if ($Agent.deployedAt) { " on $("$($Agent.deployedAt)".Substring(0, [Math]::Min(10, "$($Agent.deployedAt)".Length)))" })" }
         if ($Agent.result) { $detail += "$($Agent.result)" }
         if ($Agent.userSignedIn) { $detail += "Signed in: $($Agent.userSignedIn)" }
         if ($Agent.job -and $Agent.job.state) { $detail += "Last job: $($Agent.job.action) $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })" }
-        if ($Agent.agentVersion) { $detail += "Agent from tool version $($Agent.agentVersion)" }
+        if ($version.Detail) { $detail += $version.Detail }
+    } else {
+        $state = if ($Check) { "$($Check.State)" } else { '' }
+        $text = if ($Checking -and -not $Check) { 'None, checking...' } else {
+            switch ($state) {
+                'Yes'       { 'None, PC online' }
+                'Yes (SMB)' { 'None, PC online' }
+                'No access' { 'None, PC blocked' }
+                'Not found' { 'None, name not found' }
+                'Old DNS'   { 'None, old DNS' }
+                'No answer' { 'None, PC off' }
+                default     { 'None' }
+            }
+        }
+        $detail += $(if ($Check -and $Check.Online) { 'No agent: select the PC and click Install agent, then Reimage.' } else { 'No agent: it is put on each PC deployed while the network share is set, or with Install agent (the PC must be on, with PowerShell remoting or file sharing allowed).' })
     }
-    $version = Get-AgentVersionText -Agent $Agent -CurrentCode $CurrentCode
-    $onlineDetail = @()
-    if ($Check) { $onlineDetail += "$Name $($Check.Detail)" }
-    if ($Agent -and $Agent.Online) { $onlineDetail += "Its agent checked in $("$($Agent.LastSeenText)".ToLowerInvariant()): Reimage goes through the agent." }
-    [pscustomobject]@{
-        Online       = $online
-        OnlineDetail = $(if ($onlineDetail) { $onlineDetail -join "`n" } else { $null })
-        Agent        = $agentText
-        AgentDetail  = $(if ($detail) { $detail -join "`n" } else { 'No agent: it is put on each PC deployed while the network share is set, or with Install agent.' })
-        AgentVersion = $version.Text
-        AgentVersionDetail = $version.Detail
-    }
+    if ($Check) { $detail += "$Name $($Check.Detail)" }
+    [pscustomobject]@{ Agent = $text; AgentDetail = ($detail -join "`n") }
 }
 
 function Get-AgentVersionText {
     <#
     .SYNOPSIS
-        Console, Computers tab's Agent version column: is a PC's agent the console's (agentCode = Get-AgentCodeHash of
+        Console, Computers tab's Agent column: is a PC's agent the console's (agentCode = Get-AgentCodeHash of
         the console's src folder)? { Text, Detail }. An old agent that knows update jobs gets the new one by itself
         (Select-AgentsToUpdate); one from before them needs Install agent once.
     #>

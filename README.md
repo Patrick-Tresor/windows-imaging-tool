@@ -32,8 +32,8 @@ the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 The header shows the tool's version, `v1.NN`, where NN counts the pull requests merged since v1.00
 (from `src\version.txt` in a downloaded zip, or git in a clone). The same number is written on every
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
-plugged-in stick or the network boot image is older than the console, with **Update the stick** or
-**Rebuild network boot image**. Builds, captures, updates, downloads and reimages show as cards in
+plugged-in stick is older than the console, with **Update the stick** (an older network boot image is
+rebuilt by **Reimage...** itself). Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
 by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens
 it again after you close it.
@@ -60,9 +60,10 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   (Lenovo, `20FR`) from the maker's catalog. A model the catalog doesn't know is
   matched by name.
   **Deployed without a driver pack** shows, on the same page and only when there
-  are any, the models that were deployed without their pack: they got the maker
-  fallback, inbox drivers only, or a catalog entry whose folder is missing, with
-  how many PCs and which ones. **Find its pack** puts the selected model's pack
+  are any, the models without their pack: deployed PCs that got the maker
+  fallback, inbox drivers only, or a catalog entry whose folder is missing, and
+  PCs whose agent checks in with a model the library has no pack for (seen before
+  they are reimaged), with how many PCs and which ones. **Find its pack** puts the selected model's pack
   in the Find a model online list, ready for **Download**. **No pack needed**
   marks a model (a VM, say) as needing no pack.
 - **Media**: build a USB stick in one click (the ISO is made with the network
@@ -74,7 +75,8 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   names (its pinned version when it has one), drivers, applications and config.
   The build stops before erasing the stick when an answer file's image is missing.
   Pick the **USB disk** (a stick this tool built before is updated in place, any other
-  is erased; the tab says which), uncheck the **Driver packs on USB** you don't need, type the
+  is erased; the tab says which), check the **Driver packs on USB** you need (the packs for the
+  models you have, from the Dashboard and the agents' check-ins, start checked), type the
   **WinPE password** (twice the first time; the console remembers it for your Windows
   account on this PC, encrypted) and click **Build media**. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
@@ -104,12 +106,13 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
 - **Computers**: the computers in your Active Directory, to reimage them over
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
-  answer file, state, a progress bar, the current step, duration and when it was
-  last heard from, with the PC's live log underneath. At the end, the **Result**
+  when it was last heard from, a progress bar with the current step, the result,
+  start time and duration. The selected PC's details (one line per application,
+  task and check) show underneath; **Open log** opens its whole log in Notepad. At the end, the **Result**
   column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open.
-  Counters at the top (Deploying, Succeeded, With warnings, Failed or stalled, PCs
-  listed), a **Show** filter (All, Deploying, Failed or stalled, Finished, History),
-  **Open folder** and **Remove**. **History**
+  The counters at the top (Deploying, Succeeded, With warnings, Need attention, PCs
+  listed) are the filter: click one to show only those PCs. **Open folder**,
+  **Remove** and **History**. **History**
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.
 
@@ -147,45 +150,52 @@ on the ones you pick, with nobody at the PCs.
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the IP address, OU, Windows version, last
    logon and whether the console can reach it, checked on every Search (Search again
-   to check again). The list shows right away; Online says **Checking...** while
-   the network check runs in the background (a few seconds, however many PCs), then
+   to check again). The list shows right away; the **Agent** column of a PC with no agent says
+   **None, checking...** while the network check runs in the background (a few seconds, however many PCs), then
    fills in. The IP is where that PC really answers: each DNS address is
-   asked for its computer name, and one that names another PC is dropped (Online
-   then says **Old DNS** and a reimage never goes there). A PC with several
+   asked for its computer name, and one that names another PC is dropped (its Agent
+   column then says **None, old DNS** and Install agent never goes there). A PC with several
    addresses (a second adapter, a dock, a VPN) is tried at each, and the one that
    answers best is shown; an agent's reported address is tried first. A PC typed by IP that is
-   not in Active Directory (a laptop outside the domain) is listed too, and
-   **Reimage...** asks for its local administrator account. **Online** (point at it for
-   details):
-   - **Yes**: PowerShell remoting (WinRM) answers.
-   - **Yes (SMB)**: remoting is off, but file sharing answers. The console
+   not in Active Directory (a laptop outside the domain) is listed too (it can't
+   have the agent, so reimage it from the USB stick). The **Agent** column says
+   what each PC's agent last reported, for example **v1.35, seen 2 min ago**
+   (**updating** while the console sends it the new agent, **old** when it needs
+   **Install agent** once, **off** when it has not checked in for 15 minutes).
+   For a PC with no agent it says how **Install agent** can reach it (point at it
+   for details):
+   - **None, PC online**: PowerShell remoting (WinRM) or file sharing answers.
+     Without remoting, the console
      goes through the PC's admin share (`\\PC\ADMIN$`, `\\PC\C$`) and a
      one-time SYSTEM service that it deletes right after, the way Windows admin
      tools do. Some antivirus products block services that start PowerShell;
      the progress window then says the PC did not run the command.
-   - **No access**: the PC is on, but its firewall blocks both. Allow
+   - **None, PC blocked**: the PC is on, but its firewall blocks both. Allow
      *File and Printer Sharing (SMB-In)*, or turn on remoting
      (`Enable-PSRemoting -Force`, or for a whole OU the Group Policy *Computer
      Configuration > Administrative Templates > Windows Components > Windows
      Remote Management > WinRM Service > Allow remote server management
      through WinRM* plus the firewall rule *Windows Remote Management (HTTP-In)*).
-   - **Not found**: its name does not resolve from the console PC. Use a domain
+   - **None, name not found**: its name does not resolve from the console PC. Use a domain
      controller as the console PC's DNS server.
-   - **No answer**: it is off or asleep, or a firewall drops everything.
-3. Once: set **Network share** on the Deploy Settings tab, then click **Build
-   network boot image**. It builds WinPE with the deploy tool into `Boot\` on
-   the content root, without a WinPE password (nobody is there to type it).
-   The same build writes `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
-   Rebuild it after updating the tool or the share settings: a banner at the top
-   of the console says when it is older than the console, with a **Rebuild
-   network boot image** button.
+   - **None, PC off**: it is off or asleep, or a firewall drops everything.
+3. Once: set **Network share** on the Deploy Settings tab. **Reimage...** builds
+   the network boot image first when there is none, or when it is older than the
+   tool, maps another share or predates the last Deploy Settings save (a few
+   minutes, a card in the Progress window; the reimage starts when it is done).
+   It is WinPE with the deploy tool in `Boot\` on the content root, without a
+   WinPE password (nobody is there to type it). The same build writes
+   `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
    **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
+   Reimage goes through each PC's agent only: a PC without an agent checking in
+   is refused (select it and click **Install agent** first).
 
-For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
-checks (over PowerShell remoting, or its admin share) that it answers with its own name, starts in
-UEFI mode and has a BIOS serial of its own; writes `Reimage\<serial>.json` on
-the share; copies the network boot image to `C:\_ImagingBoot`, adds a one-time
+For each PC, the console (Start-RemoteReimage.ps1): checks from its agent's
+check-in that it answers with its own name, starts in UEFI mode, has a BIOS
+serial of its own and a network cable (WinPE has no Wi-Fi); writes
+`Reimage\<serial>.json` on the share; and gives the agent a signed job. The agent
+copies the network boot image to `C:\_ImagingBoot`, adds a one-time
 boot entry for it (no PXE or WDS needed), suspends BitLocker for that one
 restart and restarts the PC after a 60 second warning (a window with a countdown,
 **Reboot now** and **Close** for whoever is signed in). WinPE maps the share,
@@ -195,8 +205,7 @@ At the end it restarts into Windows. The progress window lists each PC until
 its deploy starts; from there it is on the Dashboard.
 
 Needs:
-- PowerShell remoting (WinRM) or file sharing on the PCs, with your account
-  (or the one typed) as administrator.
+- The agent on the PCs (deploys put it there; **Install agent** for older PCs).
 - The answer file and its image on the network share; the console checks.
 - An answer file whose passwords are encrypted in it, or on the share: a
   reimaged PC never waits for someone to type one.
@@ -219,30 +228,29 @@ the share, written as the computer account, like first boot's status.
 
 - **Check-in**: every 5 minutes it writes `Status\Agents\<serial>.json`: name,
   serial, IP addresses, model, image and answer file, deploy result, who is
-  signed in, free space on C:. The Computers tab's **Agent** column says when
-  each PC last checked in (point at it for the details), **Online** says
-  **Agent** for a PC whose WinRM and file sharing are blocked but whose agent
-  checked in, and the IP column uses the agent's address when the network check
+  signed in, free space on C:. The Computers tab's **Agent** column says its
+  version and when it last checked in (point at it for the details), and the IP column uses the agent's address when the network check
   found none. The Dashboard's **Last seen** column shows the same for each
   deployment, and a line above its list names the agents that have not checked
   in for over a day (up to two weeks): those PCs are off or their agent stopped.
-- **Updates**: the **Agent version** column on the Computers tab says Up to
-  date, Updating or Old. While the Computers tab or the Dashboard is open, the
+- **Updates**: the **Agent** column on the Computers tab says **updating** or
+  **old** after the version when the agent is not the console's. While the Computers tab or the Dashboard is open, the
   console sends each online agent whose code differs from its own the new agent
   as a signed update job; the agent checks the files, puts them in place and
-  starts again. An agent from before updates (Old) needs **Install agent** once.
+  starts again. An agent from before updates (old) needs **Install agent** once.
 - **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
   agent installs again the applications that failed at first boot.
-- **Reimage through the agent**: **Reimage...** on a PC whose agent checked in
-  within the last 15 minutes needs no WinRM or file sharing. The console writes
+- **Reimage through the agent**: **Reimage...** needs an agent that checked in
+  within the last 15 minutes, and no WinRM or file sharing. The console writes
   the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
   a copy of the network boot image in `Status\Agents\Jobs\<serial>\`. The agent
   looks for a job every minute, copies the boot image, checks its SHA-256, and
   restarts into WinPE from its own disk with the same 60 second notice. If the
-  agent has not taken the job within 4 minutes, the console reaches the PC over
-  the network as before.
+  agent has not taken the job within 10 minutes, that PC is not reimaged and
+  its row says why.
 - **Install agent** puts it on PCs imaged before it existed (over WinRM or the
-  admin share, like a reimage), and waits for each one's first check-in.
+  admin share, with your account as administrator), and waits for each one's
+  first check-in. It is the only thing the console does over WinRM or the admin share.
 - **On a PC the console can't reach** (WinRM and file sharing blocked): on that
   PC, right-click `\\<server>\<share>\Agent\Install-Agent.cmd` and pick **Run as
   administrator**. The console keeps that folder up to date (the agent files and

@@ -30,12 +30,11 @@
       </DockPanel>
     </Border>
 
-    <!-- Shown when a USB stick plugged into this PC, or the network boot image, was built with an older version of the tool. -->
+    <!-- Shown when a USB stick plugged into this PC was built with an older version of the tool. -->
     <Border x:Name="BdrStickOld" DockPanel.Dock="Top" Visibility="Collapsed" Padding="18,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="0,0,0,1">
       <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="BtnStickOldUpdate" Content="Update the stick" Margin="12,0,0,0"/>
-          <Button x:Name="BtnBootOldRebuild" Content="Rebuild network boot image" Margin="8,0,0,0" Visibility="Collapsed"/>
           <Button x:Name="BtnStickOldHide" Content="Not now" Margin="8,0,0,0"/>
         </StackPanel>
         <TextBlock x:Name="TxtStickOld" TextWrapping="Wrap" VerticalAlignment="Center"/>
@@ -187,7 +186,7 @@
             </DockPanel>
           </Border>
 
-          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Build network boot image on the Computers tab also makes Boot\Deploy-WinPE.iso, which loads everything from the share."/>
+          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Reimage on the Computers tab builds the network boot image, which also makes Boot\Deploy-WinPE.iso: it loads everything from the share."/>
 
           <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -208,11 +207,9 @@
             <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
             <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
-                         Text="Check the packs for the models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
+                         Text="The packs for the models you have are checked (from the Dashboard and the agents); check others for models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
-                <Button x:Name="BtnMediaPacksAll" DockPanel.Dock="Left" Content="Check all"/>
-                <Button x:Name="BtnMediaPacksNone" DockPanel.Dock="Left" Content="Uncheck all" Margin="8,0,0,0"/>
-                <TextBlock x:Name="TxtMediaPacks" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock x:Name="TxtMediaPacks" VerticalAlignment="Center" TextWrapping="Wrap"/>
               </DockPanel>
               <ListBox x:Name="LstMediaPacks" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
@@ -395,7 +392,7 @@
             </StackPanel>
             <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
               <DockPanel>
-                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks (and the Computers tab's network boot image) before the next deploy."/>
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks before the next deploy (the Computers tab's Reimage rebuilds its network boot image by itself)."/>
               </DockPanel>
             </Border>
           </StackPanel>
@@ -408,7 +405,7 @@
           <DockPanel MinHeight="460" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. A PC with the agent (put there by deploys that report to the network share, or by Install agent) checks in by itself and is reimaged through it. Other PCs need PowerShell remoting (WinRM) or file sharing, with your account as administrator. The network share and the Active Directory account are set on the Deploy Settings tab."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. Reimage goes through each PC's agent (put there by deploys that report to the network share, or by Install agent, which needs PowerShell remoting or file sharing on the PC with your account as administrator); a PC without an agent checking in is refused. The network share and the Active Directory account are set on the Deploy Settings tab."/>
             </StackPanel>
             <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
@@ -434,9 +431,7 @@
                 <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
-                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,10,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
-                  <Button x:Name="BtnAdBuildBoot" Content="Build network boot image" Margin="0,0,0,6"
-                          ToolTip="Builds WinPE with the deploy tool, without a WinPE password, into Boot on the content root: boot.wim for reimaging, and Deploy-WinPE.iso of the same WinPE to boot a VM or a PC without a stick. Rebuild it after updating the tool or the share settings."/>
+                  <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,0,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>
                 </WrapPanel>
               </Grid>
             </GroupBox>
@@ -447,19 +442,9 @@
                 <DataGridTextColumn Header="OU" Binding="{Binding OUPath}" Width="*"/>
                 <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystem}" Width="*"/>
                 <DataGridTextColumn Header="Last logon" Binding="{Binding LastLogonText}" Width="110"/>
-                <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="80">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding OnlineDetail}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Agent" Binding="{Binding Agent}" Width="110">
+                <DataGridTextColumn Header="Agent" Binding="{Binding Agent}" Width="170">
                   <DataGridTextColumn.ElementStyle>
                     <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentDetail}"/></Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Agent version" Binding="{Binding AgentVersion}" Width="90">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding AgentVersionDetail}"/></Style>
                   </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="Reimage" Binding="{Binding Reimage}" Width="*"/>
@@ -576,7 +561,6 @@
                           ToolTip="Sends this PC's agent a signed job to install again only the applications that failed, from the packs in Applications, without reimaging. The PC must be on with its agent checking in; an agent installed before this version must be installed again first (Computers tab, Install agent)."/>
                   <Button x:Name="BtnDashLog" Content="Open log" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this deployment's full log in Notepad."/>
                   <Button x:Name="BtnDashReimage" Content="Reimage..." Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this PC on the Computers tab, where you choose the answer file and reimage it."/>
-                  <CheckBox x:Name="ChkDashLog" Content="Show log" VerticalAlignment="Center" Margin="0,0,0,6" ToolTip="Shows the live log here instead of the details."/>
                 </WrapPanel>
                 <StackPanel VerticalAlignment="Center">
                   <TextBlock x:Name="TxtDashVerdict" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>
