@@ -528,7 +528,8 @@ function Update-DashboardDetail {
         if ($r.Warnings) { $lines += [pscustomobject]@{ Item = 'Warnings'; Result = 'Warning'; Detail = "$($r.Warnings)" } }
         if (-not $lines) { $lines = @([pscustomobject]@{ Item = 'Progress'; Result = 'Info'; Detail = "$($r.StatusText) ($($r.Percent) %)" }) }
         $ui.LstDashChecks.ItemsSource = $lines
-        Set-DashboardLogVisible ([bool]$ui.ChkDashLog.IsChecked)
+        # The details only; the whole log opens with Open log (History shows the final log here).
+        Set-DashboardLogVisible $false
     }
     if ($ui.TxtDashLog.Visibility -eq 'Visible') {
         $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
@@ -1593,7 +1594,6 @@ foreach ($card in $ui.CardDashRunning, $ui.CardDashSucceeded, $ui.CardDashWarnin
     $card.Add_MouseLeftButtonUp({ param($sender, $e) Invoke-Safely { $script:dashFilter = "$($sender.Tag)"; Update-Dashboard } })
 }
 $ui.BtnDashHistory.Add_Click({ Invoke-Safely { $script:dashFilter = 'History'; Update-Dashboard } })
-$ui.ChkDashLog.Add_Click({ Invoke-Safely { Update-DashboardDetail } })
 
 $ui.BtnDashLog.Add_Click({ Invoke-Safely {
     $r = $ui.GridDash.SelectedItem

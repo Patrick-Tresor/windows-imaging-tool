@@ -571,7 +571,6 @@
                           ToolTip="Sends this PC's agent a signed job to install again only the applications that failed, from the packs in Applications, without reimaging. The PC must be on with its agent checking in; an agent installed before this version must be installed again first (Computers tab, Install agent)."/>
                   <Button x:Name="BtnDashLog" Content="Open log" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this deployment's full log in Notepad."/>
                   <Button x:Name="BtnDashReimage" Content="Reimage..." Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this PC on the Computers tab, where you choose the answer file and reimage it."/>
-                  <CheckBox x:Name="ChkDashLog" Content="Show log" VerticalAlignment="Center" Margin="0,0,0,6" ToolTip="Shows the live log here instead of the details."/>
                 </WrapPanel>
                 <StackPanel VerticalAlignment="Center">
                   <TextBlock x:Name="TxtDashVerdict" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>

@@ -106,12 +106,13 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
 - **Computers**: the computers in your Active Directory, to reimage them over
   the network (see [Reimage computers from Active Directory](#reimage-computers-from-active-directory)).
 - **Dashboard**: every PC being deployed, live: computer name, model, IP,
-  answer file, state, a progress bar, the current step, duration and when it was
-  last heard from, with the PC's live log underneath. At the end, the **Result**
+  when it was last heard from, a progress bar with the current step, the result,
+  start time and duration. The selected PC's details (one line per application,
+  task and check) show underneath; **Open log** opens its whole log in Notepad. At the end, the **Result**
   column says whether the PC is ready (see [Deployment dashboard](#deployment-dashboard)). Refreshes every 10 seconds while it is open.
-  Counters at the top (Deploying, Succeeded, With warnings, Failed or stalled, PCs
-  listed), a **Show** filter (All, Deploying, Failed or stalled, Finished, History),
-  **Open folder** and **Remove**. **History**
+  The counters at the top (Deploying, Succeeded, With warnings, Need attention, PCs
+  listed) are the filter: click one to show only those PCs. **Open folder**,
+  **Remove** and **History**. **History**
   lists the final log of each deployment cleared from the Dashboard; capture and
   image update logs open from the Images tab's **Open log**.
 
