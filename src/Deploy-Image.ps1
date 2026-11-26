@@ -278,7 +278,6 @@ function Copy-AgentToImage([string]$StatusFolder, $Settings, [string]$Root, $Dep
     # runs as SYSTEM), with agent.json and its task's XML. deploy-settings agent.enabled false leaves it out.
     $cfg = if ($Settings -and $Settings.PSObject.Properties['agent']) { $Settings.agent } else { $null }
     if ($cfg -and $cfg.PSObject.Properties['enabled'] -and -not $cfg.enabled) { Write-DeployLog 'Agent turned off in deploy-settings.json (agent.enabled): not put on this PC'; return }
-    $minutes = if ($cfg -and $cfg.PSObject.Properties['checkInMinutes'] -and $cfg.checkInMinutes) { [int]$cfg.checkInMinutes } else { 5 }
     # The console's public key: baked into boot.wim by the build, or on the content root.
     $keys = @(foreach ($p in [IO.Path]::Combine($PSScriptRoot, 'config', 'agent-public-key.xml'), [IO.Path]::Combine($Root, 'config', 'agent-public-key.xml')) {
         if ([IO.File]::Exists($p)) { [IO.File]::ReadAllText($p).Trim() }
@@ -288,9 +287,9 @@ function Copy-AgentToImage([string]$StatusFolder, $Settings, [string]$Root, $Dep
     Protect-StagedItem -Path $dir -Folder
     foreach ($f in Get-AgentFileNames) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $f) -Destination $dir -Force -ErrorAction Stop }
     $info = [pscustomobject]@{ answerFile = "$($Deploy.answerFile)"; image = "$($Deploy.image)"; toolVersion = "$($Deploy.toolVersion)"; deployedAt = (Get-Date).ToString('o') }
-    Save-JsonFile -Path "$dir\agent.json" -InputObject (New-AgentConfig -StatusFolder $StatusFolder -PublicKeys $keys -CheckInMinutes $minutes -Deploy $info -RemoteDesktop (Test-AgentRemoteDesktopOn $Settings)) -Depth 4
+    Save-JsonFile -Path "$dir\agent.json" -InputObject (New-AgentConfig -StatusFolder $StatusFolder -PublicKeys $keys -CheckInSeconds (Get-AgentCheckInSeconds $Settings) -Deploy $info -RemoteDesktop (Test-AgentRemoteDesktopOn $Settings)) -Depth 4
     [IO.File]::WriteAllText("$dir\agent-task.xml", (Get-AgentTaskXml), [Text.Encoding]::Unicode)
-    Write-DeployLog ("Agent staged: checks in to $StatusFolder every $minutes min; " +
+    Write-DeployLog ("Agent staged: checks in to $StatusFolder every $(Get-AgentCheckInSeconds $Settings) s; " +
         $(if ($keys) { "takes jobs signed by console key $(@($keys | ForEach-Object { Get-AgentKeyId $_ }) -join ', ')" } else { 'no console key found (config\agent-public-key.xml), so it takes no jobs' }))
 }
 

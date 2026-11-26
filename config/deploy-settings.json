@@ -5,9 +5,9 @@
     "user": "DOMAIN\\svc-deploy"
   },
   "agent": {
-    "_comment": "The agent on each PC deployed while a share is set: checks in to <share>\\Status\\Agents every checkInMinutes and takes the reimage jobs the console signs. false leaves it off the PCs. remoteDesktop: the agent turns Remote Desktop on (Network Level Authentication, firewall open on the Domain network only) for the console's Remote desktop button; false leaves it as it is (reaches PCs at their next deploy or Install agent).",
+    "_comment": "The agent on each PC deployed while a share is set: checks in to <share>\\Status\\Agents every checkInSeconds (30 by default, at least 10) and takes the reimage jobs the console signs. false leaves it off the PCs. remoteDesktop: the agent turns Remote Desktop on (Network Level Authentication, firewall open on the Domain network only) for the console's Remote desktop button; false leaves it as it is (reaches PCs at their next deploy or Install agent).",
     "enabled": true,
-    "checkInMinutes": 5,
+    "checkInSeconds": 30,
     "remoteDesktop": true
   },
   "checks": {

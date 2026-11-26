@@ -30,7 +30,7 @@ try {
     $identity = [pscustomobject]@{ serial = 'abc123'; uuid = '4C4C4544-0001'; maker = 'Dell Inc.'; model = 'Latitude 5521'; firmware = 'UEFI'; firmwareFrom = 'bcdedit' }
     $record = New-AgentCheckIn -Identity $identity -Network ([pscustomobject]@{ ipAddresses = @('10.1.2.34', '192.168.56.1'); macAddress = 'AA-BB' }) `
         -Deploy ([pscustomobject]@{ answerFile = 'Staff-W11'; image = 'Win11.wim'; toolVersion = 'abc1234'; deployedAt = '2026-11-20T10:00:00' }) `
-        -AgentId 'agent-1' -ComputerName 'pc01' -Account 'CORP\PC01$' -AccountSid 'S-1-5-21-1-2-3-1104' -FreeC 50GB -Result 'Result: Ready' -Now $now
+        -AgentId 'agent-1' -ComputerName 'pc01' -Account 'CORP\PC01$' -AccountSid 'S-1-5-21-1-2-3-1104' -FreeC 50GB -Result 'Result: Ready' -CheckInSeconds 120 -Now $now
     Assert-Equal $record.computerName 'PC01' 'the name is upper case'
     $wifi = New-AgentCheckIn -Identity $identity -Network ([pscustomobject]@{ ipAddresses = @('10.10.2.1'); wired = $false }) -AgentId 'agent-1' -Now $now
     Assert-Equal "$($wifi.wired)|$($record.wired)" 'False|' 'a check-in says when the PC has no cable (unknown when not said)'
@@ -52,7 +52,24 @@ try {
     Assert-Equal (Find-AgentCheckIn -CheckIns $rows -ComputerName 'PC02').Online $false 'checked in 30 hours ago: not online'
     Assert-Equal (Find-AgentCheckIn -CheckIns $rows -Serial 'ABC123').computerName 'PC01' 'found by serial too (Dashboard)'
     Assert-Equal ((Get-AgentCheckIns -StatusFolder $status -Now $now.AddMinutes(17)) | Where-Object computerName -eq 'PC01').Online $false 'three missed check-ins: not online'
+    # Close to real time: every 30 s by default, offline after 3 missed check-ins (+30 s for a slow share).
+    $fast = New-AgentCheckIn -Identity ([pscustomobject]@{ serial = 'FAST1'; uuid = 'U3' }) -AgentId 'agent-3' -ComputerName 'PC03' -Now $now
+    Assert-Equal "$($fast.checkInSeconds)|$($fast.checkInMinutes)" '30|1' 'an agent checks in every 30 s (1 min for a console from before)'
+    Save-AgentCheckIn -StatusFolder $status -Record $fast
+    Assert-Equal ((Get-AgentCheckIns -StatusFolder $status -Now $now.AddSeconds(110)) | Where-Object computerName -eq 'PC03').Online $true 'checked in 110 s ago: online'
+    Assert-Equal ((Get-AgentCheckIns -StatusFolder $status -Now $now.AddSeconds(130)) | Where-Object computerName -eq 'PC03').Online $false 'off for about 2 minutes: offline'
+    $older = New-AgentCheckIn -Identity ([pscustomobject]@{ serial = 'SLOW1'; uuid = 'U4' }) -AgentId 'agent-4' -ComputerName 'PC04' -Now $now
+    $older.PSObject.Properties.Remove('checkInSeconds'); $older.checkInMinutes = 5
+    Save-AgentCheckIn -StatusFolder $status -Record $older
+    Assert-Equal ((Get-AgentCheckIns -StatusFolder $status -Now $now.AddMinutes(15)) | Where-Object computerName -eq 'PC04').Online $true 'an agent from before (every 5 min): still online after 15 min'
+    Assert-Equal (Get-AgentCheckInSeconds ([pscustomobject]@{ agent = [pscustomobject]@{ checkInMinutes = 5 } })) 30 'the old checkInMinutes setting is not read: 30 s'
+    Assert-Equal (Get-AgentCheckInSeconds ([pscustomobject]@{ agent = [pscustomobject]@{ checkInSeconds = 3 } })) 10 'checkInSeconds: at least 10'
+    $agentScript = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.ps1'))
+    Assert-Equal ($agentScript -match 'Start-Sleep -Seconds 5\b' -and $agentScript -notmatch "config\.checkInMinutes") $true 'the agent looks for a job every 5 s and ignores the old 5-minute setting'
+    $consoleScript = [IO.File]::ReadAllText((Join-Path $repo 'src/Console/ImagingConsole.ps1'))
+    Assert-Equal ($consoleScript -match 'Test-AgentFolderChanged' -and $consoleScript -match 'GridAd\.Items\.Refresh\(\)') $true 'the console refreshes the Computers tab when an agent checks in'
     Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddSeconds(30)) 'Just now' 'just now'
+    Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddSeconds(90)) '1 min ago' 'a minute ago'
     Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddHours(3)) '3 h ago' 'hours'
     Assert-Equal (Format-AgentLastSeen -LastSeen $now -Now $now.AddDays(1).AddHours(-1)) "Yesterday 15:00" 'yesterday'
 
@@ -82,7 +99,7 @@ try {
 
     # A PC the console can't reach installs the agent itself from <share>\Agent.
     $pub = Join-Path $root 'share/Agent'
-    $cfg = New-AgentConfig -StatusFolder '\\srv\Deploy\Status' -PublicKeys @($public) -CheckInMinutes 5
+    $cfg = New-AgentConfig -StatusFolder '\\srv\Deploy\Status' -PublicKeys @($public) -CheckInSeconds 30
     Assert-Equal (Publish-AgentInstaller -Folder $pub -SourceDir (Join-Path $repo 'src') -Config $cfg) $pub 'the installer folder is made'
     foreach ($f in @(Get-AgentFileNames) + 'Install-AgentHere.ps1', 'Install-Agent.cmd', 'agent.json') { Assert-Equal (Test-Path (Join-Path $pub $f)) $true "$f is in it" }
     Assert-Equal (([IO.File]::ReadAllText((Join-Path $pub 'agent.json')) | ConvertFrom-Json).statusFolder) '\\srv\Deploy\Status' 'agent.json says where to check in'
@@ -258,8 +275,8 @@ try {
     Assert-Equal (Get-AgentStatusFolder -StatusTarget $null -Settings ([pscustomobject]@{ share = [pscustomobject]@{ path = '' } })) '' 'USB only, no share: no agent'
 
     # agent.json and the task.
-    $cfg = New-AgentConfig -StatusFolder '\\server\Deploy\Status' -PublicKeys @($public, '') -CheckInMinutes 0
-    Assert-Equal "$($cfg.checkInMinutes)|$(@($cfg.publicKeys).Count)" '1|1' 'agent.json: at least 1 minute, empty keys left out'
+    $cfg = New-AgentConfig -StatusFolder '\\server\Deploy\Status' -PublicKeys @($public, '') -CheckInSeconds 0
+    Assert-Equal "$($cfg.checkInSeconds)|$(@($cfg.publicKeys).Count)" '10|1' 'agent.json: at least 10 seconds, empty keys left out'
 
     # Remote Desktop on agent PCs: on with NLA, Domain firewall profile only, never against a group policy.
     Assert-Equal $cfg.remoteDesktop $true 'agent.json: Remote Desktop on by default'
