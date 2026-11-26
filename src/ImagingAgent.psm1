@@ -23,12 +23,13 @@
 
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1')   # ConvertTo-SerialKey, Invoke-LocalDiskBoot
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults
 
 $script:AgentDir = 'C:\ProgramData\ImagingTool\Agent'
 $script:AgentTaskName = 'ImagingTool\Agent'
 # The files the agent runs from (copied into C:\ProgramData\ImagingTool\Agent, administrators and SYSTEM only).
 $script:AgentFiles = @('ImagingAgent.ps1', 'ImagingAgent.psm1', 'RemoteReimage.psm1', 'JsonFile.psm1', 'AnswerFile.psm1', 'AppPack.psm1',
-    'LibraryPack.psm1', 'ScriptLog.psm1')
+    'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1')
 # What a PC needs to install the agent by itself (Publish-AgentInstaller puts them in <share>\Agent).
 $script:AgentInstallerFiles = @('Install-AgentHere.ps1', 'Install-Agent.cmd')
 $script:KeyFile = 'config\secrets\agent-key.xml'
@@ -146,14 +147,36 @@ function Get-AgentKeyId {
 # The fields a signature covers, in this order. A job is signed as these lines (name=value), so nothing in it can be
 # changed or added without breaking the signature.
 $script:JobFields = @('version', 'id', 'action', 'serial', 'uuid', 'agentId', 'computerName', 'createdAt', 'expiresAt', 'bootWimSha256', 'delaySeconds', 'message', 'requestedBy')
+# Fields added later (install apps jobs): signed too, but only when the job has them, so a reimage job reads the same
+# as before and agents installed before them still take it.
+$script:OptionalJobFields = @('apps', 'payloadSha256')
 
 function Get-AgentJobText {
     param([Parameter(Mandatory)]$Job)
-    (@($script:JobFields | ForEach-Object {
-        $v = if ($Job.PSObject.Properties[$_]) { $Job.$_ } else { '' }
+    $line = { param($n)
+        $v = if ($Job.PSObject.Properties[$n]) { $Job.$n } else { '' }
         if ($v -is [datetime]) { $v = $v.ToUniversalTime().ToString('o') }
-        "$_=$("$v" -replace "[`r`n]", ' ')"
-    })) -join "`n"
+        "$n=$("$v" -replace "[`r`n]", ' ')"
+    }
+    $extra = @($script:OptionalJobFields | Where-Object { $Job.PSObject.Properties[$_] -and "$($Job.$_)" -ne '' })
+    (@(@($script:JobFields) + $extra | ForEach-Object { & $line $_ })) -join "`n"
+}
+
+function Get-AgentPayloadHash {
+    <#
+    .SYNOPSIS
+        One SHA-256 for every file under a folder (relative path and content), so the console can sign what it put
+        next to a job and the PC can check it got exactly that.
+    #>
+    param([Parameter(Mandatory)][string]$Folder)
+    $base = [IO.Path]::GetFullPath($Folder).TrimEnd('\', '/')
+    $lines = foreach ($f in [IO.Directory]::GetFiles($base, '*', [IO.SearchOption]::AllDirectories)) {
+        $rel = $f.Substring($base.Length + 1).Replace('/', '\').ToLowerInvariant()
+        "$rel|$((Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash)"
+    }
+    $text = (@($lines) | Sort-Object { $_ } -Culture ([Globalization.CultureInfo]::InvariantCulture)) -join "`n"
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace('-', '') } finally { $sha.Dispose() }
 }
 
 function Set-AgentJobSignature {
@@ -197,8 +220,10 @@ function New-AgentJob {
         [Parameter(Mandatory)][string]$StatusFolder,
         [Parameter(Mandatory)][string]$PrivateKey,
         [Parameter(Mandatory)]$CheckIn,                  # the PC's check-in (Get-AgentCheckIns row or the raw record)
-        [ValidateSet('reimage')][string]$Action = 'reimage',
+        [ValidateSet('reimage', 'installapps')][string]$Action = 'reimage',
         [string]$BootWim,
+        [string[]]$Apps,                                 # installapps: the app names; their packs are in -AppRoot
+        [string]$AppRoot,
         [string]$BootWimSha256,                          # when known already (several PCs, one image)
         [int]$DelaySeconds = 60,
         [string]$Message = 'IT is reinstalling Windows on this PC. Save your work: it restarts shortly.',
@@ -218,10 +243,22 @@ function New-AgentJob {
     if (@([IO.Directory]::GetFileSystemEntries($dir)).Count) { [IO.Directory]::Delete($dir, $true); throw "Something wrote into $dir while it was made; not used." }
     try {
         $hash = ''
+        $payload = ''
         if ($Action -eq 'reimage') {
             if (-not $BootWim -or -not [IO.File]::Exists($BootWim)) { throw "No network boot image at $BootWim." }
             $hash = if ($BootWimSha256) { $BootWimSha256 } else { (Get-FileHash -LiteralPath $BootWim -Algorithm SHA256).Hash }
             [IO.File]::Copy($BootWim, (Join-AgentPath $dir 'boot.wim'), $true)
+        } else {
+            # The app packs go next to the job (that PC's account only), and one hash of them all into the signed job.
+            $Apps = @($Apps | Where-Object { $_ } | Select-Object -Unique)
+            if (-not $Apps) { throw 'No application to install.' }
+            $appsDir = Join-AgentPath $dir 'Apps'
+            foreach ($a in $Apps) {
+                $src = Join-AgentPath $AppRoot $a
+                if (-not [IO.Directory]::Exists($src)) { throw "The application pack $a is not in $AppRoot." }
+                Copy-AgentFolder -Source $src -Destination (Join-AgentPath $appsDir $a)
+            }
+            $payload = Get-AgentPayloadHash $appsDir
         }
         $job = [pscustomobject][ordered]@{
             version       = 1
@@ -238,6 +275,10 @@ function New-AgentJob {
             message       = $Message
             requestedBy   = "$env:USERDOMAIN\$env:USERNAME".Trim('\')
         }
+        if ($Action -eq 'installapps') {
+            $job | Add-Member -NotePropertyName apps -NotePropertyValue ($Apps -join ', ')
+            $job | Add-Member -NotePropertyName payloadSha256 -NotePropertyValue $payload
+        }
         $job = Set-AgentJobSignature -Job $job -PrivateKey $PrivateKey
         Save-JsonFile -Path (Join-AgentPath $dir 'job.json') -InputObject $job
         $job
@@ -245,6 +286,25 @@ function New-AgentJob {
         try { [IO.Directory]::Delete($dir, $true) } catch { }
         throw
     }
+}
+
+function Copy-AgentFolder {
+    # A folder and everything in it (.NET: the share is a UNC path).
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+    $base = [IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($d in [IO.Directory]::GetDirectories($base, '*', [IO.SearchOption]::AllDirectories)) {
+        [void][IO.Directory]::CreateDirectory((Join-AgentPath $Destination $d.Substring($base.Length + 1)))
+    }
+    foreach ($f in [IO.Directory]::GetFiles($base, '*', [IO.SearchOption]::AllDirectories)) {
+        [IO.File]::Copy($f, (Join-AgentPath $Destination $f.Substring($base.Length + 1)), $true)
+    }
+}
+
+function Get-AgentJobApps {
+    # The app names of an install apps job.
+    param([Parameter(Mandatory)]$Job)
+    @("$(if ($Job.PSObject.Properties['apps']) { $Job.apps })" -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Set-AgentJobFolderAccess {
@@ -296,7 +356,7 @@ function Test-AgentJob {
     if (-not @($PublicKeys | Where-Object { $_ })) { return 'this PC has no console key, so it takes no jobs' }
     if (-not (Test-AgentJobSignature -Job $Job -PublicKeys $PublicKeys)) { return 'it is not signed by the console' }
     if ("$($Job.version)" -ne '1') { return "job version $($Job.version) is not known to this agent" }
-    if ($Job.action -ne 'reimage') { return "action '$($Job.action)' is not known to this agent" }
+    if ($Job.action -notin 'reimage', 'installapps') { return "action '$($Job.action)' is not known to this agent" }
     if ("$($Job.serial)".Trim().ToUpperInvariant() -ne "$($Identity.serial)".Trim().ToUpperInvariant()) { return "it is for serial $($Job.serial)" }
     if ($Job.uuid -and $Identity.uuid -and "$($Job.uuid)".Trim() -ne "$($Identity.uuid)".Trim()) { return "it is for UUID $($Job.uuid)" }
     # The agent id is new after each deploy, so a job signed for this PC before it was reimaged never runs again.
@@ -309,7 +369,19 @@ function Test-AgentJob {
     if ($expires.ToUniversalTime() -lt $utc.AddMinutes(-$ClockSkewMinutes)) { return "it expired at $($expires.ToLocalTime().ToString('yyyy-MM-dd HH:mm'))" }
     if ($created.ToUniversalTime() -gt $utc.AddMinutes($ClockSkewMinutes)) { return 'it was made in the future (is this PC''s clock right?)' }
     if ($Job.action -eq 'reimage' -and "$($Job.bootWimSha256)" -notmatch '^[0-9A-Fa-f]{64}$') { return 'it has no boot image checksum' }
+    if ($Job.action -eq 'installapps') {
+        if (-not (Get-AgentJobApps $Job)) { return 'it names no application' }
+        if ("$(if ($Job.PSObject.Properties['payloadSha256']) { $Job.payloadSha256 })" -notmatch '^[0-9A-Fa-f]{64}$') { return 'it has no checksum for the application packs' }
+        # App names become folder names here.
+        if (@(Get-AgentJobApps $Job | Where-Object { $_ -match '[\\/:*?"<>|]|\.\.' })) { return 'an application name is not a folder name' }
+    }
     $null
+}
+
+function Update-AgentDeployStatus {
+    # PC: after an install apps job, each app's new result on this PC's Dashboard row (Update-DeployAppResults).
+    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [datetime]$Now = (Get-Date))
+    Update-DeployAppResults -StatusFolder $StatusFolder -Id $Serial -Results $Results -By 'the agent' -Now $Now
 }
 
 #endregion
@@ -707,6 +779,6 @@ function Publish-AgentInstaller {
 
 Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
-    Get-AgentJobText, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
+    Get-AgentJobText, Get-AgentPayloadHash, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
     New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

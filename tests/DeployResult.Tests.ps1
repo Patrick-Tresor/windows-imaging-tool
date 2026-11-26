@@ -40,7 +40,7 @@ Assert-Equal ($s.Text -match '(?m)^  OK\s+Domain join\s+Joined to corp\.local\r?
 $bad = @($checks | Where-Object name -ne 'App: Zoom') + [pscustomobject]@{ name = 'App: Zoom'; result = 'Failed'; detail = 'Failed: exit 1603' }
 $s = Get-DeployResultSummary -Deploy $deploy -Checks $bad -Now $now
 Assert-Equal $s.Result 'NotReady' 'a failed application: not ready'
-Assert-Equal $s.Verdict 'Not ready: Applications failed' 'verdict names the failed part'
+Assert-Equal $s.Verdict 'Not ready: Zoom failed' 'verdict names the failed application'
 Assert-Equal (@($s.Lines | Where-Object Item -eq 'Applications')[0].Detail) '1 of 2 installed: Zoom (Failed: exit 1603)' 'applications line names the app and why'
 
 # No driver pack for the model and BitLocker off in Report mode: Ready with warnings.

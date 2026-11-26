@@ -87,6 +87,42 @@ try {
     Assert-Equal (Format-Duration ([timespan]::FromSeconds(95))) '1m 35s' 'durations under an hour'
     Assert-Equal (Format-Duration 42.4) '42s' 'durations under a minute, also from seconds'
 
+    # State agrees with Result: a finished PC whose checks found a failed application is Not ready, not Warning.
+    $agree = Join-Path $root 'StatusAgree'
+    New-Item -ItemType Directory -Path $agree -Force | Out-Null
+    $t = (Get-Date).AddMinutes(-30).ToString('o')
+    @{ id = 'NR1'; serial = 'NR1'; computerName = 'PC-NR1'; state = 'Warning'; percent = 100; started = $t; updated = $t; finished = $t; driverPack = 'Dell\Latitude 5521'
+       checks = @(@{ name = 'App: Google Chrome'; result = 'Failed'; detail = 'Failed: exit 1603' }, @{ name = 'App: Zoom'; result = 'Passed'; detail = 'Installed' }) } |
+        ConvertTo-Json -Depth 4 | Set-Content (Join-Path $agree 'NR1.json')
+    @{ id = 'OK1'; serial = 'OK1'; computerName = 'PC-OK1'; state = 'Succeeded'; percent = 100; started = $t; updated = $t; finished = $t; driverPack = 'Dell\Latitude 5521'
+       checks = @(@{ name = 'BitLocker'; result = 'Warning'; detail = 'Off' }) } |
+        ConvertTo-Json -Depth 4 | Set-Content (Join-Path $agree 'OK1.json')
+    $agreeRows = @(Get-DeploymentStatus -Folder $agree)
+    $nr = $agreeRows | Where-Object Id -eq 'NR1'
+    Assert-Equal "$($nr.State)|$($nr.Result)" 'Not ready|Not ready: Google Chrome failed' 'a failed app: State is Not ready and Result names the app'
+    Assert-Equal (($agreeRows | Where-Object Id -eq 'OK1').State) 'Warning' 'a check warning turns Succeeded into Warning'
+    $sum = Get-DeploymentSummary -Rows $agreeRows
+    Assert-Equal "$($sum.Warning)|$($sum.Failed)" '1|1' 'Not ready counts with failed and stalled'
+
+    # The details: one line per app, failed ones first, with the reason; Retry failed apps takes the failed ones.
+    $list = @(Get-DeployChecklist -Row $nr)
+    $apps = @($list | Where-Object { $_.Item -in 'Google Chrome', 'Zoom' })
+    Assert-Equal (($apps | ForEach-Object { "$($_.Item)=$($_.Result)" }) -join ',') 'Google Chrome=Failed,Zoom=OK' 'one line per app, the failed one first'
+    Assert-Equal ($apps[0].Detail) 'Failed: exit 1603' 'the line gives the reason'
+    Assert-Equal (@($list | Where-Object Item -eq 'Applications').Count) 0 'no Applications total line when each app has its own'
+    Assert-Equal ((@($list | ForEach-Object Item))[0]) 'Windows' 'the other parts keep their order'
+    Assert-Equal ((Get-FailedApps -Row $nr) -join ',') 'Google Chrome' 'the failed apps'
+    Assert-Equal (@(Get-FailedApps -Row ($agreeRows | Where-Object Id -eq 'OK1')).Count) 0 'none on a PC whose apps passed'
+
+    # Notices: only for a PC that finished or failed since the last read; nothing on the first read.
+    $prev = @{ NR1 = 'Running'; OK1 = 'Warning' }
+    Assert-Equal (@(Get-DeployNotices -Rows $agreeRows -Previous $null).Count) 0 'no notice on the first read'
+    $n = @(Get-DeployNotices -Rows $agreeRows -Previous $prev)
+    Assert-Equal "$($n.Count)|$($n[0].Title)|$($n[0].Bad)" '1|PC-NR1 is not ready|True' 'a PC that just finished as not ready gets a notice'
+    Assert-Equal $n[0].Text 'Not ready: Google Chrome failed' 'the notice says what failed'
+    Assert-Equal (@(Get-DeployNotices -Rows $agreeRows -Previous @{ NR1 = 'Not ready'; OK1 = 'Warning' }).Count) 0 'no notice when nothing changed'
+    Assert-Equal (@(Get-DeployNotices -Rows $agreeRows -Previous @{ OK1 = 'Warning' }).Count) 1 'a PC new on the Dashboard that already finished gets one (USB stick import)'
+
     # USB deploys with no network folder: the console moves the stick's status into the dashboard
     $stick = Join-Path $root 'stick'
     $dash = Join-Path $root 'dash'

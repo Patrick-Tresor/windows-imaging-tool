@@ -154,7 +154,7 @@ function Set-WindowsBootNext { param([string]$SystemDrive) Add-E2ECall "bootnext
     Import-Module (Join-Path $repo 'src\DeployStatus.psm1') -Force
     $row = @(Get-DeploymentStatus -Folder (Join-Path $root 'Status'))[0]
     Assert-Equal "$($row.Percent)|$($row.Step)" '100|Deployment complete' 'the dashboard shows the deployment complete'
-    Assert-Equal ($row.State -in 'Succeeded', 'Warning') $true 'the dashboard state is Succeeded or Warning (this CI PC is not E2E-PC01, so the name check fails)'
+    Assert-Equal ($row.State -in 'Succeeded', 'Warning', 'Not ready') $true "the dashboard state is a finished one, Not ready here (this CI PC is not E2E-PC01, so the name check fails): $($row.State)"
     Assert-Equal ([bool]$row.Result) $true 'the dashboard row has a result'
     Assert-Equal ($row.ResultText -match 'Applications\s+1 of 1 installed') $true 'the dashboard result lists the application'
 }

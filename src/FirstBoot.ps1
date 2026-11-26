@@ -34,7 +34,7 @@ function Get-FirstBootCleanupCommand([string]$Dir, [switch]$KeepScript) {
     # firstboot-progress.json stays as the record that first boot finished.
     $d = $Dir.TrimEnd('\')
     $folders = 'Apps', 'Tasks' | ForEach-Object { "rd /s /q `"$d\$_`"" }
-    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
+    $names = @('DeployStatus.psm1', 'PostDeployChecks.psm1', 'Test-Deployment.ps1', 'Retry-FailedApps.ps1', 'AppPack.psm1', 'TaskPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'firstboot.json', 'deployed.json', 'firstboot.lock')
     if (-not $KeepScript) { $names = @('FirstBoot.ps1', 'FirstBootState.psm1') + $names }
     $files = $names | ForEach-Object { "del /f /q `"$d\$_`"" }
     (@($folders) + @($files)) -join ' & '
@@ -330,6 +330,28 @@ try {
     Set-Content -Path "$env:WINDIR\Temp\DeployResult.txt" -Value $summary.Text -Encoding utf8
     Write-Log ('Deployment result:' + [Environment]::NewLine + $summary.Text)
 } catch { Write-Log "Could not write the deployment result: $($_.Exception.Message)" }
+
+# Applications that failed are installed again at the next logon, silently as SYSTEM (Retry-FailedApps.ps1, logon task
+# ImagingTool\RetryApps): their packs move to C:\ProgramData\ImagingTool\RetryApps before C:\Temp is cleared.
+try {
+    $retry = New-AppRetryPlan -Applications @($plan.applications) -AppResults @($appResults) -Deploy $deployInfo -Checks @($checkResults) `
+        -Status $(if ($plan.PSObject.Properties['status']) { $plan.status } else { $null })
+    if ($retry -and (Test-Path (Join-Path $deployDir 'Retry-FailedApps.ps1'))) {
+        $retryDir = "$env:ProgramData\ImagingTool\RetryApps"
+        if (Test-Path $retryDir) { Remove-Item $retryDir -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path "$retryDir\Apps" -Force | Out-Null
+        $acl = Get-AdminOnlyAclArgs -Path $retryDir -Folder
+        & icacls.exe @acl 2>&1 | Out-Null
+        foreach ($f in 'Retry-FailedApps.ps1', 'AppPack.psm1', 'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1') { Copy-Item (Join-Path $deployDir $f) $retryDir -Force }
+        foreach ($a in @($retry.apps)) {
+            $src = Join-Path $deployDir "Apps\$($a.name)"
+            if (Test-Path $src) { Copy-Item $src "$retryDir\Apps\" -Recurse -Force }
+        }
+        $retry | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $retryDir 'retry.json') -Encoding utf8
+        & schtasks.exe /Create /F /TN 'ImagingTool\RetryApps' /SC ONLOGON /DELAY 0002:00 /RU SYSTEM /RL HIGHEST /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$retryDir\Retry-FailedApps.ps1`"" 2>&1 | Out-Null
+        Write-Log "$(@($retry.apps | ForEach-Object name) -join ', ') failed: installed again at the next logon (task ImagingTool\RetryApps, up to $($retry.maxAttempts) logons): exit $LASTEXITCODE"
+    }
+} catch { Write-Log "Could not set up the logon retry of the failed applications: $($_.Exception.Message)" }
 Write-Log "First boot finished; removing what deploy staged in $deployDir"
 if (-not $reporting) { $script:nextStatusTry = Get-Date; Set-Progress 'Finishing first boot' 99 }   # a last try at the status share
 if ($reporting) { Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded -Fields @{ computerName = $env:COMPUTERNAME } }

@@ -471,7 +471,12 @@
           <DockPanel MinHeight="480" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Deployment dashboard"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; the Result column says whether the PC is ready, and the details below give drivers, applications, tasks, domain join, BitLocker and total time, one line each. A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Show: History lists deployments removed or cleared from here, with their final log."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Each PC's progress while it deploys, and whether it is ready at the end of first boot. Click a box to show only those PCs; point here for details." Cursor="Help" ToolTipService.ShowDuration="60000">
+                <TextBlock.ToolTip>
+                  <TextBlock MaxWidth="520" TextWrapping="Wrap" Text="Each PC reports its progress while it deploys: from WinPE to the Status folder, then from Windows at first boot while applications install. At the end of first boot it runs the post-deploy checks; Result says whether the PC is ready and names any application or task that failed, and the details under the list give one line per part (drivers, each application and task, domain join, BitLocker, time). A PC that stops reporting is shown as Stalled. First boot reports as the computer account, so the status share must let Domain Computers write to it. PCs deployed from a USB stick that could not reach the share show up here when you plug the stick into this PC. Last seen is the PC's last report (its agent's check-in once Windows runs). The console tells you when a PC finishes or fails, even on another tab. History lists deployments removed or cleared from here, with their final log."/>
+                </TextBlock.ToolTip>
+              </TextBlock>
+              <!-- The count boxes are the filter: click one to show only those PCs, PCs listed for all. -->
               <UniformGrid Rows="1" Margin="0,0,0,12">
                 <UniformGrid.Resources>
                   <Style TargetType="Border">
@@ -481,36 +486,35 @@
                     <Setter Property="CornerRadius" Value="8"/>
                     <Setter Property="Padding" Value="14,10"/>
                     <Setter Property="Margin" Value="0,0,8,0"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                    <Style.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource ControlBorderHoverBrush}"/></Trigger>
+                    </Style.Triggers>
                   </Style>
                 </UniformGrid.Resources>
-                <Border><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Deploying" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource SuccessBrush}"/><TextBlock Text="Succeeded" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}"/><TextBlock Text="With warnings" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
-                <Border><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"/><TextBlock Text="Failed or stalled" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
-                <Border Margin="0"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border x:Name="CardDashRunning" Tag="Running" ToolTip="Show only the PCs deploying now"><StackPanel><TextBlock x:Name="TxtDashRunning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Deploying" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border x:Name="CardDashSucceeded" Tag="Succeeded" ToolTip="Show only the PCs that are ready"><StackPanel><TextBlock x:Name="TxtDashSucceeded" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource SuccessBrush}"/><TextBlock Text="Succeeded" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border x:Name="CardDashWarning" Tag="Warning" ToolTip="Show only the PCs that are ready, with warnings"><StackPanel><TextBlock x:Name="TxtDashWarning" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}"/><TextBlock Text="With warnings" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border x:Name="CardDashFailed" Tag="Attention" ToolTip="Show only the PCs that failed, stalled, or finished but are not ready"><StackPanel><TextBlock x:Name="TxtDashFailed" Text="0" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}"/><TextBlock Text="Need attention" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
+                <Border x:Name="CardDashTotal" Tag="All" Margin="0" ToolTip="Show every PC on the Dashboard"><StackPanel><TextBlock x:Name="TxtDashTotal" Text="0" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="PCs listed" Foreground="{DynamicResource MutedBrush}"/></StackPanel></Border>
               </UniformGrid>
             </StackPanel>
             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-              <Label Content="Show"/>
-              <ComboBox x:Name="CmbDashFilter" Width="150" SelectedIndex="0" VerticalContentAlignment="Center">
-                <ComboBoxItem Content="All"/>
-                <ComboBoxItem Content="Deploying"/>
-                <ComboBoxItem Content="Failed or stalled"/>
-                <ComboBoxItem Content="Finished"/>
-                <ComboBoxItem Content="History"/>
-              </ComboBox>
+              <TextBlock x:Name="TxtDashShowing" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
               <Button x:Name="BtnDashOpen" DockPanel.Dock="Right" Content="Open folder" Margin="8,0,0,0"/>
               <Button x:Name="BtnDashRemove" DockPanel.Dock="Right" Content="Remove" Margin="8,0,0,0"/>
+              <Button x:Name="BtnDashHistory" DockPanel.Dock="Right" Content="History" Margin="8,0,0,0" ToolTip="Deployments removed or cleared from the Dashboard, with their final log. Click a count box to go back."/>
               <TextBlock/>
             </DockPanel>
             <Grid>
-              <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="80"/></Grid.RowDefinitions>
+              <Grid.RowDefinitions><RowDefinition Height="2*" MinHeight="120"/><RowDefinition Height="8"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="90"/></Grid.RowDefinitions>
               <DataGrid x:Name="GridDash" IsReadOnly="True">
                 <DataGrid.RowStyle>
                   <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
                     <Style.Triggers>
                       <DataTrigger Binding="{Binding State}" Value="Failed"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Stalled"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
+                      <DataTrigger Binding="{Binding State}" Value="Not ready"><Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Warning"><Setter Property="Background" Value="{DynamicResource WarningSoftBrush}"/></DataTrigger>
                       <DataTrigger Binding="{Binding State}" Value="Succeeded"><Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}"/></DataTrigger>
                     </Style.Triggers>
@@ -519,26 +523,31 @@
                 <DataGrid.Columns>
                   <DataGridTextColumn Header="Computer" Binding="{Binding ComputerName}" Width="120"/>
                   <DataGridTextColumn Header="Model" Binding="{Binding Model}" Width="*"/>
-                  <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="100"/>
                   <DataGridTextColumn Header="IP" Binding="{Binding IpAddress}" Width="100"/>
                   <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeenText}" Width="100"/>
-                  <DataGridTextColumn Header="Answer file" Binding="{Binding AnswerFile}" Width="110"/>
-                  <DataGridTextColumn Header="State" Binding="{Binding State}" Width="80"/>
-                  <DataGridTemplateColumn Header="Progress" Width="110">
+                  <!-- State, progress and step in one: a bar coloured by state with the step (or the state) written in it. -->
+                  <DataGridTemplateColumn Header="Status" Width="2*">
                     <DataGridTemplateColumn.CellTemplate>
                       <DataTemplate>
-                        <Grid Margin="2,4">
-                          <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100"/>
-                          <TextBlock Text="{Binding Percent, StringFormat={}{0} %}" HorizontalAlignment="Center" FontSize="11"/>
+                        <Grid Margin="2,4" ToolTip="{Binding StatusTip}">
+                          <ProgressBar x:Name="Bar" Value="{Binding Percent, Mode=OneWay}" Maximum="100" MinHeight="20" Foreground="{DynamicResource InfoLineBrush}"/>
+                          <TextBlock Text="{Binding StatusText}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11" Margin="6,0" TextTrimming="CharacterEllipsis"/>
                         </Grid>
+                        <DataTemplate.Triggers>
+                          <DataTrigger Binding="{Binding State}" Value="Succeeded"><Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource SuccessLineBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding State}" Value="Warning"><Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource WarningLineBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding State}" Value="Not ready"><Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ErrorLineBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding State}" Value="Failed"><Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ErrorLineBrush}"/></DataTrigger>
+                          <DataTrigger Binding="{Binding State}" Value="Stalled"><Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource ErrorLineBrush}"/></DataTrigger>
+                        </DataTemplate.Triggers>
                       </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                   </DataGridTemplateColumn>
-                  <DataGridTextColumn Header="Step" Binding="{Binding Step}" Width="2*"/>
-                  <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="1.5*">
+                  <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="2*">
                     <DataGridTextColumn.ElementStyle>
                       <Style TargetType="TextBlock">
                         <Setter Property="ToolTip" Value="{Binding ResultText}"/>
+                        <Setter Property="TextWrapping" Value="Wrap"/>
                         <Style.Triggers>
                           <DataTrigger Binding="{Binding ResultState}" Value="Failed"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
                           <DataTrigger Binding="{Binding ResultState}" Value="NotReady"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
@@ -549,14 +558,49 @@
                     </DataGridTextColumn.ElementStyle>
                   </DataGridTextColumn>
                   <DataGridTextColumn Header="Started" Binding="{Binding Started, StringFormat=MM-dd HH:mm}" Width="85"/>
-                  <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="70"/>
-                  <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeen}" Width="70"/>
+                  <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="75"/>
                 </DataGrid.Columns>
               </DataGrid>
               <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" Background="Transparent"/>
-              <TextBlock x:Name="TxtDashDetail" Grid.Row="2" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="{DynamicResource BodyBrush}"/>
-              <TextBox x:Name="TxtDashLog" Grid.Row="3" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
+              <!-- The selected PC: its verdict and what can be done about it. -->
+              <DockPanel Grid.Row="2" Margin="0,0,0,6" LastChildFill="True">
+                <WrapPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,-6">
+                  <Button x:Name="BtnDashRetry" Content="Retry failed apps" Margin="0,0,8,6" IsEnabled="False"
+                          ToolTip="Sends this PC's agent a signed job to install again only the applications that failed, from the packs in Applications, without reimaging. The PC must be on with its agent checking in; an agent installed before this version must be installed again first (Computers tab, Install agent)."/>
+                  <Button x:Name="BtnDashLog" Content="Open log" Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this deployment's full log in Notepad."/>
+                  <Button x:Name="BtnDashReimage" Content="Reimage..." Margin="0,0,8,6" IsEnabled="False" ToolTip="Opens this PC on the Computers tab, where you choose the answer file and reimage it."/>
+                  <CheckBox x:Name="ChkDashLog" Content="Show log" VerticalAlignment="Center" Margin="0,0,0,6" ToolTip="Shows the live log here instead of the details."/>
+                </WrapPanel>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock x:Name="TxtDashVerdict" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>
+                  <TextBlock x:Name="TxtDashInfo" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+                </StackPanel>
+              </DockPanel>
+              <Border Grid.Row="3" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Background="{DynamicResource SurfaceBrush}">
+                <Grid>
+                  <ScrollViewer x:Name="ScrDashChecks" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="10,6">
+                    <ItemsControl x:Name="LstDashChecks">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="0,2">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="Mark" Text="&#x2022;" FontWeight="Bold" Foreground="{DynamicResource FaintBrush}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Item}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Item}" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Detail}" TextWrapping="Wrap" Foreground="{DynamicResource BodyBrush}"/>
+                          </Grid>
+                          <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Result}" Value="OK"><Setter TargetName="Mark" Property="Text" Value="&#x2714;"/><Setter TargetName="Mark" Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+                            <DataTrigger Binding="{Binding Result}" Value="Warning"><Setter TargetName="Mark" Property="Text" Value="!"/><Setter TargetName="Mark" Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+                            <DataTrigger Binding="{Binding Result}" Value="Failed"><Setter TargetName="Mark" Property="Text" Value="&#x2716;"/><Setter TargetName="Mark" Property="Foreground" Value="{DynamicResource ErrorBrush}"/></DataTrigger>
+                          </DataTemplate.Triggers>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                  <TextBox x:Name="TxtDashLog" Visibility="Collapsed" IsReadOnly="True" FontFamily="Consolas" FontSize="12" BorderThickness="0"
+                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" VerticalContentAlignment="Top"/>
+                </Grid>
+              </Border>
             </Grid>
           </DockPanel>
         </ScrollViewer>

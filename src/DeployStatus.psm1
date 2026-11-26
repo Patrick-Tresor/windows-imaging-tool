@@ -302,6 +302,12 @@ function Get-DeploymentStatus {
                 started = $s.started; finished = $s.finished; state = $state; message = $s.message }
             $result = Get-DeployResultSummary -Deploy $deploy -Checks $(if ($s.PSObject.Properties['checks']) { @($s.checks) } else { @() }) -Now $Now
         } catch { $result = $null }
+        # State and Result say the same thing: a finished deployment whose checks found a problem shows it in State too
+        # (Not ready when something failed, Warning when only warnings), so the row colour and the counts match Result.
+        if ($result -and $state -in 'Succeeded', 'Warning') {
+            if ($result.Result -eq 'NotReady') { $state = 'Not ready' }
+            elseif ($result.Result -eq 'Warning') { $state = 'Warning' }
+        }
         [pscustomobject]@{
             Id           = $s.id
             ComputerName = $s.computerName
@@ -325,7 +331,6 @@ function Get-DeploymentStatus {
             Started      = $started
             Updated      = $updated
             Duration     = if ($started -and $end) { Format-Duration ($end - $started) } else { '' }
-            LastSeen     = if ($updated) { Format-Duration ($Now - $updated) } else { '' }
             LogPath      = if (Test-Path $log) { $log } else { $null }
             LogFile      = if ($s.PSObject.Properties['logFile']) { "$($s.logFile)" } else { '' }
             StatusPath   = $file.FullName
@@ -333,6 +338,7 @@ function Get-DeploymentStatus {
             Result       = if ($result) { $result.Verdict } else { '' }
             ResultState  = if ($result) { $result.Result } else { '' }
             ResultText   = if ($result) { $result.Text } else { '' }
+            ResultLines  = if ($result) { @($result.Lines) } else { @() }
         }
     }
     @($rows) | Sort-Object Started -Descending
@@ -346,7 +352,7 @@ function Get-DeploymentSummary {
         Running   = & $count @('Running')
         Succeeded = & $count @('Succeeded')
         Warning   = & $count @('Warning')
-        Failed    = & $count @('Failed', 'Stalled')
+        Failed    = & $count @('Failed', 'Stalled', 'Not ready')
         Cancelled = & $count @('Cancelled')
     }
 }
@@ -361,8 +367,8 @@ function Remove-DeploymentStatus {
 }
 
 function Get-ExpiredDeployments {
-    # Finished PCs (Succeeded, Warning, Cancelled) not heard from for -Days: the console moves them off the Dashboard
-    # by itself (there is no Clear finished button). Their final log stays under Show: History.
+    # Finished PCs (Succeeded, Warning, Cancelled; not Failed or Not ready) not heard from for -Days: the console moves them off the Dashboard
+    # by itself (there is no Clear finished button). Their final log stays under History.
     param([AllowEmptyCollection()][object[]]$Rows, [int]$Days = 7, [datetime]$Now = (Get-Date))
     @($Rows | Where-Object { $_.State -in 'Succeeded', 'Warning', 'Cancelled' -and $_.Updated -and $_.Updated -lt $Now.AddDays(-$Days) })
 }
@@ -438,6 +444,8 @@ function Get-DeployResultSummary {
     $Checks = @($Checks | Where-Object { $_ })
     $lines = [Collections.Generic.List[object]]::new()
     $add = { param($item, $result, $detail) $lines.Add([pscustomobject]@{ Item = $item; Result = $result; Detail = "$detail" }) }
+    # Applications and tasks that did not pass, by line and result, so the verdict can name them (Not ready: Chrome failed).
+    $named = @{}
     $fromCheck = { param($r) switch ("$r") { 'Passed' { 'OK' } 'Failed' { 'Failed' } 'Warning' { 'Warning' } default { 'Info' } } }
 
     $pc = (@((& $get 'maker'), (& $get 'model')) | Where-Object { $_ }) -join ' '
@@ -460,6 +468,11 @@ function Get-DeployResultSummary {
         $bad = @($list | Where-Object result -ne 'Passed')
         $text = '{0} of {1} {2}' -f ($list.Count - $bad.Count), $list.Count, $kind[2]
         if ($bad) { $text += ': ' + (($bad | ForEach-Object { "$("$($_.name)".Substring($kind[1].Length)) ($($_.detail))" }) -join '; ') }
+        foreach ($b in $bad) {
+            $key = "$($kind[0])|$(if ($b.result -eq 'Failed') { 'Failed' } else { 'Warning' })"
+            if (-not $named[$key]) { $named[$key] = [Collections.Generic.List[string]]::new() }
+            $named[$key].Add("$($b.name)".Substring($kind[1].Length))
+        }
         & $add $kind[0] $(if (@($bad | Where-Object result -eq 'Failed')) { 'Failed' } elseif ($bad) { 'Warning' } else { 'OK' }) $text
     }
     foreach ($name in 'Computer name', 'Domain join', 'Workgroup', 'BitLocker') {
@@ -478,17 +491,137 @@ function Get-DeployResultSummary {
 
     $result = if ($state -eq 'Failed') { 'Failed' } elseif ($state -in 'Running', 'Stalled') { 'Running' }
               elseif (@($lines | Where-Object Result -eq 'Failed')) { 'NotReady' } elseif (@($lines | Where-Object Result -eq 'Warning')) { 'Warning' } else { 'Ready' }
+    # The parts with this result: an application or task line gives the names of those that did not pass.
+    $parts = { param($r) @($lines | Where-Object Result -eq $r | ForEach-Object {
+        $n = $named["$($_.Item)|$r"]
+        if ($n) { $n } else { $_.Item }
+    }) -join ', ' }
     $verdict = switch ($result) {
         'Failed'   { "Deployment failed: $(& $get 'message')".TrimEnd(': ') }
         'Running'  { if ($state -eq 'Stalled') { 'Not finished: the PC stopped reporting' } else { 'Still deploying' } }
-        'NotReady' { 'Not ready: ' + ((@($lines | Where-Object Result -eq 'Failed' | ForEach-Object Item)) -join ', ') + ' failed' }
-        'Warning'  { 'Ready, with warnings: ' + ((@($lines | Where-Object Result -eq 'Warning' | ForEach-Object Item)) -join ', ') }
+        'NotReady' { 'Not ready: ' + (& $parts 'Failed') + ' failed' }
+        'Warning'  { 'Ready, with warnings: ' + (& $parts 'Warning') }
         default    { 'Ready' }
     }
     $head = (@((& $get 'computerName'), $(if ($pc) { "($pc)" })) | Where-Object { $_ }) -join ' '
     $textLines = @($(if ($head) { "$head - $verdict" } else { $verdict })) +
         @($lines | ForEach-Object { '  {0,-8} {1,-13} {2}' -f $(switch ($_.Result) { 'OK' { 'OK' } 'Failed' { 'FAILED' } 'Warning' { 'WARNING' } default { '' } }), $_.Item, $_.Detail })
     [pscustomobject]@{ Verdict = $verdict; Result = $result; Lines = $lines.ToArray(); Text = ($textLines -join [Environment]::NewLine) }
+}
+
+function Set-AppCheckResults {
+    <#
+    .SYNOPSIS
+        A check list with each app's new result in place of its old one ('App: <name>', Passed or Failed), for an app
+        installed again after first boot (the logon retry, or the agent's Retry failed apps). Returns the new list.
+    #>
+    param([AllowEmptyCollection()][object[]]$Checks = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry', [datetime]$Now = (Get-Date))
+    $list = [Collections.Generic.List[object]]::new()
+    foreach ($c in @($Checks)) { if ($c) { $list.Add($c) } }
+    foreach ($x in $Results) {
+        $name = "App: $($x.name)"
+        $result = if ($x.ok) { 'Passed' } else { 'Failed' }
+        $detail = if ($x.ok) { "Installed by $By $($Now.ToString('yyyy-MM-dd HH:mm'))$(if ($x.message) { ": $($x.message)" })" } else { "$($x.status): $($x.message)" }
+        $old = @($list | Where-Object name -eq $name) | Select-Object -First 1
+        $new = [pscustomobject]@{ name = $name; result = $result; detail = $detail }
+        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
+    }
+    ,$list.ToArray()
+}
+
+function Update-DeployAppResults {
+    <#
+    .SYNOPSIS
+        PC: puts each app's new result (installed again after first boot) into this PC's deployment status
+        (<status folder>\<id>.json, the Dashboard's row) and a line in its live log. A check that passes now drops that
+        app's warning; with nothing failed or warned any more, the deployment goes back to Succeeded.
+        -Results: { name, ok, status, message } per app. Returns the record, or $null when there is none.
+    #>
+    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+          [string]$By = 'a retry', [datetime]$Now = (Get-Date))
+    $file = ($Id.Trim() -replace '[\\/:*?"<>|\s]', '_')
+    $path = [IO.Path]::Combine($StatusFolder, "$file.json")
+    if (-not [IO.File]::Exists($path)) { return $null }
+    $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+    $checks = Set-AppCheckResults -Checks @(if ($r.PSObject.Properties['checks']) { @($r.checks) }) -Results $Results -By $By -Now $Now
+    $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
+    foreach ($x in @($Results | Where-Object { $_.ok })) { $warnings = @($warnings | Where-Object { "$_" -notlike "$($x.name) failed*" }) }
+    if (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) { $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) }
+    $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
+    $logLines = @($Results | ForEach-Object {
+        '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} {3} ({4}){5}' -f $Now, $who, $_.name, $(if ($_.ok) { 'installed' } else { 'FAILED' }), $_.status, $(if ($_.message) { ": $($_.message)" })
+    })
+    $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
+    & $set 'checks' @($checks)
+    & $set 'warnings' @($warnings)
+    & $set 'updated' $Now.ToString('o')
+    if ("$($r.state)" -in 'Succeeded', 'Warning') { & $set 'state' $(if ($warnings) { 'Warning' } else { 'Succeeded' }) }
+    $tmp = "$path.tmp"
+    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
+    [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
+    if ($logLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($logLines -join "`r`n") + "`r`n")) } catch { } }
+    $r
+}
+
+function Get-DeployChecklist {
+    <#
+    .SYNOPSIS
+        The Dashboard's details for one PC: one line per part of the result (Windows, Drivers, Domain join, BitLocker,
+        time...), with one line per application and per task instead of their totals, so a failed one shows by name
+        with its reason. Each line: { Item, Result (OK, Warning, Failed, Info), Detail }.
+    #>
+    param([Parameter(Mandatory)]$Row)
+    $checks = @(if ($Row.PSObject.Properties['CheckResults']) { @($Row.CheckResults) | Where-Object { $_ } })
+    $lines = @(if ($Row.PSObject.Properties['ResultLines']) { @($Row.ResultLines) | Where-Object { $_ } })
+    $mark = { param($r) switch ("$r") { 'Passed' { 'OK' } 'Failed' { 'Failed' } 'Warning' { 'Warning' } default { 'Info' } } }
+    foreach ($l in $lines) {
+        $prefix = switch ($l.Item) { 'Applications' { 'App: ' } 'Tasks' { 'Task: ' } default { '' } }
+        $each = if ($prefix) { @($checks | Where-Object { "$($_.name)".StartsWith($prefix) }) } else { @() }
+        if ($each) {
+            # Failed ones first, then warnings, then the rest in their order.
+            $order = { param($c) switch ("$($c.result)") { 'Failed' { 0 } 'Warning' { 1 } default { 2 } } }
+            foreach ($c in @($each | Sort-Object { & $order $_ })) {
+                [pscustomobject]@{ Item = "$($c.name)".Substring($prefix.Length); Result = (& $mark $c.result); Detail = "$($c.detail)" }
+            }
+        } else {
+            [pscustomobject]@{ Item = $l.Item; Result = $l.Result; Detail = "$($l.Detail)" }
+        }
+    }
+}
+
+function Get-FailedApps {
+    # The applications whose post-deploy check did not pass: what Retry failed apps installs again.
+    param([Parameter(Mandatory)]$Row)
+    @(if ($Row.PSObject.Properties['CheckResults']) {
+        @($Row.CheckResults) | Where-Object { $_ -and "$($_.name)".StartsWith('App: ') -and $_.result -ne 'Passed' } | ForEach-Object { "$($_.name)".Substring(5) }
+    })
+}
+
+function Get-DeployNotices {
+    <#
+    .SYNOPSIS
+        What changed since the last Dashboard read that is worth a notification: a PC that finished (Succeeded,
+        Warning, Not ready), failed or stalled. -Previous: Id -> State from the last read ($null on the first read:
+        no notice for what was already there). Returns { Id, Title, Text, Bad }.
+    #>
+    param([object[]]$Rows = @(), [hashtable]$Previous)
+    if ($null -eq $Previous) { return }
+    foreach ($r in $Rows) {
+        $was = $Previous["$($r.Id)"]
+        if ($was -eq $r.State -or $r.State -in 'Running', 'Cancelled') { continue }
+        if ($null -ne $was -and $was -ne 'Running') { continue }
+        $name = if ($r.ComputerName) { $r.ComputerName } else { $r.Serial }
+        $title = switch ($r.State) {
+            'Succeeded' { "$name is ready" }
+            'Warning'   { "$name finished with warnings" }
+            'Not ready' { "$name is not ready" }
+            'Failed'    { "$name failed to deploy" }
+            'Stalled'   { "$name stopped reporting" }
+            default     { "${name}: $($r.State)" }
+        }
+        $text = if ($r.Result) { "$($r.Result)" } elseif ($r.Step) { "$($r.Step)" } else { "$($r.Model)" }
+        [pscustomobject]@{ Id = "$($r.Id)"; Title = $title; Text = $text; Bad = ($r.State -in 'Failed', 'Stalled', 'Not ready') }
+    }
 }
 
 function Get-DeployStickRoots {
@@ -524,4 +657,5 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
+    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

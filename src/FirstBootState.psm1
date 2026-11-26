@@ -104,6 +104,29 @@ function Get-AdminOnlyAclArgs {
     @($Path, '/inheritance:r', '/grant:r', "*S-1-5-32-544:$r", "*S-1-5-18:$r")
 }
 
-Export-ModuleMember -Function New-FirstBootProgress, Read-FirstBootProgress, Save-FirstBootProgress, Get-FirstBootStepState,
+function New-AppRetryPlan {
+    <#
+    .SYNOPSIS
+        First boot: what the logon retry needs for the applications that failed to install, or $null when none did.
+        Retry-FailedApps.ps1 installs them again, silently as SYSTEM, a little after someone logs on, up to
+        -MaxAttempts logons, and puts the results on the Dashboard and in DeployResult.txt.
+        -Applications: firstboot.json's applications (name + app.json fields). -AppResults: { name, ok, status, message }.
+        -Deploy and -Checks: what DeployResult.txt was made from. -Status: { folder, id } when the PC reports.
+    #>
+    param([object[]]$Applications = @(), [object[]]$AppResults = @(), $Deploy, [object[]]$Checks = @(), $Status, [int]$MaxAttempts = 3)
+    $failed = @($AppResults | Where-Object { $_ -and -not $_.ok } | ForEach-Object { "$($_.name)" } | Select-Object -Unique)
+    $apps = @(foreach ($n in $failed) { @($Applications | Where-Object { "$($_.name)" -eq $n }) | Select-Object -First 1 })
+    if (-not $apps) { return $null }
+    [pscustomobject][ordered]@{
+        apps        = @($apps)
+        attempts    = 0
+        maxAttempts = $MaxAttempts
+        deploy      = $Deploy
+        checks      = @($Checks | Where-Object { $_ })
+        status      = $Status
+    }
+}
+
+Export-ModuleMember -Function New-AppRetryPlan, New-FirstBootProgress, Read-FirstBootProgress, Save-FirstBootProgress, Get-FirstBootStepState,
     Start-FirstBootStep, Complete-FirstBootStep, Test-FirstBootRunsLeft, Get-InterruptedAppResult, Get-InterruptedTaskResult,
     Get-FirstBootLock, Get-AdminOnlyAclArgs

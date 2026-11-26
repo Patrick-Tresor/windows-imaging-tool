@@ -117,7 +117,7 @@ try {
     Set-DeployCheckResult -Results $failed -Summary $fs -Warning (ConvertTo-CheckWarning $fs)
     Set-DeployStatus -Step 'Deployment complete' -Percent 100 -State Succeeded
     $row = @(Get-DeploymentStatus -Folder $folder)[0]
-    Assert-Equal "$($row.State)|$($row.CheckResult)|$(@($row.CheckResults).Count)" 'Warning|Failed|6' 'failed checks show on the dashboard and make the deployment a Warning'
+    Assert-Equal "$($row.State)|$($row.CheckResult)|$(@($row.CheckResults).Count)" 'Not ready|Failed|6' 'failed checks show on the dashboard and make the deployment Not ready'
     Assert-Equal $row.Checks $fs.Text 'the Checks column shows the summary'
     $utc = { param($d) ([datetime]$d).ToUniversalTime().ToString('s') }    # PowerShell 7 reads ISO dates back as DateTime
     $finished = & $utc (Get-DeployStatusRecord).finished
@@ -128,7 +128,8 @@ try {
     $ps = Get-PostDeployCheckSummary -Results $passed
     Set-DeployCheckResult -Results $passed -Summary $ps -Warning (ConvertTo-CheckWarning $ps)
     $row = @(Get-DeploymentStatus -Folder $folder)[0]
-    Assert-Equal "$($row.State)|$($row.CheckResult)|$($row.Warnings)" 'Succeeded|Passed|' 'a passing re-run clears the check warning'
+    # State follows the result: Succeeded, or Warning when the result still has one (here no driver pack is recorded).
+    Assert-Equal "$($row.State -eq $(if ($row.ResultState -eq 'Warning') { 'Warning' } else { 'Succeeded' }))|$($row.CheckResult)|$($row.Warnings)" 'True|Passed|' 'a passing re-run clears the check warning and Not ready'
     Assert-Equal (& $utc (Get-DeployStatusRecord).finished) $finished 'a re-run keeps the finish time'
 }
 finally {

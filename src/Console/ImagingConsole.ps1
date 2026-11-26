@@ -47,7 +47,7 @@ try {
 } catch { }
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
 
 # With the console window hidden, an error that stops the console before (or after) its window opens would leave
 # nothing on screen. Show it in a message box and keep it in %LOCALAPPDATA%\ImagingConsole\console-error.log, with
@@ -367,11 +367,12 @@ function Get-ConsoleAgentCheckIns {
     $rows
 }
 
+$script:dashFilter = 'All'   # All, Running, Succeeded, Warning, Attention or History (the count boxes)
 function Update-Dashboard {
     $folder = Get-DashboardFolder
     if ($folder) { Import-StickDashboard $folder }
     $rows = @(if ($folder) { Get-DeploymentStatus -Folder $folder })
-    # Finished more than 7 days ago: off the Dashboard by itself, the final log stays under Show: History.
+    # Finished more than 7 days ago: off the Dashboard by itself, the final log stays under History.
     $expired = @(Get-ExpiredDeployments -Rows $rows)
     if ($expired) {
         Remove-DeploymentStatus -Rows $expired
@@ -384,25 +385,43 @@ function Update-Dashboard {
     $ui.TxtDashFailed.Text    = $sum.Failed
     $ui.TxtDashTotal.Text     = $sum.Total
 
-    if ($ui.CmbDashFilter.SelectedIndex -eq 4) {
-        # History: deployments removed or cleared from the Dashboard, from their final log in Logs\.
+    # Notices for PCs that finished or failed since the last read (also on other tabs: see the timer below).
+    Show-DashboardNotices -Rows $rows
+
+    $filter = $script:dashFilter
+    if ($filter -eq 'History') {
+        # Deployments removed or cleared from the Dashboard, from their final log in Logs\.
         $onDash = @($rows | ForEach-Object LogFile)
         $rows = @(if (Test-ContentRoot $script:root) { Get-DeploymentHistoryRows -ContentRoot $script:root -DashboardLogFiles $onDash })
     } else {
-        $states = @(switch ($ui.CmbDashFilter.SelectedIndex) {
-            1 { 'Running' }
-            2 { 'Failed', 'Stalled' }
-            3 { 'Succeeded', 'Warning', 'Cancelled' }
-        })
+        $states = @(Get-DashboardFilterStates $filter)
         if ($states) { $rows = @($rows | Where-Object State -in $states) }
     }
+    Update-DashboardCards
+    $ui.TxtDashShowing.Text = switch ($filter) {
+        'History'   { 'Showing: history (deployments removed or cleared from here). Click a box to go back.' }
+        'Running'   { 'Showing: deploying now' }
+        'Succeeded' { 'Showing: ready' }
+        'Warning'   { 'Showing: ready, with warnings' }
+        'Attention' { 'Showing: failed, stalled or not ready' }
+        default     { '' }
+    }
 
-    # The agent's last check-in (by serial): when the PC was last on, and the address it has now.
+    # One Last seen: the agent's last check-in (by serial) when it is newer than the deployment's last report,
+    # otherwise that report; and the address the agent has now.
     $checkIns = Get-ConsoleAgentCheckIns
     foreach ($r in $rows) {
         $a = if ($checkIns -and $r.Serial) { Find-AgentCheckIn -CheckIns $checkIns -Serial "$($r.Serial)" } else { $null }
-        $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue $(if ($a) { $a.LastSeenText } else { '' }) -Force
+        $seen = if ($a -and $a.LastSeen -and (-not $r.Updated -or $a.LastSeen -gt $r.Updated)) { $a.LastSeenText }
+                elseif ($r.Updated) { Format-AgentLastSeen -LastSeen $r.Updated } else { '' }
+        $r | Add-Member -NotePropertyName LastSeenText -NotePropertyValue $seen -Force
         if ($a -and $a.Online -and $a.ipAddress) { $r | Add-Member -NotePropertyName IpAddress -NotePropertyValue "$($a.ipAddress)" -Force }
+        $r | Add-Member -NotePropertyName Agent -NotePropertyValue $a -Force
+        # The Status column: the step while it deploys, the state once it ends; the tooltip has both and the percent.
+        $step = "$(if ($r.PSObject.Properties['Step']) { $r.Step })"
+        $text = switch ("$($r.State)") { 'Running' { $step } 'Stalled' { "Stalled: $step" } default { "$($r.State)" } }
+        $r | Add-Member -NotePropertyName StatusText -NotePropertyValue $text -Force
+        $r | Add-Member -NotePropertyName StatusTip -NotePropertyValue ("$($r.State): $step ($($r.Percent) %)".Replace(':  (', ': (')) -Force
     }
 
     # Keep the selected PC selected across refreshes.
@@ -412,24 +431,133 @@ function Update-Dashboard {
     Update-DashboardDetail
 }
 
+function Get-DashboardFilterStates([string]$Filter) {
+    switch ($Filter) {
+        'Running'   { 'Running' }
+        'Succeeded' { 'Succeeded' }
+        'Warning'   { 'Warning' }
+        'Attention' { 'Failed', 'Stalled', 'Not ready' }
+    }
+}
+
+function Update-DashboardCards {
+    # The count box that filters the list now is outlined in the accent colour.
+    foreach ($card in $ui.CardDashRunning, $ui.CardDashSucceeded, $ui.CardDashWarning, $ui.CardDashFailed, $ui.CardDashTotal) {
+        $on = "$($card.Tag)" -eq $script:dashFilter
+        if ($on) {
+            $card.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush')
+            $card.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'AccentSoftBrush')
+        } else {
+            $card.ClearValue([Windows.Controls.Border]::BorderBrushProperty)
+            $card.ClearValue([Windows.Controls.Border]::BackgroundProperty)
+        }
+    }
+}
+
 function Update-DashboardDetail {
     $r = $ui.GridDash.SelectedItem
-    if (-not $r) { $ui.TxtDashDetail.Text = ''; $ui.TxtDashLog.Text = ''; return }
-    if ($r.PSObject.Properties['IsHistory']) {
-        $ui.TxtDashDetail.Text = "Final log of $($r.Serial), $($r.State), $($r.Started.ToString('yyyy-MM-dd HH:mm'))"
-        $text = try { [IO.File]::ReadAllText($r.LogPath) } catch { '' }
-        if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
-        return
+    $history = $r -and $r.PSObject.Properties['IsHistory']
+    $live = $r -and -not $history
+    $ui.BtnDashLog.IsEnabled = [bool]($r -and $r.LogPath)
+    $ui.BtnDashReimage.IsEnabled = [bool]($live -and $r.ComputerName -and $r.State -ne 'Running')
+    $failed = @(if ($live) { Get-FailedApps -Row $r })
+    $ui.BtnDashRetry.IsEnabled = [bool]($failed -and $r.State -notin 'Running', 'Stalled')
+    $ui.BtnDashRetry.Content = if ($failed.Count -eq 1) { "Retry $($failed[0])" } else { 'Retry failed apps' }
+    if (-not $r) {
+        $ui.TxtDashVerdict.Text = 'Select a PC to see its details.'; $ui.TxtDashInfo.Text = ''
+        $ui.LstDashChecks.ItemsSource = $null; $ui.TxtDashLog.Text = ''; return
     }
-    # The deployment's result first (one line each: drivers, applications, tasks, join, BitLocker, time), then the rest.
-    $parts = @("MAC: $($r.MacAddress)", "Phase: $($r.Phase)", "Updated: $(if ($r.Updated) { $r.Updated.ToString('yyyy-MM-dd HH:mm:ss') })")
-    if ($r.Message)  { $parts += "Error: $($r.Message)" }
-    if ($r.Warnings) { $parts += "Warnings: $($r.Warnings)" }
-    $ui.TxtDashDetail.Text = $(if ($r.ResultText) { $r.ResultText + "`n" } else { '' }) + ($parts -join '    ')
-    if ($r.Checked) { $ui.TxtDashDetail.Text += "    Checked: $($r.Checked.ToString('yyyy-MM-dd HH:mm'))" }
-    $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
-    if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
+    if ($history) {
+        $ui.TxtDashVerdict.Text = "Final log of $($r.Serial), $($r.State), $($r.Started.ToString('yyyy-MM-dd HH:mm'))"
+        $ui.TxtDashInfo.Text = ''
+        $ui.LstDashChecks.ItemsSource = $null
+        Set-DashboardLogVisible $true
+    } else {
+        $name = (@($r.ComputerName, $(if ($r.Model) { "($($r.Model))" })) | Where-Object { $_ }) -join ' '
+        $ui.TxtDashVerdict.Text = (@($name, $(if ($r.Result) { $r.Result } else { $r.StatusText })) | Where-Object { $_ }) -join ' - '
+        $info = @()
+        if ($r.Serial)     { $info += "Serial $($r.Serial)" }
+        if ($r.AnswerFile) { $info += "Answer file $($r.AnswerFile)" }
+        if ($r.MacAddress) { $info += "MAC $($r.MacAddress)" }
+        if ($r.Phase)      { $info += "Phase $($r.Phase)" }
+        if ($r.Updated)    { $info += "Updated $($r.Updated.ToString('yyyy-MM-dd HH:mm'))" }
+        if ($r.Checked)    { $info += "Checked $($r.Checked.ToString('yyyy-MM-dd HH:mm'))" }
+        if ($r.Agent -and $r.Agent.PSObject.Properties['job'] -and $r.Agent.job -and $r.Agent.job.state) {
+            $info += "Agent job: $($r.Agent.job.action) $($r.Agent.job.state)$(if ($r.Agent.job.message) { " ($($r.Agent.job.message))" })"
+        }
+        $ui.TxtDashInfo.Text = $info -join '    '
+        $lines = @(Get-DeployChecklist -Row $r)
+        if ($r.Message)  { $lines = @([pscustomobject]@{ Item = 'Error'; Result = 'Failed'; Detail = "$($r.Message)" }) + $lines }
+        if ($r.Warnings) { $lines += [pscustomobject]@{ Item = 'Warnings'; Result = 'Warning'; Detail = "$($r.Warnings)" } }
+        if (-not $lines) { $lines = @([pscustomobject]@{ Item = 'Progress'; Result = 'Info'; Detail = "$($r.StatusText) ($($r.Percent) %)" }) }
+        $ui.LstDashChecks.ItemsSource = $lines
+        Set-DashboardLogVisible ([bool]$ui.ChkDashLog.IsChecked)
+    }
+    if ($ui.TxtDashLog.Visibility -eq 'Visible') {
+        $text = if ($r.LogPath) { try { [IO.File]::ReadAllText($r.LogPath) } catch { '' } } else { 'No log reported yet.' }
+        if ($text -ne $ui.TxtDashLog.Text) { $ui.TxtDashLog.Text = $text; $ui.TxtDashLog.ScrollToEnd() }
+    }
 }
+
+function Set-DashboardLogVisible([bool]$Show) {
+    $ui.TxtDashLog.Visibility = if ($Show) { 'Visible' } else { 'Collapsed' }
+    $ui.ScrDashChecks.Visibility = if ($Show) { 'Collapsed' } else { 'Visible' }
+}
+
+#region Dashboard notices
+
+# A Windows notification (tray balloon: it needs no Start menu shortcut) and a flashing taskbar button when a PC
+# finishes or fails, while the console is not in front on the Dashboard.
+$script:dashLastStates = $null
+$script:dashNotifyIcon = $null
+Add-Type -Namespace ImagingTool -Name TaskbarFlash -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential)] public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
+[DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+public static void Flash(IntPtr hwnd) {
+    FLASHWINFO f = new FLASHWINFO(); f.cbSize = (uint)Marshal.SizeOf(f); f.hwnd = hwnd; f.dwFlags = 3 | 12; f.uCount = 0; f.dwTimeout = 0;
+    FlashWindowEx(ref f);
+}
+'@ -ErrorAction SilentlyContinue
+
+function Show-DashboardNotices([object[]]$Rows) {
+    $notices = @(Get-DeployNotices -Rows $Rows -Previous $script:dashLastStates)
+    $script:dashLastStates = @{}
+    foreach ($r in $Rows) { $script:dashLastStates["$($r.Id)"] = "$($r.State)" }
+    if (-not $notices) { return }
+    if ($window.IsActive -and $ui.Tabs.SelectedItem -eq $ui.TabDashboard) { return }
+    try {
+        if (-not $script:dashNotifyIcon) {
+            $icon = New-Object Windows.Forms.NotifyIcon
+            $ico = Join-Path $srcDir 'Assets\logo.ico'
+            $icon.Icon = if (Test-Path $ico) { New-Object Drawing.Icon $ico } else { [Drawing.SystemIcons]::Information }
+            $icon.Text = 'Imaging Console'
+            $icon.Add_BalloonTipClicked({ Invoke-Safely { Open-DashboardFromNotice } })
+            $icon.Add_MouseClick({ Invoke-Safely { Open-DashboardFromNotice } })
+            $script:dashNotifyIcon = $icon
+        }
+        $script:dashNotifyIcon.Visible = $true
+        $n = $notices[-1]
+        $title = if ($notices.Count -gt 1) { "$($notices.Count) PCs finished or need attention" } else { $n.Title }
+        $text = if ($notices.Count -gt 1) { ($notices | ForEach-Object Title) -join "`n" } else { $n.Text }
+        $script:dashNoticeId = $n.Id
+        $script:dashNotifyIcon.ShowBalloonTip(10000, $title, $(if ($text) { $text } else { ' ' }), $(if (@($notices | Where-Object Bad)) { 'Warning' } else { 'Info' }))
+    } catch { }
+    try {
+        if (-not $window.IsActive) { [ImagingTool.TaskbarFlash]::Flash((New-Object Windows.Interop.WindowInteropHelper $window).Handle) }
+    } catch { }
+}
+
+function Open-DashboardFromNotice {
+    if ($window.WindowState -eq 'Minimized') { $window.WindowState = 'Normal' }
+    [void]$window.Activate()
+    $ui.Tabs.SelectedItem = $ui.TabDashboard
+    if ($script:dashNoticeId) {
+        $row = @($ui.GridDash.ItemsSource | Where-Object { "$($_.Id)" -eq $script:dashNoticeId })[0]
+        if ($row) { $ui.GridDash.SelectedItem = $row; $ui.GridDash.ScrollIntoView($row) }
+    }
+}
+
+#endregion
 
 function Update-Library {
     # Applications and tasks in one list (Apps and Tasks tab); the selection stays when the row is still there.
@@ -1393,7 +1521,58 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
 
 #region Dashboard
 
-$ui.CmbDashFilter.Add_SelectionChanged({ Invoke-Safely { Update-Dashboard } })
+# The count boxes filter the list (PCs listed: all); History shows deployments removed or cleared from here.
+foreach ($card in $ui.CardDashRunning, $ui.CardDashSucceeded, $ui.CardDashWarning, $ui.CardDashFailed, $ui.CardDashTotal) {
+    $card.Add_MouseLeftButtonUp({ param($sender, $e) Invoke-Safely { $script:dashFilter = "$($sender.Tag)"; Update-Dashboard } })
+}
+$ui.BtnDashHistory.Add_Click({ Invoke-Safely { $script:dashFilter = 'History'; Update-Dashboard } })
+$ui.ChkDashLog.Add_Click({ Invoke-Safely { Update-DashboardDetail } })
+
+$ui.BtnDashLog.Add_Click({ Invoke-Safely {
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r -or -not $r.LogPath) { Show-Error 'This PC has not sent a log yet.'; return }
+    Start-Process -FilePath notepad.exe -ArgumentList (ConvertTo-Arg $r.LogPath)
+} })
+
+$ui.BtnDashReimage.Add_Click({ Invoke-Safely {
+    # The Computers tab has the answer file, the boot image and the confirmation: open the PC there.
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r -or -not $r.ComputerName) { return }
+    $name = "$($r.ComputerName)".ToUpperInvariant()
+    $ui.Tabs.SelectedItem = $ui.TabComputers
+    $row = @($ui.GridAd.ItemsSource | Where-Object { "$($_.Name)" -eq $name })[0]
+    if (-not $row) {
+        $ui.TxtAdName.Text = $name
+        Search-AdComputers
+        $row = @($ui.GridAd.ItemsSource | Where-Object { "$($_.Name)" -eq $name })[0]
+    }
+    if ($row) {
+        $ui.GridAd.SelectedItems.Clear(); $ui.GridAd.SelectedItem = $row; $ui.GridAd.ScrollIntoView($row)
+        Set-Status "$name is selected: choose the answer file and click Reimage."
+    } else { Set-Status "$name is not in the domain list: search for it by name or IP on this tab." }
+} })
+
+$ui.BtnDashRetry.Add_Click({ Invoke-Safely {
+    if (-not (Test-RootReady)) { return }
+    $r = $ui.GridDash.SelectedItem
+    if (-not $r -or $r.PSObject.Properties['IsHistory']) { return }
+    $apps = @(Get-FailedApps -Row $r)
+    if (-not $apps) { Show-Error 'No application failed on this PC.'; return }
+    $statusFolder = Get-DashboardFolder
+    $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
+    if (-not $agent) { Show-Error "$($r.ComputerName) has no agent checking in. Install it from the Computers tab (Install agent), then try again."; return }
+    if (-not $agent.Online) { Show-Error "$($r.ComputerName)'s agent last checked in $("$($agent.LastSeenText)".ToLowerInvariant()). Turn the PC on (and connect it to the network), then try again."; return }
+    $appRoot = Join-Path $script:root 'Applications'
+    $missing = @($apps | Where-Object { -not (Test-Path -LiteralPath (Join-Path $appRoot $_)) })
+    if ($missing) { Show-Error "The application pack $($missing -join ', ') is not in $appRoot."; return }
+    if (-not (Confirm-Action "Install $($apps -join ', ') again on $($r.ComputerName)?`n`nIts agent takes the job within a minute and installs in the background; whoever is signed in can keep working. The result shows here when it is done.")) { return }
+    $key = Get-AgentSigningKey -ContentRoot $script:root
+    if (-not $key) { Show-Error 'This content root has no agent key (config\secrets\agent-key.xml): the PCs would not trust the job.'; return }
+    $job = New-AgentJob -StatusFolder $statusFolder -PrivateKey $key -CheckIn $agent -Action installapps -Apps $apps -AppRoot $appRoot `
+        -Message "IT is installing $($apps -join ', ') on this PC."
+    $script:agentCache = $null
+    Set-Status "Sent $($r.ComputerName) a job to install $($apps -join ', ') (job $($job.id.Substring(0, 8))). Agent job shows its progress under the list."
+} })
 $ui.GridDash.Add_SelectionChanged({ Invoke-Safely { Update-DashboardDetail } })
 
 $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
@@ -1403,7 +1582,7 @@ $ui.BtnDashRemove.Add_Click({ Invoke-Safely {
     if ($r.State -eq 'Running' -and -not (Confirm-Action "$($r.ComputerName) ($($r.Serial)) is still deploying. Remove it from the dashboard anyway? It reappears at its next update.")) { return }
     Remove-DeploymentStatus -Rows @($r)
     Update-Dashboard
-    Set-Status "Removed $($r.Serial) from the dashboard. Show: History has its final log."
+    Set-Status "Removed $($r.Serial) from the dashboard. History has its final log."
 } })
 
 $ui.BtnDashOpen.Add_Click({ Invoke-Safely {
@@ -1416,8 +1595,15 @@ $ui.BtnDashOpen.Add_Click({ Invoke-Safely {
 # Live refresh while the Dashboard tab is open. Errors go to the status bar, not a dialog every 10 seconds.
 $script:dashTimer = [Windows.Threading.DispatcherTimer]::new()
 $script:dashTimer.Interval = [timespan]::FromSeconds(10)
+$script:dashTick = 0
 $script:dashTimer.Add_Tick({
-    if ($ui.Tabs.SelectedItem -ne $ui.TabDashboard) { return }
+    $script:dashTick++
+    if ($ui.Tabs.SelectedItem -ne $ui.TabDashboard) {
+        # On another tab: every 30 seconds, only look for PCs that finished or failed, to tell you.
+        if ($script:dashTick % 3) { return }
+        try { $f = Get-DashboardFolder; if ($f) { Show-DashboardNotices -Rows @(Get-DeploymentStatus -Folder $f) } } catch { }
+        return
+    }
     try { Update-Dashboard } catch { Set-Status "Dashboard refresh failed: $($_.Exception.Message)" }
 })
 $script:dashTimer.Start()
@@ -1457,6 +1643,7 @@ $window.Dispatcher.Add_UnhandledException({
 # Progress windows hide instead of closing while their work runs; when the console closes, they close with it.
 $window.Add_Closing({ $script:ConsoleClosing = $true })
 $window.Add_Closed({ Close-ProgressHub })
+$window.Add_Closed({ if ($script:dashNotifyIcon) { try { $script:dashNotifyIcon.Visible = $false; $script:dashNotifyIcon.Dispose() } catch { } } })
 $window.Add_Closed({ $script:dashTimer.Stop(); $script:scanTimer.Stop(); $script:stickTimer.Stop(); Stop-AdOnlineCheck })
 
 # A stick can be plugged in at any time: look every 5 seconds (DriveInfo only, no disk queries).
