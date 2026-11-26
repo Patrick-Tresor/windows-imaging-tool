@@ -837,7 +837,7 @@ function Get-AgentCheckInSeconds {
 
 # Remote Desktop on agent PCs: the agent turns it on (Network Level Authentication required, firewall open on the
 # Domain profile only) unless agent.json says remoteDesktop false, and says in its check-in whether it is on. The
-# console's Remote desktop button then opens mstsc to the PC. Who may sign in is not changed: the PC's
+# console's Remote support button joins the signed-in user's screen over it (mstsc /shadow). Who may sign in is not changed: the PC's
 # Administrators (Domain Admins on a domain PC) and its Remote Desktop Users group, which is empty unless IT fills it.
 $script:RdpKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
 $script:RdpTcpKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
@@ -956,16 +956,6 @@ function Get-RemoteDesktopTarget {
     "$Name"
 }
 
-function Get-RemoteDesktopProblem {
-    # Console: why Remote desktop to a PC would not work, in one line, or '' (try it). From its agent's check-in.
-    param([string]$ComputerName, $Agent)
-    if (-not $Agent) { return "$ComputerName has no agent checking in, so Remote Desktop may be off on it." }
-    if (-not $Agent.Online) { return "$ComputerName's agent last checked in $("$($Agent.LastSeenText)".ToLowerInvariant()): the PC is probably off." }
-    $rdp = if ($Agent.PSObject.Properties['remoteDesktop']) { "$($Agent.remoteDesktop)" } else { '' }
-    if ($rdp -like 'Off*') { return "Remote Desktop on ${ComputerName}: $rdp" }
-    ''
-}
-
 function Get-RemoteSupportPlan {
     <#
     .SYNOPSIS
@@ -981,7 +971,7 @@ function Get-RemoteSupportPlan {
     if (-not $support) { return & $no "$ComputerName's agent is older than remote support: it updates itself within a few minutes, try again then." }
     if ($support -like 'Off*') { return & $no "Remote support on ${ComputerName}: $support" }
     $id = if ($Agent.PSObject.Properties['userSessionId']) { "$($Agent.userSessionId)" } else { '' }
-    if (-not "$($Agent.userSignedIn)" -or $id -notmatch '^\d+$') { return & $no "Nobody is signed in on ${ComputerName}: use Remote desktop instead." }
+    if (-not "$($Agent.userSignedIn)" -or $id -notmatch '^\d+$') { return & $no "Nobody is signed in on ${ComputerName}: remote support joins the screen of someone signed in." }
     $view = $support -like 'View only*'
     $ask = if ($support -match 'without asking') { "A group policy on $ComputerName lets you in without asking $($Agent.userSignedIn). Join their screen anyway?" } else { '' }
     $a = "/v:$Target /shadow:$id" + $(if (-not $view) { ' /control' })
@@ -1090,4 +1080,4 @@ Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
-    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Get-RemoteDesktopPlan, Get-RemoteDesktopState, Sync-AgentRemoteDesktop, Test-AgentRemoteDesktopOn, Get-RemoteDesktopTarget, Get-RemoteDesktopProblem, Get-RemoteSupportPlan, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Get-RemoteDesktopPlan, Get-RemoteDesktopState, Sync-AgentRemoteDesktop, Test-AgentRemoteDesktopOn, Get-RemoteDesktopTarget, Get-RemoteSupportPlan, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

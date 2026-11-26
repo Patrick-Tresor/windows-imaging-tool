@@ -314,15 +314,12 @@ try {
     Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $agentOn -Check ([pscustomobject]@{ Ip = '10.9.9.9'; State = 'No answer' })) '10.1.2.34' 'DNS gives another address: the IP the agent reported'
     Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $agentOn -Check ([pscustomobject]@{ Ip = ''; State = 'Old DNS' })) '10.1.2.34' 'old DNS: the agent IP'
     Assert-Equal (Get-RemoteDesktopTarget -Name 'PC01' -Agent $null -Check $null) 'PC01' 'no agent: the name'
-    Assert-Equal (Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent $agentOn) '' 'agent on, Remote Desktop on: no question'
-    Assert-Equal ((Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent $null) -match 'no agent') $true 'no agent: asked first'
-    Assert-Equal ((Get-RemoteDesktopProblem -ComputerName 'PC01' -Agent ([pscustomobject]@{ Online = $true; remoteDesktop = $gpo.Text })) -match 'group policy') $true 'off by group policy: asked first, with why'
     $view = Get-AgentRowView -Agent ([pscustomobject]@{ Online = $true; LastSeen = $now; LastSeenText = '2 min ago'; ipAddress = '10.1.2.34'; remoteDesktop = 'On (x)' }) -Name 'PC01'
     Assert-Equal ($view.AgentDetail -match 'Remote Desktop: On') $true 'the Agent column tooltip says it'
     $agentScript = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.ps1'))
     Assert-Equal ($agentScript -match 'Sync-AgentRemoteDesktop' -and $agentScript -match '-RemoteDesktop \$script:rdpText') $true 'the agent turns it on and reports it'
     $consoleText = [IO.File]::ReadAllText((Join-Path $repo 'src/Console/ImagingConsole.ps1'))
-    Assert-Equal ($consoleText -match 'mstsc\.exe' -and $consoleText -match 'BtnAdRdp' -and $consoleText -match 'BtnDashRdp') $true 'the Computers tab and the Dashboard open Remote Desktop'
+    Assert-Equal ($consoleText -match 'mstsc\.exe' -and $consoleText -match 'BtnAdSupport' -and $consoleText -match 'BtnDashSupport' -and $consoleText -notmatch 'BtnAdRdp|BtnDashRdp|Open-RemoteDesktop') $true 'remote support only: no separate Remote desktop button'
     $module = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.psm1'))
     Assert-Equal ($module -match "Set-NetFirewallRule -Name \`$r\.name -Profile Domain -Enabled True") $true 'the firewall opens on the Domain profile only'
     Assert-Equal ($module -match 'Add-LocalGroupMember|net(\.exe)? localgroup') $false 'who may sign in is never changed'
@@ -345,7 +342,7 @@ try {
     Assert-Equal "$($p.Args)|$($p.Problem)|$($p.Ask)" '/v:PC01 /shadow:2 /control||' 'joins session 2 with control; Windows asks the user (no /noConsentPrompt)'
     Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $null).Problem -match 'no agent') $true 'no agent: refused'
     $nobody = [pscustomobject]@{ Online = $true; userSignedIn = ''; userSessionId = ''; remoteSupport = 'Ready: the user is asked first' }
-    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $nobody).Problem -match 'Nobody is signed in') $true 'nobody signed in: use Remote desktop'
+    Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $nobody).Problem -match 'Nobody is signed in') $true 'nobody signed in: refused'
     $old = [pscustomobject]@{ Online = $true; userSignedIn = 'CORP\jdoe' }
     Assert-Equal ((Get-RemoteSupportPlan -ComputerName 'PC01' -Agent $old).Problem -match 'older') $true 'an agent from before remote support: wait for its update'
     $viewOnly = [pscustomobject]@{ Online = $true; userSignedIn = 'CORP\jdoe'; userSessionId = '3'; remoteSupport = $s0.SupportText -replace '.*', 'View only: x' }

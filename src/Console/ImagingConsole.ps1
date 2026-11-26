@@ -520,7 +520,6 @@ function Update-DashboardDetail {
     $live = $r -and -not $history
     $ui.BtnDashLog.IsEnabled = [bool]($r -and $r.LogPath)
     $ui.BtnDashReimage.IsEnabled = [bool]($live -and $r.ComputerName -and $r.State -ne 'Running')
-    $ui.BtnDashRdp.IsEnabled = [bool]($live -and $r.ComputerName)
     $ui.BtnDashSupport.IsEnabled = [bool]($live -and $r.ComputerName)
     $failed = @(if ($live) { Get-FailedApps -Row $r })
     $ui.BtnDashRetry.IsEnabled = [bool]($failed -and $r.State -notin 'Running', 'Stalled')
@@ -1425,24 +1424,6 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     Start-PendingReimage
 } })
 
-function Open-RemoteDesktop {
-    # mstsc to each PC (5 at most), by its DNS name when DNS agrees with its agent, else the IP its agent reported.
-    # A PC whose agent says Remote Desktop is off, or that has no agent checking in, asks first.
-    param([object[]]$Pcs)   # { Name, Agent (check-in or $null), Check (network check or $null) }
-    $Pcs = @($Pcs | Where-Object { $_ -and $_.Name } | Select-Object -First 5)
-    if (-not $Pcs) { return }
-    $problems = @($Pcs | ForEach-Object { Get-RemoteDesktopProblem -ComputerName $_.Name -Agent $_.Agent } | Where-Object { $_ })
-    if ($problems -and -not (Confirm-Action "$($problems -join "`n")`n`nOpen Remote Desktop anyway?")) { return }
-    $opened = @()
-    foreach ($pc in $Pcs) {
-        $target = Get-RemoteDesktopTarget -Name $pc.Name -Agent $pc.Agent -Check $pc.Check
-        if (-not $target) { continue }
-        Start-Process -FilePath "$env:WINDIR\System32\mstsc.exe" -ArgumentList "/v:$target"
-        $opened += $(if ($target -eq $pc.Name) { $target } else { "$($pc.Name) ($target)" })
-    }
-    if ($opened) { Set-Status "Remote Desktop opened to $($opened -join ', ')." }
-}
-
 function Start-RemoteSupport {
     # Joins the signed-in user's own screen (mstsc /shadow /control): Windows asks them to allow it first.
     param($Pc)   # { Name, Agent, Check }
@@ -1466,10 +1447,6 @@ function Get-AdRemoteDesktopPcs {
     })
 }
 
-$ui.BtnAdRdp.Add_Click({ Invoke-Safely {
-    if (-not $ui.GridAd.SelectedItems.Count) { Show-Error 'Select the PC to open Remote Desktop to.'; return }
-    Open-RemoteDesktop (Get-AdRemoteDesktopPcs)
-} })
 $ui.GridAd.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridAd.SelectedItem) { Start-RemoteSupport (Get-AdRemoteDesktopPcs | Select-Object -First 1) } } })
 $ui.BtnAdSupport.Add_Click({ Invoke-Safely {
     if ($ui.GridAd.SelectedItems.Count -ne 1) { Show-Error 'Select one PC for remote support.'; return }
@@ -1480,13 +1457,6 @@ $ui.BtnDashSupport.Add_Click({ Invoke-Safely {
     if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
     $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
     Start-RemoteSupport ([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
-} })
-
-$ui.BtnDashRdp.Add_Click({ Invoke-Safely {
-    $r = $ui.GridDash.SelectedItem
-    if (-not $r -or -not $r.ComputerName -or $r.PSObject.Properties['IsHistory']) { return }
-    $agent = if ($r.Agent) { $r.Agent } else { Find-AgentCheckIn -CheckIns (Get-ConsoleAgentCheckIns) -Serial "$($r.Serial)" }
-    Open-RemoteDesktop @([pscustomobject]@{ Name = "$($r.ComputerName)".ToUpperInvariant(); Agent = $agent; Check = $null })
 } })
 
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
