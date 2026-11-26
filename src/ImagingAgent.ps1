@@ -9,7 +9,8 @@
     was imaged before (Computers tab, Install agent).
     Every CheckInMinutes (agent.json, 5 by default) it writes Status\Agents\<serial>.json on the share; every minute
     it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
-    (ImagingAgent.psm1). Log: C:\Windows\Temp\ImagingAgent.log.
+    (ImagingAgent.psm1). At each check-in, while the deploy result says BitLocker is off, it checks again and
+    updates the result once it is on (a FIRSTLOGON task can turn it on). Log: C:\Windows\Temp\ImagingAgent.log.
 .PARAMETER Register
     Makes (or replaces) the ImagingTool\Agent task from agent-task.xml next to this script, starts it, and exits.
 .PARAMETER Once
@@ -151,6 +152,15 @@ function Send-CheckIn {
     $free = try { [int64](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop).FreeSpace } catch { $null }
     $deploy = if ($config.PSObject.Properties['deploy']) { $config.deploy } else { $null }
     $script:lastCheckIn = Get-Date
+    # BitLocker again while the result says it is off: a FIRSTLOGON task may have turned it on after first boot.
+    try {
+        $bl = Sync-AgentBitLockerCheck -StatusFolder $statusFolder -Serial $identity.serial
+        if ($bl) { Write-Log "BitLocker is on now ($($bl.detail)): deploy result and Dashboard updated" }
+    } catch {
+        $m = "Could not update the BitLocker result: $($_.Exception.Message)"
+        if ($script:lastBitLockerError -ne $m) { Write-Log $m }
+        $script:lastBitLockerError = $m
+    }
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
     $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -CheckInMinutes $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `

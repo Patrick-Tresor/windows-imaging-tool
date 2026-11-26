@@ -69,16 +69,21 @@ function Get-PostDeployFacts {
                 ForEach-Object DisplayName
         }
     )
+    $facts.BitLocker = Get-BitLockerFacts
+    [pscustomobject]$facts
+}
+
+function Get-BitLockerFacts {
+    # The Windows drive's BitLocker state, or $null when it can't be read (edition without BitLocker, no admin rights).
     try {
         $v = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
-        $facts.BitLocker = [pscustomobject]@{
+        [pscustomobject]@{
             VolumeStatus         = "$($v.VolumeStatus)"         # FullyEncrypted, EncryptionInProgress, FullyDecrypted, ...
             ProtectionStatus     = "$($v.ProtectionStatus)"     # On, Off
             EncryptionPercentage = [int]$v.EncryptionPercentage
             Protectors           = @($v.KeyProtector | ForEach-Object { "$($_.KeyProtectorType)" })
         }
-    } catch { }
-    [pscustomobject]$facts
+    } catch { $null }
 }
 
 # Windows' domain join errors in plain words. NetSetup.LOG gives them as hex status codes.
@@ -205,16 +210,21 @@ function Invoke-PostDeployCheck {
     }
 
     # BitLocker on the Windows drive. Encryption still running counts once a protector is in place.
-    if ($Plan.bitLocker -and $Plan.bitLocker -ne 'Off') {
-        $b = $Facts.BitLocker
-        $outcome = Get-CheckOutcome $Plan.bitLocker
-        if (-not $b) { & $add 'BitLocker' $outcome 'BitLocker status unavailable (not supported on this edition, or no access)' }
-        elseif ($b.VolumeStatus -eq 'FullyEncrypted' -and $b.ProtectionStatus -eq 'On') { & $add 'BitLocker' 'Passed' "On ($(@($b.Protectors) -join ', '))" }
-        elseif ($b.VolumeStatus -eq 'EncryptionInProgress' -and @($b.Protectors).Count) { & $add 'BitLocker' 'Passed' "Encrypting, $($b.EncryptionPercentage) % done ($(@($b.Protectors) -join ', '))" }
-        elseif ($b.VolumeStatus -eq 'FullyEncrypted') { & $add 'BitLocker' $outcome 'Encrypted but protection is suspended or off' }
-        else { & $add 'BitLocker' $outcome "Off ($($b.VolumeStatus))" }
-    }
+    if ($Plan.bitLocker -and $Plan.bitLocker -ne 'Off') { $results.Add((Get-BitLockerCheck -BitLocker $Facts.BitLocker -Outcome (Get-CheckOutcome $Plan.bitLocker))) }
     , $results.ToArray()
+}
+
+function Get-BitLockerCheck {
+    # The BitLocker check from Get-BitLockerFacts. -Outcome is what a drive that is not protected gives (Warning or Failed).
+    # Also used by the agent, which checks again later: a FIRSTLOGON task can turn BitLocker on after first boot.
+    param($BitLocker, [string]$Outcome = 'Warning')
+    $b = $BitLocker
+    $r = if (-not $b) { $Outcome, 'BitLocker status unavailable (not supported on this edition, or no access)' }
+         elseif ($b.VolumeStatus -eq 'FullyEncrypted' -and $b.ProtectionStatus -eq 'On') { 'Passed', "On ($(@($b.Protectors) -join ', '))" }
+         elseif ($b.VolumeStatus -eq 'EncryptionInProgress' -and @($b.Protectors).Count) { 'Passed', "Encrypting, $($b.EncryptionPercentage) % done ($(@($b.Protectors) -join ', '))" }
+         elseif ($b.VolumeStatus -eq 'FullyEncrypted') { $Outcome, 'Encrypted but protection is suspended or off' }
+         else { $Outcome, "Off ($($b.VolumeStatus))" }
+    [pscustomobject]@{ name = 'BitLocker'; result = $r[0]; detail = $r[1] }
 }
 
 function Get-CheckOutcome([string]$Mode) { if ($Mode -eq 'Report') { 'Warning' } else { 'Failed' } }
@@ -260,4 +270,4 @@ function ConvertTo-CheckWarning {
 #endregion
 
 Export-ModuleMember -Function Get-NetSetupJoinError, New-PostDeployCheckPlan, Get-PostDeployFacts, Invoke-PostDeployCheck,
-    Get-PostDeployCheckSummary, Start-PostDeployCheck, ConvertTo-CheckWarning
+    Get-PostDeployCheckSummary, Start-PostDeployCheck, ConvertTo-CheckWarning, Get-BitLockerFacts, Get-BitLockerCheck

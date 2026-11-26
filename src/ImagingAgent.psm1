@@ -23,13 +23,14 @@
 
 Import-Module (Join-Path $PSScriptRoot 'JsonFile.psm1')
 Import-Module (Join-Path $PSScriptRoot 'RemoteReimage.psm1')   # ConvertTo-SerialKey, Invoke-LocalDiskBoot
-Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults
+Import-Module (Join-Path $PSScriptRoot 'DeployStatus.psm1')     # Update-DeployAppResults, Update-DeployCheckResults
+Import-Module (Join-Path $PSScriptRoot 'PostDeployChecks.psm1') # Get-BitLockerCheck (BitLocker checked again)
 
 $script:AgentDir = 'C:\ProgramData\ImagingTool\Agent'
 $script:AgentTaskName = 'ImagingTool\Agent'
 # The files the agent runs from (copied into C:\ProgramData\ImagingTool\Agent, administrators and SYSTEM only).
 $script:AgentFiles = @('ImagingAgent.ps1', 'ImagingAgent.psm1', 'RemoteReimage.psm1', 'JsonFile.psm1', 'AnswerFile.psm1', 'AppPack.psm1',
-    'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1')
+    'LibraryPack.psm1', 'ScriptLog.psm1', 'DeployStatus.psm1', 'PostDeployChecks.psm1')
 # What a PC needs to install the agent by itself (Publish-AgentInstaller puts them in <share>\Agent).
 $script:AgentInstallerFiles = @('Install-AgentHere.ps1', 'Install-Agent.cmd')
 $script:KeyFile = 'config\secrets\agent-key.xml'
@@ -382,6 +383,48 @@ function Update-AgentDeployStatus {
     # PC: after an install apps job, each app's new result on this PC's Dashboard row (Update-DeployAppResults).
     param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Serial, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [datetime]$Now = (Get-Date))
     Update-DeployAppResults -StatusFolder $StatusFolder -Id $Serial -Results $Results -By 'the agent' -Now $Now
+}
+
+function Sync-AgentBitLockerCheck {
+    <#
+    .SYNOPSIS
+        PC: checks BitLocker again while the deploy result still says it is off. First boot's checks run before the
+        first logon, so a FIRSTLOGON task that turns BitLocker on (GWHZLG3: "Ready, with warnings: BitLocker") was
+        never seen. Once the drive is protected (or encrypting with a protector), the BitLocker check passes in
+        last-check.json, C:\Windows\Temp\DeployResult.txt and this PC's Dashboard row. Returns the new check when
+        it changed, else $null. A share it can't reach is tried again next time (last-check.json is saved last).
+    #>
+    param(
+        [string]$ToolDir = "$env:ProgramData\ImagingTool",
+        [string]$ResultPath = "$env:WINDIR\Temp\DeployResult.txt",
+        [string]$StatusFolder,
+        [string]$Serial,
+        $BitLocker,                  # Get-BitLockerFacts' answer; read from the PC when not given (tests give it)
+        [datetime]$Now = (Get-Date)
+    )
+    $reportPath = [IO.Path]::Combine($ToolDir, 'last-check.json')
+    if (-not [IO.File]::Exists($reportPath)) { return $null }
+    $report = [IO.File]::ReadAllText($reportPath) | ConvertFrom-Json
+    $old = @(@($report.checks) | Where-Object { $_ -and $_.name -eq 'BitLocker' }) | Select-Object -First 1
+    if (-not $old -or "$($old.result)" -eq 'Passed') { return $null }
+    if (-not $PSBoundParameters.ContainsKey('BitLocker')) { $BitLocker = Get-BitLockerFacts }
+    $check = Get-BitLockerCheck -BitLocker $BitLocker -Outcome "$($old.result)"
+    if ($check.result -ne 'Passed') { return $null }
+
+    # The Dashboard first: when the share is down, nothing is saved and the next check-in tries again.
+    if ($StatusFolder -and $Serial) {
+        $null = Update-DeployCheckResults -StatusFolder $StatusFolder -Id (Get-StatusId -Serial $Serial) -Results @($check) -By 'the agent' -Now $Now `
+            -CheckWarning { param($all) ConvertTo-CheckWarning (Get-PostDeployCheckSummary -Results @($all)) }
+    }
+    if ([IO.File]::Exists($ResultPath)) {
+        $text = Update-DeployResultText -Text ([IO.File]::ReadAllText($ResultPath)) -Item 'BitLocker' -Result 'OK' -Detail $check.detail
+        [IO.File]::WriteAllText($ResultPath, $text, (New-Object Text.UTF8Encoding $true))
+    }
+    $checks = @(@($report.checks) | Where-Object { $_ } | ForEach-Object { if ($_.name -eq 'BitLocker') { $check } else { $_ } })
+    $summary = Get-PostDeployCheckSummary -Results $checks
+    $saved = [pscustomobject]@{ checked = $Now.ToString('o'); result = $summary.Result; summary = $summary.Text; checks = $checks }
+    [IO.File]::WriteAllText($reportPath, (ConvertTo-Json -InputObject $saved -Depth 4), (New-Object Text.UTF8Encoding $true))
+    $check
 }
 
 #endregion
@@ -781,6 +824,6 @@ function Publish-AgentInstaller {
 
 Export-ModuleMember -Function Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
-    Get-AgentJobText, Get-AgentPayloadHash, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
+    Get-AgentJobText, Get-AgentPayloadHash, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
     New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
