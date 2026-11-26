@@ -72,7 +72,7 @@ try {
     # GWHZLG3: DNS gave 10.10.64.51, its agent reported 10.10.2.1. The network fallback tries the agent's first.
     $known = Get-AgentKnownAddresses -CheckIns $rows -Targets @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01.corp.local' }, [pscustomobject]@{ Name = 'PC09'; Address = 'PC09' })
     Assert-Equal "$($known.Keys -join ',')|$($known['pc01.corp.local'] -join ',')" 'pc01.corp.local|10.1.2.34,192.168.56.1' 'the addresses its agent reported, by the address the console uses'
-    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress \(Get-AgentKnownAddresses') $true 'a reimage checks the network with them'
+    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress') $true 'the Computers tab checks the network with them'
 
     # A PC the console can't reach installs the agent itself from <share>\Agent.
     $pub = Join-Path $root 'share/Agent'
@@ -312,8 +312,10 @@ Assert-Equal ($firstBoot -match '(?s)Agent\\ImagingAgent\.ps1.{0,200}-File \$age
 $media = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($media -match 'agent-public-key\.xml') $true 'the build puts the console''s public key in boot.wim'
 $start = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($start -match '(?s)New-AgentJob.*?Start-PcOverNetwork \$p') $true 'reimage goes through the agent, and over the network when it does not take the job'
+Assert-Equal ($start -match 'New-AgentJob' -and $start -notmatch 'Invoke-LocalDiskBoot|Get-RemoteComputerInfo|Start-PcOverNetwork') $true 'reimage goes through the agent only, never over WinRM or the admin share'
+Assert-Equal ($start -match "Not reimaged: it has no agent") $true 'a PC without an agent is skipped, with nothing changed on it'
 $console = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
+Assert-Equal ($console -match 'No agent checking in from') $true 'the console refuses to reimage a PC without an agent'
 Assert-Equal ($console -match "'-StatusFolder'.*'-KeyRoot'") $true 'the console tells the reimage where the agents check in and which key signs'
 Assert-Equal ($console -match 'Install-RemoteAgent\.ps1') $true 'Install agent puts it on PCs imaged before'
 $xaml = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/MainWindow.xaml')

@@ -40,15 +40,14 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.5 | Computers tab: open it, Search | It connects by itself with the Deploy Settings account and domain controller (there is no Connect box); the domain's computers are listed with OU, OS, last logon; Online is Yes for PCs that are on with WinRM |
 | 2.6 | Reimage with no network boot image yet | The confirmation says it is built first; a "Building the network boot image" card, then the reimage card; `Boot\boot.wim`, `boot.json`, `tool-version.json` and `Deploy-WinPE.iso` on the content root; after updating the console or saving Deploy Settings, the next Reimage rebuilds it first |
 | 2.7 | Reimage one running PC (BitLocker on) | It restarts into WinPE with no recovery key prompt, deploys without questions, keeps its name and OU, restarts into Windows; the Dashboard shows it |
-| 2.8 | Reimage a PC that is off, and one with a wrong DNS record | Both rows fail with one line, nothing changed on either PC |
+| 2.8 | Reimage a PC with no agent, and one whose agent stopped checking in | Both are refused with one line, nothing changed on either PC |
 | 2.8a | Search `NAME 10.1.2.34` for a PC whose DNS record is old | The IP column shows where the PC really answers; with only the old address, Online says Old DNS and Reimage refuses it |
 | 2.8c | Search the whole domain (no name) | The list shows at once with Online **Checking...**; Online and IP fill in a few seconds later; a PC with two addresses in DNS (`Resolve-DnsName NAME`) shows the one that answers, the same on every Search |
-| 2.8b | Search and Reimage on a PC with PowerShell remoting off (file sharing on) | Online says Yes (SMB); the reimage goes through the admin share, no `ImagingToolRun*` service is left on it (`sc.exe \\PC query state= all`), and no `C:\Windows\Temp\ImagingTool-*` folder |
 
-| 2.9 | Search the IP of a laptop that is not in the domain, Reimage | The row is listed with the IP; Reimage asks for its local administrator account, then the laptop restarts into WinPE and deploys |
+| 2.9 | Search the IP of a laptop that is not in the domain, Reimage | Reimage refuses it in one line (no agent checking in); it is reimaged from the USB stick |
 | 2.10 | Reimage notice on a PC with someone signed in | A window shows the countdown with **Reboot now** and **Close**; Reboot now restarts at once |
 | 2.11 | Deploy a PC from the share (new stick or network boot image), wait 5 min | Task `ImagingTool\Agent` is running; `Status\Agents\<serial>.json` appears; the Computers tab's Agent column says "Just now" or "x min ago", the Dashboard's Last seen too |
-| 2.12 | Block WinRM and file sharing on that PC (firewall), Search, Reimage | Online says Agent; the reimage goes through the agent: notice, restart into WinPE, deploy, back on the Dashboard |
+| 2.12 | Block WinRM and file sharing on that PC (firewall), Search, Reimage; then stop its agent task and Reimage again | First the reimage goes through the agent: notice, restart into WinPE, deploy, back on the Dashboard. Then Reimage refuses it: no agent checking in |
 | 2.13 | Install agent on a PC imaged before the agent | The row ends "Checked in from <IP>"; the Agent column fills in |
 | 2.13b | On a PC the console cannot reach, run `\\server\share\Agent\Install-Agent.cmd` as administrator | "Done: <PC> checked in"; the Agent column fills in |
 | 2.13c | Reimage a laptop on Wi-Fi only through its agent, then again with a cable | First: "on Wi-Fi only", the PC does not restart. Then: WinPE maps the share (Deploy.log "Network: ..." and "Using network content at Z:\ (...)") |

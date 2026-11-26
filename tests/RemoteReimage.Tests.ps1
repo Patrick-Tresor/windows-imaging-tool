@@ -167,7 +167,7 @@ $aclAt = $reimage.IndexOf('& icacls.exe ([string[]]$AclArgs)'); $copyAt = $reima
 Assert-Equal ($aclAt -gt 0 -and $aclAt -lt $copyAt) $true 'the folder is locked before boot.wim is copied in'
 Assert-Equal ($reimage -match "schtasks\.exe /Create /TN 'ImagingTool\\RemoveImagingBoot'") $true 'the cleanup task is created with the boot entry'
 $start = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($start -match 'Remove-LocalDiskBoot -ComputerName \$p\.Address') $true 'a time-out takes WinPE off the PC when it answers'
+Assert-Equal ($start -match '(?s)did not start the deploy within.{0,300}|Remove-AgentJob[^\r\n]*\r?\n[^\r\n]*did not start the deploy') $true 'a time-out removes the agent job (its startup task takes WinPE off the disk)'
 Assert-Equal ($start -match 'Get-StartedJob -ContentRoot \$ContentRoot -Serial \$p\.Serial -RequestedAt') $true 'the console matches the started job by its own time stamp'
 
 # The build gives WinPE this PC's time zone.
@@ -283,8 +283,6 @@ try {
     $ask.Dispose()
 } finally { $nbUdp.Close() }
 Assert-Equal (Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'GWHZLG3'; State = 'Old DNS' })) '0 of 1 can be reimaged now. GWHZLG3: DNS gives an old address, where another PC answers now. Search it by its IP address.' 'the status line says the DNS address is old'
-$rr = Get-Content -Raw (Join-Path $repo 'src/Start-RemoteReimage.ps1')
-Assert-Equal ($rr -match "State -eq 'Old DNS'\) \{ Stop-Pc") $true 'a reimage never goes to the old DNS address'
 
 $t = Get-OnlineSummaryText -Rows @([pscustomobject]@{ Name = 'PC1'; State = 'Yes' }, [pscustomobject]@{ Name = '2J14HL3'; State = 'Yes (SMB)' }, [pscustomobject]@{ Name = 'PC3'; State = 'No access' })
 Assert-Equal ($t -like '2 of 3 can be reimaged now. PC3: on, but its firewall blocks*') $true 'the status line counts the admin share as reimageable and names a blocked PC'
@@ -332,14 +330,11 @@ Assert-Equal ($mod -match 'GetNetworkCredential\(\)\.Password, \$Credential\.Use
 foreach ($f in 'Get-RemoteComputerInfo', 'Invoke-LocalDiskBoot', 'Remove-LocalDiskBoot') {
     Assert-Equal ($mod -match "(?s)function $f \{.*?Open-RemoteChannel.*?Close-RemoteChannel") $true "$f works over WinRM or the admin share"
 }
-Assert-Equal ($start -match '-Method \$p\.Method') $true 'Start-RemoteReimage uses the way in the check found'
 # A console PC outside the domain (2026-11-16, 2J14HL3): WinRM answers but asks for TrustedHosts.
 $trusted = 'Connecting to remote server 2J14HL3.borealc.on.ca failed with the following error message : The WinRM client cannot process the request. If the authentication scheme is different from Kerberos, or if the client computer is not joined to a domain, then HTTPS transport must be used or the destination machine must be added to the TrustedHosts configuration setting.'
 Assert-Equal (Test-WinRMSignInError $trusted) $true 'the TrustedHosts error is a sign-in error'
 Assert-Equal (Test-WinRMSignInError 'Access is denied.') $false 'access denied is not (the account is wrong, not the console PC)'
 Assert-Equal ($mod -match '(?s)Test-WinRMSignInError.*?-Authentication Kerberos') $true 'WinRM tries Kerberos with the account given before giving up'
-Assert-Equal ($start -match "(?s)Test-WinRMSignInError.*?\`$p\.Method = 'Smb'") $true 'when WinRM still will not sign in, the reimage goes through the admin share'
-Assert-Equal ($start -match '\$check\.Smb') $true 'only when file sharing answered'
 
 # WinPE and Windows PowerShell 5.1 read these files: ASCII only.
 foreach ($f in 'src/RemoteReimage.psm1', 'src/Start-RemoteReimage.ps1') {

@@ -1353,50 +1353,30 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
     }
-    $off = @($rows | Where-Object { -not $_.HasAgent -and $script:adOnline.ContainsKey($_.Address) -and -not $script:adOnline[$_.Address].Online })
+    # Reimage goes through each PC's agent only: a PC without one gets it with Install agent first.
+    $noAgent = @($rows | Where-Object { -not $_.HasAgent })
+    if ($noAgent) {
+        $names = (@($noAgent | Select-Object -First 5 | ForEach-Object Name) -join ', ') + $(if ($noAgent.Count -gt 5) { ', ...' })
+        Show-Error "No agent checking in from $names. Select it and click Install agent (or turn it on), then Reimage. A PC outside the domain is reimaged from the USB stick."; return
+    }
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
-    if ($off) { $text += "`n`n$($off.Count) of them were offline at the last check; they are skipped if they still are." }
     if ($rebuild) { $text += "`n`nThe network boot image is built first ($rebuild), which takes a few minutes." }
     if (-not (Confirm-Action $text)) { return }
 
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    # PCs outside the domain sign in with their own local administrator account, asked for each one. For the hidden
-    # process each goes in a file protected with this Windows account (DPAPI), deleted as soon as it is read.
-    $localCreds = @{}
-    $n = 0
-    foreach ($r in @($rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })) {
-        $c = Get-Credential -UserName 'Administrator' -Message ("Local administrator account on $($r.Name) ($($r.Address)), which is not in the domain. " +
-            'Its built-in Administrator works; another local admin account needs remote admin allowed on that PC.')
-        if (-not $c) { Set-Status 'Reimage cancelled: no account given.'; return }
-        $c = [pscredential]::new((ConvertTo-LocalAccountName -User $c.UserName -Computer $r.Address), $c.Password)
-        $f = Join-Path $env:TEMP "reimage-$stamp-$tag-local$n.xml"; $n++
-        $c | Export-Clixml -Path $f
-        $localCreds[$r.Address] = $f
-    }
-    # Also for PCs with an agent: the network is the way in when the agent does not take its job.
-    $cred = if (@($rows | Where-Object { -not $localCreds.ContainsKey($_.Address) })) { Get-AdCredential } else { $null }
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
-    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object {
-        $local = $localCreds.ContainsKey($_.Address)
-        [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU; local = $local; credentialFile = $(if ($local) { $localCreds[$_.Address] } else { '' }) }
-    })
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
     $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
         '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
         '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    # PCs with an agent go through it: it checks in to the Dashboard's folder, and jobs are signed with this content
+    # Each PC's agent takes the job: it checks in to the Dashboard's folder, and jobs are signed with this content
     # root's key.
     $statusFolder = Get-DashboardFolder
     if ($statusFolder) { $runArgs += @('-StatusFolder', (ConvertTo-Arg $statusFolder), '-KeyRoot', (ConvertTo-Arg $script:root)) }
     # Each PC keeps its name and joins back into the OU it is in now.
     $runArgs += @('-KeepNames', '-KeepOU')
-    if ($cred) {
-        # For the hidden process: protected with this Windows account (DPAPI), deleted as soon as it is read.
-        $credFile = Join-Path $env:TEMP "reimage-$stamp-$tag-cred.xml"
-        $cred | Export-Clixml -Path $credFile
-        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
-    }
     $script:pendingReimage = @{ RunArgs = $runArgs; Count = $rows.Count; Title = "Reimaging $($rows.Count) PC(s) with $answer" }
     if ($rebuild) {
         if (-not (Start-NetworkBootBuild)) { $script:pendingReimage = $null }

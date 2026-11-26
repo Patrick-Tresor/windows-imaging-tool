@@ -157,9 +157,9 @@ on the ones you pick, with nobody at the PCs.
    then says **Old DNS** and a reimage never goes there). A PC with several
    addresses (a second adapter, a dock, a VPN) is tried at each, and the one that
    answers best is shown; an agent's reported address is tried first. A PC typed by IP that is
-   not in Active Directory (a laptop outside the domain) is listed too, and
-   **Reimage...** asks for its local administrator account. **Online** (point at it for
-   details):
+   not in Active Directory (a laptop outside the domain) is listed too (it can't
+   have the agent, so reimage it from the USB stick). **Online** says how
+   **Install agent** can reach a PC (point at it for details):
    - **Yes**: PowerShell remoting (WinRM) answers.
    - **Yes (SMB)**: remoting is off, but file sharing answers. The console
      goes through the PC's admin share (`\\PC\ADMIN$`, `\\PC\C$`) and a
@@ -184,11 +184,14 @@ on the ones you pick, with nobody at the PCs.
    `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
    **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
+   Reimage goes through each PC's agent only: a PC without an agent checking in
+   is refused (select it and click **Install agent** first).
 
-For each PC, the console (Start-RemoteReimage.ps1, RemoteReimage.psm1):
-checks (over PowerShell remoting, or its admin share) that it answers with its own name, starts in
-UEFI mode and has a BIOS serial of its own; writes `Reimage\<serial>.json` on
-the share; copies the network boot image to `C:\_ImagingBoot`, adds a one-time
+For each PC, the console (Start-RemoteReimage.ps1): checks from its agent's
+check-in that it answers with its own name, starts in UEFI mode, has a BIOS
+serial of its own and a network cable (WinPE has no Wi-Fi); writes
+`Reimage\<serial>.json` on the share; and gives the agent a signed job. The agent
+copies the network boot image to `C:\_ImagingBoot`, adds a one-time
 boot entry for it (no PXE or WDS needed), suspends BitLocker for that one
 restart and restarts the PC after a 60 second warning (a window with a countdown,
 **Reboot now** and **Close** for whoever is signed in). WinPE maps the share,
@@ -198,8 +201,7 @@ At the end it restarts into Windows. The progress window lists each PC until
 its deploy starts; from there it is on the Dashboard.
 
 Needs:
-- PowerShell remoting (WinRM) or file sharing on the PCs, with your account
-  (or the one typed) as administrator.
+- The agent on the PCs (deploys put it there; **Install agent** for older PCs).
 - The answer file and its image on the network share; the console checks.
 - An answer file whose passwords are encrypted in it, or on the share: a
   reimaged PC never waits for someone to type one.
@@ -236,16 +238,17 @@ the share, written as the computer account, like first boot's status.
   starts again. An agent from before updates (Old) needs **Install agent** once.
 - **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
   agent installs again the applications that failed at first boot.
-- **Reimage through the agent**: **Reimage...** on a PC whose agent checked in
-  within the last 15 minutes needs no WinRM or file sharing. The console writes
+- **Reimage through the agent**: **Reimage...** needs an agent that checked in
+  within the last 15 minutes, and no WinRM or file sharing. The console writes
   the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
   a copy of the network boot image in `Status\Agents\Jobs\<serial>\`. The agent
   looks for a job every minute, copies the boot image, checks its SHA-256, and
   restarts into WinPE from its own disk with the same 60 second notice. If the
-  agent has not taken the job within 4 minutes, the console reaches the PC over
-  the network as before.
+  agent has not taken the job within 10 minutes, that PC is not reimaged and
+  its row says why.
 - **Install agent** puts it on PCs imaged before it existed (over WinRM or the
-  admin share, like a reimage), and waits for each one's first check-in.
+  admin share, with your account as administrator), and waits for each one's
+  first check-in. It is the only thing the console does over WinRM or the admin share.
 - **On a PC the console can't reach** (WinRM and file sharing blocked): on that
   PC, right-click `\\<server>\<share>\Agent\Install-Agent.cmd` and pick **Run as
   administrator**. The console keeps that folder up to date (the agent files and
