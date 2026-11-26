@@ -180,6 +180,33 @@ try {
     Assert-Equal "$(@($saved.checks | Where-Object name -eq 'App: Zoom')[0].result)|$($saved.state)" 'Failed|Succeeded' 'a failed retry marks the app failed (the Dashboard shows Not ready from it)'
     Assert-Equal ($null -eq (Update-AgentDeployStatus -StatusFolder $status -Serial 'NOPE' -Results @())) $true 'no status for the PC, nothing to update'
 
+    # BitLocker turned on by a FIRSTLOGON task after first boot's checks (GWHZLG3): the agent checks again and the
+    # result, the Dashboard row and last-check.json say it is on.
+    $tool = Join-Path $root 'ToolDir'; New-Item -ItemType Directory -Path $tool -Force | Out-Null
+    $resultTxt = Join-Path $root 'DeployResult.txt'
+    $blChecks = @(@{ name = 'Domain join'; result = 'Passed'; detail = 'Joined' }, @{ name = 'BitLocker'; result = 'Warning'; detail = 'Off (FullyDecrypted)' })
+    @{ checked = 'x'; result = 'Warning'; summary = 'Warning 1/2: BitLocker'; checks = $blChecks } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $tool 'last-check.json')
+    [ordered]@{ id = 'GWHZLG3'; serial = 'GWHZLG3'; driverPack = 'Dell\Latitude 5521'; state = 'Warning'; warnings = @('Post-deploy checks: Warning 1/2: BitLocker'); checks = $blChecks } |
+        ConvertTo-Json -Depth 5 | Set-Content (Join-Path $status 'GWHZLG3.json')
+    Set-Content $resultTxt ("GWHZLG3 (Dell Inc. Latitude 5521) - Ready, with warnings: BitLocker`r`n" + ('  {0,-8} {1,-13} {2}' -f 'OK', 'Domain join', 'Joined') + "`r`n" + ('  {0,-8} {1,-13} {2}' -f 'WARNING', 'BitLocker', 'Off (FullyDecrypted)'))
+    $off = [pscustomobject]@{ VolumeStatus = 'FullyDecrypted'; ProtectionStatus = 'Off'; EncryptionPercentage = 0; Protectors = @() }
+    $on = [pscustomobject]@{ VolumeStatus = 'EncryptionInProgress'; ProtectionStatus = 'Off'; EncryptionPercentage = 5; Protectors = @('Tpm', 'RecoveryPassword') }
+    $sync = @{ ToolDir = $tool; ResultPath = $resultTxt; StatusFolder = $status; Serial = 'GWHZLG3'; Now = $now }
+    Assert-Equal ($null -eq (Sync-AgentBitLockerCheck @sync -BitLocker $off)) $true 'still off: nothing changes'
+    Assert-Equal ((Get-Content -Raw (Join-Path $status 'GWHZLG3.json') | ConvertFrom-Json).state) 'Warning' 'the row still warns while it is off'
+    $bl = Sync-AgentBitLockerCheck @sync -BitLocker $on
+    Assert-Equal "$($bl.result)|$($bl.detail)" 'Passed|Encrypting, 5 % done (Tpm, RecoveryPassword)' 'turned on by the task: the check passes'
+    $saved = Get-Content -Raw (Join-Path $status 'GWHZLG3.json') | ConvertFrom-Json
+    Assert-Equal "$(@($saved.checks | Where-Object name -eq 'BitLocker')[0].result)|$($saved.state)|$(@($saved.warnings).Count)" 'Passed|Succeeded|0' 'the Dashboard row is Ready again'
+    Import-Module (Join-Path $repo 'src/DeployStatus.psm1')
+    $rows = @(Get-DeploymentStatus -Folder $status -Now $now | Where-Object Id -eq 'GWHZLG3')
+    Assert-Equal $rows[0].Result 'Ready' 'the Dashboard result says Ready'
+    $txt = Get-Content -Raw $resultTxt
+    Assert-Equal ($txt -like 'GWHZLG3 (Dell Inc. Latitude 5521) - Ready*') $true 'DeployResult.txt says Ready (the agent''s check-in result)'
+    Assert-Equal ($txt -match '(?m)^  OK\s+BitLocker\s+Encrypting') $true 'and its BitLocker line is OK'
+    Assert-Equal ((Get-Content -Raw (Join-Path $tool 'last-check.json') | ConvertFrom-Json).result) 'Passed' 'last-check.json passes'
+    Assert-Equal ($null -eq (Sync-AgentBitLockerCheck @sync -BitLocker $on)) $true 'once it passed, it is not checked again'
+
     # Where a new PC's agent checks in: the folder WinPE reported to, or for a USB deploy that could not reach the
     # share (status kept on the stick), the share's Status folder from the settings.
     $shareSettings = [pscustomobject]@{ share = [pscustomobject]@{ path = '\\srv\Deploy\' } }

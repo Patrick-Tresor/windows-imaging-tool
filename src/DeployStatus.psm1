@@ -563,6 +563,80 @@ function Update-DeployAppResults {
     $r
 }
 
+function Update-DeployCheckResults {
+    <#
+    .SYNOPSIS
+        PC: puts checks run again after first boot (the agent's BitLocker check, once a FIRSTLOGON task turned it on)
+        into this PC's deployment status (<status folder>\<id>.json, the Dashboard's row) and a line in its live log.
+        Each result replaces the check of the same name. -CheckWarning gets the whole new list and returns the
+        'Post-deploy checks: ...' warning (or nothing); without it that warning only goes once nothing fails or warns.
+        Returns the record, or $null when there is none.
+    #>
+    param([Parameter(Mandatory)][string]$StatusFolder, [Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+          [scriptblock]$CheckWarning, [string]$By = 'the agent', [datetime]$Now = (Get-Date))
+    $file = ($Id.Trim() -replace '[\\/:*?"<>|\s]', '_')
+    $path = [IO.Path]::Combine($StatusFolder, "$file.json")
+    if (-not [IO.File]::Exists($path)) { return $null }
+    $r = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+    $list = [Collections.Generic.List[object]]::new()
+    foreach ($c in @(if ($r.PSObject.Properties['checks']) { @($r.checks) })) { if ($c) { $list.Add($c) } }
+    foreach ($x in $Results) {
+        $old = @($list | Where-Object name -eq $x.name) | Select-Object -First 1
+        $new = [pscustomobject]@{ name = "$($x.name)"; result = "$($x.result)"; detail = "$($x.detail)" }
+        if ($old) { $list[$list.IndexOf($old)] = $new } else { $list.Add($new) }
+    }
+    $checks = $list.ToArray()
+    $warnings = @(if ($r.PSObject.Properties['warnings']) { @($r.warnings) | Where-Object { $_ } })
+    if ($CheckWarning) {
+        $w = & $CheckWarning $checks
+        $warnings = @(@($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' }) + @($w | Where-Object { $_ }))
+    } elseif (-not @($checks | Where-Object { $_.result -in 'Failed', 'Warning' })) {
+        $warnings = @($warnings | Where-Object { "$_" -notlike 'Post-deploy checks:*' })
+    }
+    $who = (Get-Culture).TextInfo.ToTitleCase(($By -replace '^(the|a) ', ''))
+    $logLines = @($Results | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} [INFO] {1}: {2} check {3}: {4}' -f $Now, $who, $_.name, $_.result, $_.detail })
+    $set = { param($n, $v) $r | Add-Member -NotePropertyName $n -NotePropertyValue $v -Force }
+    & $set 'checks' @($checks)
+    & $set 'warnings' @($warnings)
+    & $set 'updated' $Now.ToString('o')
+    & $set 'checked' $Now.ToString('o')
+    if ("$($r.state)" -in 'Succeeded', 'Warning') { & $set 'state' $(if ($warnings) { 'Warning' } else { 'Succeeded' }) }
+    $tmp = "$path.tmp"
+    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $r -Depth 8), (New-Object Text.UTF8Encoding $false))
+    [IO.File]::Copy($tmp, $path, $true); [IO.File]::Delete($tmp)
+    if ($logLines) { try { [IO.File]::AppendAllText([IO.Path]::ChangeExtension($path, '.log'), (($logLines -join "`r`n") + "`r`n")) } catch { } }
+    $r
+}
+
+function Update-DeployResultText {
+    <#
+    .SYNOPSIS
+        DeployResult.txt (Get-DeployResultSummary's Text) with one line's result and detail changed, and its first
+        line's verdict to match: an item that passes now leaves 'Ready, with warnings: ...', and with no warning
+        left it says Ready. A 'Not ready' or failed deployment keeps its verdict. -Result: OK, Warning or Failed.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [Parameter(Mandatory)][string]$Item, [Parameter(Mandatory)][string]$Result, [string]$Detail)
+    $lines = [Collections.Generic.List[string]]::new()
+    foreach ($l in ($Text -split '\r?\n')) { $lines.Add($l) }
+    while ($lines.Count -and -not $lines[$lines.Count - 1].Trim()) { $lines.RemoveAt($lines.Count - 1) }
+    if (-not $lines.Count) { return $Text }
+    $mark = switch ($Result) { 'OK' { 'OK' } 'Failed' { 'FAILED' } 'Warning' { 'WARNING' } default { '' } }
+    $new = '  {0,-8} {1,-13} {2}' -f $mark, $Item, $Detail
+    $at = -1
+    for ($i = 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "^  \S*\s+$([regex]::Escape($Item))(\s|`$)") { $at = $i; break } }
+    if ($at -ge 0) { $lines[$at] = $new } else { $lines.Add($new) }
+    # The verdict: "<PC> - Ready, with warnings: A, B" (or without the PC part).
+    if ($lines[0] -match '^(?<head>.*? - )?Ready, with warnings: (?<list>.*)$') {
+        $head = $Matches['head']
+        $left = @($Matches['list'] -split ',\s*' | Where-Object { $_ -and ($_ -ne $Item -or $Result -eq 'Warning') })
+        if ($Result -eq 'Warning' -and $left -notcontains $Item) { $left += $Item }
+        $lines[0] = "$head$(if ($Result -eq 'Failed') { "Not ready: $Item failed" } elseif ($left) { 'Ready, with warnings: ' + ($left -join ', ') } else { 'Ready' })"
+    } elseif ($lines[0] -match '^(?<head>.*? - )?Ready$' -and $Result -ne 'OK') {
+        $lines[0] = "$($Matches['head'])$(if ($Result -eq 'Failed') { "Not ready: $Item failed" } else { "Ready, with warnings: $Item" })"
+    }
+    $lines.ToArray() -join [Environment]::NewLine
+}
+
 function Get-DeployChecklist {
     <#
     .SYNOPSIS
@@ -657,5 +731,5 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults,
+    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

@@ -87,4 +87,15 @@ Assert-Equal ($deployScript -match "NotePropertyName deploy") $true 'firstboot.j
 $firstBoot = Get-Content -Raw (Join-Path $repo 'src/FirstBoot.ps1')
 Assert-Equal ($firstBoot -match 'DeployResult\.txt') $true 'first boot writes DeployResult.txt'
 
+# DeployResult.txt after a check passes later (the agent's BitLocker check): the line and the verdict change.
+$warnText = (Get-DeployResultSummary -Deploy $deploy -Checks (@($checks | Where-Object name -ne 'BitLocker') + [pscustomobject]@{ name = 'BitLocker'; result = 'Warning'; detail = 'Off (FullyDecrypted)' }) -Now $now).Text
+Assert-Equal ($warnText -like '*- Ready, with warnings: BitLocker*') $true 'BitLocker off: Ready, with warnings'
+$fixed = Update-DeployResultText -Text $warnText -Item 'BitLocker' -Result 'OK' -Detail 'On (Tpm)'
+$expected = (Get-DeployResultSummary -Deploy $deploy -Checks (@($checks | Where-Object name -ne 'BitLocker') + [pscustomobject]@{ name = 'BitLocker'; result = 'Passed'; detail = 'On (Tpm)' }) -Now $now).Text
+Assert-Equal $fixed $expected 'BitLocker on: the same text a passing check gives'
+$two = "PC-1 - Ready, with warnings: Drivers, BitLocker`r`n  WARNING  Drivers       none`r`n  WARNING  BitLocker     Off"
+Assert-Equal ((Update-DeployResultText -Text $two -Item 'BitLocker' -Result 'OK' -Detail 'On') -split "`r?`n")[0] 'PC-1 - Ready, with warnings: Drivers' 'other warnings stay'
+$nr = "PC-1 - Not ready: Zoom failed`r`n  WARNING  BitLocker     Off"
+Assert-Equal ((Update-DeployResultText -Text $nr -Item 'BitLocker' -Result 'OK' -Detail 'On') -split "`r?`n")[0] 'PC-1 - Not ready: Zoom failed' 'Not ready stays Not ready'
+
 Complete-Tests
