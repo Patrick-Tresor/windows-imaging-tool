@@ -163,7 +163,7 @@ foreach ($name in @('network-boot', 'media-build')) {
 Assert-Equal ($consoleText -match 'BtnShowProgress\.Add_Click\(\{ Invoke-Safely \{ Show-ProgressWindows') $true 'Show progress button reopens the windows'
 Assert-Equal ($consoleText -match '\$window\.Add_Closing\(\{ \$script:ConsoleClosing = \$true') $true 'closing the console closes the hidden progress windows'
 
-# Image updates and versions are cards in the same Progress window, not windows of their own.
+# Image updates and versions run hidden like the builds, but show in the image's row instead of the Progress window.
 foreach ($pair in @(@('Update-OfflineImage.ps1', 'Console/UpdateImage.ps1'), @('Invoke-ImageVersion.ps1', 'Console/ImageVersions.ps1'))) {
     $script = Get-Content -Raw -LiteralPath (Join-Path $repo "src/$($pair[0])")
     $dialog = Get-Content -Raw -LiteralPath (Join-Path $repo "src/$($pair[1])")
@@ -171,7 +171,8 @@ foreach ($pair in @(@('Update-OfflineImage.ps1', 'Console/UpdateImage.ps1'), @('
     $reported = @([regex]::Matches($script, "(?:Start-BuildStep|Complete-BuildStep)\s+'(\w+)'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
     Assert-Equal ($script -match 'Start-BuildProgress -Path \$ProgressFile' -and $script -match 'Stop-BuildProgress -Message') $true "$($pair[0]) writes its progress"
     Assert-Equal (@($reported | Where-Object { $_ -notin $stepIds }) -join ',') '' "$($pair[0]): every reported step is listed"
-    Assert-Equal ($dialog -match 'Start-ConsoleJob ' -and $dialog -match 'Show-BuildProgress ' -and $dialog -notmatch 'Start-Process powershell') $true "$($pair[1]) runs it as a Progress window card"
+    # Shown in the image's row on the Images tab (Patrick, 2026-11-27), read the same way (tests/RowProgress.Tests.ps1).
+    Assert-Equal ($dialog -match 'Start-ConsoleJob ' -and $dialog -match 'Start-RowJob ' -and $dialog -notmatch 'Start-Process powershell') $true "$($pair[1]) runs it hidden, shown in the image's row"
 }
 
 $sta = [Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA'

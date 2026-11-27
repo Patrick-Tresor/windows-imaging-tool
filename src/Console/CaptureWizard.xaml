@@ -143,7 +143,7 @@
       <DockPanel x:Name="Page4" Visibility="Collapsed">
         <TextBlock DockPanel.Dock="Top" Style="{StaticResource Title}" Text="Summary"/>
         <TextBlock x:Name="TxtSummaryIntro" DockPanel.Dock="Top" Style="{StaticResource Body}"
-                   Text="Clicking Start shows the capture in the Progress window, with each step and the time left. The copy of the disk made by the check is reused, so the capture starts right away. The new image appears on the Images tab when it finishes."/>
+                   Text="Clicking Start shows the capture on top of the Images list, with each step and the time left. The copy of the disk made by the check is reused, so the capture starts right away. The new image takes its place in the list when it finishes."/>
         <TextBox x:Name="TxtSummary" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap"
                  VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SubtleBrush}"/>
       </DockPanel>

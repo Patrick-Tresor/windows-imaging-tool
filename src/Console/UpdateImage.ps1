@@ -50,13 +50,13 @@ function Show-UpdateImageDialog {
             [void](& $getArgs '' '')
             $lines = @(if ($latest) { '- The latest cumulative update (downloaded first)' }) + @($packages | ForEach-Object { "- $($_.Name)" })
             $text = "Update $($Image.Name) with:`n`n" + ($lines -join "`n") +
-                "`n`nDo not deploy this image until the Progress window says it is done."
+                "`n`nDo not deploy this image until its Status on the Images tab says it is done."
             if ([Windows.MessageBox]::Show($dlg, $text, 'Update Image', 'YesNo', 'Question') -ne 'Yes') { return }
             # Hidden, in its own process: servicing takes 20 minutes or more per edition and must not freeze the
-            # console. Its steps are a card in the Progress window.
+            # console. Each step shows in the image's Status on the Images tab (RowProgress.ps1; Patrick, 2026-11-27).
             $job = Start-ConsoleJob -Name 'image-update' -ArgumentList $getArgs -Hidden
-            Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Noun 'update' -Hidden `
-                -Title "Updating $($Image.Name)" -OnFinished { try { Update-Images } catch { } }
+            $null = Start-RowJob -Job $job -Title "Updating $($Image.Name)" -Grid 'images' -Keys @($Image.Name) -FailedWord 'Update failed' `
+                -Noun 'update' -Owner $Owner -OnFinished { try { Update-Images } catch { } }
             $dlg.DialogResult = $true
             $dlg.Close()
         } catch { Show-WindowMessage $dlg 'Update Image' $_.Exception.Message }

@@ -26,12 +26,11 @@ function Show-ImageVersionsDialog {
         param($Version)
         $args2 = Get-ImageVersionArguments -ScriptPath (Join-Path $SrcDir 'Invoke-ImageVersion.ps1') -ContentRoot $ContentRoot `
             -ImageName $Image.Name -Version $Version
-        # Hidden, with its steps as a card in the Progress window; the Images tab refreshes when it ends. This window
-        # closes so the Progress window can be used (a dialog blocks the others while it is open).
+        # Hidden, each step in the image's Status on the Images tab (RowProgress.ps1); the tab refreshes when it ends.
+        # This window closes so the console can be used (a dialog blocks the others while it is open).
         $job = Start-ConsoleJob -Name 'image-version' -ArgumentList $args2 -Hidden
-        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Noun 'copy' -Hidden `
-            -Title "Rolling $($Image.Name) back to $Version" `
-            -OnFinished { try { Update-Images; Update-Answers } catch { } }
+        $null = Start-RowJob -Job $job -Title "Rolling $($Image.Name) back to $Version" -Grid 'images' -Keys @($Image.Name) -FailedWord 'Rollback failed' `
+            -Noun 'copy' -Owner $Owner -OnFinished { try { Update-Images; Update-Answers } catch { } }
         $state.Changed = $true
         $win.Close()
     }
