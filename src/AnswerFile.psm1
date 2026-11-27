@@ -34,49 +34,6 @@ function Read-BitLockerNode($d) {
     }
 }
 
-function ConvertTo-NamePattern {
-    # Naming is one pattern ({SERIAL} = BIOS serial, # = random digit). An older answer file that named PCs from a
-    # serial number WMI query, or had a separate prefix, becomes that pattern. Another WMI query (an asset tag)
-    # stays as it was so the deploy keeps naming PCs the same way.
-    param([Parameter(Mandatory)]$Answer)
-    $serialQuery = '(?i)^\s*SELECT\s+(SerialNumber\s+FROM\s+Win32_(BIOS|SystemEnclosure)|IdentifyingNumber\s+FROM\s+Win32_ComputerSystemProduct)\s*$'
-    if ($Answer.NamingMode -eq 'WMI' -and "$($Answer.WmiQuery)" -match $serialQuery) {
-        $Answer.NamingMode = 'Custom'
-        $Answer.CustomScheme = '{SERIAL}'
-    }
-    if ($Answer.NamingMode -eq 'Custom' -and $Answer.Prefix) {
-        $Answer.CustomScheme = "$($Answer.Prefix)$($Answer.CustomScheme)"
-        $Answer.Prefix = ''
-    }
-}
-
-function Split-NamePattern {
-    # The editor's Computer name page as choices: the pattern read as Serial ({SERIAL}), PrefixSerial (LAB-{SERIAL}),
-    # PrefixRandom (LAB-#### or ########) or Custom (anything else). Join-NamePattern turns a choice back into it.
-    param([string]$Pattern)
-    $p = "$Pattern".Trim()
-    if (-not $p -or $p -ieq '{SERIAL}') { return [pscustomobject]@{ Choice = 'Serial'; Prefix = ''; Digits = 4; Pattern = '{SERIAL}' } }
-    if ($p -match '^([A-Za-z0-9-]+)\{SERIAL\}$') { return [pscustomobject]@{ Choice = 'PrefixSerial'; Prefix = $Matches[1]; Digits = 4; Pattern = $p } }
-    if ($p -match '^([A-Za-z0-9-]*?)(#{2,15})$') { return [pscustomobject]@{ Choice = 'PrefixRandom'; Prefix = $Matches[1]; Digits = $Matches[2].Length; Pattern = $p } }
-    [pscustomobject]@{ Choice = 'Custom'; Prefix = ''; Digits = 4; Pattern = $p }
-}
-
-function Join-NamePattern {
-    param(
-        [ValidateSet('Serial', 'PrefixSerial', 'PrefixRandom', 'Custom')][string]$Choice,
-        [string]$Prefix,
-        [int]$Digits = 4,
-        [string]$Pattern
-    )
-    $Prefix = "$Prefix".Trim()
-    switch ($Choice) {
-        'Serial'       { '{SERIAL}' }
-        'PrefixSerial' { "$Prefix{SERIAL}" }
-        'PrefixRandom' { $Prefix + ('#' * [Math]::Max(1, [Math]::Min(15, $Digits))) }
-        'Custom'       { "$Pattern".Trim() }
-    }
-}
-
 function Read-AnswerFile {
     <#
     .SYNOPSIS
@@ -110,8 +67,7 @@ function Read-AnswerFile {
         UILanguage           = Get-XmlText $d 'regional/uiLanguage'
         UILanguageFallback   = Get-XmlText $d 'regional/uiLanguageFallback'
         UserLocale           = Get-XmlText $d 'regional/userLocale'
-        # 'Prompt' (ask the technician) was removed: an older answer file with it names PCs from the hardware.
-        NamingMode           = $(if ((Get-XmlText $d 'identification/naming/@mode' 'WMI') -eq 'Custom') { 'Custom' } else { 'WMI' })
+        NamingMode           = $(switch (Get-XmlText $d 'identification/naming/@mode' 'WMI') { 'Custom' { 'Custom' } 'Prompt' { 'Prompt' } default { 'WMI' } })
         WmiQuery             = Get-XmlText $d 'identification/naming/wmiQuery' 'SELECT SerialNumber FROM Win32_BIOS'
         CustomScheme         = Get-XmlText $d 'identification/naming/customScheme'
         Prefix               = Get-XmlText $d 'identification/naming/prefix' ''
@@ -143,7 +99,6 @@ function Read-AnswerFile {
     # Extra network shares (<shares>) were removed: everything comes from the content share. An older answer file's
     # <shares> section is ignored, and dropped the next time it is saved.
 
-    ConvertTo-NamePattern $a
     if ($SkipValidation) { return $a }
     $problems = @(Test-AnswerFile $a)
     if ($problems) { throw "Answer file $($a.Name) has problems:`n - " + ($problems -join "`n - ") }
@@ -159,8 +114,8 @@ function Test-AnswerFile {
     if ($a.ImageIndex -lt 1) { 'image/index must be 1 or more.' }
     if ($a.ImageVersion -and $a.ImageVersion -notmatch '^\d{8}-\d{4}(-\d+)?$') { "image/version '$($a.ImageVersion)' must be a version time stamp such as 20261022-1530, or empty for the current image." }
     if ($a.DiskOption -ne 'Recreate') { "disk/option '$($a.DiskOption)' is not supported yet; only Recreate (wipe the disk and recreate partitions)." }
-    if ($a.NamingMode -notin 'WMI', 'Custom') { "identification/naming mode must be WMI or Custom, not '$($a.NamingMode)'." }
-    if ($a.NamingMode -eq 'Custom' -and -not $a.CustomScheme) { 'The computer name pattern (identification/naming/customScheme) is empty.' }
+    if ($a.NamingMode -notin 'WMI', 'Custom', 'Prompt') { "identification/naming mode must be WMI, Custom or Prompt, not '$($a.NamingMode)'." }
+    if ($a.NamingMode -eq 'Custom' -and -not $a.CustomScheme) { 'Custom naming needs identification/naming/customScheme.' }
     if ($a.Membership -notin 'Domain', 'Workgroup') { "network/membership must be Domain or Workgroup, not '$($a.Membership)'." }
     if ($a.Membership -eq 'Domain') {
         if (-not $a.Domain) { 'Domain membership needs network/domain.' }
@@ -197,18 +152,19 @@ function Test-AnswerFile {
 function Resolve-ComputerName {
     <#
     .SYNOPSIS
-        Builds the computer name from the pattern (Custom): # is a random digit and {SERIAL} the BIOS serial.
-        An older answer file with another WMI query uses prefix + that query's value (WMI).
-        Cleaned to letters, digits and dashes, cut to 15 characters.
+        Builds the computer name: prefix + WMI value (WMI), or prefix + scheme (Custom) where # is a random
+        digit and {SERIAL} the BIOS serial. Cleaned to letters, digits and dashes, cut to 15 characters.
     #>
     param(
         [Parameter(Mandatory)]$Answer,
         [string]$WmiValue,          # result of the answer file's WMI query (Get-WmiNamingValue)
         [string]$Serial,
+        [string]$Typed,             # operator's answer when NamingMode is Prompt
         [Random]$Random = [Random]::new()
     )
     $body = switch ($Answer.NamingMode) {
         'WMI'    { $WmiValue }
+        'Prompt' { if ($Typed) { $Typed } else { $WmiValue } }
         'Custom' {
             $s = $Answer.CustomScheme -replace '\{SERIAL\}', $Serial
             -join ($s.ToCharArray() | ForEach-Object { if ($_ -eq '#') { $Random.Next(0, 10) } else { $_ } })
@@ -757,7 +713,7 @@ function Get-AnswerFileUsage {
     $usage
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Split-NamePattern, Join-NamePattern, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile,
     Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

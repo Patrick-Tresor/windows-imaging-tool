@@ -12,22 +12,14 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
     # The shipped sample is valid as is.
     $default = Read-AnswerFile -Path (Join-Path $repo 'config/answer-files/Default.xml')
-    Assert-Equal "$($default.Mode)|$($default.ImageFile)|$($default.Membership)|$($default.NamingMode)|$($default.CustomScheme)" 'Interactive|Images\Win11-Enterprise.wim|Workgroup|Custom|{SERIAL}' 'sample answer file parses'
+    Assert-Equal "$($default.Mode)|$($default.ImageFile)|$($default.Membership)|$($default.NamingMode)" 'Interactive|Images\Win11-Enterprise.wim|Workgroup|WMI' 'sample answer file parses'
     Assert-Equal $default.Applications.Count 0 'commented-out applications are ignored'
-    # Older naming (WMI query, separate prefix, Prompt) becomes one name pattern where it can.
-    $defaultText = Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')
-    $oldNaming = {
-        param($Mode, $Query, $Scheme, $Prefix)
-        $p = Join-Path $tmp "naming-$([guid]::NewGuid()).xml"
-        $defaultText -replace '(?s)<naming mode="Custom">.*?</naming>', "<naming mode=`"$Mode`"><wmiQuery>$Query</wmiQuery><customScheme>$Scheme</customScheme><prefix>$Prefix</prefix></naming>" | Set-Content -LiteralPath $p
-        $r = Read-AnswerFile -Path $p
-        "$($r.NamingMode)|$($r.CustomScheme)|$($r.Prefix)"
-    }
-    Assert-Equal (& $oldNaming 'Prompt' 'SELECT SerialNumber FROM Win32_BIOS' '' '') 'Custom|{SERIAL}|' 'an older answer file that asked the technician names PCs from the serial'
-    Assert-Equal (& $oldNaming 'WMI' 'SELECT SerialNumber FROM Win32_SystemEnclosure' 'A###' 'LAB-') 'Custom|LAB-{SERIAL}|' 'a WMI serial query with a prefix becomes the pattern LAB-{SERIAL}'
-    Assert-Equal (& $oldNaming 'WMI' 'select IdentifyingNumber from Win32_ComputerSystemProduct' '' '') 'Custom|{SERIAL}|' 'the product serial query is the serial too'
-    Assert-Equal (& $oldNaming 'Custom' '' 'A####' 'X-') 'Custom|X-A####|' 'a custom scheme takes in its prefix'
-    Assert-Equal (& $oldNaming 'WMI' 'SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure' '' 'LAB-') 'WMI||LAB-' 'an asset tag query is kept as it was'
+    $promptXml = Join-Path $tmp 'Prompt.xml'
+    (Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')) -replace '<naming mode="WMI">', '<naming mode="Prompt">' | Set-Content -LiteralPath $promptXml
+    Assert-Equal (Read-AnswerFile -Path $promptXml).NamingMode 'Prompt' 'an answer file that asks the technician keeps Prompt'
+    $p = [pscustomobject]@{ NamingMode = 'Prompt'; Prefix = ''; CustomScheme = '' }
+    Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1' -Typed 'kiosk 01') 'KIOSK01' 'typed name wins in prompt mode'
+    Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1') 'SER1' 'prompt mode without a typed name uses the WMI value'
 
     # Validation.
     $bad = $default.PSObject.Copy()
@@ -45,7 +37,7 @@ try {
 
     # Naming.
     $n = $default.PSObject.Copy()
-    $n.NamingMode = 'WMI'; $n.Prefix = 'lab-'
+    $n.Prefix = 'lab-'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'pf3x 9k!' -Serial 'S1') 'LAB-PF3X9K' 'WMI name is prefixed and cleaned'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'ABCDEFGHIJKLMNOPQRS') 'LAB-ABCDEFGHIJK' 'name is cut to 15 characters'
     $n.NamingMode = 'Custom'; $n.Prefix = ''; $n.CustomScheme = 'A####-{SERIAL}'
@@ -57,18 +49,6 @@ try {
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-AB12-') 'AB12' 'leading and trailing dashes are dropped'
     $n.Prefix = 'ABCDEFGHIJKLMN'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue '-X') 'ABCDEFGHIJKLMN' 'a name cut at 15 characters does not end with a dash'
-    # The editor's Computer name choices read and write the same pattern.
-    foreach ($case in @(
-            @('{SERIAL}', 'Serial', ''), @('', 'Serial', ''), @('LAB-{SERIAL}', 'PrefixSerial', 'LAB-'),
-            @('LAB-####', 'PrefixRandom', 'LAB-'), @('########', 'PrefixRandom', ''), @('A##-{SERIAL}', 'Custom', ''))) {
-        $split = Split-NamePattern $case[0]
-        Assert-Equal "$($split.Choice)|$($split.Prefix)" "$($case[1])|$($case[2])" "name pattern '$($case[0])' shows as $($case[1])"
-        $back = Join-NamePattern -Choice $split.Choice -Prefix $split.Prefix -Digits $split.Digits -Pattern $split.Pattern
-        $expected = if ($case[0]) { $case[0] } else { '{SERIAL}' }
-        Assert-Equal $back $expected "choice $($case[1]) saves the pattern '$expected' again"
-    }
-    Assert-Equal (Join-NamePattern -Choice PrefixRandom -Prefix ' LAB- ' -Digits 6) 'LAB-######' 'prefix + 6 random digits'
-    Assert-Equal (Join-NamePattern -Choice PrefixSerial -Prefix '') '{SERIAL}' 'prefix + serial with no prefix is the serial'
     foreach ($bad in '', '1234567', 'PC_01', 'ABCDEFGHIJKLMNOP', '-PC', 'PC-') {
         Assert-Equal ([bool](Test-UnattendComputerName $bad)) $true "computer name '$bad' is rejected"
     }

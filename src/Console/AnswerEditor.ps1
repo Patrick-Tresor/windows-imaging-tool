@@ -114,19 +114,12 @@ function Show-AnswerEditor {
     $pwState = { param($file, $enc) if ((Test-SavedPassword -ContentRoot $ContentRoot -RelativePath $file -Encrypted $enc)) { 'A password is saved (encrypted in the answer file). Leave empty to keep it.' } else { 'No password saved yet.' } }
     $e.TxtAdminPwState.Text = & $pwState $a.AdminPasswordFile $a.AdminPasswordEncrypted
 
-    # Computer name: the pattern ({SERIAL}, #) shown as a choice (Split-NamePattern). An older answer file with a WMI
-    # query other than the serial (an asset tag) keeps it until another choice is made or a custom name is typed.
-    $keepWmi = $a.NamingMode -eq 'WMI'
-    $e.CmbNameDigits.ItemsSource = @(2..10)
-    $naming = Split-NamePattern $(if ($keepWmi) { '' } else { $a.CustomScheme })
-    $e.TxtNamePrefix.Text = $naming.Prefix
-    $e.CmbNameDigits.SelectedItem = [Math]::Max(2, [Math]::Min(10, $naming.Digits))
-    $e.TxtScheme.Text = if ($naming.Choice -eq 'Custom') { $naming.Pattern } else { '' }
-    if ($keepWmi) {
-        $e.TxtNameWmi.Text = "This answer file names PCs with $(if ($a.Prefix) { "the prefix $($a.Prefix) and " })the WMI query $($a.WmiQuery). Type a custom name to replace it."
-        $e.TxtNameWmi.Visibility = 'Visible'
-        $e.RbNameCustom.IsChecked = $true
-    } else { $e["RbName$($naming.Choice)"].IsChecked = $true }
+    $e.RbNameWmi.IsChecked = $a.NamingMode -eq 'WMI'
+    $e.RbNameCustom.IsChecked = $a.NamingMode -eq 'Custom'
+    $e.RbNamePrompt.IsChecked = $a.NamingMode -eq 'Prompt'
+    $e.TxtPrefix.Text = $a.Prefix
+    $e.CmbWmi.Text = $a.WmiQuery
+    $e.TxtScheme.Text = $a.CustomScheme
 
     $e.RbDomain.IsChecked = $a.Membership -eq 'Domain'
     $e.RbWorkgroup.IsChecked = $a.Membership -ne 'Domain'
@@ -163,6 +156,8 @@ function Show-AnswerEditor {
 
     $syncEnabled = {
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
+        $e.CmbWmi.IsEnabled = -not $e.RbNameCustom.IsChecked
+        $e.TxtScheme.IsEnabled = [bool]$e.RbNameCustom.IsChecked
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
@@ -172,7 +167,7 @@ function Show-AnswerEditor {
         $e.ChkBlAD.IsEnabled = $on -and $dom
         if (-not $dom) { $e.ChkBlAD.IsChecked = $false }
     }
-    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbDomain', 'RbWorkgroup') { $e[$c].Add_Checked($syncEnabled) }
+    foreach ($c in 'RbInteractive', 'RbUnattended', 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt', 'RbDomain', 'RbWorkgroup') { $e[$c].Add_Checked($syncEnabled) }
     foreach ($c in 'ChkAdmin', 'ChkBitLocker') { $e[$c].Add_Click($syncEnabled) }
     & $syncEnabled
 
@@ -215,11 +210,6 @@ function Show-AnswerEditor {
 
 
     # --- Collect and save ------------------------------------------------------------------------------------
-    $nameChoice = { foreach ($c in 'Serial', 'PrefixSerial', 'PrefixRandom', 'Custom') { if ($e["RbName$c"].IsChecked) { return $c } }; 'Serial' }
-    $namePattern = {
-        $digits = if ($e.CmbNameDigits.SelectedItem) { [int]$e.CmbNameDigits.SelectedItem } else { 4 }
-        Join-NamePattern -Choice (& $nameChoice) -Prefix $e.TxtNamePrefix.Text -Digits $digits -Pattern $e.TxtScheme.Text
-    }
     $collect = {
         $e.GridTasks.CommitEdit('Row', $true) | Out-Null
         $a.Name          = $e.TxtName.Text.Trim()
@@ -238,12 +228,10 @@ function Show-AnswerEditor {
         $regional = Get-RegionalSettings $e.CmbLanguage.Text $e.CmbFallback.Text
         foreach ($n in 'InputLocale', 'SystemLocale', 'UILanguage', 'UILanguageFallback', 'UserLocale') { $a.$n = $regional.$n }
         $a.EnableAdministrator  = [bool]$e.ChkAdmin.IsChecked
-        $pattern = & $namePattern
-        if (-not $keepWmi -or $pattern) {
-            $a.NamingMode   = 'Custom'
-            $a.Prefix       = ''
-            $a.CustomScheme = $pattern
-        }
+        $a.NamingMode    = if ($e.RbNameCustom.IsChecked) { 'Custom' } elseif ($e.RbNamePrompt.IsChecked) { 'Prompt' } else { 'WMI' }
+        $a.Prefix        = $e.TxtPrefix.Text.Trim()
+        $a.WmiQuery      = $e.CmbWmi.Text.Trim()
+        $a.CustomScheme  = $e.TxtScheme.Text.Trim()
         $a.Membership    = if ($e.RbDomain.IsChecked) { 'Domain' } else { 'Workgroup' }
         $a.Domain        = $e.TxtDomain.Text.Trim()
         $a.OrganizationalUnit = $e.TxtOU.Text.Trim()
@@ -261,35 +249,13 @@ function Show-AnswerEditor {
         $a.BitLocker.RequireBackup     = $true
     }
 
-    # The example updates as the choice, prefix or digits change, with this PC's serial (read once, on first use).
-    $updateNamePreview = {
-        $choice = & $nameChoice
-        foreach ($c in 'LblNamePrefix', 'TxtNamePrefix') { $e[$c].IsEnabled = $choice -in 'PrefixSerial', 'PrefixRandom' }
-        foreach ($c in 'LblNameDigits', 'CmbNameDigits') { $e[$c].IsEnabled = $choice -eq 'PrefixRandom' }
-        foreach ($c in 'LblScheme', 'PnlScheme') { $e[$c].IsEnabled = $choice -eq 'Custom' }
-        $pattern = & $namePattern
-        if ($keepWmi -and -not $pattern) {
-            $e.TxtNamePreview.Text = ''
-            $e.TxtNamePreviewNote.Text = 'Named by the WMI query above.'
-            return
-        }
-        if ($null -eq $state.Serial) {
-            $state.Serial = try { "$((Get-CimInstance Win32_BIOS -ErrorAction Stop).SerialNumber)".Trim() } catch { '' }
-        }
-        $serial = if ($state.Serial) { $state.Serial } else { 'ABC1234' }
-        $sample = [pscustomobject]@{ NamingMode = 'Custom'; Prefix = ''; CustomScheme = $pattern }
-        $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $sample -Serial $serial -Random ([Random]::new(7))
-        $notes = @()
-        if ($pattern -match '\{SERIAL\}' -and $state.Serial) { $notes += "With this PC's serial number ($($state.Serial))." }
-        elseif ($pattern -match '\{SERIAL\}') { $notes += 'With a made-up serial number.' }
-        if ($pattern -match '#') { $notes += 'Random digits change for every PC.' }
-        $notes += 'Letters, digits and dashes only, 15 characters at most.'
-        $e.TxtNamePreviewNote.Text = $notes -join ' '
-    }
-    foreach ($c in 'RbNameSerial', 'RbNamePrefixSerial', 'RbNamePrefixRandom', 'RbNameCustom') { $e[$c].Add_Checked($updateNamePreview) }
-    foreach ($c in 'TxtNamePrefix', 'TxtScheme') { $e[$c].Add_TextChanged($updateNamePreview) }
-    $e.CmbNameDigits.Add_SelectionChanged($updateNamePreview)
-    & $updateNamePreview
+    $e.BtnNamePreview.Add_Click({
+        & $collect
+        try {
+            $wmi = Get-WmiNamingValue -Query $a.WmiQuery
+            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial (Get-CimInstance Win32_BIOS).SerialNumber
+        } catch { $e.TxtNamePreview.Text = "Query failed: $($_.Exception.Message)" }
+    })
 
     $e.BtnCancel.Add_Click({ $win.Close() })
     $e.BtnSave.Add_Click({
