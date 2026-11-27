@@ -535,16 +535,6 @@ function ConvertTo-AppChecks {
     })
 }
 
-function Set-AppCheckResults {
-    <#
-    .SYNOPSIS
-        A check list with each app's new result in place of its old one ('App: <name>', Passed or Failed), for an app
-        installed again after first boot (the logon retry, or the agent's Retry failed apps). Returns the new list.
-    #>
-    param([AllowEmptyCollection()][object[]]$Checks = @(), [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results, [string]$By = 'a retry', [datetime]$Now = (Get-Date))
-    Merge-CheckResults -Checks $Checks -Results (ConvertTo-AppChecks -Results $Results -By $By -Now $Now)
-}
-
 function Update-DeployAppResults {
     <#
     .SYNOPSIS
@@ -824,6 +814,6 @@ function Format-Duration($Span) {
 Export-ModuleMember -Function Get-StatusId, Resolve-StatusTarget, Start-DeployStatus, Resume-DeployStatus, Set-DeployStatus, Set-DeployCheckResult,
     Start-LocalProgress, Get-ProgressCancelPath, Receive-ProgressCancel,
     Get-DeployStatusRecord, Get-PrimaryNetworkAddress, Get-StatusFolder, Get-DeploymentStatus, Get-DeploymentSummary,
-    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Set-AppCheckResults, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
+    Get-DeployChecklist, Get-FailedApps, Get-DeployNotices, Update-DeployAppResults, Update-DeployCheckResults, Update-DeployResultText,
     Merge-CheckResults, ConvertTo-AppChecks, Get-LocalDeployResultPath, Read-LocalDeployResult, Save-LocalDeployResult, Update-LocalDeployResult, Publish-AppRetryResults,
     Remove-DeploymentStatus, Get-ExpiredDeployments, Import-StickDeployStatus, Get-DeployStickRoots, Format-Duration, Get-DeployResultSummary

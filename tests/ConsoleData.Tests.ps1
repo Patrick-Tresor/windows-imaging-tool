@@ -61,13 +61,12 @@ try {
     Assert-Equal (($gpt -match 'convert gpt') -and ($gpt -match 'create partition efi') -and ($gpt -notmatch 'active')) $true 'UEFI layout is GPT with an EFI partition'
     Assert-Equal (($gpt -match 'select disk 1') -and ($gpt -match 'assign letter=S') -and ($gpt -match 'assign letter=W')) $true 'the layout selects the disk and uses S: and W:'
 
-    # Images: split parts count as one image.
+    # Images: .wim and .esd are listed; split parts (.swm) are no longer images.
     Set-Content (Join-Path $root 'Images/Win11.wim') 'x'
+    Set-Content (Join-Path $root 'Images/Small.esd') 'x'
     Set-Content (Join-Path $root 'Images/Big.swm') 'x'
-    Set-Content (Join-Path $root 'Images/Big2.swm') 'x'
     $images = @(Get-ImageList -ContentRoot $root)
-    Assert-Equal ($images.Name -join ',') 'Big.swm,Win11.wim' 'image list hides extra .swm parts'
-    Assert-Equal (($images | Where-Object Name -eq 'Big.swm').Parts) 2 'split image counts its parts'
+    Assert-Equal ($images.Name -join ',') 'Small.esd,Win11.wim' 'image list: .wim and .esd only'
 
     # Logs: name parsing.
     Set-Content (Join-Path $root 'Logs/ABC123_20261022-1530_OK.log') 'done'

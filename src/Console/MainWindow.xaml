@@ -72,7 +72,6 @@
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
               <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
-              <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
               <DataGridTextColumn Header="Earlier versions" Binding="{Binding Versions}" Width="110"/>
               <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
               <DataGridTextColumn Header="Last updated" Binding="{Binding Updated}" Width="2*"/>
@@ -174,7 +173,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build shows in the Progress window and takes several minutes."/>
 
           <Border x:Name="BrdAdk" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,14">
             <DockPanel>
@@ -390,11 +389,6 @@
               <Button x:Name="BtnSettingsSave" Content="Save" Style="{StaticResource Primary}"/>
               <TextBlock x:Name="TxtSettingsProblem" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" MaxWidth="700"/>
             </StackPanel>
-            <Border x:Name="BdrSettingsStale" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
-              <DockPanel>
-                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="Saved. WinPE reads these settings from the boot image, so update or rebuild your USB sticks before the next deploy (the Computers tab's Reimage rebuilds its network boot image by itself)."/>
-              </DockPanel>
-            </Border>
           </StackPanel>
         </ScrollViewer>
       </TabItem>
@@ -405,7 +399,7 @@
           <DockPanel MinHeight="460" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. Reimage goes through each PC's agent (put there by deploys that report to the network share, or by Install agent, which needs PowerShell remoting or file sharing on the PC with your account as administrator); a PC without an agent checking in is refused. The network share and the Active Directory account are set on the Deploy Settings tab."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. Reimage goes through each PC's agent (put there by deploys that report to the network share, or by Install agent, which needs PowerShell remoting or file sharing on the PC with your account as administrator); a PC without an agent checking in gets it first, then is reimaged once it checks in. The network share and the Active Directory account are set on the Deploy Settings tab."/>
             </StackPanel>
             <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
@@ -422,13 +416,11 @@
             <GroupBox DockPanel.Dock="Bottom" Header="2. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="0"/><RowDefinition Height="0"/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Answer file" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-                <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
-                <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <!-- Buttons go onto a second line when the window is narrow. -->
-                <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
+                <WrapPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
                   <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,0,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>

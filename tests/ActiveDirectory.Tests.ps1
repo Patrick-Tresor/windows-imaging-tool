@@ -108,8 +108,5 @@ Assert-Equal $row.Address '10.1.2.40' 'local row: reached at its IP'
 Assert-Equal $row.NotInDomain $true 'local row: not in the domain'
 Assert-Equal $row.JoinOU '' 'local row: no OU'
 Assert-Equal (New-LocalComputerRow -Ip '10.1.2.40').Name '10.1.2.40' 'local row: no name answered shows the IP'
-Assert-Equal (ConvertTo-LocalAccountName -User 'Administrator' -Computer '10.1.2.40') '10.1.2.40\Administrator' 'local account: bare name gets the PC'
-Assert-Equal (ConvertTo-LocalAccountName -User '.\Pat' -Computer 'PC1') 'PC1\Pat' 'local account: .\ becomes the PC'
-Assert-Equal (ConvertTo-LocalAccountName -User 'PC1\Pat' -Computer '10.1.2.40') 'PC1\Pat' 'local account: PC\user kept'
 
 Complete-Tests 'All Active Directory tests passed.'

@@ -79,6 +79,13 @@ try {
     Assert-Equal ($msg -like "*$stickA*1111111*2026-11-11 12:00*2222222*Update the stick*") $true 'an old stick: banner names it, both versions and how to update'
     $msg = Get-StaleStickMessage -Console $console -StickRoots @($stickC)
     Assert-Equal ($msg -like '*built before this console stamped versions*') $true 'a stick from before versions: banner too'
+    # One banner for Deploy Settings too: a stick of this version built before the settings changed needs updating.
+    $stickD = Join-Path $tmp 'stickD'; New-Item -ItemType Directory -Path $stickD | Out-Null
+    Save-JsonFile -Path (Join-Path $stickD 'tool-version.json') -InputObject (ConvertTo-ToolVersionRecord -Version $console -Target Usb -Built ([datetime]'2026-11-26 09:00'))
+    $msg = Get-StaleStickMessage -Console $console -StickRoots @($stickD) -SettingsChanged '2026-11-27 15:40'
+    Assert-Equal ($msg -like "*$stickD*2026-11-26 09:00*Deploy Settings changed on 2026-11-27 15:40*Update the stick*") $true 'a stick built before the settings changed: banner'
+    Assert-Equal (Get-StaleStickMessage -Console $console -StickRoots @($stickD) -SettingsChanged '2026-11-25 08:00') $null 'built after the change: no banner'
+    Assert-Equal (Test-StickStale -Console $console -Stick (Get-StickToolVersion -StickRoot $stickD) -SettingsChanged '') $false 'no settings change recorded: up to date'
 
     # The network boot image (<root>\Boot) gets a banner too when it is older than the console.
     $root = Join-Path $tmp 'root'; $boot = Join-Path $root 'Boot'

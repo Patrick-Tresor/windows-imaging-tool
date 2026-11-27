@@ -135,7 +135,7 @@ function ConvertFrom-AdComputerProperties {
 
 function New-LocalComputerRow {
     # A grid row for a PC found by IP that is not in Active Directory (a workgroup laptop on the same network). It is
-    # reimaged with its own local administrator account; it has no OU to join back into.
+    # has no agent, so it is reimaged from the USB stick; it has no OU to join back into.
     param([Parameter(Mandatory)][string]$Ip, [string]$Name)
     $shown = if ("$Name".Trim()) { "$Name".Trim().ToUpperInvariant() } else { $Ip }
     [pscustomobject]@{
@@ -149,20 +149,10 @@ function New-LocalComputerRow {
         OUPath            = '(not in the domain)'
         JoinOU            = ''
         Enabled           = $true
-        Description       = 'Not in Active Directory: reimaged with its local administrator account'
+        Description       = 'Not in Active Directory: reimage it from the USB stick'
         DistinguishedName = ''
         NotInDomain       = $true
     }
-}
-
-function ConvertTo-LocalAccountName {
-    # A local account typed for a PC outside the domain, as Windows file sharing signs in with it: Administrator ->
-    # <PC>\Administrator. PC\user, .\user and user@domain are kept (.\ becomes the PC).
-    param([Parameter(Mandatory)][string]$User, [Parameter(Mandatory)][string]$Computer)
-    $u = $User.Trim()
-    if ($u -match '^\.\\(.+)$') { return "$Computer\$($Matches[1])" }
-    if ($u -match '[\\@]') { return $u }
-    "$Computer\$u"
 }
 
 function Get-AdDomainFromAccount {
@@ -284,4 +274,4 @@ function Resolve-AdComputerNameFromIp {
 Export-ModuleMember -Function ConvertTo-DomainDN, Split-AdDN, Get-AdParentDN, ConvertTo-AdFriendlyPath, Get-AdJoinOU,
     ConvertTo-LdapFilterValue, Get-AdComputerFilter, Get-AdLdapPath, ConvertFrom-AdFileTime, ConvertFrom-AdComputerProperties,
     Get-AdDomainFromAccount, Resolve-AdDomain, Get-AdDefaultDomain, Get-AdComputers,
-    ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp, New-LocalComputerRow, ConvertTo-LocalAccountName
+    ConvertFrom-AdSearchText, ConvertFrom-NbtstatOutput, Resolve-AdComputerNameFromIp, New-LocalComputerRow

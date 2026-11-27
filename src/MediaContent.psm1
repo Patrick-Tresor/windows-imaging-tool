@@ -102,10 +102,10 @@ function Get-MediaContent {
                 catch { $problems += "Answer file $name uses image $image version $($a.ImageVersion): $($_.Exception.Message)" }
                 if ($pinned) {
                     $folders += Join-MediaRelative $sp.Dir, 'Previous', "$($sp.Base)_$($a.ImageVersion)"
-                    $size = [int64](Get-ImagePartFiles -ImagePath $pinned | Measure-Object Length -Sum).Sum
+                    $size = [int64](Get-ImageFileItem -ImagePath $pinned | Measure-Object Length -Sum).Sum
                 }
             } else {
-                $parts = @(Get-ImagePartFiles -ImagePath $current)
+                $parts = @(Get-ImageFileItem -ImagePath $current)
                 if (-not $parts) { $problems += "Answer file $name uses image $image, which is not in $ContentRoot. Capture it or pick another image on the answer file's Image page." }
                 foreach ($part in $parts) { $files += Join-MediaRelative $sp.Dir, $part.Name }
                 if (Test-Path (Join-Path (Split-Path $current -Parent) "$($sp.Base).updates.json")) {

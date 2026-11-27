@@ -32,7 +32,8 @@ the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 The header shows the tool's version, `v1.NN`, where NN counts the pull requests merged since v1.00
 (from `src\version.txt` in a downloaded zip, or git in a clone). The same number is written on every
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
-plugged-in stick is older than the console, with **Update the stick** (an older network boot image is
+plugged-in stick is older than the console, or was built before Deploy Settings last changed
+something WinPE reads (share, account, password), with **Update the stick** (an older network boot image is
 rebuilt by **Reimage...** itself). Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
 by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens
@@ -149,8 +150,9 @@ on the ones you pick, with nobody at the PCs.
    and its IP (`GWHZLG3 10.1.2.34`) when DNS has an old address, and
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the IP address, OU, Windows version, last
-   logon and whether the console can reach it, checked on every Search (Search again
-   to check again). The list shows right away; the **Agent** column of a PC with no agent says
+   logon and its agent. A PC with no agent checking in gets a network check on
+   every Search (Search again to check again); a PC whose agent checks in is not
+   checked, since Reimage goes through the agent. The list shows right away; the **Agent** column of a PC with no agent says
    **None, checking...** while the network check runs in the background (a few seconds, however many PCs), then
    fills in. The IP is where that PC really answers: each DNS address is
    asked for its computer name, and one that names another PC is dropped (its Agent
@@ -188,8 +190,11 @@ on the ones you pick, with nobody at the PCs.
    `Boot\Deploy-WinPE.iso`, to boot a PC or VM from.
 4. Select the PCs (Ctrl+click, Shift+click), pick the answer file and click
    **Reimage...**. Each PC keeps its name and joins back into the OU it is in.
-   Reimage goes through each PC's agent only: a PC without an agent checking in
-   is refused (select it and click **Install agent** first).
+   Reimage goes through each PC's agent only. A PC without an agent checking in
+   gets it first (as with **Install agent**, while the network boot image builds
+   if it needs to) and is reimaged once it checks in; one the agent can't reach
+   is left as it is. A PC outside the domain can't have the agent: reimage it
+   from the USB stick.
 
 For each PC, the console (Start-RemoteReimage.ps1): checks from its agent's
 check-in that it answers with its own name, starts in UEFI mode, has a BIOS
@@ -241,7 +246,8 @@ the share, written as the computer account, like first boot's status.
 - **Failed apps**: an hour after first boot, then hourly (up to 3 tries), the
   agent installs again the applications that failed at first boot.
 - **Reimage through the agent**: **Reimage...** needs an agent that checked in
-  within the last 15 minutes, and no WinRM or file sharing. The console writes
+  within the last 15 minutes (it installs one first on a PC that has none), and
+  no WinRM or file sharing. The console writes
   the usual `Reimage\<serial>.json` job for WinPE, then puts a job it signed and
   a copy of the network boot image in `Status\Agents\Jobs\<serial>\`. The agent
   looks for a job every minute, copies the boot image, checks its SHA-256, and
@@ -250,7 +256,7 @@ the share, written as the computer account, like first boot's status.
   its row says why.
 - **Install agent** puts it on PCs imaged before it existed (over WinRM or the
   admin share, with your account as administrator), and waits for each one's
-  first check-in. It is the only thing the console does over WinRM or the admin share.
+  first check-in. **Reimage...** does the same first for PCs with no agent. It is the only thing the console does over WinRM or the admin share.
 - **On a PC the console can't reach** (WinRM and file sharing blocked): on that
   PC, right-click `\\<server>\<share>\Agent\Install-Agent.cmd` and pick **Run as
   administrator**. The console keeps that folder up to date (the agent files and
@@ -607,8 +613,7 @@ components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
 name, so answer files pick it up without changes. An `.esd` image is exported to a
-.wim, updated and exported back. Split images (`.swm`) from older captures are
-joined, updated and split again (new captures are never split). The Images tab shows when each image was last updated and
+.wim, updated and exported back. The Images tab shows when each image was last updated and
 with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass

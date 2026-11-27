@@ -96,6 +96,11 @@ try {
     $known = Get-AgentKnownAddresses -CheckIns $rows -Targets @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01.corp.local' }, [pscustomobject]@{ Name = 'PC09'; Address = 'PC09' })
     Assert-Equal "$($known.Keys -join ',')|$($known['pc01.corp.local'] -join ',')" 'pc01.corp.local|10.1.2.34,192.168.56.1' 'the addresses its agent reported, by the address the console uses'
     Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress') $true 'the Computers tab checks the network with them'
+    # Only PCs without an agent checking in get the network check: PC01 checks in, PC02's agent stopped, PC09 has none.
+    $toCheck = @(Select-RowsWithoutAgent -Rows @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01' }, [pscustomobject]@{ Name = 'PC02'; Address = 'pc02' }, [pscustomobject]@{ Name = 'PC09'; Address = 'pc09' }) -CheckIns $rows)
+    Assert-Equal ($toCheck.Name -join ',') 'PC02,PC09' 'the network check skips PCs whose agent checks in'
+    Assert-Equal (@(Select-RowsWithoutAgent -Rows @() -CheckIns $rows).Count) 0 'no rows, nothing to check'
+    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Select-RowsWithoutAgent -Rows \$script:adRows') $true 'the Computers tab checks only those'
 
     # A PC the console can't reach installs the agent itself from <share>\Agent.
     $pub = Join-Path $root 'share/Agent'
@@ -348,7 +353,10 @@ $start = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Start-RemoteReimage
 Assert-Equal ($start -match 'New-AgentJob' -and $start -notmatch 'Invoke-LocalDiskBoot|Get-RemoteComputerInfo|Start-PcOverNetwork') $true 'reimage goes through the agent only, never over WinRM or the admin share'
 Assert-Equal ($start -match "Not reimaged: it has no agent") $true 'a PC without an agent is skipped, with nothing changed on it'
 $console = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
-Assert-Equal ($console -match 'No agent checking in from') $true 'the console refuses to reimage a PC without an agent'
+Assert-Equal ($console -match 'Start-AgentInstall -Rows \$noAgent') $true 'Reimage installs the agent first on a PC without one'
+Assert-Equal ($console -match 'if \(\$script:bootBuilding -or \$p\.WaitingAgent\) \{ return \}') $true 'and starts the reimage only once the agent install and the boot image build are both done'
+Assert-Equal ($console -match 'Find-AgentCheckIn -CheckIns \$checkIns -ComputerName \$_\.Name; \$a -and \$a\.Online') $true 'only the PCs whose agent checks in then are reimaged'
+Assert-Equal ($console -match "not in the domain, so it can't have the agent") $true 'a PC outside the domain is refused (USB stick)'
 Assert-Equal ($console -match "'-StatusFolder'.*'-KeyRoot'") $true 'the console tells the reimage where the agents check in and which key signs'
 Assert-Equal ($console -match 'Install-RemoteAgent\.ps1') $true 'Install agent puts it on PCs imaged before'
 $xaml = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/MainWindow.xaml')

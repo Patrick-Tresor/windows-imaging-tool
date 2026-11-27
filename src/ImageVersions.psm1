@@ -19,10 +19,9 @@ function Test-ImageVersionName {
 }
 
 function Get-ExistingImageFiles {
-    # The image files named -Name in -ImagesDir, whatever their kind: Name.wim, Name.esd (Smallest compression) or
-    # the first part of a split image, Name.swm.
+    # The image files named -Name in -ImagesDir, whatever their kind: Name.wim or Name.esd (Smallest compression).
     param([Parameter(Mandatory)][string]$ImagesDir, [Parameter(Mandatory)][string]$Name)
-    @(foreach ($ext in '.wim', '.esd', '.swm') {
+    @(foreach ($ext in '.wim', '.esd') {
         $p = [IO.Path]::Combine($ImagesDir, "$Name$ext")
         if ([IO.File]::Exists($p)) { $p }
     })
@@ -30,7 +29,6 @@ function Get-ExistingImageFiles {
 
 function Get-ImageFileExtension {
     # The extension a capture ends up with: .esd with the Smallest (recovery) compression, else .wim.
-    # Captures are no longer split (the stick and the share are NTFS); older split images (.swm) still deploy.
     param([string]$Compression)
     if ($Compression -eq 'recovery') { '.esd' } else { '.wim' }
 }
@@ -106,18 +104,13 @@ function Convert-ImageToEsd {
     $esd
 }
 
-function Get-ImagePartFiles {
-    # The files that make up an image: the .wim, or every part of a split image (Name.swm, Name2.swm, ...).
+function Get-ImageFileItem {
+    # The image file (.wim or .esd) as a one-item list, or an empty list when it is not there.
     param([Parameter(Mandatory)][string]$ImagePath)
     $dir = Split-Path $ImagePath -Parent
     $leaf = Split-Path $ImagePath -Leaf
     if (-not (Test-Path -LiteralPath $dir)) { return @() }
-    if ($leaf -like '*.swm') {
-        $base = [IO.Path]::GetFileNameWithoutExtension($leaf)
-        @(Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Extension -eq '.swm' -and $_.BaseName -match "^$([regex]::Escape($base))\d*$" } | Sort-Object Name)
-    } else {
-        @(Get-ChildItem -LiteralPath $dir -File | Where-Object Name -eq $leaf)
-    }
+    @(Get-ChildItem -LiteralPath $dir -File | Where-Object Name -eq $leaf)
 }
 
 function Get-ImageSidecarFiles {
@@ -153,7 +146,7 @@ function Get-ImageVersions {
         $infoPath = Join-Path $d.FullName 'version.json'
         if (Test-Path -LiteralPath $infoPath) { try { $info = Get-Content -Raw -LiteralPath $infoPath | ConvertFrom-Json } catch { } }
         $archived = [datetime]::ParseExact($version.Substring(0, 13), $script:StampFormat, [Globalization.CultureInfo]::InvariantCulture)
-        $parts = @(Get-ImagePartFiles -ImagePath $first)
+        $parts = @(Get-ImageFileItem -ImagePath $first)
         [pscustomobject]@{
             Version   = $version
             Archived  = $archived
@@ -246,7 +239,7 @@ function Save-ImageVersion {
         [switch]$Move,
         [datetime]$Date = (Get-Date)
     )
-    $parts = @(Get-ImagePartFiles -ImagePath $ImagePath)
+    $parts = @(Get-ImageFileItem -ImagePath $ImagePath)
     if (-not $parts) { throw "Image not found: $ImagePath" }
 
     $stamp = $Date.ToString($script:StampFormat, [Globalization.CultureInfo]::InvariantCulture)
@@ -294,11 +287,11 @@ function Restore-ImageVersion {
     param([Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][string]$Version, [datetime]$Date = (Get-Date))
     $source = Get-ImageVersionPath -ImagePath $ImagePath -Version $Version
     $dir = Split-Path $ImagePath -Parent
-    $sourceParts = @(Get-ImagePartFiles -ImagePath $source)
+    $sourceParts = @(Get-ImageFileItem -ImagePath $source)
     $sourceSidecars = @(Get-ImageSidecarFiles -ImagePath $source)
 
     $archived = $null
-    if (@(Get-ImagePartFiles -ImagePath $ImagePath).Count) {
+    if (@(Get-ImageFileItem -ImagePath $ImagePath).Count) {
         $archived = Save-ImageVersion -ImagePath $ImagePath -Move -Date $Date -Reason "Replaced by a rollback to $Version"
     } else {
         Get-ImageSidecarFiles -ImagePath $ImagePath | Remove-Item -Force
@@ -312,7 +305,7 @@ function Restore-ImageVersion {
         foreach ($f in $sourceParts + $sourceSidecars) { Remove-Item -LiteralPath (Join-Path $dir $f.Name) -Force -ErrorAction SilentlyContinue }
         if ($archived) {
             $archivedImage = Join-Path $archived.Folder (Split-Path $ImagePath -Leaf)
-            foreach ($f in Get-ImagePartFiles -ImagePath $archivedImage) { Move-Item -LiteralPath $f.FullName -Destination $dir -Force }
+            foreach ($f in Get-ImageFileItem -ImagePath $archivedImage) { Move-Item -LiteralPath $f.FullName -Destination $dir -Force }
             foreach ($f in Get-ImageSidecarFiles -ImagePath $archivedImage) { Copy-Item -LiteralPath $f.FullName -Destination $dir -Force }
             Remove-Item -LiteralPath $archived.Folder -Recurse -Force
         }
@@ -339,7 +332,7 @@ function Publish-CapturedImage {
     <#
     .SYNOPSIS
         After a capture into -Staging: keeps the image it replaces (-Existing) as a version, moves the new files into
-        -ImagesDir and applies the image's keep limit. Returns the new file name (Name.wim, Name.esd or Name.swm).
+        -ImagesDir and applies the image's keep limit. Returns the new file name (Name.wim or Name.esd).
     .DESCRIPTION
         Used by Capture-VMImage.ps1, which imports DeployCommon.psm1 for Write-DeployLog.
         $State.Swapping turns true once the old image starts moving: from then on the staging folder may hold the
@@ -380,7 +373,7 @@ function Publish-CapturedImage {
     $newLeaf
 }
 
-Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Get-CaptureExclusionList, New-CaptureConfigFile, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImagePartFiles, Get-ImageVersions, Get-ImageVersionPath,
+Export-ModuleMember -Function Get-ExistingImageFiles, Get-ImageFileExtension, Get-CaptureImageArgs, Get-CaptureExclusionList, New-CaptureConfigFile, Convert-ImageToEsd, Publish-CapturedImage, Test-ImageVersionName, Get-ImageFileItem, Get-ImageVersions, Get-ImageVersionPath,
     Save-ImageVersion, Restore-ImageVersion, Remove-ImageVersion, Get-ImageVersionsToPrune,
     Get-ImageVersionUsage, Get-VersionsToKeep, Set-VersionsToKeep, Invoke-ImageVersionRetention,
     Test-ImageHardLinks

@@ -672,11 +672,25 @@ function Update-UsbMode {
         else { 'Not built by this tool: everything on it is erased.' }
 }
 
+function Get-SettingsChangedAt {
+    # When Deploy Settings last changed something WinPE reads ('yyyy-MM-dd HH:mm'), or '' (Save-DeploySettingsPage).
+    # The stick banner asks every 5 seconds: read again at most every 30 seconds (the share can be slow), and at once
+    # after a save (-Fresh).
+    param([switch]$Fresh)
+    if (-not (Test-ContentRoot $script:root)) { return '' }
+    $c = $script:settingsChangedCache
+    if (-not $Fresh -and $c -and $c.Root -eq $script:root -and ((Get-Date) - $c.At).TotalSeconds -lt 30) { return $c.Value }
+    $s = try { Get-DeploySettings -ContentRoot $script:root } catch { $null }
+    $v = if ($s -and $s.PSObject.Properties['winpeChangedAt']) { "$($s.winpeChangedAt)" } else { '' }
+    $script:settingsChangedCache = [pscustomobject]@{ Root = $script:root; At = Get-Date; Value = $v }
+    $v
+}
+
 function Update-StickVersionBanner {
-    # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
-    # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
+    # A banner at the top when a plugged-in stick was built with an older version of the tool, or before the Deploy
+    # Settings last changed something WinPE reads: the fix or setting the operator expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
     # (An older network boot image needs no banner: Reimage rebuilds it first.)
-    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots) -SettingsChanged (Get-SettingsChangedAt)
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
         $ui.BdrStickOld.Visibility = 'Visible'
@@ -691,7 +705,8 @@ function Select-StickForUpdate {
     # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
     Update-UsbDisks
-    $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    $changed = Get-SettingsChangedAt
+    $old = @(Get-DeployStickRoots | Where-Object { Test-StickStale -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_) -SettingsChanged $changed })
     $item = $null
     if ($old) {
         $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
@@ -1126,18 +1141,6 @@ function Get-NetworkBootRebuild {
     Get-NetworkBootRebuildReason -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot -Stale "$stale" -SettingsNewer:$newer
 }
 
-function Update-AdBootStatus {
-    if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
-    $boot = Get-NetworkBootImage -ContentRoot $script:root
-    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $rebuild = if (-not $problems) { Get-NetworkBootRebuild }
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] }
-        elseif ($script:bootBuilding) { 'Building the network boot image (Progress window); the reimage starts when it is done.' }
-        elseif ($rebuild) { "Network boot image: $rebuild. Reimage builds it first (a few minutes)." }
-        else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
-    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } elseif ($rebuild -or $script:bootBuilding) { 'MutedBrush' } else { 'SuccessBrush' }))
-}
-
 function Show-AdRows {
     $states = @{}
     if ($script:adRows -and (Test-ContentRoot $script:root)) {
@@ -1191,7 +1194,6 @@ function Update-Computers {
     $ui.CmbAdAnswer.ItemsSource = $answers
     # No default answer file: keep the one picked, or the only one there is.
     $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif ($answers.Count -eq 1) { $answers[0] } else { $null }
-    Update-AdBootStatus
     Update-AgentInstaller
     Show-AdRows
 }
@@ -1242,10 +1244,10 @@ function Search-AdComputers {
         if ($find.Ip) {
             $found = @($found | Where-Object { $find.Name -and $_.Name -eq $find.Name.ToUpperInvariant() })
             if (-not $found) {
-                # Not in Active Directory (or no name answered): a PC outside the domain, reimaged with its own local
-                # administrator account, asked for at Reimage (Patrick, 2026-11-22).
+                # Not in Active Directory (or no name answered): a PC outside the domain. It has no agent, so it is
+                # reimaged from the USB stick.
                 $found = @(New-LocalComputerRow -Ip $find.Ip -Name $find.Name)
-                $localNote = " $($find.Ip) is not in Active Directory: Reimage asks for its local administrator account."
+                $localNote = " $($find.Ip) is not in Active Directory: reimage it from the USB stick."
             }
             foreach ($r in $found) { $r.Address = $find.Ip }
         }
@@ -1255,7 +1257,7 @@ function Search-AdComputers {
         Start-AdOnlineCheck -Note $localNote
     } finally { $window.Cursor = $null }
     Show-AdRows
-    Set-Status "$($script:adRows.Count) computer(s) found.$(if ($script:adCheck) { ' Checking which are online...' })$localNote"
+    Set-Status "$($script:adRows.Count) computer(s) found.$(if ($script:adCheck) { ' Checking the PCs with no agent...' } elseif ($script:adRows) { " $(Get-AdOnlineSummary)" })$localNote"
 }
 
 $script:adCheck = $null
@@ -1273,24 +1275,23 @@ function Stop-AdOnlineCheck {
 
 function Start-AdOnlineCheck {
     # Get-RemoteOnlineState in its own runspace, so the window stays free while it runs; Complete-AdOnlineCheck
-    # takes its answer. The addresses a PC's agent reported in its last check-in are knocked on first: DNS can be
-    # old or give a second adapter's address.
+    # takes its answer. Only PCs with no agent checking in are checked: the others are reached through their agent.
+    # The addresses an agent that stopped checking in last reported are knocked on first: DNS can be old or give a
+    # second adapter's address.
     param([string]$Note = '')
     Stop-AdOnlineCheck
     $script:adOnline = @{}
     if (-not $script:adRows) { return }
-    $known = @{}
     $checkIns = @(Get-ConsoleAgentCheckIns)
-    foreach ($r in @($script:adRows)) {
-        $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $r.Name
-        if ($a -and $a.Online) { $known[$r.Address] = @(@($a.ipAddresses) + "$($a.ipAddress)" | Where-Object { $_ }) }
-    }
+    $targets = @(Select-RowsWithoutAgent -Rows $script:adRows -CheckIns $checkIns)
+    if (-not $targets) { return }
+    $known = Get-AgentKnownAddresses -CheckIns $checkIns -Targets $targets
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
         param($Module, $Names, $Known)
         Import-Module $Module -Force
         Get-RemoteOnlineState -ComputerName $Names -KnownAddress $Known
-    }).AddArgument((Join-Path $srcDir 'RemoteReimage.psm1')).AddArgument([string[]]@($script:adRows | ForEach-Object Address)).AddArgument($known)
+    }).AddArgument((Join-Path $srcDir 'RemoteReimage.psm1')).AddArgument([string[]]@($targets | ForEach-Object Address)).AddArgument($known)
     $script:adCheck = [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Note = $Note }
     $script:adCheckTimer.Start()
 }
@@ -1354,7 +1355,6 @@ function Start-NetworkBootBuild {
     $script:bootBuilding = $true
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished {
         $script:bootBuilding = $false
-        try { Update-AdBootStatus } catch { }
         Invoke-Safely { Start-PendingReimage }
     }
     Set-Status 'Building the network boot image first; the reimage starts when it is done.'
@@ -1362,16 +1362,67 @@ function Start-NetworkBootBuild {
 }
 
 function Start-PendingReimage {
-    # The reimage prepared by Reimage..., once the network boot image is ready.
+    # The reimage prepared by Reimage..., once the network boot image is ready and the agent installed on the PCs
+    # that had none: both run at the same time, and whichever finishes last starts the reimage.
     $p = $script:pendingReimage
-    $script:pendingReimage = $null
     if (-not $p) { return }
+    if ($script:bootBuilding -or $p.WaitingAgent) { return }
+    $script:pendingReimage = $null
     $why = Get-NetworkBootRebuild
     if ($why) { Show-Error "The reimage did not start: the network boot image build did not finish ($why). Its log is in the Progress window."; return }
-    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $p.RunArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title $p.Title `
+    # Only the PCs whose agent checks in now (the ones that just got it included).
+    $script:agentCache = $null
+    $checkIns = @(Get-ConsoleAgentCheckIns)
+    $rows = @($p.Rows | Where-Object { $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name; $a -and $a.Online })
+    $left = @($p.Rows | Where-Object { $rows -notcontains $_ } | ForEach-Object Name)
+    if (-not $rows) { Show-Error "The reimage did not start: no agent checks in from $($left -join ', ') (see Install agent in the Progress window)."; return }
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
+    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
+        '-ContentRoot', (ConvertTo-Arg $p.Share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
+        '-AnswerFile', (ConvertTo-Arg $p.Answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
+    # Each PC's agent takes the job: it checks in to the Dashboard's folder, and jobs are signed with this content
+    # root's key.
+    $statusFolder = Get-DashboardFolder
+    if ($statusFolder) { $runArgs += @('-StatusFolder', (ConvertTo-Arg $statusFolder), '-KeyRoot', (ConvertTo-Arg $script:root)) }
+    # Each PC keeps its name and joins back into the OU it is in now.
+    $runArgs += @('-KeepNames', '-KeepOU')
+    $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $runArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Reimaging $($rows.Count) PC(s) with $($p.Answer)" `
         -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
-    Set-Status "Reimage of $($p.Count) PC(s) started. Each deploy then shows on the Dashboard."
+    Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard.$(if ($left) { " Not reimaged (no agent checking in): $($left -join ', ')." })"
+}
+
+function Start-AgentInstall {
+    # Install agent on -Rows (Install-RemoteAgent.ps1, hidden, a card in the Progress window). It waits for each
+    # PC's first check-in. -OnFinished runs when it is done. $false when it can't start (the reason was shown).
+    param([object[]]$Rows, [scriptblock]$OnFinished = { try { Show-AdRows } catch { } })
+    $statusFolder = Get-DashboardFolder
+    if (-not (Get-ReimageShare) -or -not $statusFolder -or $statusFolder -notlike '\\*') {
+        Show-Error 'Set Network share on the Deploy Settings tab first: the agents check in to its Status folder.'; return $false
+    }
+    $local = @($Rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })
+    if ($local) { Show-Error "$($local[0].Name) is not in the domain: the agent checks in as the computer account, so it only works on domain PCs. Reimage it from the USB stick."; return $false }
+    # The key pair is made the first time: the PCs get the public key, the jobs are signed with the private one.
+    $null = Get-AgentPublicKey -ContentRoot $script:root -Create
+    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $targetsFile = Join-Path $env:TEMP "agent-$stamp-$tag-targets.json"
+    Save-JsonFile -Path $targetsFile -InputObject @($Rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = ''; local = $false; credentialFile = '' } })
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Install-RemoteAgent.ps1"),
+        '-ContentRoot', (ConvertTo-Arg $script:root), '-StatusFolder', (ConvertTo-Arg $statusFolder), '-TargetsFile', (ConvertTo-Arg $targetsFile))
+    $cred = Get-AdCredential
+    if ($cred) {
+        $credFile = Join-Path $env:TEMP "agent-$stamp-$tag-cred.xml"
+        $cred | Export-Clixml -Path $credFile
+        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
+    }
+    $job = Start-ConsoleJob -Name 'agent' -ArgumentList $runArgs -Hidden
+    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Installing the agent on $($Rows.Count) PC(s)" `
+        -Noun 'install' -Hidden -OnFinished $OnFinished
+    $true
 }
 
 $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
@@ -1384,46 +1435,44 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if ($self) { Show-Error "$($self[0].Name) is this PC, the one running the console: reimage it from the USB stick."; return }
     $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root))
     if ($problems) { Show-Error $problems[0]; return }
-    if ($script:bootBuilding -or $script:pendingReimage) { Show-Error 'A reimage is already waiting for the network boot image build. Try again when it has started.'; return }
+    if ($script:bootBuilding -or $script:pendingReimage) { Show-Error 'A reimage is already waiting (network boot image build or agent install). Try again when it has started.'; return }
     $rebuild = Get-NetworkBootRebuild
     $share = Get-ReimageShare
     if (-not (Test-Path -LiteralPath (Join-Path $share "AnswerFiles\$answer.xml"))) {
         Show-Error "Answer file $answer is not on $share, where the PCs read it. Use the share as the content root, or copy the answer file and its image there."; return
     }
-    # Reimage goes through each PC's agent only: a PC without one gets it with Install agent first.
+    # Reimage goes through each PC's agent only: a PC without one gets it first (Install agent), then is reimaged
+    # once it checks in. A PC outside the domain can't run the agent.
+    $local = @($rows | Where-Object { -not $_.HasAgent -and $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })
+    if ($local) { Show-Error "$($local[0].Name) is not in the domain, so it can't have the agent: reimage it from the USB stick."; return }
     $noAgent = @($rows | Where-Object { -not $_.HasAgent })
-    if ($noAgent) {
-        $names = (@($noAgent | Select-Object -First 5 | ForEach-Object Name) -join ', ') + $(if ($noAgent.Count -gt 5) { ', ...' })
-        Show-Error "No agent checking in from $names. Select it and click Install agent (or turn it on), then Reimage. A PC outside the domain is reimaged from the USB stick."; return
-    }
     $text = "ERASE and reinstall Windows on $($rows.Count) PC(s) with answer file ${answer}?`n`n$(($rows | ForEach-Object Name) -join ', ')`n`n" +
         'Each PC restarts after a 60 second warning, and anyone logged on loses unsaved work.'
+    if ($noAgent) {
+        $names = (@($noAgent | Select-Object -First 5 | ForEach-Object Name) -join ', ') + $(if ($noAgent.Count -gt 5) { ', ...' })
+        $text += "`n`nNo agent checks in from ${names}: it is installed first (PowerShell remoting or file sharing, your Deploy Settings account), and each one is reimaged once it checks in. One that can't get it is left as it is."
+    }
     if ($rebuild) { $text += "`n`nThe network boot image is built first ($rebuild), which takes a few minutes." }
     if (-not (Confirm-Action $text)) { return }
 
-    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
-    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = $_.JoinOU } })
-    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Start-RemoteReimage.ps1"),
-        '-ContentRoot', (ConvertTo-Arg $share), '-BootWim', (ConvertTo-Arg (Get-NetworkBootImage -ContentRoot $script:root).Path),
-        '-AnswerFile', (ConvertTo-Arg $answer), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    # Each PC's agent takes the job: it checks in to the Dashboard's folder, and jobs are signed with this content
-    # root's key.
-    $statusFolder = Get-DashboardFolder
-    if ($statusFolder) { $runArgs += @('-StatusFolder', (ConvertTo-Arg $statusFolder), '-KeyRoot', (ConvertTo-Arg $script:root)) }
-    # Each PC keeps its name and joins back into the OU it is in now.
-    $runArgs += @('-KeepNames', '-KeepOU')
-    $script:pendingReimage = @{ RunArgs = $runArgs; Count = $rows.Count; Title = "Reimaging $($rows.Count) PC(s) with $answer" }
-    if ($rebuild) {
-        if (-not (Start-NetworkBootBuild)) { $script:pendingReimage = $null }
-        Update-AdBootStatus
+    $script:pendingReimage = [pscustomobject]@{ Rows = $rows; Answer = "$answer"; Share = $share; WaitingAgent = [bool]$noAgent }
+    if ($rebuild -and -not (Start-NetworkBootBuild)) { $script:pendingReimage = $null; return }
+    if ($noAgent) {
+        $started = Start-AgentInstall -Rows $noAgent -OnFinished {
+            try { Show-AdRows } catch { }
+            if ($script:pendingReimage) { $script:pendingReimage.WaitingAgent = $false }
+            Invoke-Safely { Start-PendingReimage }
+        }
+        if (-not $started) { $script:pendingReimage = $null; return }
+    }
+    if ($noAgent -or $rebuild) {
+        $what = if ($noAgent -and $rebuild) { "Installing the agent on $($noAgent.Count) PC(s) and building the network boot image" }
+            elseif ($noAgent) { "Installing the agent on $($noAgent.Count) PC(s)" } else { 'Building the network boot image' }
+        Set-Status "$what; the reimage starts when it is done."
         return
     }
     Start-PendingReimage
 } })
-
-
 
 $ui.BtnAdCancel.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
@@ -1448,30 +1497,7 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $rows = @($ui.GridAd.SelectedItems)
     if (-not $rows) { Show-Error 'Select the PCs to put the agent on (Ctrl+click or Shift+click for several).'; return }
-    $statusFolder = Get-DashboardFolder
-    if (-not (Get-ReimageShare) -or -not $statusFolder -or $statusFolder -notlike '\\*') {
-        Show-Error 'Set Network share on the Deploy Settings tab first: the agents check in to its Status folder.'; return
-    }
-    $local = @($rows | Where-Object { $_.PSObject.Properties['NotInDomain'] -and $_.NotInDomain })
-    if ($local) { Show-Error "$($local[0].Name) is not in the domain: the agent checks in as the computer account, so it only works on domain PCs."; return }
-    # The key pair is made the first time: the PCs get the public key, the jobs are signed with the private one.
-    $null = Get-AgentPublicKey -ContentRoot $script:root -Create
-    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $targetsFile = Join-Path $env:TEMP "agent-$stamp-$tag-targets.json"
-    Save-JsonFile -Path $targetsFile -InputObject @($rows | ForEach-Object { [ordered]@{ name = $_.Name; address = $_.Address; ou = ''; local = $false; credentialFile = '' } })
-    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-Arg "$srcDir\Install-RemoteAgent.ps1"),
-        '-ContentRoot', (ConvertTo-Arg $script:root), '-StatusFolder', (ConvertTo-Arg $statusFolder), '-TargetsFile', (ConvertTo-Arg $targetsFile))
-    $cred = Get-AdCredential
-    if ($cred) {
-        $credFile = Join-Path $env:TEMP "agent-$stamp-$tag-cred.xml"
-        $cred | Export-Clixml -Path $credFile
-        $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
-    }
-    $job = Start-ConsoleJob -Name 'agent' -ArgumentList $runArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Installing the agent on $($rows.Count) PC(s)" `
-        -Noun 'install' -Hidden -OnFinished { try { Show-AdRows } catch { } }
-    Set-Status "Installing the agent on $($rows.Count) PC(s). Each one checks in within a few minutes."
+    if (Start-AgentInstall -Rows $rows) { Set-Status "Installing the agent on $($rows.Count) PC(s). Each one checks in within a few minutes." }
 } })
 
 #endregion
@@ -1600,8 +1626,9 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     Save-AdSettings -Server $ui.TxtAdServer.Text
     # The Computers tab uses this account and share: show the change there too.
     Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
-    if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
-    Set-Status 'Deploy settings saved'
+    $null = Get-SettingsChangedAt -Fresh
+    Update-StickVersionBanner
+    Set-Status $(if ($r.MediaOutOfDate) { 'Deploy settings saved. WinPE reads them from the boot image: a stick built before now gets the Update the stick banner when it is plugged in (Reimage rebuilds the network boot image by itself).' } else { 'Deploy settings saved' })
 } })
 
 #endregion
