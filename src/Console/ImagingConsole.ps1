@@ -112,6 +112,7 @@ Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
 . (Join-Path $PSScriptRoot 'AppPackEditor.ps1')
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
 . (Join-Path $PSScriptRoot 'BuildProgress.ps1')
+. (Join-Path $PSScriptRoot 'RowProgress.ps1')
 
 $form = New-ConsoleWindow 'MainWindow.xaml'
 $window = $form.Window
@@ -173,6 +174,8 @@ function Update-Images {
     $ui.GridImages.ItemsSource = @(Get-ImageList -ContentRoot $script:root | ForEach-Object {
         $_ | Add-Member -NotePropertyName UsedBy -NotePropertyValue ($(if ($usage.ContainsKey($_.Name)) { $usage[$_.Name] -join ', ' } else { '' })) -PassThru
     })
+    # A capture, update or rollback running now shows in its image's Status (a captured image not here yet: a row on top).
+    Update-ImageRowJobs
 }
 
 function Update-Answers {
@@ -770,25 +773,30 @@ $ui.BtnBrowseRoot.Add_Click({ Invoke-Safely {
 $ui.BtnCapture.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     if (Show-CaptureWizard -Owner $window -ContentRoot $script:root -SrcDir $srcDir) {
-        Set-Status 'Capture started. Click Refresh on the Images tab when it finishes.'
+        Update-ImageRowJobs
+        Set-Status 'Capture started. It shows on top of the Images list; the list refreshes when it finishes.'
     }
 } })
 $ui.BtnImageVersions.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
+    if ($image.PSObject.Properties['IsJobEntry'] -and $image.IsJobEntry) { Show-Error "$($image.Name) is still being captured."; return }
     if (Show-ImageVersionsDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
         Update-Images; Update-Answers
-        Set-Status "Versions of $($image.Name) changed. A copy or rollback shows in the Progress window; the list refreshes when it ends."
+        Set-Status "Versions of $($image.Name) changed. A rollback shows in the image's Status; the list refreshes when it ends."
     }
 } })
+# Right-click an image whose capture, update or rollback shows in its Status: Open the log, Clear the message.
+Add-RowJobMenu -DataGrid $ui.GridImages -Grid 'images'
 $ui.GridImages.Add_MouseDoubleClick({ Invoke-Safely { if ($ui.GridImages.SelectedItem) { $ui.BtnImageVersions.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent)) } } })
 $ui.BtnImageUpdate.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $image = $ui.GridImages.SelectedItem
     if (-not $image) { Show-Error 'Select an image first.'; return }
+    if ($image.PSObject.Properties['IsJobEntry'] -and $image.IsJobEntry) { Show-Error "$($image.Name) is still being captured."; return }
     if (Show-UpdateImageDialog -Owner $window -ContentRoot $script:root -SrcDir $srcDir -Image $image) {
-        Set-Status "Updating $($image.Name). The Progress window shows each step; Open log shows its log when it finishes."
+        Set-Status "Updating $($image.Name). Its Status on the Images tab shows each step; right-click it for the log."
     }
 } })
 $ui.BtnImageLog.Add_Click({ Invoke-Safely {
@@ -1152,6 +1160,8 @@ function Show-AdRows {
     $picked = @($ui.GridAd.SelectedItems | ForEach-Object Name)
     $ui.GridAd.ItemsSource = @(Set-AdRowValues -States $states -CheckIns $checkIns)
     if ($picked) { foreach ($row in @($ui.GridAd.ItemsSource | Where-Object { $picked -contains $_.Name })) { [void]$ui.GridAd.SelectedItems.Add($row) } }
+    # Install agent and Reimage running now: in each PC's Agent and Reimage columns.
+    Update-AdRowJobs
 }
 
 function Update-AdRowsLive {
@@ -1165,6 +1175,7 @@ function Update-AdRowsLive {
     $checkIns = @(Get-ConsoleAgentCheckIns)
     Send-AgentUpdates $checkIns
     $null = Set-AdRowValues -States $states -CheckIns $checkIns
+    Update-AdRowJobs
     try { $ui.GridAd.Items.Refresh() } catch { }
 }
 
@@ -1374,7 +1385,7 @@ function Start-PendingReimage {
     $checkIns = @(Get-ConsoleAgentCheckIns)
     $rows = @($p.Rows | Where-Object { $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $_.Name; $a -and $a.Online })
     $left = @($p.Rows | Where-Object { $rows -notcontains $_ } | ForEach-Object Name)
-    if (-not $rows) { Show-Error "The reimage did not start: no agent checks in from $($left -join ', ') (see Install agent in the Progress window)."; return }
+    if (-not $rows) { Show-Error "The reimage did not start: no agent checks in from $($left -join ', ') (see their Agent column)."; return }
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $targetsFile = Join-Path $env:TEMP "reimage-$stamp-$tag-targets.json"
@@ -1389,13 +1400,14 @@ function Start-PendingReimage {
     # Each PC keeps its name and joins back into the OU it is in now.
     $runArgs += @('-KeepNames', '-KeepOU')
     $job = Start-ConsoleJob -Name 'reimage' -ArgumentList $runArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Reimaging $($rows.Count) PC(s) with $($p.Answer)" `
-        -Noun 'reimage' -Hidden -OnFinished { try { Show-AdRows } catch { } }
+    # Each PC's Reimage column shows its part (RowProgress.ps1), not the Progress window (Patrick, 2026-11-27).
+    $null = Start-RowJob -Job $job -Title "Reimaging $($rows.Count) PC(s) with $($p.Answer)" -Grid 'ad' -Column 'Reimage' -Keys @($rows | ForEach-Object Name) `
+        -Noun 'reimage' -Owner $window -OnFinished { try { Show-AdRows } catch { } }
     Set-Status "Reimage of $($rows.Count) PC(s) started. Each deploy then shows on the Dashboard.$(if ($left) { " Not reimaged (no agent checking in): $($left -join ', ')." })"
 }
 
 function Start-AgentInstall {
-    # Install agent on -Rows (Install-RemoteAgent.ps1, hidden, a card in the Progress window). It waits for each
+    # Install agent on -Rows (Install-RemoteAgent.ps1, hidden, shown in each PC's Agent column). It waits for each
     # PC's first check-in. -OnFinished runs when it is done. $false when it can't start (the reason was shown).
     param([object[]]$Rows, [scriptblock]$OnFinished = { try { Show-AdRows } catch { } })
     $statusFolder = Get-DashboardFolder
@@ -1419,11 +1431,13 @@ function Start-AgentInstall {
         $runArgs += @('-CredentialFile', (ConvertTo-Arg $credFile))
     }
     $job = Start-ConsoleJob -Name 'agent' -ArgumentList $runArgs -Hidden
-    Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Installing the agent on $($Rows.Count) PC(s)" `
-        -Noun 'install' -Hidden -OnFinished $OnFinished
+    $null = Start-RowJob -Job $job -Title "Installing the agent on $($Rows.Count) PC(s)" -Grid 'ad' -Column 'Agent' -Keys @($Rows | ForEach-Object Name) `
+        -Noun 'install' -Owner $window -OnFinished $OnFinished
     $true
 }
 
+# Right-click a PC whose Install agent or Reimage shows in its row: Open the log, Clear the message.
+Add-RowJobMenu -DataGrid $ui.GridAd -Grid 'ad'
 $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $rows = @($ui.GridAd.SelectedItems)

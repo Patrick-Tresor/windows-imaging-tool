@@ -1,5 +1,5 @@
 # Capture wizard window. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg,
-# Show-BuildProgress and the ConsoleData, VMwareVM and CaptureCheck modules.
+# Start-RowJob and the ConsoleData, VMwareVM and CaptureCheck modules.
 
 function Show-CaptureWizard {
     param(
@@ -251,7 +251,8 @@ function Show-CaptureWizard {
 
     $finish = {
         $c = & $getChoice
-        # Its own process, followed in the Progress window (steps, bars, time left), like a media build.
+        # Its own process, shown in the new image's row on the Images tab (step, bar, time left; RowProgress.ps1,
+        # Patrick 2026-11-27: in the page, not the Progress window).
         $reuse = if ($state.Result -and $state.CheckedDisk -eq $c.DiskFile) { "$($state.Result.convertedPath)" } else { '' }
         $job = Start-ConsoleJob -Name "capture-$($c.Name)" -Hidden -ArgumentList {
             param($progressFile, $logPath)
@@ -260,7 +261,8 @@ function Show-CaptureWizard {
                 -SysprepAtDeploy:$c.SysprepAtDeploy -ImagesDir $(if (& $isDefaultSaveTo $c.SaveTo) { '' } else { $c.SaveTo }) -ReuseConvertedDisk $reuse -ProgressFile $progressFile -LogPath $logPath
         }
         $state.HandedOver = $true
-        Show-BuildProgress -Owner $Owner -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title "Capturing $($c.Name)" -Hidden
+        $null = Start-RowJob -Job $job -Title "Capturing $($c.Name)" -Grid 'images' -Keys @("$($c.Name).$(if ($c.Compression -eq 'recovery') { 'esd' } else { 'wim' })") -FailedWord 'Capture failed' -Noun 'capture' `
+            -Owner $Owner -OnFinished { try { Update-Images; Update-Answers } catch { } }
         $true
     }
 

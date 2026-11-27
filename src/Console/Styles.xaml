@@ -475,6 +475,25 @@
               IsChecked="{Binding IsSelected, Mode=OneWay, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"/>
   </DataTemplate>
 
+  <!-- A grid row's Status cell for work shown in its row instead of the Progress window (Status, StatusTip, Percent,
+       Busy, Indeterminate, Failed): driver downloads, captures, image updates and rollbacks. -->
+  <DataTemplate x:Key="RowStatusCellTemplate">
+    <Grid Margin="2,3" ToolTip="{Binding StatusTip}">
+      <ProgressBar x:Name="Bar" Visibility="Collapsed" Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
+                   Maximum="100" MinHeight="18" Foreground="{DynamicResource InfoLineBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
+      <TextBlock x:Name="Txt" Text="{Binding Status}" VerticalAlignment="Center" Margin="4,0" TextTrimming="CharacterEllipsis"/>
+    </Grid>
+    <DataTemplate.Triggers>
+      <DataTrigger Binding="{Binding Busy}" Value="True">
+        <Setter TargetName="Bar" Property="Visibility" Value="Visible"/>
+        <Setter TargetName="Txt" Property="FontSize" Value="11"/>
+      </DataTrigger>
+      <DataTrigger Binding="{Binding Failed}" Value="True">
+        <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+      </DataTrigger>
+    </DataTemplate.Triggers>
+  </DataTemplate>
+
   <!-- One step row with its bar (Name, Time, Percent, Indeterminate, Status, Detail, State): the cards of the
        Progress window. -->
   <DataTemplate x:Key="StepRowTemplate">
