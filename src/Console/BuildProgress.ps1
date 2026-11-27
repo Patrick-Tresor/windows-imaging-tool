@@ -1,5 +1,5 @@
-# Progress window: one window for everything that runs (media builds, captures, driver downloads, reimages, image
-# updates and versions), one card each, with one row per step (name, elapsed time, bar, Complete), read twice a
+# Progress window: one window for everything that runs (media builds, captures, reimages, image updates and
+# versions; driver pack downloads show in the Driver library's rows instead, through -NoWindow), one card each, with one row per step (name, elapsed time, bar, Complete), read twice a
 # second from the progress file the job writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
 # Not modal: the console stays usable, and closing the window leaves the work running.
 # Closing the window while work runs only hides it: Show progress in the console header brings it back
@@ -9,6 +9,9 @@
 # button can fail to bring it up. Its own window, centred on the screen and drawn in software, avoids all three.
 
 if (-not $script:ProgressWindows) { $script:ProgressWindows = New-Object Collections.ArrayList }
+# Jobs read the same way but shown somewhere else by their -OnUpdate (-NoWindow): driver pack downloads show in their
+# row of the Driver library (Patrick, 2026-11-27: show the download in the driver library, not in another window).
+if (-not $script:WindowlessJobs) { $script:WindowlessJobs = New-Object Collections.ArrayList }
 
 # A C# row so each property change redraws only that bit: a busy bar keeps running while its time counts up.
 if (-not ('ImagingTool.BuildStepRow' -as [type])) {
@@ -149,9 +152,13 @@ function Show-BuildProgress {
         # A job that worked takes its card off after this many seconds, and the window closes once no card is left
         # (Patrick 2026-11-11 for downloads, 2026-11-23 for everything: it closes itself when done). A failed one
         # stays, for its log. 0: stays until Remove.
-        [int]$RemoveWhenDoneSeconds = 10
+        [int]$RemoveWhenDoneSeconds = 10,
+        # No card in the Progress window, which does not open: -OnUpdate shows the job (it gets the job after each
+        # read, with View and Rows like a card's).
+        [switch]$NoWindow,
+        [scriptblock]$OnUpdate
     )
-    $hub = Get-ProgressHub -Owner $Owner
+    $hub = if ($NoWindow) { $null } else { Get-ProgressHub -Owner $Owner }
     $view = New-Object ImagingTool.BuildJobView
     $view.Title = $Title
     $view.Summary = 'Starting...'
@@ -164,9 +171,16 @@ function Show-BuildProgress {
     # Show() returns at once, so the handlers can't see this function's variables: everything they need rides on
     # the timer's Tag, and each job keeps its own.
     $ctx = @{ View = $view; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
-        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $hub.Window; RemoveWhenDoneSeconds = $RemoveWhenDoneSeconds; RemoveTimer = $null }
+        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $(if ($hub) { $hub.Window } else { $Owner })
+        RemoveWhenDoneSeconds = $RemoveWhenDoneSeconds; RemoveTimer = $null; NoWindow = [bool]$NoWindow; OnUpdate = $OnUpdate }
     $timer.Tag = $ctx
     $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
+    if ($NoWindow) {
+        [void]$script:WindowlessJobs.Add($ctx)
+        $timer.Start()
+        Update-BuildProgressWindow $ctx
+        return $ctx
+    }
     [void]$script:ProgressWindows.Add($ctx)
     $hub.Jobs.Add($view)
     Update-ShowProgressButton
@@ -192,6 +206,12 @@ function Invoke-ProgressJobButton {
 function Remove-ProgressJob {
     # Takes a finished job off the window; the window closes when nothing is left.
     param([Parameter(Mandatory)]$Ctx)
+    if ($Ctx.NoWindow) {
+        if ($Ctx.Timer.IsEnabled) { return }
+        if ($Ctx.RemoveTimer) { $Ctx.RemoveTimer.Stop() }
+        $script:WindowlessJobs.Remove($Ctx)
+        return
+    }
     if ($Ctx.Timer.IsEnabled -or -not $script:ProgressWindows.Contains($Ctx)) { return }
     if ($Ctx.RemoveTimer) { $Ctx.RemoveTimer.Stop() }
     $script:ProgressWindows.Remove($Ctx)
@@ -334,4 +354,7 @@ function Update-BuildProgressWindow {
             Stop-ProgressJob $Ctx
         }
     } catch { $v.Summary = "Can't read the progress: $($_.Exception.Message)" }
+    finally {
+        if ($Ctx.OnUpdate) { try { & $Ctx.OnUpdate $Ctx } catch { } }
+    }
 }

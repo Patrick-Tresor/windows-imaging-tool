@@ -274,6 +274,22 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Remove-ProgressJob -Ctx $ctx4
         Remove-ProgressJob -Ctx $ctx3
         Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: Remove on the last card closes the window'
+
+        # -NoWindow (driver downloads, shown in the Driver library rows): read the same way, no Progress window.
+        $file5 = Join-Path $dir 'pagedl.json'
+        Start-BuildProgress -Path $file5 -Title 'x' -Steps @(, @('pack1', 'Lenovo ThinkPad T14 Gen 6'))
+        Start-BuildStep 'pack1'; Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'Downloading 900 MB'
+        Start-Sleep -Milliseconds 350   # progress writes are spaced out: the second one is written
+        Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'Downloading 900 MB'
+        $script:updates = 0
+        $ctx5 = Show-BuildProgress -Owner $owner -ProgressFile $file5 -Title 'Downloading' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5 -NoWindow -OnUpdate { param($j) $script:updates++ }
+        Assert-Equal "$($null -eq $script:ProgressHub)|$($script:ProgressWindows.Count)|$($script:WindowlessJobs.Contains($ctx5))" 'True|0|True' 'no window: no Progress window, the job is tracked'
+        Assert-Equal "$($script:updates -ge 1)|$(@($ctx5.Rows)[0].Percent)" 'True|40' 'no window: OnUpdate runs after each read, rows have the percent'
+        Complete-BuildStep 'pack1'; Stop-BuildProgress
+        Update-BuildProgressWindow $ctx5
+        Assert-Equal "$($ctx5.View.SummaryState)|$($ctx5.RemoveTimer.Interval.TotalSeconds)" 'success|5' 'no window: done after 5 s when it worked'
+        $ctx5.RemoveTimer.Stop(); Remove-ProgressJob -Ctx $ctx5
+        Assert-Equal "$($script:WindowlessJobs.Contains($ctx5))|$($null -eq $script:ProgressHub)" 'False|True' 'no window: let go, still no Progress window'
     } finally {
         $owner.Close()
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

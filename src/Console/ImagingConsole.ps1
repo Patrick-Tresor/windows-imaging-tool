@@ -113,17 +113,6 @@ Import-Module (Join-Path $srcDir 'ToolVersion.psm1') -Force
 . (Join-Path $PSScriptRoot 'TaskEditor.ps1')
 . (Join-Path $PSScriptRoot 'BuildProgress.ps1')
 
-# A real .NET type so the editable grid can add rows and bind two-way.
-class DriverRow {
-    [string]$Maker
-    [string]$Model
-    [string]$Sku
-    [string]$MachineType
-    [string]$ModelPattern
-    [string]$Path
-    [string]$Status
-}
-
 $form = New-ConsoleWindow 'MainWindow.xaml'
 $window = $form.Window
 $ui = $form.Controls
@@ -135,7 +124,9 @@ $script:stickOldHidden = ''
 
 $config = Get-ConsoleConfig
 $script:root = $config.contentRoot
-$script:drivers = [Collections.ObjectModel.ObservableCollection[DriverRow]]::new()
+# Driver library rows (ImagingTool.DriverRow, DriverDownloader.ps1): a real .NET type so the editable grid can add rows,
+# bind two-way and redraw a row's download progress.
+$script:drivers = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.DriverRow]'
 
 #region Helpers
 
@@ -295,11 +286,13 @@ function Update-Drivers {
         # Lenovo rows keyed on the SystemSKU text (older Unknown models report): merged into the model's own row.
         try { $merged = Merge-LenovoSkuEntries -ContentRoot $script:root; if ($merged) { Set-Status "Merged $merged duplicate Lenovo row(s) in the driver library" } } catch { }
         foreach ($r in Get-DriverCatalogRows -ContentRoot $script:root) {
-            $row = [DriverRow]::new()
+            $row = New-Object ImagingTool.DriverRow
             foreach ($p in 'Maker', 'Model', 'Sku', 'MachineType', 'ModelPattern', 'Path', 'Status') { $row.$p = $r.$p }
             $script:drivers.Add($row)
         }
     }
+    # Packs downloading now show in their rows again (a new row on top for a model not in the library yet).
+    Update-DriverDownloadRows
     $ui.GridDrivers.ItemsSource = $script:drivers
     Update-MediaPacks
     # Models deployed (or checking in through the agent) without their driver pack, above the library; hidden when
@@ -951,7 +944,7 @@ $ui.GridLibrary.Add_SelectionChanged({
 
 #region Driver library
 
-# Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
+# Find a model online: type the PC model, pick the pack, download it (the progress shows in the pack's library row).
 $script:driverFound = @()
 function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
@@ -981,7 +974,7 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     $p = $script:driverFound[$i]
     if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
     Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window
-    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The Progress window shows it; the library refreshes when it is done."
+    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). Its row in the library shows the progress."
 } })
 
 function Show-DriverPacksFound([object[]]$Packs) {
@@ -1020,7 +1013,10 @@ $ui.BtnUnknownInbox.Add_Click({ Invoke-Safely {
 
 $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
     $row = $ui.GridDrivers.SelectedItem
-    if ($row -isnot [DriverRow]) { return }
+    if ($row -isnot [ImagingTool.DriverRow]) { return }
+    # A download's row: the failed download's message goes (a running one stays); the catalog entry is not touched.
+    $msg = Remove-DriverDownloadRow -Row $row
+    if ($msg) { Set-Status $msg; return }
     if (Confirm-Action "Remove the catalog entry for $($row.Maker) $(@($row.Model, $row.Sku, $row.MachineType, $row.ModelPattern) -ne '' | Select-Object -First 1)? The driver files stay on disk. Click Save to keep the change.") {
         [void]$script:drivers.Remove($row)
         $script:driversEdited = $true
@@ -1029,11 +1025,14 @@ $ui.BtnDriversRemove.Add_Click({ Invoke-Safely {
 
 # Typed in the grid and not saved yet: opening the tab again does not reload (and lose) it.
 $ui.GridDrivers.Add_CellEditEnding({ $script:driversEdited = $true })
+# Double-click on a row that shows a download (a failed one, say): its log.
+$ui.GridDrivers.Add_MouseDoubleClick({ Invoke-Safely { [void](Open-DriverDownloadLog $ui.GridDrivers.SelectedItem) } })
 
 $ui.BtnDriversSave.Add_Click({ Invoke-Safely {
     if (-not (Test-RootReady)) { return }
     $ui.GridDrivers.CommitEdit('Row', $true) | Out-Null
-    Save-DriverCatalog -ContentRoot $script:root -Rows @($script:drivers)
+    # Rows that only show a download are not in the catalog yet: the download adds them when it is done.
+    Save-DriverCatalog -ContentRoot $script:root -Rows @($script:drivers | Where-Object { -not $_.IsDownloadEntry })
     Update-Drivers
     Set-Status "Saved $($script:drivers.Count) driver catalog entries"
 } })

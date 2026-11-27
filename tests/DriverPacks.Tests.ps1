@@ -325,7 +325,75 @@ $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 if ($start.IndexOf("`nfunction ", 10) -gt 0) { $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10)) }
 Assert-Equal ($start -match "Start-ConsoleJob [^\n]*-Hidden") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
-Assert-Equal ($start -match 'Show-BuildProgress ' -and $start -match '-Hidden -RemoveWhenDoneSeconds 5') $true 'download: a card in the Progress window that goes away 5 s after it worked'
+Assert-Equal ($start -match 'Show-BuildProgress ' -and $start -match '-Hidden -RemoveWhenDoneSeconds 5 -NoWindow') $true 'download: no Progress window, done 5 s after it worked'
+Assert-Equal ($start -match '-OnUpdate \{ param\(\$job\) Update-DriverDownloadRows \}') $true 'download: each read updates the library rows'
+
+# Patrick 2026-11-27: the download shows in the driver library, its row right away with "downloading" in front.
+if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
+    Write-Host 'SKIP driver library download rows: the console runs on Windows' -ForegroundColor Yellow
+} else {
+    . (Join-Path $repo 'src/Console/DriverDownloader.ps1')
+    function Remove-ProgressJob { param($Ctx) $script:removedJob = $Ctx }
+    $script:removedJob = $null
+    $step = { param($state, $pct, $status, $detail, [bool]$busy) [pscustomobject]@{ State = $state; Percent = $pct; Status = $status; Detail = $detail; Indeterminate = $busy } }
+    $running = [pscustomobject]@{ SummaryState = 'muted'; Finished = $false; Summary = '' }
+    $st = Get-DriverDownloadStatus -Step (& $step 'running' 40 '40%, under 1 min left' 'Downloading 812 MB' $false) -Job $running
+    Assert-Equal "$($st.Text)|$($st.Percent)|$($st.Busy)|$($st.Failed)" 'Downloading 40%, under 1 min left|40|True|False' 'row status: downloading with percent and time left'
+    $st = Get-DriverDownloadStatus -Step (& $step 'running' 0 '' 'Checking the file (hash and vendor signature)' $true) -Job $running
+    Assert-Equal "$($st.Text)|$($st.Indeterminate)" 'Checking the file|True' 'row status: checking, busy bar'
+    $st = Get-DriverDownloadStatus -Step (& $step 'running' 0 '' 'Extracting the drivers' $true) -Job $running
+    Assert-Equal $st.Text 'Extracting the drivers' 'row status: extracting'
+    $st = Get-DriverDownloadStatus -Step $null -Job $running
+    Assert-Equal "$($st.Text)|$($st.Busy)" 'Starting the download|True' 'row status: before the first read'
+    Assert-Equal (Get-DriverDownloadStatus -Step (& $step 'done' 100 'Complete' '512 drivers in Drivers\Lenovo\T14' $false) -Job $running) $null 'row status: done, the row shows its drivers'
+    $st = Get-DriverDownloadStatus -Step (& $step 'failed' 0 'Failed' 'HTTP 403 from download.lenovo.com' $false) -Job ([pscustomobject]@{ SummaryState = 'error'; Finished = $true; Summary = 'x' })
+    Assert-Equal "$($st.Text)|$($st.Failed)|$($st.Busy)" 'Download failed: HTTP 403 from download.lenovo.com|True|False' 'row status: failed with its one-line reason'
+    $st = Get-DriverDownloadStatus -Step (& $step 'running' 40 '40%' 'Downloading' $false) -Job ([pscustomobject]@{ SummaryState = 'error'; Finished = $true; Summary = 'stopped' })
+    Assert-Equal "$($st.Text)|$($st.Failed)" 'Download failed: it stopped before the end|True' 'row status: the worker died mid-download'
+
+    $pack = [pscustomobject]@{ Maker = 'Lenovo'; Model = 'ThinkPad T14 Gen 6'; Skus = @(); MachineTypes = @('21QC', '21QD'); SizeMB = 900 }
+    $r = New-Object ImagingTool.DriverRow; $r.Maker = 'Lenovo'; $r.Model = 'ThinkPad T14 Gen 6 old name'; $r.MachineType = '21QD'
+    Assert-Equal (Test-DriverRowForPack -Row $r -Pack $pack) $true 'row match: a shared machine type'
+    $r.MachineType = '21QE'
+    Assert-Equal (Test-DriverRowForPack -Row $r -Pack $pack) $false 'row match: another model'
+
+    # A new model: a row on top at once, its Status the download; it goes when the download ends (the reload adds
+    # the real row). A re-download overlays the existing row and gives its Status back.
+    $script:drivers = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.DriverRow]'
+    $vm = New-Object ImagingTool.DriverRow; $vm.Maker = 'Microsoft Corporation'; $vm.Model = 'Virtual Machine'; $vm.Status = 'Inbox drivers only'
+    $script:drivers.Add($vm)
+    $script:WindowlessJobs = New-Object Collections.ArrayList
+    $jobRows = New-Object Collections.ArrayList
+    $job = @{ Packs = @($pack); Rows = $jobRows; View = $running; Dismissed = @{} }
+    [void]$script:WindowlessJobs.Add($job)
+    Update-DriverDownloadRows
+    $top = $script:drivers[0]
+    Assert-Equal "$($script:drivers.Count)|$($top.Model)|$($top.MachineType)|$($top.IsDownloadEntry)|$($top.Busy)" '2|ThinkPad T14 Gen 6|21QC, 21QD|True|True' 'library: the downloading model shows at once, on top'
+    [void]$jobRows.Add((& $step 'running' 40 '40%, under 1 min left' 'Downloading 900 MB' $false))
+    Update-DriverDownloadRows
+    Assert-Equal "$($script:drivers.Count)|$($script:drivers[0].Status)|$($script:drivers[0].Percent)" '2|Downloading 40%, under 1 min left|40' 'library: the row shows the percent, no second row'
+    Assert-Equal (Remove-DriverDownloadRow -Row $script:drivers[0]) 'Lenovo ThinkPad T14 Gen 6 is still downloading. It can be removed once it ends.' 'library: a running download cannot be removed'
+    $jobRows[0] = (& $step 'done' 100 'Complete' '' $false)
+    Update-DriverDownloadRows
+    Assert-Equal "$($script:drivers.Count)|$($script:drivers[0].Model)" '1|Virtual Machine' 'library: the download row goes when it worked (the reload shows the real row)'
+
+    $vmPack = [pscustomobject]@{ Maker = 'Microsoft Corporation'; Model = 'Virtual Machine'; Skus = @(); MachineTypes = @() }
+    $job2 = @{ Packs = @($vmPack); Rows = (New-Object Collections.ArrayList); View = $running; Dismissed = @{} }
+    [void]$job2.Rows.Add((& $step 'running' 10 '10%' 'Downloading' $false))
+    [void]$script:WindowlessJobs.Add($job2)
+    Update-DriverDownloadRows
+    Assert-Equal "$($script:drivers.Count)|$($vm.Status)|$($vm.LibraryStatus)" '1|Downloading 10%|Inbox drivers only' 'library: a re-download shows on the model''s own row'
+    $job2.Rows[0] = (& $step 'failed' 0 'Failed' 'hash check failed' $false)
+    $job2.View = [pscustomobject]@{ SummaryState = 'error'; Finished = $true; Summary = 'x' }
+    Update-DriverDownloadRows
+    Assert-Equal "$($vm.Status)|$($vm.Failed)|$($vm.Busy)" 'Download failed: hash check failed|True|False' 'library: a failed download stays on its row with the reason'
+    Assert-Equal (Remove-DriverDownloadRow -Row $vm) 'Removed the failed download of Microsoft Corporation Virtual Machine.' 'library: Remove row clears the failed download'
+    Assert-Equal "$($script:drivers.Count)|$($vm.Status)|$($vm.Failed)|$($script:removedJob -eq $job2)" '1|Inbox drivers only|False|True' 'library: the row gets its own Status back, the job is let go'
+    Assert-Equal (Remove-DriverDownloadRow -Row $vm) '' 'library: Remove row on a plain row removes the entry as usual'
+    $consoleSrc = Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')
+    Assert-Equal ($consoleSrc -match 'Save-DriverCatalog [^\n]*-not \$_\.IsDownloadEntry') $true 'library: Save leaves out rows that only show a download'
+    Assert-Equal ($consoleSrc -match 'Update-DriverDownloadRows\s+\$ui\.GridDrivers\.ItemsSource') $true 'library: a reload keeps showing the downloads'
+}
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
 Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
 
