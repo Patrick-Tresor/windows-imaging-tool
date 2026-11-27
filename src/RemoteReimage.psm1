@@ -315,8 +315,9 @@ function Get-RemoteOnlineState {
     .OUTPUTS
         Hashtable: name as given -> { Online, Method, State, Address (the name that resolved), Ip, Detail }
         Method: 'WinRM' (PowerShell remoting answers), 'Smb' (remoting is off but the admin share answers: the
-        console copies its files there and runs them with a one-time service), or '' when neither answers.
-        State: 'Yes', 'Yes (SMB)', 'No access' (on, but neither WinRM nor file sharing answers), 'Not found' (the
+        console copies its files there and runs them with a one-time service), 'Wmi' (both are blocked but the RPC
+        port 135 answers: WMI over DCOM, files carried in its registry), or '' when none answers.
+        State: 'Yes', 'Yes (SMB)', 'Yes (WMI)', 'No access' (on, but no way in answers), 'Not found' (the
         name does not resolve from this PC), 'Old DNS' (DNS gives an address where another PC answers now, and the
         PC was not found on the local network by its name) or 'No answer' (off, asleep, or a firewall drops everything).
         Ip is the address where the PC answers with its own name (NetBIOS) when it says it; Address is that IP when
@@ -329,7 +330,7 @@ function Get-RemoteOnlineState {
         is on answers in milliseconds, so the PCs that are off don't hold everyone up to TimeoutMs. 0 waits TimeoutMs.
     #>
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ComputerName, [int]$TimeoutMs = 3000, [int]$Port = 5985,
-        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [switch]$NoNameCheck, [hashtable]$KnownAddress = @{}, [int]$QuietMs = 1000)
+        [int]$SmbPort = 445, [int[]]$OtherPorts = @(135, 3389), [int]$RpcPort = 135, [switch]$NoNameCheck, [hashtable]$KnownAddress = @{}, [int]$QuietMs = 1000)
     $result = @{}
     $names = @($ComputerName | Where-Object { $_ } | Select-Object -Unique)
     $allPorts = @(@($Port, $SmbPort) + $OtherPorts | Where-Object { $_ -gt 0 } | Select-Object -Unique)
@@ -430,13 +431,15 @@ function Get-RemoteOnlineState {
         }
 
         foreach ($r in $resolved) {
-            # The address that answers best: WinRM, then file sharing, then any port, then none; DNS order breaks ties.
+            # The address that answers best: WinRM, then file sharing, then WMI (RPC, one of the other ports), then any
+            # port, then none; DNS order breaks ties. Patrick, 2026-11-27: DPF5VT945 answered on 135 only.
             $seen = @(foreach ($ip in @($r.Try)) {
                 $w = [bool]$open["$($r.Name)|$ip|$Port"]; $f = [bool]$open["$($r.Name)|$ip|$SmbPort"]
                 $o = @($OtherPorts | Where-Object { $open["$($r.Name)|$ip|$_"] })
-                $rank = if ($w) { 0 } elseif ($f) { 1 } elseif ($o) { 2 } else { 3 }
-                [pscustomobject]@{ Ip = $ip; WinRM = $w; Smb = $f; Other = $o; Rank = $rank
-                    State = @('Yes', 'Yes (SMB)', 'No access', 'No answer')[$rank] }
+                $rpc = [bool]($RpcPort -gt 0 -and $o -contains $RpcPort)
+                $rank = if ($w) { 0 } elseif ($f) { 1 } elseif ($rpc) { 2 } elseif ($o) { 3 } else { 4 }
+                [pscustomobject]@{ Ip = $ip; WinRM = $w; Smb = $f; Rpc = $rpc; Other = $o; Rank = $rank
+                    State = @('Yes', 'Yes (SMB)', 'Yes (WMI)', 'No access', 'No answer')[$rank] }
             })
             $best = $null
             foreach ($x in $seen) { if (-not $best -or $x.Rank -lt $best.Rank) { $best = $x } }
@@ -445,21 +448,23 @@ function Get-RemoteOnlineState {
             if ($r.Ip -and "$($r.Ip)" -ne $r.DnsFirst) { $r.Used = "$($r.Ip)" }
             $winrm = [bool]($best -and $best.WinRM)
             $smb = [bool]($best -and $best.Smb)
+            $rpc = [bool]($best -and $best.Rpc)
             $other = @(if ($best) { $best.Other })
-            $method = if ($winrm) { 'WinRM' } elseif ($smb) { 'Smb' } else { '' }
-            $state = if ($r.OldDns) { 'Old DNS' } elseif (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($other) { 'No access' } else { 'No answer' }
+            $method = if ($winrm) { 'WinRM' } elseif ($smb) { 'Smb' } elseif ($rpc) { 'Wmi' } else { '' }
+            $state = if ($r.OldDns) { 'Old DNS' } elseif (-not $r.Ip) { 'Not found' } elseif ($winrm) { 'Yes' } elseif ($smb) { 'Yes (SMB)' } elseif ($rpc) { 'Yes (WMI)' } elseif ($other) { 'No access' } else { 'No answer' }
             $detail = switch ($state) {
                 'Old DNS'   { "is not at $($r.OldDns.OldIp), the address DNS gives for it: $($r.OldDns.OtherName) answers there now, so the DNS record is old, and $($r.Name) did not answer by name on this network. Search it by its IP address, or wait for DNS to update" }
                 'Not found' { "$($r.Name) does not resolve from this PC: it is not in the DNS this PC uses (this PC on another network, or the PC's DNS record is old)" }
                 'Yes'       { "answers on PowerShell remoting (WinRM, port $Port) at $($r.Ip)" }
                 'Yes (SMB)' { "is on at $($r.Ip): PowerShell remoting is off, so Install agent goes through its admin share (C$, port $SmbPort) and a one-time service" }
-                'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port) nor file sharing (port $SmbPort) answers: turn one on, or allow it in its firewall" }
+                'Yes (WMI)' { "is on at $($r.Ip): its firewall blocks PowerShell remoting (port $Port) and file sharing (port $SmbPort), but port $RpcPort answers, so Install agent goes through WMI. If WMI is blocked too, allow 'Windows Management Instrumentation (WMI-In)' or PowerShell remoting in its firewall" }
+                'No access' { "is on at $($r.Ip) (port $($other -join ', ') answers) but neither PowerShell remoting (port $Port), file sharing (port $SmbPort) nor WMI (port $RpcPort) answers: turn one on, or allow it in its firewall" }
                 default     { "resolves to $($r.Ip) but answers on none of ports $($allPorts -join ', '): it is off or asleep, the address is old, or a firewall drops everything" }
             }
             if ($r.Moved -and $state -ne 'Old DNS') { $detail = "$detail ($($r.Moved))" }
             $rest = @($seen | Where-Object { $_.Ip -ne "$($r.Ip)" })
             if ($rest) { $detail = "$detail. Its other address$(if ($rest.Count -gt 1) { 'es' }): $(($rest | ForEach-Object { "$($_.Ip) $($_.State)" }) -join ', ')" }
-            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail
+            $result[$r.Name] = [pscustomobject]@{ Online = [bool]$method; Method = $method; Smb = $smb; Rpc = $rpc; State = $state; Address = $r.Used; Ip = "$($r.Ip)"; Detail = $detail
                 Addresses = @($seen | ForEach-Object Ip) }
         }
     }
@@ -481,7 +486,7 @@ function Get-OnlineSummaryText {
     $old = @($rest | Where-Object State -eq 'Old DNS')
     if ($ready) { $text += " $(& $names $ready): no agent yet. Select and click Install agent." }
     elseif ($old) { $text += " $(& $names $old): DNS gives an old address, where another PC answers now. Search it by its IP address." }
-    elseif ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks both PowerShell remoting and file sharing, so Install agent can't reach it. Allow one of them, or run Agent\Install-Agent.cmd on it (README)." }
+    elseif ($blocked) { $text += " $(& $names $blocked): on, but its firewall blocks PowerShell remoting, file sharing and WMI, so Install agent can't reach it. Allow one of them, or run Agent\Install-Agent.cmd on it (README)." }
     elseif ($lost) { $text += " $(& $names $lost): name not found in this PC's DNS. Use a domain controller as this PC's DNS server." }
     elseif ($rest) { $text += ' No answer: off, asleep, or a firewall drops everything. Point at Agent for details.' }
     $text
@@ -489,7 +494,7 @@ function Get-OnlineSummaryText {
 
 #endregion
 
-#region Running commands on a PC: PowerShell remoting, or the admin share and a one-time service
+#region Running commands on a PC: PowerShell remoting, the admin share and a one-time service, or WMI
 
 # Without WinRM: the console connects to \\PC\IPC$ and \\PC\ADMIN$ (as the account given), writes a script and its
 # arguments to \\PC\ADMIN$\Temp\ImagingTool-<id>, creates a one-time SYSTEM service that starts it (sc.exe over
@@ -572,13 +577,88 @@ function Get-RemoteServiceArgs {
     }
 }
 
+# Without WinRM and file sharing (a firewall that lets only the RPC port 135 in, Patrick 2026-11-27): WMI over DCOM,
+# as Windows admin tools do. WMI has no file copy, so the script, its arguments and its result go through a
+# registry key on the PC (StdRegProv, HKLM\SOFTWARE\ImagingTool\Remote\<id>), and Win32_Process starts a
+# PowerShell that writes them to C:\Windows\Temp\ImagingTool-<id>, runs the same runner script as the admin share
+# way, and puts the result back in the key. It runs as the account that signed in, with its admin rights.
+
+$script:HKLM = [uint32]2147483650
+$script:WmiChunk = 262144            # characters per registry value
+$script:WmiMaxCopy = 32MB            # files carried in the registry: the agent, not boot.wim
+
+function Invoke-WmiRegistry {
+    # One StdRegProv call on the PC; throws when it fails.
+    param([Parameter(Mandatory)]$Session, [Parameter(Mandatory)][string]$Method, [Parameter(Mandatory)][hashtable]$Arguments)
+    $a = @{ hDefKey = $script:HKLM } + $Arguments
+    $r = Invoke-CimMethod -CimSession $Session -Namespace 'root/default' -ClassName 'StdRegProv' -MethodName $Method -Arguments $a -ErrorAction Stop
+    if ($r.ReturnValue -ne 0) { throw "WMI registry $Method on $($Arguments.sSubKeyName) failed (error $($r.ReturnValue))" }
+    $r
+}
+
+function Split-WmiText {
+    # Text cut in pieces small enough for one registry value each.
+    param([AllowEmptyString()][string]$Text, [int]$Size = $script:WmiChunk)
+    if (-not $Text) { return }
+    for ($i = 0; $i -lt $Text.Length; $i += $Size) { $Text.Substring($i, [Math]::Min($Size, $Text.Length - $i)) }
+}
+
+function Get-WmiBootstrapScript {
+    # What Win32_Process starts on the PC: the files from the registry key, the runner, the result back in the key.
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Folder)
+    @"
+`$k = 'Registry::HKEY_LOCAL_MACHINE\$($Key -replace "'", "''")'
+`$dir = '$($Folder -replace "'", "''")'
+function Get-Text(`$n) { `$p = Get-ItemProperty -LiteralPath `$k; `$c = [int]`$p."`$n.count"; -join @(for (`$i = 0; `$i -lt `$c; `$i++) { `$p."`$n.`$i" }) }
+try {
+    [void][IO.Directory]::CreateDirectory(`$dir)
+    [IO.File]::WriteAllText("`$dir\args.xml", (Get-Text 'args'), [Text.Encoding]::Unicode)
+    [IO.File]::WriteAllText("`$dir\run.ps1", (Get-Text 'run'), [Text.Encoding]::UTF8)
+    & "`$dir\run.ps1"
+    if ([IO.File]::Exists("`$dir\out.xml")) { Set-ItemProperty -LiteralPath `$k -Name 'out' -Value ([IO.File]::ReadAllText("`$dir\out.xml")) }
+    if ([IO.File]::Exists("`$dir\error.txt")) { Set-ItemProperty -LiteralPath `$k -Name 'error' -Value ([IO.File]::ReadAllText("`$dir\error.txt")) }
+} catch {
+    Set-ItemProperty -LiteralPath `$k -Name 'error' -Value "`$(`$_.Exception.Message)"
+} finally {
+    Set-ItemProperty -LiteralPath `$k -Name 'done' -Value '1'
+    try { [IO.Directory]::Delete(`$dir, `$true) } catch { }
+}
+"@
+}
+
+function Get-WmiProblemText {
+    # One short line from a WMI/DCOM error, saying what to do; the whole error goes to the log.
+    param([AllowEmptyString()][string]$Message)
+    if ($Message -match '(?i)RPC server is unavailable|serveur RPC n.est pas disponible|0x800706BA|WinRM client cannot|cannot connect') {
+        return "Port 135 answers but its firewall blocks WMI: allow 'Windows Management Instrumentation (WMI-In)' or PowerShell remoting on it (Group Policy, see the log)"
+    }
+    if ($Message -match '(?i)Access is denied|Acc.s refus|0x80070005') { return 'Access is denied over WMI: the account is not an administrator on it' }
+    $line = @("$Message" -split "`r?`n" | Where-Object { $_.Trim() })
+    if ($line) { $line[0].Trim() } else { 'WMI failed' }
+}
+
 function Open-RemoteChannel {
-    # A way to run commands and copy files on a PC: Method 'WinRM' (a PowerShell session) or 'Smb'. 'Local' runs
-    # them on this PC itself: the agent on an imaged PC (ImagingAgent.ps1, as SYSTEM) restarts itself into WinPE
-    # with the same steps the console uses over the network.
-    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb', 'Local')][string]$Method = 'WinRM')
-    $ch = [pscustomobject]@{ ComputerName = $ComputerName; Method = $Method; Credential = $Credential; Session = $null; Connected = @() }
+    # A way to run commands and copy files on a PC: Method 'WinRM' (a PowerShell session), 'Smb' or 'Wmi'. 'Local'
+    # runs them on this PC itself: the agent on an imaged PC (ImagingAgent.ps1, as SYSTEM) restarts itself into
+    # WinPE with the same steps the console uses over the network.
+    param([Parameter(Mandatory)][string]$ComputerName, [pscredential]$Credential, [ValidateSet('WinRM', 'Smb', 'Wmi', 'Local')][string]$Method = 'WinRM')
+    $ch = [pscustomobject]@{ ComputerName = $ComputerName; Method = $Method; Credential = $Credential; Session = $null; Connected = @(); Cim = $null }
     if ($Method -eq 'Local') { return $ch }
+    if ($Method -eq 'Wmi') {
+        # Packet privacy: what Windows asks of DCOM since its 2022 hardening (KB5004442).
+        $opt = New-CimSessionOption -Protocol Dcom -Impersonation Impersonate -PacketPrivacy
+        $a = @{ ComputerName = $ComputerName; SessionOption = $opt; ErrorAction = 'Stop' }
+        if ($Credential) { $a.Credential = $Credential }
+        try {
+            $ch.Cim = New-CimSession @a
+            # DCOM connects on the first call: this one says whether WMI answers and lets this account in.
+            $null = Get-CimInstance -CimSession $ch.Cim -ClassName Win32_OperatingSystem -Property Caption -ErrorAction Stop
+        } catch {
+            Close-RemoteChannel $ch
+            throw "WMI on ${ComputerName}: $($_.Exception.Message)"
+        }
+        return $ch
+    }
     if ($Method -eq 'WinRM') {
         $credArgs = @{}
         if ($Credential) { $credArgs.Credential = $Credential }
@@ -609,6 +689,7 @@ function Close-RemoteChannel {
     param($Channel)
     if (-not $Channel) { return }
     if ($Channel.Session) { Remove-PSSession $Channel.Session -ErrorAction SilentlyContinue }
+    if ($Channel.PSObject.Properties['Cim'] -and $Channel.Cim) { Remove-CimSession $Channel.Cim -ErrorAction SilentlyContinue; $Channel.Cim = $null }
     foreach ($unc in @($Channel.Connected)) { Disconnect-AdminShare $unc }
     $Channel.Connected = @()
 }
@@ -624,6 +705,7 @@ function Invoke-RemoteChannel {
         $ErrorActionPreference = 'Stop'
         return & $ScriptBlock @ArgumentList
     }
+    if ($Channel.Method -eq 'Wmi') { return Invoke-WmiChannel -Channel $Channel -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -TimeoutSeconds $TimeoutSeconds }
     $pc = $Channel.ComputerName
     $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
     $local = "C:\Windows\Temp\ImagingTool-$id"
@@ -655,6 +737,46 @@ function Invoke-RemoteChannel {
     }
 }
 
+function Invoke-WmiChannel {
+    # Invoke-RemoteChannel over WMI: see the note above Invoke-WmiRegistry.
+    param([Parameter(Mandatory)]$Channel, [Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @(), [int]$TimeoutSeconds = 180)
+    $pc = $Channel.ComputerName; $s = $Channel.Cim
+    $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
+    $key = "SOFTWARE\ImagingTool\Remote\$id"
+    $folder = "C:\Windows\Temp\ImagingTool-$id"
+    $null = Invoke-WmiRegistry -Session $s -Method CreateKey -Arguments @{ sSubKeyName = $key }
+    try {
+        # The list goes as one object, as Export-Clixml writes it for the admin share way.
+        $texts = @{ args = [Management.Automation.PSSerializer]::Serialize($ArgumentList, 4); run = (Get-RemoteRunnerScript -ScriptBlock $ScriptBlock -Folder $folder) }
+        foreach ($n in $texts.Keys) {
+            $parts = @(Split-WmiText $texts[$n])
+            for ($i = 0; $i -lt $parts.Count; $i++) { $null = Invoke-WmiRegistry -Session $s -Method SetStringValue -Arguments @{ sSubKeyName = $key; sValueName = "$n.$i"; sValue = $parts[$i] } }
+            $null = Invoke-WmiRegistry -Session $s -Method SetStringValue -Arguments @{ sSubKeyName = $key; sValueName = "$n.count"; sValue = "$($parts.Count)" }
+        }
+        $boot = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((Get-WmiBootstrapScript -Key $key -Folder $folder)))
+        $cmd = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $boot"
+        $r = Invoke-CimMethod -CimSession $s -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = 'C:\Windows\Temp' } -ErrorAction Stop
+        if ($r.ReturnValue -ne 0) { throw "Could not start PowerShell on $pc over WMI (Win32_Process error $($r.ReturnValue))" }
+        $read = { param($n) $v = Invoke-CimMethod -CimSession $s -Namespace 'root/default' -ClassName 'StdRegProv' -MethodName GetStringValue -Arguments @{ hDefKey = $script:HKLM; sSubKeyName = $key; sValueName = $n } -ErrorAction Stop
+            if ($v.ReturnValue -eq 0) { "$($v.sValue)" } else { $null } }
+        $until = (Get-Date).AddSeconds($TimeoutSeconds)
+        while (-not (& $read 'done')) {
+            if ((Get-Date) -gt $until) { throw "$pc did not run the command within $TimeoutSeconds s (its antivirus may block PowerShell started over WMI)" }
+            Start-Sleep -Milliseconds 500
+        }
+        $err = & $read 'error'
+        if ($err) { throw $err.Trim() }
+        $out = & $read 'out'
+        if ($out) {
+            # One ArrayList: written out, its items go down the pipeline one by one, as Invoke-Command's would.
+            $result = [Management.Automation.PSSerializer]::Deserialize($out)
+            $result
+        }
+    } finally {
+        try { $null = Invoke-WmiRegistry -Session $s -Method DeleteKey -Arguments @{ sSubKeyName = $key } } catch { }
+    }
+}
+
 function Copy-ToRemoteChannel {
     # Copies a file from this PC to a path on the PC (C:\...).
     param([Parameter(Mandatory)]$Channel, [Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Destination)
@@ -662,6 +784,13 @@ function Copy-ToRemoteChannel {
         Copy-Item -LiteralPath $Path -Destination $Destination -ToSession $Channel.Session -Force
     } elseif ($Channel.Method -eq 'Local') {
         [IO.File]::Copy($Path, $Destination, $true)
+    } elseif ($Channel.Method -eq 'Wmi') {
+        $size = (New-Object IO.FileInfo $Path).Length
+        if ($size -gt $script:WmiMaxCopy) { throw "$([IO.Path]::GetFileName($Path)) is too big to copy over WMI ($([int]($size / 1MB)) MB): allow PowerShell remoting or file sharing on $($Channel.ComputerName)" }
+        $null = Invoke-WmiChannel -Channel $Channel -ArgumentList $Destination, ([IO.File]::ReadAllBytes($Path)) -ScriptBlock {
+            param($Destination, $Bytes)
+            [IO.File]::WriteAllBytes($Destination, [byte[]]$Bytes)
+        }
     } else {
         [IO.File]::Copy($Path, (ConvertTo-AdminSharePath -ComputerName $Channel.ComputerName -Path $Destination), $true)
     }
@@ -1125,5 +1254,5 @@ function Get-ReimageTargetList {
 
 Export-ModuleMember -Function Get-ReimageTargetList, New-TaskXml, Get-ReimageNoticeScript, Get-ReimageNoticeTaskXml, Get-ReimageRestartTaskXml, Get-ReimageRestartCommand, Get-ReimageNoticeFolderAclArgs, Get-RemotingProblemText, Test-WinRMSignInError, Read-ReimageTargets, Test-UsableSerial, ConvertTo-SerialKey, New-ReimageJob, Test-JobExpired, Get-ReimageJob, Remove-ReimageJob,
     Receive-ReimageJob, Get-StartedJob, Get-ReimageStates, Find-ReimageJobByName, Get-RemoteOnlineState, Wait-PortProbes, Get-OnlineSummaryText, New-NbstatRequest, ConvertFrom-NbstatResponse, Get-NetBiosComputerNames,
-    Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel,
+    Select-ComputerAddress, Find-ComputerOnLocalNetwork, ConvertTo-AdminSharePath, Get-RemoteRunnerScript, Get-RemoteServiceArgs, Open-RemoteChannel, Close-RemoteChannel, Invoke-RemoteChannel, Copy-ToRemoteChannel, Invoke-WmiChannel, Split-WmiText, Get-WmiBootstrapScript, Get-WmiProblemText,
     Test-RemoteTarget, Get-BcdGuid, Get-LocalBootCommands, Get-LocalBootFolderAclArgs, Get-LocalBootCleanupCommand, Invoke-LocalDiskBoot, Get-NetworkBootImage, Get-RemoteReimageProblems, Get-NetworkBootRebuildReason
