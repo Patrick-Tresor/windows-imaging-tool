@@ -1,10 +1,11 @@
 # Driver pack downloads. Dot-sourced by ImagingConsole.ps1, which provides ConvertTo-Arg and imports
 # DriverPacks.psm1. The downloads run hidden through Get-DriverPacks.ps1 so the console stays usable; their progress
-# is a card in the Progress window (BuildProgress.ps1), like everything else that runs.
+# is a card on the Driver library page (LstDriverDownloads), not in the Progress window (Patrick, 2026-11-27: show
+# the download in the driver library instead of opening another window).
 
 function Start-DriverPackDownload {
     # Hands the packs to Get-DriverPacks.ps1 through a job file. It runs hidden, in its own process so the console
-    # stays usable, and the console's progress window shows each pack: download percent, time left, then checking,
+    # stays usable, and a card on the Driver library page (-Panel) shows each pack: download percent, time left, then checking,
     # extracting and adding it to the library (Patrick, 2026-11-11: no PowerShell window with the BITS bar).
     # When it ends the driver library refreshes by itself. Used by Find a model online and the Unknown models window.
     param(
@@ -12,6 +13,8 @@ function Start-DriverPackDownload {
         [Parameter(Mandatory)][string]$ContentRoot,
         [Parameter(Mandatory)][string]$SrcDir,
         [Parameter(Mandatory)]$Owner,
+        # The Driver library page's download list (LstDriverDownloads) the card goes in.
+        [Parameter(Mandatory)]$Panel,
         [switch]$KeepDownload
     )
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
@@ -24,8 +27,8 @@ function Start-DriverPackDownload {
     if ($KeepDownload) { $runArgs += '-KeepDownload' }
     $run = Start-ConsoleJob -Name 'driverpacks' -ArgumentList $runArgs -Hidden
     $title = if (@($Packs).Count -eq 1) { "$(Format-DriverPackName @($Packs)[0]) driver pack" } else { "$(@($Packs).Count) driver packs" }
-    # One card in the Progress window. A download that worked takes itself off after 5 seconds (Patrick, 2026-11-11);
-    # a failed one stays for its log.
-    Show-BuildProgress -Owner $Owner -ProgressFile $run.ProgressFile -LogPath $run.LogPath -Process $run.Process -Title "Downloading the $title" `
+    # One card on the Driver library page. A download that worked takes itself off after 5 seconds (Patrick,
+    # 2026-11-11); a failed one stays with its reason until Remove, Open log has the details.
+    Show-BuildProgress -Owner $Owner -Panel $Panel -ProgressFile $run.ProgressFile -LogPath $run.LogPath -Process $run.Process -Title "Downloading the $title" `
         -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5 -OnFinished { try { Update-Drivers } catch { } }
 }

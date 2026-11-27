@@ -3,38 +3,9 @@
         Title="Progress" Width="820" Height="640" MinWidth="560" MinHeight="360"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True" FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource SurfaceBrush}" Foreground="{DynamicResource TextBrush}">
 
-  <!-- One window for everything that runs: each build, capture, download or reimage is one card (JobTemplate),
-       newest at the bottom (Patrick, 2026-11-22: one window instead of one per reimage). -->
-  <Window.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
-    <DataTemplate x:Key="JobTemplate">
-      <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="16,10" Margin="0,0,0,12">
-        <DockPanel>
-          <StackPanel DockPanel.Dock="Top">
-            <DockPanel>
-              <TextBlock DockPanel.Dock="Right" Text="{Binding Elapsed}" FontSize="16" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
-              <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-            </DockPanel>
-            <TextBlock x:Name="JobSummary" Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-          </StackPanel>
-          <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" LastChildFill="False">
-            <Button Tag="remove" DockPanel.Dock="Right" Content="Remove" ToolTip="Take this finished item off the list"
-                    Visibility="{Binding Finished, Converter={StaticResource BoolToVisibility}}"/>
-            <Button Tag="log" DockPanel.Dock="Right" Content="Open log" IsEnabled="{Binding HasLog}"/>
-          </DockPanel>
-          <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{DynamicResource StepRowTemplate}" Margin="0,6,0,0"/>
-        </DockPanel>
-      </Border>
-      <DataTemplate.Triggers>
-        <DataTrigger Binding="{Binding SummaryState}" Value="error">
-          <Setter TargetName="JobSummary" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
-        </DataTrigger>
-        <DataTrigger Binding="{Binding SummaryState}" Value="success">
-          <Setter TargetName="JobSummary" Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-        </DataTrigger>
-      </DataTemplate.Triggers>
-    </DataTemplate>
-  </Window.Resources>
+  <!-- One window for everything that runs: each build, capture, download or reimage is one card (JobCardTemplate in Styles.xaml),
+       newest at the bottom (Patrick, 2026-11-22: one window instead of one per reimage). Driver pack downloads are not
+       here: they show on the Driver library page (Patrick, 2026-11-27). -->
 
   <DockPanel Margin="16">
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
@@ -49,7 +20,7 @@
     </DockPanel>
 
     <ScrollViewer x:Name="ScrollJobs" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-      <ItemsControl x:Name="LstJobs" ItemTemplate="{StaticResource JobTemplate}"/>
+      <ItemsControl x:Name="LstJobs" ItemTemplate="{DynamicResource JobCardTemplate}"/>
     </ScrollViewer>
   </DockPanel>
 </Window>

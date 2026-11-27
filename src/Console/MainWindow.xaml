@@ -107,6 +107,10 @@
                 <Button x:Name="BtnDriverFoundDownload" Grid.Column="5" Content="Download" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                         ToolTip="Downloads the pack from the vendor, checks it, extracts it to Drivers\Maker\Model and adds it to the library"/>
               </Grid>
+              <!-- Driver pack downloads, one card each (JobCardTemplate): bar, percent and time left per pack, then
+                   checking, extracting and adding it. One that worked leaves after 5 s; a failed one stays with its
+                   reason until Remove. Hidden when there are none (Patrick, 2026-11-27: in the page, no window). -->
+              <ItemsControl x:Name="LstDriverDownloads" Visibility="Collapsed" Margin="0,0,0,0" ItemTemplate="{DynamicResource JobCardTemplate}"/>
               <!-- Models deployed without their driver pack (from the Dashboard's status records). Hidden when there are none. -->
               <Border x:Name="BdrUnknown" Visibility="Collapsed" Margin="0,0,0,10" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
                 <DockPanel>

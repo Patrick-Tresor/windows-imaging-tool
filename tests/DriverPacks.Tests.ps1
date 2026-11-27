@@ -325,7 +325,12 @@ $start = $dl.Substring($dl.IndexOf('function Start-DriverPackDownload'))
 if ($start.IndexOf("`nfunction ", 10) -gt 0) { $start = $start.Substring(0, $start.IndexOf("`nfunction ", 10)) }
 Assert-Equal ($start -match "Start-ConsoleJob [^\n]*-Hidden") $true 'download: the worker runs hidden'
 Assert-Equal ($start -notmatch "-NoExit") $true 'download: no window left open'
-Assert-Equal ($start -match 'Show-BuildProgress ' -and $start -match '-Hidden -RemoveWhenDoneSeconds 5') $true 'download: a card in the Progress window that goes away 5 s after it worked'
+Assert-Equal ($start -match 'Show-BuildProgress -Owner \$Owner -Panel \$Panel ' -and $start -match '-Hidden -RemoveWhenDoneSeconds 5') $true 'download: a card on the Driver library page that goes away 5 s after it worked'
+# Patrick 2026-11-27: the download shows in the driver library, not in another window.
+$consoleSrc = Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')
+Assert-Equal ($consoleSrc -match 'Start-DriverPackDownload [^\n]*-Panel \$ui\.LstDriverDownloads') $true 'download: Find a model online puts the card on the Driver library page'
+$mainXaml = Get-Content -Raw (Join-Path $repo 'src/Console/MainWindow.xaml')
+Assert-Equal ($mainXaml -match '<ItemsControl x:Name="LstDriverDownloads" Visibility="Collapsed"[^>]*JobCardTemplate') $true 'download: the page list uses the Progress card and is hidden when empty'
 $gdp = Get-Content -Raw (Join-Path $repo 'src/Get-DriverPacks.ps1')
 Assert-Equal ($gdp -match 'Install-VendorDriverPack .*-OnStage \$onStage') $true 'download: each pack reports its stage'
 

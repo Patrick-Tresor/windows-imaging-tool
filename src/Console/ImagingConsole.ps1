@@ -951,7 +951,7 @@ $ui.GridLibrary.Add_SelectionChanged({
 
 #region Driver library
 
-# Find a model online: type the PC model, pick the pack, download it (the progress shows in the Progress window).
+# Find a model online: type the PC model, pick the pack, download it (the progress shows on this page, under the search box).
 $script:driverFound = @()
 function Find-DriverPackOnline {
     $query = $ui.TxtDriverFind.Text.Trim()
@@ -980,8 +980,8 @@ $ui.BtnDriverFoundDownload.Add_Click({ Invoke-Safely {
     if ($i -lt 0 -or $i -ge $script:driverFound.Count) { return }
     $p = $script:driverFound[$i]
     if ($p.Installed -like 'Yes*' -and -not (Confirm-Action "$($p.Maker) $($p.Model) $($p.Version) is already in the library. Download it again?")) { return }
-    Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window
-    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). The Progress window shows it; the library refreshes when it is done."
+    Start-DriverPackDownload -Packs @($p) -ContentRoot $script:root -SrcDir $srcDir -Owner $window -Panel $ui.LstDriverDownloads
+    Set-Status "Downloading the $(Format-DriverPackName $p) driver pack ($($p.SizeMB) MB). Its progress shows under the search box; the library refreshes when it is done."
 } })
 
 function Show-DriverPacksFound([object[]]$Packs) {

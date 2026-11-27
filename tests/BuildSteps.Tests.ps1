@@ -274,6 +274,26 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         Remove-ProgressJob -Ctx $ctx4
         Remove-ProgressJob -Ctx $ctx3
         Assert-Equal "$($script:ProgressWindows.Count)|$($null -eq $script:ProgressHub)" '0|True' 'window: Remove on the last card closes the window'
+
+        # A driver download on the Driver library page (-Panel): a card there, no Progress window (Patrick 2026-11-27).
+        $panel = New-Object Windows.Controls.ItemsControl
+        $panel.Visibility = 'Collapsed'
+        $file5 = Join-Path $dir 'pagedl.json'
+        Start-BuildProgress -Path $file5 -Title 'x' -Steps @(, @('pack1', 'Lenovo ThinkPad T14 Gen 6'))
+        Start-BuildStep 'pack1'; Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'under 1 min left'
+        Show-BuildProgress -Owner $owner -ProgressFile $file5 -Title 'Downloading the Lenovo driver pack' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5 -Panel $panel
+        $ctx5 = $script:PanelJobs[0]
+        Assert-Equal "$($null -eq $script:ProgressHub)|$($script:ProgressWindows.Count)" 'True|0' 'page: no Progress window for a driver download'
+        Assert-Equal "$($panel.Visibility)|$(@($panel.ItemsSource).Count)" 'Visible|1' 'page: the card shows on the page'
+        Assert-Equal @($ctx5.View.Rows)[0].Percent 40 'page: the pack row has its percent'
+        Remove-ProgressJob -Ctx $ctx5
+        Assert-Equal @($panel.ItemsSource).Count 1 'page: a running download cannot be removed'
+        Complete-BuildStep 'pack1'; Stop-BuildProgress
+        Update-BuildProgressWindow $ctx5
+        Assert-Equal "$($ctx5.View.SummaryState)|$($ctx5.RemoveTimer.Interval.TotalSeconds)" 'success|5' 'page: a download that worked leaves after 5 seconds'
+        $ctx5.RemoveTimer.Stop(); Remove-ProgressJob -Ctx $ctx5.RemoveTimer.Tag
+        Assert-Equal "$($panel.Visibility)|$(@($panel.ItemsSource).Count)|$($script:PanelJobs.Count)" 'Collapsed|0|0' 'page: the list hides when empty'
+        Assert-Equal "$($null -eq $script:ProgressHub)" 'True' 'page: still no Progress window'
     } finally {
         $owner.Close()
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
