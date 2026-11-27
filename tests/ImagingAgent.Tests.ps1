@@ -96,6 +96,11 @@ try {
     $known = Get-AgentKnownAddresses -CheckIns $rows -Targets @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01.corp.local' }, [pscustomobject]@{ Name = 'PC09'; Address = 'PC09' })
     Assert-Equal "$($known.Keys -join ',')|$($known['pc01.corp.local'] -join ',')" 'pc01.corp.local|10.1.2.34,192.168.56.1' 'the addresses its agent reported, by the address the console uses'
     Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Get-RemoteOnlineState[^\r\n]*-KnownAddress') $true 'the Computers tab checks the network with them'
+    # Only PCs without an agent checking in get the network check: PC01 checks in, PC02's agent stopped, PC09 has none.
+    $toCheck = @(Select-RowsWithoutAgent -Rows @([pscustomobject]@{ Name = 'PC01'; Address = 'pc01' }, [pscustomobject]@{ Name = 'PC02'; Address = 'pc02' }, [pscustomobject]@{ Name = 'PC09'; Address = 'pc09' }) -CheckIns $rows)
+    Assert-Equal ($toCheck.Name -join ',') 'PC02,PC09' 'the network check skips PCs whose agent checks in'
+    Assert-Equal (@(Select-RowsWithoutAgent -Rows @() -CheckIns $rows).Count) 0 'no rows, nothing to check'
+    Assert-Equal ($(Get-Content -Raw (Join-Path $repo 'src/Console/ImagingConsole.ps1')) -match 'Select-RowsWithoutAgent -Rows \$script:adRows') $true 'the Computers tab checks only those'
 
     # A PC the console can't reach installs the agent itself from <share>\Agent.
     $pub = Join-Path $root 'share/Agent'

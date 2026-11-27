@@ -579,6 +579,20 @@ function Format-AgentLastSeen {
     $LastSeen.ToString('yyyy-MM-dd HH:mm')
 }
 
+function Select-RowsWithoutAgent {
+    <#
+    .SYNOPSIS
+        Console, Computers tab: the rows (Name, Address) whose PC has no agent checking in. Only those get the network
+        check (Get-RemoteOnlineState): a PC whose agent checks in is reimaged through it, so knocking on its ports
+        only slows the Search down.
+    #>
+    param([AllowEmptyCollection()][object[]]$Rows = @(), [AllowEmptyCollection()][object[]]$CheckIns = @())
+    @($Rows | Where-Object { $_ } | Where-Object {
+        $a = Find-AgentCheckIn -CheckIns @($CheckIns) -ComputerName "$($_.Name)"
+        -not ($a -and $a.Online)
+    })
+}
+
 function Get-AgentKnownAddresses {
     <#
     .SYNOPSIS
@@ -923,5 +937,5 @@ function Publish-AgentInstaller {
 Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
-    New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
+    New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Select-RowsWithoutAgent, Get-AgentRowView,
     Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

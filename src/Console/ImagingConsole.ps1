@@ -1242,7 +1242,7 @@ function Search-AdComputers {
         Start-AdOnlineCheck -Note $localNote
     } finally { $window.Cursor = $null }
     Show-AdRows
-    Set-Status "$($script:adRows.Count) computer(s) found.$(if ($script:adCheck) { ' Checking which are online...' })$localNote"
+    Set-Status "$($script:adRows.Count) computer(s) found.$(if ($script:adCheck) { ' Checking the PCs with no agent...' } elseif ($script:adRows) { " $(Get-AdOnlineSummary)" })$localNote"
 }
 
 $script:adCheck = $null
@@ -1260,24 +1260,23 @@ function Stop-AdOnlineCheck {
 
 function Start-AdOnlineCheck {
     # Get-RemoteOnlineState in its own runspace, so the window stays free while it runs; Complete-AdOnlineCheck
-    # takes its answer. The addresses a PC's agent reported in its last check-in are knocked on first: DNS can be
-    # old or give a second adapter's address.
+    # takes its answer. Only PCs with no agent checking in are checked: the others are reached through their agent.
+    # The addresses an agent that stopped checking in last reported are knocked on first: DNS can be old or give a
+    # second adapter's address.
     param([string]$Note = '')
     Stop-AdOnlineCheck
     $script:adOnline = @{}
     if (-not $script:adRows) { return }
-    $known = @{}
     $checkIns = @(Get-ConsoleAgentCheckIns)
-    foreach ($r in @($script:adRows)) {
-        $a = Find-AgentCheckIn -CheckIns $checkIns -ComputerName $r.Name
-        if ($a -and $a.Online) { $known[$r.Address] = @(@($a.ipAddresses) + "$($a.ipAddress)" | Where-Object { $_ }) }
-    }
+    $targets = @(Select-RowsWithoutAgent -Rows $script:adRows -CheckIns $checkIns)
+    if (-not $targets) { return }
+    $known = Get-AgentKnownAddresses -CheckIns $checkIns -Targets $targets
     $ps = [powershell]::Create()
     [void]$ps.AddScript({
         param($Module, $Names, $Known)
         Import-Module $Module -Force
         Get-RemoteOnlineState -ComputerName $Names -KnownAddress $Known
-    }).AddArgument((Join-Path $srcDir 'RemoteReimage.psm1')).AddArgument([string[]]@($script:adRows | ForEach-Object Address)).AddArgument($known)
+    }).AddArgument((Join-Path $srcDir 'RemoteReimage.psm1')).AddArgument([string[]]@($targets | ForEach-Object Address)).AddArgument($known)
     $script:adCheck = [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Note = $Note }
     $script:adCheckTimer.Start()
 }

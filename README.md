@@ -149,8 +149,9 @@ on the ones you pick, with nobody at the PCs.
    and its IP (`GWHZLG3 10.1.2.34`) when DNS has an old address, and
    **Search**. The whole domain is searched. Servers, domain controllers and disabled accounts
    are left out. Each row shows the IP address, OU, Windows version, last
-   logon and whether the console can reach it, checked on every Search (Search again
-   to check again). The list shows right away; the **Agent** column of a PC with no agent says
+   logon and its agent. A PC with no agent checking in gets a network check on
+   every Search (Search again to check again); a PC whose agent checks in is not
+   checked, since Reimage goes through the agent. The list shows right away; the **Agent** column of a PC with no agent says
    **None, checking...** while the network check runs in the background (a few seconds, however many PCs), then
    fills in. The IP is where that PC really answers: each DNS address is
    asked for its computer name, and one that names another PC is dropped (its Agent
