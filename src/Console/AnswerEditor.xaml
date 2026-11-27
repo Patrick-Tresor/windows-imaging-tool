@@ -136,28 +136,18 @@
       <ScrollViewer x:Name="Sec4" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
-          <TextBlock Style="{StaticResource Hint}" Text="How new PCs are named. The deploy wizard shows the name and it can be changed there. A PC reimaged from the Computers tab keeps its name and OU."/>
-          <RadioButton x:Name="RbNameSerial" GroupName="Naming" Content="Serial number" Margin="0,8,0,4"/>
-          <RadioButton x:Name="RbNamePrefixSerial" GroupName="Naming" Content="Prefix + serial number" Margin="0,4"/>
-          <RadioButton x:Name="RbNamePrefixRandom" GroupName="Naming" Content="Prefix + random digits" Margin="0,4"/>
-          <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom" Margin="0,4"/>
+          <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
+          <TextBlock Style="{StaticResource Hint}" Text="{}{SERIAL} is the serial number and # a random digit, for example LAB-{SERIAL} or A########."/>
           <Grid Margin="0,10,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-            <Label x:Name="LblNamePrefix" Content="Prefix"/>
-            <TextBox x:Name="TxtNamePrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left" ToolTip="For example LAB-"/>
-            <Label x:Name="LblNameDigits" Grid.Row="1" Content="Random digits"/>
-            <ComboBox x:Name="CmbNameDigits" Grid.Row="1" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
-            <Label x:Name="LblScheme" Grid.Row="2" Content="Custom name"/>
-            <StackPanel x:Name="PnlScheme" Grid.Row="2" Grid.Column="1">
-              <TextBox x:Name="TxtScheme" Width="240" HorizontalAlignment="Left" ToolTip="{}{SERIAL} = serial number, # = random digit. Example: LAB-{SERIAL}"/>
-              <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Text="{}{SERIAL} is the serial number and # a random digit, for example A##-{SERIAL}."/>
-            </StackPanel>
-            <TextBlock x:Name="TxtNameWmi" Grid.Row="3" Grid.Column="1" Style="{StaticResource Hint}" Visibility="Collapsed" TextWrapping="Wrap"/>
-            <Label Grid.Row="4" Content="Example"/>
-            <StackPanel Grid.Row="4" Grid.Column="1">
-              <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,2"/>
-              <TextBlock x:Name="TxtNamePreviewNote" Style="{StaticResource Hint}" TextWrapping="Wrap"/>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Label Content="Name pattern"/>
+            <TextBox x:Name="TxtScheme" Grid.Column="1" Width="240" HorizontalAlignment="Left" ToolTip="{}{SERIAL} = serial number, # = random digit. Example: LAB-{SERIAL}"/>
+            <TextBlock x:Name="TxtNameWmi" Grid.Row="1" Grid.Column="1" Style="{StaticResource Hint}" Visibility="Collapsed" TextWrapping="Wrap"/>
+            <Label Grid.Row="2" Content="Example on this PC"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+              <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
+              <Button x:Name="BtnNamePreview" Content="Preview"/>
             </StackPanel>
           </Grid>
         </StackPanel>
