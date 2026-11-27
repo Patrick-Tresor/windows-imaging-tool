@@ -58,9 +58,6 @@ Test PC used so far: Dell Latitude 5521 (Intel VMD on). Add a second maker (HP o
 | 2.18 | Deploy a PC with an app that fails (agent on), wait an hour | `ImagingAgent.log` has "Retry 1 of 3 by the agent"; once it installs, the Dashboard row and `DeployResult.txt` say Ready, BitLocker stays OK if a first-logon task turned it on; no `ImagingTool\RetryApps` task on that PC |
 | 2.19 | After updating the console, open the Computers tab with a PC whose agent is from the previous version (but has automatic updates) | The Agent column says "v1.x updating, ...", then "v1.y, seen ..." within a few minutes; `ImagingAgent.log` says "Agent updated from ... to ..." and the agent checks in again |
 | 2.20 | Turn a PC with the agent off for over a day, open the Dashboard | A line above the list names it ("have not checked in for over a day") |
-| 2.21 | MeshCentral set up (README, Remote support), a PC with this version's agent: open the Computers tab, wait a few minutes | The Agent column tooltip says "Remote support agent: Installed"; the PC shows in the MeshCentral device group; nothing about it on the Dashboard; `ImagingAgent.log` has "Agent: MeshCentral-Agent installed" or similar |
-| 2.22 | Someone signed in on that PC: select it, **Remote support** (or double-click it); then the Dashboard's **Remote support** | The browser opens that PC's Desktop page on MeshCentral; after Connect the person at the PC is asked to allow it, and sees you once they do |
-| 2.23 | A PC whose agent turned Remote Desktop on with the earlier version, after its agent updates | `ImagingAgent.log` has "Remote Desktop undone ... Remote Desktop turned off"; `mstsc` to it no longer connects |
 
 ## 3. Features on the deployed PC
 

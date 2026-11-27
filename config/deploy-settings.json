@@ -9,11 +9,6 @@
     "enabled": true,
     "checkInSeconds": 30
   },
-  "remoteSupport": {
-    "_comment": "Remote support with MeshCentral: url is your MeshCentral server (https://...), empty = off. appPack: the Applications folder with the MeshCentral agent installer, sent to every PC with the imaging agent.",
-    "url": "",
-    "appPack": "MeshCentral-Agent"
-  },
   "checks": {
     "_comment": "Post-deploy checks at the end of first boot, reported to the Dashboard. BitLocker and device driver problems are warnings. ignoreDevices: wildcards for device names or ids to skip.",
     "enabled": true,
