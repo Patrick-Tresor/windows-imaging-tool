@@ -404,7 +404,7 @@
           <DockPanel MinHeight="460" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
             <StackPanel DockPanel.Dock="Top">
               <TextBlock Style="{StaticResource SectionTitle}" Text="Computers in Active Directory"/>
-              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. Reimage goes through each PC's agent (put there by deploys that report to the network share, or by Install agent, which needs PowerShell remoting or file sharing on the PC with your account as administrator); a PC without an agent checking in is refused. The network share and the Active Directory account are set on the Deploy Settings tab."/>
+              <TextBlock Style="{StaticResource Hint}" Text="Lists the computers in your domain. Select PCs that are on and click Reimage: each one restarts into WinPE from the network boot image and deploys the answer file unattended, keeping its name and OU; progress shows on the Dashboard. Reimage goes through each PC's agent (put there by deploys that report to the network share, or by Install agent, which needs PowerShell remoting or file sharing on the PC with your account as administrator); a PC without an agent checking in gets it first, then is reimaged once it checks in. The network share and the Active Directory account are set on the Deploy Settings tab."/>
             </StackPanel>
             <GroupBox DockPanel.Dock="Top" Header="1. Find computers" Padding="12,10" Margin="0,4,0,12">
               <Grid>
