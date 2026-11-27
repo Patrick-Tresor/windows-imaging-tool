@@ -279,6 +279,8 @@ if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') {
         $file5 = Join-Path $dir 'pagedl.json'
         Start-BuildProgress -Path $file5 -Title 'x' -Steps @(, @('pack1', 'Lenovo ThinkPad T14 Gen 6'))
         Start-BuildStep 'pack1'; Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'Downloading 900 MB'
+        Start-Sleep -Milliseconds 350   # progress writes are spaced out: the second one is written
+        Set-BuildStepProgress 'pack1' -Percent 40 -Detail 'Downloading 900 MB'
         $script:updates = 0
         $ctx5 = Show-BuildProgress -Owner $owner -ProgressFile $file5 -Title 'Downloading' -Noun 'download' -Hidden -RemoveWhenDoneSeconds 5 -NoWindow -OnUpdate { param($j) $script:updates++ }
         Assert-Equal "$($null -eq $script:ProgressHub)|$($script:ProgressWindows.Count)|$($script:WindowlessJobs.Contains($ctx5))" 'True|0|True' 'no window: no Progress window, the job is tracked'
