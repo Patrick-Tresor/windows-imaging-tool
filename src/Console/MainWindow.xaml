@@ -421,13 +421,11 @@
             <GroupBox DockPanel.Dock="Bottom" Header="2. Reimage the selected PCs" Padding="12,10" Margin="0,12,0,0">
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="0"/><RowDefinition Height="0"/><RowDefinition Height="12"/><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="14"/><RowDefinition/></Grid.RowDefinitions>
                 <Label Content="Answer file" VerticalAlignment="Center"/>
                 <ComboBox x:Name="CmbAdAnswer" Grid.Column="1" Width="260" HorizontalAlignment="Left"/>
-                <Label Grid.Row="4" Content="Boot image" VerticalAlignment="Center"/>
-                <TextBlock x:Name="TxtAdBoot" Grid.Row="4" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                 <!-- Buttons go onto a second line when the window is narrow. -->
-                <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
+                <WrapPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,-6">
                   <Button x:Name="BtnAdReimage" MinWidth="120" Content="Reimage..." Style="{StaticResource Primary}" Margin="0,0,10,6"/>
                   <Button x:Name="BtnAdCancel" MinWidth="120" Content="Cancel reimage" Margin="0,0,10,6" ToolTip="Removes the waiting job of the selected PCs. A PC whose deploy has started is not stopped."/>
                   <Button x:Name="BtnAdAgent" MinWidth="120" Content="Install agent" Margin="0,0,0,6" ToolTip="Puts the agent on the selected PCs over PowerShell remoting or file sharing, for PCs imaged before the agent existed. From then on they check in by themselves and take reimage jobs through it. Newly deployed PCs get it at deploy."/>

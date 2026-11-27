@@ -1126,18 +1126,6 @@ function Get-NetworkBootRebuild {
     Get-NetworkBootRebuildReason -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot -Stale "$stale" -SettingsNewer:$newer
 }
 
-function Update-AdBootStatus {
-    if (-not (Test-ContentRoot $script:root)) { $ui.TxtAdBoot.Text = ''; return }
-    $boot = Get-NetworkBootImage -ContentRoot $script:root
-    $problems = @(Get-RemoteReimageProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -Boot $boot)
-    $rebuild = if (-not $problems) { Get-NetworkBootRebuild }
-    $ui.TxtAdBoot.Text = if ($problems) { $problems[0] }
-        elseif ($script:bootBuilding) { 'Building the network boot image (Progress window); the reimage starts when it is done.' }
-        elseif ($rebuild) { "Network boot image: $rebuild. Reimage builds it first (a few minutes)." }
-        else { "Network boot image built $($boot.Built), maps $($boot.Share). Boot\Deploy-WinPE.iso boots a VM or a PC from the same share." }
-    $ui.TxtAdBoot.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($problems) { 'WarningBrush' } elseif ($rebuild -or $script:bootBuilding) { 'MutedBrush' } else { 'SuccessBrush' }))
-}
-
 function Show-AdRows {
     $states = @{}
     if ($script:adRows -and (Test-ContentRoot $script:root)) {
@@ -1191,7 +1179,6 @@ function Update-Computers {
     $ui.CmbAdAnswer.ItemsSource = $answers
     # No default answer file: keep the one picked, or the only one there is.
     $ui.CmbAdAnswer.SelectedItem = if ($picked -and $answers -contains $picked) { $picked } elseif ($answers.Count -eq 1) { $answers[0] } else { $null }
-    Update-AdBootStatus
     Update-AgentInstaller
     Show-AdRows
 }
@@ -1354,7 +1341,6 @@ function Start-NetworkBootBuild {
     $script:bootBuilding = $true
     Show-BuildProgress -Owner $window -ProgressFile $job.ProgressFile -LogPath $job.LogPath -Process $job.Process -Title 'Building the network boot image' -Hidden -OnFinished {
         $script:bootBuilding = $false
-        try { Update-AdBootStatus } catch { }
         Invoke-Safely { Start-PendingReimage }
     }
     Set-Status 'Building the network boot image first; the reimage starts when it is done.'
@@ -1417,7 +1403,6 @@ $ui.BtnAdReimage.Add_Click({ Invoke-Safely {
     $script:pendingReimage = @{ RunArgs = $runArgs; Count = $rows.Count; Title = "Reimaging $($rows.Count) PC(s) with $answer" }
     if ($rebuild) {
         if (-not (Start-NetworkBootBuild)) { $script:pendingReimage = $null }
-        Update-AdBootStatus
         return
     }
     Start-PendingReimage
