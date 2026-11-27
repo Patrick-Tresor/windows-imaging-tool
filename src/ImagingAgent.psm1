@@ -150,8 +150,7 @@ function Get-AgentKeyId {
 $script:JobFields = @('version', 'id', 'action', 'serial', 'uuid', 'agentId', 'computerName', 'createdAt', 'expiresAt', 'bootWimSha256', 'delaySeconds', 'message', 'requestedBy')
 # Fields added later (install apps jobs): signed too, but only when the job has them, so a reimage job reads the same
 # as before and agents installed before them still take it.
-# quiet: an install apps job that leaves the Dashboard and the deploy result alone (the remote support agent).
-$script:OptionalJobFields = @('apps', 'payloadSha256', 'quiet')
+$script:OptionalJobFields = @('apps', 'payloadSha256')
 
 function Get-AgentJobText {
     param([Parameter(Mandatory)]$Job)
@@ -243,7 +242,6 @@ function New-AgentJob {
         [string]$SourceDir,                              # update: the console's src folder (the agent's new files)
         [string]$BootWim,
         [string[]]$Apps,                                 # installapps: the app names; their packs are in -AppRoot
-        [switch]$Quiet,                                  # installapps: no Dashboard or deploy result change (remote support agent)
         [string]$AppRoot,
         [string]$BootWimSha256,                          # when known already (several PCs, one image)
         [int]$DelaySeconds = 60,
@@ -304,7 +302,6 @@ function New-AgentJob {
             requestedBy   = "$env:USERDOMAIN\$env:USERNAME".Trim('\')
         }
         if ($Action -eq 'installapps') { $job | Add-Member -NotePropertyName apps -NotePropertyValue ($Apps -join ', ') }
-        if ($Action -eq 'installapps' -and $Quiet) { $job | Add-Member -NotePropertyName quiet -NotePropertyValue 'true' }
         if ($Action -in 'installapps', 'update') { $job | Add-Member -NotePropertyName payloadSha256 -NotePropertyValue $payload }
         $job = Set-AgentJobSignature -Job $job -PrivateKey $PrivateKey
         Save-JsonFile -Path (Join-AgentPath $dir 'job.json') -InputObject $job
@@ -487,8 +484,6 @@ function New-AgentCheckIn {
         [Nullable[int64]]$FreeC,
         [string]$Result,
         $Job,
-        [string]$RemoteSupport,
-        [string]$HostName,
         [datetime]$Now = (Get-Date)
     )
     $get = { param($o, $n) if ($o -and $o.PSObject.Properties[$n]) { $o.$n } else { $null } }
@@ -518,9 +513,6 @@ function New-AgentCheckIn {
         toolVersion    = "$(& $get $Deploy 'toolVersion')"
         deployedAt     = "$(& $get $Deploy 'deployedAt')"
         result         = $Result
-        # Remote support: is the MeshCentral agent here (Get-RemoteSupportState), and the name it shows the PC by.
-        remoteSupport  = $RemoteSupport
-        hostName       = $HostName
         agentId        = $AgentId
         agentVersion   = $AgentVersion
         agentCode      = $AgentCode
@@ -640,7 +632,6 @@ function Get-AgentRowView {
         if ($Agent.answerFile -or $Agent.image) { $detail += "Deployed with $((@("$($Agent.answerFile)", "$($Agent.image)") | Where-Object { $_ }) -join ', ')$(if ($Agent.deployedAt) { " on $("$($Agent.deployedAt)".Substring(0, [Math]::Min(10, "$($Agent.deployedAt)".Length)))" })" }
         if ($Agent.result) { $detail += "$($Agent.result)" }
         if ($Agent.userSignedIn) { $detail += "Signed in: $($Agent.userSignedIn)" }
-        if ($Agent.PSObject.Properties['remoteSupport'] -and "$($Agent.remoteSupport)") { $detail += "Remote support agent: $($Agent.remoteSupport)" }
         if ($Agent.job -and $Agent.job.state) { $detail += "Last job: $($Agent.job.action) $($Agent.job.state)$(if ($Agent.job.message) { " ($($Agent.job.message))" })" }
         if ($version.Detail) { $detail += $version.Detail }
     } else {
@@ -835,112 +826,6 @@ function Get-AgentCheckInSeconds {
     30
 }
 
-# Remote support with MeshCentral (a self-hosted remote support server, its own agent and connection; no RDP). The
-# console's Remote support button opens the server's web page on the PC's screen; the person at the PC is asked to
-# allow it (the device group's consent settings on the server). The MeshCentral agent is an app pack in Applications
-# (template MeshCentral-Agent: the installer downloaded from the server for its device group); the console sends it
-# to agent PCs that do not have it as a quiet install apps job (no Dashboard or deploy result change).
-$script:MeshServiceName = 'Mesh Agent'
-$script:RemoteSupportPack = 'MeshCentral-Agent'
-
-function Get-RemoteSupportSettings {
-    # deploy-settings.json remoteSupport: { url (the MeshCentral server, https://...), appPack }.
-    param($Settings)
-    $rs = if ($Settings -and $Settings.PSObject.Properties['remoteSupport'] -and $Settings.remoteSupport) { $Settings.remoteSupport } else { $null }
-    $url = if ($rs -and $rs.PSObject.Properties['url']) { "$($rs.url)".Trim().TrimEnd('/') } else { '' }
-    $pack = if ($rs -and $rs.PSObject.Properties['appPack'] -and "$($rs.appPack)".Trim()) { "$($rs.appPack)".Trim() } else { $script:RemoteSupportPack }
-    [pscustomobject]@{ Url = $url; AppPack = $pack }
-}
-
-function Test-RemoteSupportUrl {
-    # One line on what is wrong with a MeshCentral address, or '' (empty = remote support not set up).
-    param([string]$Url)
-    $Url = "$Url".Trim()
-    if (-not $Url) { return '' }
-    if ($Url -notmatch '^https://[^\s/]+(:\d+)?(/[^\s]*)?$') { return "The remote support server must look like https://imager.corp.local, not $Url." }
-    ''
-}
-
-function Get-RemoteSupportState {
-    # PC: is the MeshCentral agent here? 'Installed', 'Installed, stopped' or 'Not installed'.
-    param([scriptblock]$GetService = { Get-Service -Name $script:MeshServiceName -ErrorAction Stop })
-    $svc = try { & $GetService } catch { $null }
-    if (-not $svc) { return 'Not installed' }
-    if ("$($svc.Status)" -eq 'Running') { 'Installed' } else { 'Installed, stopped' }
-}
-
-function Get-RemoteSupportLink {
-    <#
-    .SYNOPSIS
-        Console: the MeshCentral page that opens a PC's screen: the server's own gotodevicename (its name as Windows
-        reports it) and viewmode 11 (Desktop). { Url, Problem (one line, the reason it can't), Install (send the
-        agent first) }.
-    #>
-    param([string]$ServerUrl, [string]$ComputerName, $Agent)
-    $no = { param($m, [bool]$i) [pscustomobject]@{ Url = ''; Problem = $m; Install = $i } }
-    if (-not $ServerUrl) { return & $no 'Remote support is not set up: type your MeshCentral server on the Deploy Settings tab (5. Remote support).' $false }
-    $name = if ($Agent -and $Agent.PSObject.Properties['hostName'] -and "$($Agent.hostName)") { "$($Agent.hostName)" } else { $ComputerName }
-    $state = if ($Agent -and $Agent.PSObject.Properties['remoteSupport']) { "$($Agent.remoteSupport)" } else { '' }
-    if ($Agent -and $Agent.Online -and $state -eq 'Not installed') {
-        return & $no "The remote support agent is not on $ComputerName yet." $true
-    }
-    [pscustomobject]@{ Url = "$ServerUrl/?gotodevicename=$([uri]::EscapeDataString($name))&viewmode=11"; Problem = ''; Install = $false }
-}
-
-function Select-RemoteSupportInstalls {
-    <#
-    .SYNOPSIS
-        Console: the online agents to send the remote support pack to: they report it is not installed, run the
-        console's agent code (an older one would refuse a quiet job), and were not sent it already (-Sent: serials).
-    #>
-    param([object[]]$CheckIns = @(), [string]$CurrentCode, [hashtable]$Sent = @{})
-    @($CheckIns | Where-Object {
-        $_ -and $_.Online -and $_.agentId -and $_.PSObject.Properties['remoteSupport'] -and "$($_.remoteSupport)" -eq 'Not installed' -and
-        (-not $CurrentCode -or "$($_.agentCode)" -eq $CurrentCode) -and -not $Sent.ContainsKey("$($_.serial)")
-    })
-}
-
-function Get-RemoteDesktopUndo {
-    <#
-    .SYNOPSIS
-        PC: what an agent from 2026-11-26 changed to have Remote Desktop on (it logged each change, see its log), to
-        put back once: Remote Desktop off again, the firewall rules it opened closed and the ones it closed open,
-        the remote control policy it set removed. Network Level Authentication stays required (safer, harmless).
-        Returns { action: 'deny' | 'rule-off' | 'rule-on' | 'shadow'; name }.
-    #>
-    param([string[]]$LogLines = @())
-    $out = [Collections.Generic.List[object]]::new()
-    foreach ($l in @($LogLines)) {
-        if ($l -notmatch 'Remote Desktop: (.+)$') { continue }
-        foreach ($c in ($Matches[1] -split ';\s*')) {
-            if ($c -eq 'Remote Desktop turned on') { $out.Add([pscustomobject]@{ action = 'deny'; name = '' }) }
-            elseif ($c -match '^firewall rule (\S+) open on the Domain network only$') { $out.Add([pscustomobject]@{ action = 'rule-off'; name = $Matches[1] }) }
-            elseif ($c -match '^firewall rule (\S+) closed$') { $out.Add([pscustomobject]@{ action = 'rule-on'; name = $Matches[1] }) }
-            elseif ($c -like 'remote support allowed*') { $out.Add([pscustomobject]@{ action = 'shadow'; name = '' }) }
-        }
-    }
-    # Each once, in the order found.
-    $seen = @{}
-    @($out | Where-Object { $k = "$($_.action)|$($_.name)"; if ($seen.ContainsKey($k)) { $false } else { $seen[$k] = 1; $true } })
-}
-
-function Undo-AgentRemoteDesktop {
-    # PC (as SYSTEM): puts back what Get-RemoteDesktopUndo found in the agent's log. Returns what it did, for the log.
-    param([Parameter(Mandatory)][string]$LogPath)
-    $lines = try { [IO.File]::ReadAllLines($LogPath) } catch { @() }
-    $done = @()
-    foreach ($u in @(Get-RemoteDesktopUndo -LogLines $lines)) {
-        try {
-            switch ($u.action) {
-                'deny' { Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 1 -Type DWord -ErrorAction Stop; $done += 'Remote Desktop turned off' }
-                'rule-off' { Set-NetFirewallRule -Name $u.name -Enabled False -ErrorAction Stop; $done += "firewall rule $($u.name) closed" }
-                'rule-on' { Set-NetFirewallRule -Name $u.name -Enabled True -ErrorAction Stop; $done += "firewall rule $($u.name) open again" }
-                'shadow' { Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name Shadow -ErrorAction Stop; $done += 'remote control policy removed' }
-            }
-        } catch { $done += "could not undo $($u.action) $($u.name): $($_.Exception.Message)" }
-    }
-    $done
-}
 
 function New-AgentConfig {
     # agent.json next to the agent: where to check in, the console keys it trusts, and what this deploy was.
@@ -1041,4 +926,4 @@ Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-Age
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,
-    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Get-RemoteSupportSettings, Test-RemoteSupportUrl, Get-RemoteSupportState, Get-RemoteSupportLink, Select-RemoteSupportInstalls, Get-RemoteDesktopUndo, Undo-AgentRemoteDesktop, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem
+    Get-AgentCheckInSeconds, New-AgentConfig, Get-AgentTaskXml, Install-AgentOnRemotePC, Publish-AgentInstaller, Get-DomainComputersSid, Resolve-LocalSharePath, Grant-StatusFolderAccess, Get-AgentLogProblem

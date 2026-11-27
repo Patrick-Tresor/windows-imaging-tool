@@ -9,8 +9,7 @@
     was imaged before (Computers tab, Install agent).
     Every checkInSeconds (agent.json, 30 by default) it writes Status\Agents\<serial>.json on the share; every 5
     seconds it looks for Status\Agents\Jobs\<serial>\job.json and runs it if the console signed it for this PC
-    (ImagingAgent.psm1), so the console sees it and its jobs start close to real time. Each check-in says whether the
-    MeshCentral agent (remote support) is installed. Every 5 minutes, while the deploy result says BitLocker is off, it checks again and
+    (ImagingAgent.psm1), so the console sees it and its jobs start close to real time. Every 5 minutes, while the deploy result says BitLocker is off, it checks again and
     updates the result once it is on (a FIRSTLOGON task can turn it on), and installs again the applications that
     failed at first boot (an hour later, then hourly, up to 3 tries: Invoke-AppRetryPlan). Log: C:\Windows\Temp\ImagingAgent.log.
 .PARAMETER Register
@@ -151,18 +150,6 @@ if (-not (Test-UsableSerial $identity.serial)) { Write-Log "The BIOS serial '$($
 
 $script:lastCheckIn = [datetime]::MinValue
 $script:lastError = ''
-# Remote support is MeshCentral's own agent (an app pack the console sends): each check-in says whether it is here.
-# An agent from 2026-11-26 turned Remote Desktop on; that is put back once, from what its log says it changed.
-function Undo-RemoteDesktopOnce {
-    if ($state.PSObject.Properties['rdpUndone'] -and $state.rdpUndone) { return }
-    try {
-        $done = @(Undo-AgentRemoteDesktop -LogPath $log)
-        if ($done) { Write-Log "Remote Desktop undone (remote support is MeshCentral now): $($done -join '; ')" }
-    } catch { Write-Log "Could not undo the Remote Desktop changes: $($_.Exception.Message)" }
-    $state | Add-Member -NotePropertyName rdpUndone -NotePropertyValue $true -Force
-    Save-State
-}
-Undo-RemoteDesktopOnce
 function Send-CheckIn {
     Get-ComputerAccount
     $net = Get-Network
@@ -174,7 +161,7 @@ function Send-CheckIn {
     # A problem building the record is logged (once) and tried again at the next check-in: the agent keeps running.
     $record = try { New-AgentCheckIn -Identity $identity -Network $net -Deploy $deploy -AgentId $state.agentId -AgentVersion $script:agentVersion -AgentCode $script:agentCode -CheckInSeconds $every `
         -Account $script:account -AccountSid $script:accountSid -Os $(if ($os) { "$($os.Caption) $($os.Version)".Trim() }) -UserSignedIn "$($cs.UserName)" `
-        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -RemoteSupport (Get-RemoteSupportState) -HostName ([Net.Dns]::GetHostName()) -ErrorAction Stop
+        -BootTime $(if ($os) { $os.LastBootUpTime }) -FreeC $free -Result (Get-DeployResultLine) -Job $state.lastJob -ErrorAction Stop
     } catch {
         $m = "Could not make the check-in: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
         if ($script:lastError -ne $m) { Write-Log $m }
@@ -218,9 +205,6 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
         $lock = Enter-AppInstallLock -Minutes 30
         if (-not $lock) { throw 'another application install on this PC did not end within 30 minutes' }
         $results = @(Invoke-AppReinstall -AppRoot $work -Names $names -Log { param($m) Write-Log $m } -OnApp { param($n) Set-JobState $Job 'Running' "Installing $n" })
-        # A quiet job (the remote support agent) leaves the Dashboard, DeployResult.txt and the logon retry alone.
-        $quiet = $Job.PSObject.Properties['quiet'] -and "$($Job.quiet)" -eq 'true'
-        if (-not $quiet) {
         try { $null = Update-AgentDeployStatus -StatusFolder $statusFolder -Serial $identity.serial -Results $results }
         catch { Write-Log "Could not update the Dashboard: $($_.Exception.Message)" }
         try { $v = Update-LocalDeployResult -Results @(ConvertTo-AppChecks -Results $results -By 'the agent') -AppResults $results; if ($v) { Write-Log "DeployResult.txt now: $v" } }
@@ -229,7 +213,6 @@ function Invoke-AppsJob($Job, [string]$JobDir) {
             $ok = @($results | Where-Object ok | ForEach-Object name)
             if ($ok) { $waiting = @(Remove-AppRetry -Names $ok); Write-Log "Logon retry: $(if ($waiting) { "still to install $($waiting -join ', ')" } else { 'nothing left' })" }
         } catch { Write-Log "Could not update the logon retry: $($_.Exception.Message)" }
-        }
         $bad = @($results | Where-Object { -not $_.ok })
         $text = if ($bad) { (($bad | ForEach-Object { "$($_.name) failed ($($_.status))" }) -join '; ') } else { "Installed $($names -join ', ')" }
         Set-JobState $Job $(if ($bad) { 'Failed' } else { 'Done' }) $text

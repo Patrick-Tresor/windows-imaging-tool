@@ -187,14 +187,6 @@ try {
     Set-Content (Join-Path $jobDir 'Apps/Google Chrome/files/chrome.msi') 'other bytes'
     Assert-Equal ((Get-AgentPayloadHash (Join-Path $jobDir 'Apps')) -ne $appsJob.payloadSha256) $true 'a changed pack file changes the hash (the PC refuses it)'
     Assert-Throws { New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Nope') -AppRoot $appRoot -SetFolderAccess { param($f, $a) } } '*not in*' 'a missing app pack, no job'
-    # The remote support agent goes as a quiet install apps job: signed, and the agent leaves the Dashboard alone.
-    $quietJob = New-AgentJob -StatusFolder $status -PrivateKey $private -CheckIn $pc1 -Action installapps -Apps @('Google Chrome') -AppRoot $appRoot -Quiet -Now $now -SetFolderAccess { param($f, $a) }
-    $readQuiet = Get-AgentJob -StatusFolder $status -Serial 'ABC123'
-    Assert-Equal "$($quietJob.quiet)|$((Get-AgentJobText $readQuiet) -match '(?m)^quiet=true')" 'true|True' 'a quiet job says so, and the signature covers it'
-    Assert-Equal ($null -eq (Test-AgentJob -Job $readQuiet -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1))) $true 'the PC takes a quiet job'
-    $jq = $readQuiet | ConvertTo-Json -Depth 4 | ConvertFrom-Json; $jq.PSObject.Properties.Remove('quiet')
-    Assert-Equal ((Test-AgentJob -Job $jq -PublicKeys @($public) -Identity $mine -Now $now.AddMinutes(1)) -like '*not signed*') $true 'quiet taken off after signing: refused'
-    Assert-Equal ((Get-AgentJobText $readApps) -match '(?m)^quiet=') $false 'a Retry failed apps job is signed as before'
     Remove-AgentJob -StatusFolder $status -Serial 'ABC123'
 
     # Agent updates: the console's agent code (Get-AgentCodeHash of src) goes to an old agent as a signed update job.
@@ -286,55 +278,9 @@ try {
     $cfg = New-AgentConfig -StatusFolder '\\server\Deploy\Status' -PublicKeys @($public, '') -CheckInSeconds 0
     Assert-Equal "$($cfg.checkInSeconds)|$(@($cfg.publicKeys).Count)" '10|1' 'agent.json: at least 10 seconds, empty keys left out'
 
-    # Remote support with MeshCentral (no RDP): the settings, the PC's state, the console's link and quiet installs.
-    Assert-Equal ($cfg.PSObject.Properties['remoteDesktop'] -eq $null) $true 'agent.json has no Remote Desktop setting'
-    $rsNone = Get-RemoteSupportSettings $null
-    Assert-Equal "$($rsNone.Url)|$($rsNone.AppPack)" '|MeshCentral-Agent' 'no settings: remote support off, default pack name'
-    $rsSet = Get-RemoteSupportSettings ([pscustomobject]@{ remoteSupport = [pscustomobject]@{ url = 'https://imager.corp.local/ '; appPack = '' } })
-    Assert-Equal "$($rsSet.Url)|$($rsSet.AppPack)" 'https://imager.corp.local|MeshCentral-Agent' 'the server address without its last slash'
-    Assert-Equal (Test-RemoteSupportUrl '') '' 'empty address: off, no problem'
-    Assert-Equal (Test-RemoteSupportUrl 'https://imager.corp.local:8443') '' 'an https address with a port is fine'
-    Assert-Equal ((Test-RemoteSupportUrl 'imager') -match 'https://') $true 'an address without https:// is refused'
-    $shipped = [IO.File]::ReadAllText((Join-Path $repo 'config/deploy-settings.json')) | ConvertFrom-Json
-    Assert-Equal "$($shipped.remoteSupport.url)|$($shipped.remoteSupport.appPack)|$($shipped.agent.PSObject.Properties['remoteDesktop'] -eq $null)" '|MeshCentral-Agent|True' 'the shipped settings: remote support off until a server is typed, no Remote Desktop setting'
-    Assert-Equal (Get-RemoteSupportState -GetService { throw 'no such service' }) 'Not installed' 'no Mesh Agent service: not installed'
-    Assert-Equal (Get-RemoteSupportState -GetService { [pscustomobject]@{ Status = 'Running' } }) 'Installed' 'service running: installed'
-    Assert-Equal (Get-RemoteSupportState -GetService { [pscustomobject]@{ Status = 'Stopped' } }) 'Installed, stopped' 'service stopped: said so'
-    $rsIn = New-AgentCheckIn -Identity $identity -AgentId 'agent-1' -RemoteSupport 'Installed' -HostName 'Pc01' -Now $now
-    Assert-Equal "$($rsIn.remoteSupport)|$($rsIn.hostName)" 'Installed|Pc01' 'the check-in says whether the MeshCentral agent is there, and the name it shows'
-    $online = [pscustomobject]@{ Online = $true; remoteSupport = 'Installed'; hostName = 'Pc01'; serial = 'S1'; agentId = 'a'; agentCode = 'c1' }
-    $link = Get-RemoteSupportLink -ServerUrl 'https://imager.corp.local' -ComputerName 'PC01' -Agent $online
-    Assert-Equal "$($link.Url)|$($link.Problem)|$($link.Install)" 'https://imager.corp.local/?gotodevicename=Pc01&viewmode=11||False' 'opens the PC''s desktop page on the server, by the name it reports'
-    Assert-Equal (Get-RemoteSupportLink -ServerUrl 'https://m' -ComputerName 'PC 02' -Agent $null).Url 'https://m/?gotodevicename=PC%2002&viewmode=11' 'no agent: by its name, escaped'
-    Assert-Equal ((Get-RemoteSupportLink -ServerUrl '' -ComputerName 'PC01' -Agent $online).Problem -match 'Deploy Settings') $true 'not set up: says where to set it'
-    $missing = [pscustomobject]@{ Online = $true; remoteSupport = 'Not installed'; serial = 'S2'; agentId = 'b'; agentCode = 'c1' }
-    Assert-Equal (Get-RemoteSupportLink -ServerUrl 'https://m' -ComputerName 'PC02' -Agent $missing).Install $true 'not installed yet: the console sends it first'
-    $old = [pscustomobject]@{ Online = $true; remoteSupport = 'Not installed'; serial = 'S3'; agentId = 'c'; agentCode = 'c0' }
-    $off = [pscustomobject]@{ Online = $false; remoteSupport = 'Not installed'; serial = 'S4'; agentId = 'd'; agentCode = 'c1' }
-    $pick = @(Select-RemoteSupportInstalls -CheckIns @($online, $missing, $old, $off) -CurrentCode 'c1' -Sent @{})
-    Assert-Equal (@($pick | ForEach-Object serial) -join ',') 'S2' 'sent only to online agents without it that run the console''s agent'
-    Assert-Equal @(Select-RemoteSupportInstalls -CheckIns @($missing) -CurrentCode 'c1' -Sent @{ S2 = $true }).Count 0 'sent once per PC'
-    $view = Get-AgentRowView -Agent ([pscustomobject]@{ Online = $true; LastSeen = $now; LastSeenText = '2 min ago'; ipAddress = '10.1.2.34'; remoteSupport = 'Installed' }) -Name 'PC01'
-    Assert-Equal ($view.AgentDetail -match 'Remote support agent: Installed') $true 'the Agent column tooltip says it'
-    $templates = ([IO.File]::ReadAllText((Join-Path $repo 'config/app-templates.json')) | ConvertFrom-Json).templates
-    $mt = @($templates | Where-Object name -eq 'MeshCentral-Agent')[0]
-    Assert-Equal "$($mt.command)|$($mt.detection.rules[0].target)" '"{installer}" -fullinstall|%ProgramFiles%\Mesh Agent\MeshAgent.exe' 'the MeshCentral-Agent template installs the service and detects it'
-
-    # The Remote Desktop an agent from 2026-11-26 turned on is put back once, from its log.
-    $undo = @(Get-RemoteDesktopUndo -LogLines @(
-        '2026-11-26 20:10:01 Remote Desktop: Network Level Authentication required; Remote Desktop turned on; firewall rule RemoteDesktop-UserMode-In-TCP open on the Domain network only; firewall rule RemoteDesktop-Public-In-TCP closed'
-        '2026-11-26 20:10:01 Remote Desktop: On (Network Level Authentication, Domain network only)'
-        '2026-11-26 20:40:01 Remote Desktop: remote support allowed, with the user''s permission'
-        '2026-11-26 21:10:01 Remote Desktop: Remote Desktop turned on'
-        '2026-11-26 21:20:01 Remote Desktop undone (remote support is MeshCentral now): Remote Desktop turned off'))
-    Assert-Equal (@($undo | ForEach-Object { "$($_.action):$($_.name)" }) -join ' ') 'deny: rule-off:RemoteDesktop-UserMode-In-TCP rule-on:RemoteDesktop-Public-In-TCP shadow:' 'what it turned on is put back, each once; NLA stays; its own undo line is not read again'
-    Assert-Equal @(Get-RemoteDesktopUndo -LogLines @('2026-11-26 Agent started')).Count 0 'an agent that never turned it on changes nothing'
-
     $agentScript = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.ps1'))
-    Assert-Equal ($agentScript -match 'Undo-AgentRemoteDesktop' -and $agentScript -match 'rdpUndone' -and $agentScript -match '-RemoteSupport \(Get-RemoteSupportState\)') $true 'the agent undoes Remote Desktop once and reports the MeshCentral agent'
-    Assert-Equal ($agentScript -match "quiet = .*'true'" -and $agentScript -match 'if \(-not \$quiet\)') $true 'a quiet job leaves the Dashboard and the deploy result alone'
     $consoleText = [IO.File]::ReadAllText((Join-Path $repo 'src/Console/ImagingConsole.ps1'))
-    Assert-Equal ($consoleText -match 'BtnAdSupport' -and $consoleText -match 'BtnDashSupport' -and $consoleText -match 'Send-RemoteSupportInstalls' -and $consoleText -notmatch 'mstsc') $true 'Remote support opens MeshCentral; no RDP anywhere in the console'
+    Assert-Equal ($consoleText -notmatch 'mstsc|RemoteSupport|MeshCentral|BtnAdSupport|BtnDashSupport') $true 'no remote access code in the console'
     $module = [IO.File]::ReadAllText((Join-Path $repo 'src/ImagingAgent.psm1'))
     Assert-Equal ($module -match 'fDenyTSConnections -Value 0|-Name Shadow -Value') $false 'the agent never turns Remote Desktop on'
     $xml = [xml](Get-AgentTaskXml)
