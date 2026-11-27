@@ -512,7 +512,7 @@ function Show-DeployWizard {
         $w.NameBox.Text = if ($w.ComputerName) { $w.ComputerName } else { $w.Plan.DefaultName }
         $w.NameHint.Text = switch ($a.NamingMode) {
             'WMI'    { 'Suggested from the hardware. You can change it.' }
-            'Custom' { "Suggested from the pattern $($a.CustomScheme). You can change it." }
+            'Custom' { "Suggested from the scheme $($a.CustomScheme). You can change it." }
         }
         $isDomain = $a.Membership -eq 'Domain'
         $w.JoinLabel.Text = if ($isDomain) { "Joins the domain $($a.Domain)" } else { "Joins the workgroup $($a.Workgroup)" }
@@ -536,7 +536,7 @@ function Show-DeployWizard {
             $w.About.ForeColor = Get-ThemeColor 'Text'
             $w.About.Text = (@(
                 "Image: $($a.ImageFile) (index $($a.ImageIndex))",
-                "Naming: $(if ($a.NamingMode -eq 'Custom') { $a.CustomScheme } else { "$($a.Prefix)WMI" })",
+                "Naming: $($a.NamingMode)$(if ($a.Prefix) { ", prefix $($a.Prefix)" })",
                 $(if ($a.Membership -eq 'Domain') { "Joins domain $($a.Domain)" } else { "Workgroup $($a.Workgroup)" }),
                 "Applications: $(if ($a.Applications) { $a.Applications.Count } else { 'none' })",
                 "Tasks: $(if (@($a.Tasks).Count) { @($a.Tasks).Count } else { 'none' })",

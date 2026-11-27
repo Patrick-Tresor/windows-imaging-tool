@@ -179,8 +179,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
     $available = @(Get-ChildItem -Path $appRoot -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path (Join-Path $_.FullName 'app.json') } | ForEach-Object Name)
 
-    # Only an older answer file with a WMI query other than the serial number runs it (Read-AnswerFile).
-    $wmiValue = if ($Answer.NamingMode -ne 'WMI') { $Hardware.Serial } else { try { Get-WmiNamingValue -Query $Answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $Hardware.Serial } }
+    $wmiValue = try { Get-WmiNamingValue -Query $Answer.WmiQuery } catch { Write-DeployLog "WMI naming query failed: $($_.Exception.Message)" -Level WARN; $Hardware.Serial }
     if (-not $wmiValue) { $wmiValue = $Hardware.Serial }
 
     # Extra summary lines, shown before ERASE in the wizard and on the console.
@@ -198,7 +197,7 @@ function Get-DeployPlan($Root, $Answer, $Hardware) {
         AvailableApps = $available
         WmiValue      = $wmiValue
         DefaultName   = Resolve-ComputerName -Answer $Answer -WmiValue $wmiValue -Serial $Hardware.Serial
-        NameSource    = "answer file, $(if ($Answer.NamingMode -eq 'Custom') { "pattern $($Answer.CustomScheme)" } else { $Answer.WmiQuery })"
+        NameSource    = "answer file, $($Answer.NamingMode)"
         Details       = $details
     }
 }

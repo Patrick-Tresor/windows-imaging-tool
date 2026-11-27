@@ -12,22 +12,11 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
     # The shipped sample is valid as is.
     $default = Read-AnswerFile -Path (Join-Path $repo 'config/answer-files/Default.xml')
-    Assert-Equal "$($default.Mode)|$($default.ImageFile)|$($default.Membership)|$($default.NamingMode)|$($default.CustomScheme)" 'Interactive|Images\Win11-Enterprise.wim|Workgroup|Custom|{SERIAL}' 'sample answer file parses'
+    Assert-Equal "$($default.Mode)|$($default.ImageFile)|$($default.Membership)|$($default.NamingMode)" 'Interactive|Images\Win11-Enterprise.wim|Workgroup|WMI' 'sample answer file parses'
     Assert-Equal $default.Applications.Count 0 'commented-out applications are ignored'
-    # Older naming (WMI query, separate prefix, Prompt) becomes one name pattern where it can.
-    $defaultText = Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')
-    $oldNaming = {
-        param($Mode, $Query, $Scheme, $Prefix)
-        $p = Join-Path $tmp "naming-$([guid]::NewGuid()).xml"
-        $defaultText -replace '(?s)<naming mode="Custom">.*?</naming>', "<naming mode=`"$Mode`"><wmiQuery>$Query</wmiQuery><customScheme>$Scheme</customScheme><prefix>$Prefix</prefix></naming>" | Set-Content -LiteralPath $p
-        $r = Read-AnswerFile -Path $p
-        "$($r.NamingMode)|$($r.CustomScheme)|$($r.Prefix)"
-    }
-    Assert-Equal (& $oldNaming 'Prompt' 'SELECT SerialNumber FROM Win32_BIOS' '' '') 'Custom|{SERIAL}|' 'an older answer file that asked the technician names PCs from the serial'
-    Assert-Equal (& $oldNaming 'WMI' 'SELECT SerialNumber FROM Win32_SystemEnclosure' 'A###' 'LAB-') 'Custom|LAB-{SERIAL}|' 'a WMI serial query with a prefix becomes the pattern LAB-{SERIAL}'
-    Assert-Equal (& $oldNaming 'WMI' 'select IdentifyingNumber from Win32_ComputerSystemProduct' '' '') 'Custom|{SERIAL}|' 'the product serial query is the serial too'
-    Assert-Equal (& $oldNaming 'Custom' '' 'A####' 'X-') 'Custom|X-A####|' 'a custom scheme takes in its prefix'
-    Assert-Equal (& $oldNaming 'WMI' 'SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure' '' 'LAB-') 'WMI||LAB-' 'an asset tag query is kept as it was'
+    $promptXml = Join-Path $tmp 'Prompt.xml'
+    (Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')) -replace '<naming mode="WMI">', '<naming mode="Prompt">' | Set-Content -LiteralPath $promptXml
+    Assert-Equal (Read-AnswerFile -Path $promptXml).NamingMode 'WMI' 'an older answer file that asked the technician names PCs from the hardware'
 
     # Validation.
     $bad = $default.PSObject.Copy()
@@ -45,7 +34,7 @@ try {
 
     # Naming.
     $n = $default.PSObject.Copy()
-    $n.NamingMode = 'WMI'; $n.Prefix = 'lab-'
+    $n.Prefix = 'lab-'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'pf3x 9k!' -Serial 'S1') 'LAB-PF3X9K' 'WMI name is prefixed and cleaned'
     Assert-Equal (Resolve-ComputerName -Answer $n -WmiValue 'ABCDEFGHIJKLMNOPQRS') 'LAB-ABCDEFGHIJK' 'name is cut to 15 characters'
     $n.NamingMode = 'Custom'; $n.Prefix = ''; $n.CustomScheme = 'A####-{SERIAL}'
