@@ -107,10 +107,6 @@
                 <Button x:Name="BtnDriverFoundDownload" Grid.Column="5" Content="Download" Margin="6,0,0,0" IsEnabled="False" Style="{StaticResource Primary}"
                         ToolTip="Downloads the pack from the vendor, checks it, extracts it to Drivers\Maker\Model and adds it to the library"/>
               </Grid>
-              <!-- Driver pack downloads, one card each (JobCardTemplate): bar, percent and time left per pack, then
-                   checking, extracting and adding it. One that worked leaves after 5 s; a failed one stays with its
-                   reason until Remove. Hidden when there are none (Patrick, 2026-11-27: in the page, no window). -->
-              <ItemsControl x:Name="LstDriverDownloads" Visibility="Collapsed" Margin="0,0,0,0" ItemTemplate="{DynamicResource JobCardTemplate}"/>
               <!-- Models deployed without their driver pack (from the Dashboard's status records). Hidden when there are none. -->
               <Border x:Name="BdrUnknown" Visibility="Collapsed" Margin="0,0,0,10" Padding="12,8" Background="{DynamicResource WarningSoftBrush}" BorderBrush="{DynamicResource WarningLineBrush}" BorderThickness="1" CornerRadius="8">
                 <DockPanel>
@@ -165,7 +161,29 @@
                 <DataGridTextColumn Header="Machine type" Binding="{Binding MachineType}" Width="100"/>
                 <DataGridTextColumn Header="Model pattern" Binding="{Binding ModelPattern}" Width="*"/>
                 <DataGridTextColumn Header="Folder (under Drivers)" Binding="{Binding Path}" Width="2*"/>
-                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="110" IsReadOnly="True"/>
+                <!-- A pack being downloaded shows in its row at once (a new row on top for a model not in the library yet):
+                     a bar with "Downloading 40%, under 1 min left", then checking, extracting, adding. A failed one stays
+                     with its reason; double-click it for the log, Remove row takes it off (Patrick, 2026-11-27). -->
+                <DataGridTemplateColumn Header="Status" Width="200" IsReadOnly="True" SortMemberPath="Status">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Grid Margin="2,3" ToolTip="{Binding StatusTip}">
+                        <ProgressBar x:Name="Bar" Visibility="Collapsed" Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding Indeterminate, Mode=OneWay}"
+                                     Maximum="100" MinHeight="18" Foreground="{DynamicResource InfoLineBrush}" Background="{DynamicResource TrackBrush}" BorderThickness="0"/>
+                        <TextBlock x:Name="Txt" Text="{Binding Status}" VerticalAlignment="Center" Margin="4,0" TextTrimming="CharacterEllipsis"/>
+                      </Grid>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding Busy}" Value="True">
+                          <Setter TargetName="Bar" Property="Visibility" Value="Visible"/>
+                          <Setter TargetName="Txt" Property="FontSize" Value="11"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding Failed}" Value="True">
+                          <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
               </DataGrid.Columns>
             </DataGrid>
           </DockPanel>

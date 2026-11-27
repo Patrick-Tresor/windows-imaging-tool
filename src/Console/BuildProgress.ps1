@@ -1,7 +1,6 @@
 # Progress window: one window for everything that runs (media builds, captures, reimages, image updates and
-# versions; driver pack downloads show on the Driver library page instead, through -Panel), one card each, with
-# one row per step (name, elapsed time, bar, Complete), read twice a second from the progress file the job writes
-# (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
+# versions; driver pack downloads show in the Driver library's rows instead, through -NoWindow), one card each, with one row per step (name, elapsed time, bar, Complete), read twice a
+# second from the progress file the job writes (src\BuildSteps.psm1). Dot-sourced by ImagingConsole.ps1.
 # Not modal: the console stays usable, and closing the window leaves the work running.
 # Closing the window while work runs only hides it: Show progress in the console header brings it back
 # (Patrick, 2026-11-22: a closed progress window could not be opened again; then: one window, not one per reimage).
@@ -10,9 +9,9 @@
 # button can fail to bring it up. Its own window, centred on the screen and drawn in software, avoids all three.
 
 if (-not $script:ProgressWindows) { $script:ProgressWindows = New-Object Collections.ArrayList }
-# Jobs shown as a card in a page of the console instead of the Progress window (-Panel): driver pack downloads on the
-# Driver library page (Patrick, 2026-11-27: show the download in the driver library, not in another window).
-if (-not $script:PanelJobs) { $script:PanelJobs = New-Object Collections.ArrayList }
+# Jobs read the same way but shown somewhere else by their -OnUpdate (-NoWindow): driver pack downloads show in their
+# row of the Driver library (Patrick, 2026-11-27: show the download in the driver library, not in another window).
+if (-not $script:WindowlessJobs) { $script:WindowlessJobs = New-Object Collections.ArrayList }
 
 # A C# row so each property change redraws only that bit: a busy bar keeps running while its time counts up.
 if (-not ('ImagingTool.BuildStepRow' -as [type])) {
@@ -154,11 +153,12 @@ function Show-BuildProgress {
         # (Patrick 2026-11-11 for downloads, 2026-11-23 for everything: it closes itself when done). A failed one
         # stays, for its log. 0: stays until Remove.
         [int]$RemoveWhenDoneSeconds = 10,
-        # An ItemsControl in the console (JobCardTemplate) to show the card in, instead of the Progress window. It
-        # shows while it has a card and hides when the last one is removed. The Progress window does not open.
-        $Panel
+        # No card in the Progress window, which does not open: -OnUpdate shows the job (it gets the job after each
+        # read, with View and Rows like a card's).
+        [switch]$NoWindow,
+        [scriptblock]$OnUpdate
     )
-    $hub = if ($null -ne $Panel) { $null } else { Get-ProgressHub -Owner $Owner }
+    $hub = if ($NoWindow) { $null } else { Get-ProgressHub -Owner $Owner }
     $view = New-Object ImagingTool.BuildJobView
     $view.Title = $Title
     $view.Summary = 'Starting...'
@@ -171,15 +171,15 @@ function Show-BuildProgress {
     # Show() returns at once, so the handlers can't see this function's variables: everything they need rides on
     # the timer's Tag, and each job keeps its own.
     $ctx = @{ View = $view; Rows = $rows; ProgressFile = $ProgressFile; Process = $Process; LogPath = $LogPath; Timer = $timer; Started = [DateTime]::UtcNow
-        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $(if ($hub) { $hub.Window } else { $Owner }); RemoveWhenDoneSeconds = $RemoveWhenDoneSeconds; RemoveTimer = $null
-        Panel = $Panel }
+        Noun = $Noun; Hidden = [bool]$Hidden; OnFinished = $OnFinished; Window = $(if ($hub) { $hub.Window } else { $Owner })
+        RemoveWhenDoneSeconds = $RemoveWhenDoneSeconds; RemoveTimer = $null; NoWindow = [bool]$NoWindow; OnUpdate = $OnUpdate }
     $timer.Tag = $ctx
     $timer.Add_Tick({ param($sender) Update-BuildProgressWindow $sender.Tag })
-    if ($null -ne $Panel) {
-        Add-PanelJob -Ctx $ctx
+    if ($NoWindow) {
+        [void]$script:WindowlessJobs.Add($ctx)
         $timer.Start()
         Update-BuildProgressWindow $ctx
-        return
+        return $ctx
     }
     [void]$script:ProgressWindows.Add($ctx)
     $hub.Jobs.Add($view)
@@ -194,28 +194,6 @@ function Show-BuildProgress {
     try { $hub.B.ScrollJobs.ScrollToEnd() } catch { }
 }
 
-function Add-PanelJob {
-    # Puts a job's card in its page panel (newest at the top), shows the panel, and wires the card buttons once.
-    param([Parameter(Mandatory)]$Ctx)
-    $panel = $Ctx.Panel
-    if ($null -eq $panel.ItemsSource) {
-        $panel.ItemsSource = New-Object 'Collections.ObjectModel.ObservableCollection[ImagingTool.BuildJobView]'
-    }
-    if (-not $panel.Tag) {
-        $panel.Tag = 'jobs'
-        $panel.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{
-            param($sender, $e)
-            $btn = $e.OriginalSource
-            if (-not ($btn -is [Windows.Controls.Button]) -or "$($btn.Tag)" -notin 'log', 'remove') { return }
-            $c = @($script:PanelJobs | Where-Object { $_.View -eq $btn.DataContext })[0]
-            if ($c) { $e.Handled = $true; Invoke-ProgressJobButton -Ctx $c -Action "$($btn.Tag)" }
-        })
-    }
-    [void]$script:PanelJobs.Add($Ctx)
-    $panel.ItemsSource.Insert(0, $Ctx.View)
-    $panel.Visibility = 'Visible'
-}
-
 function Invoke-ProgressJobButton {
     # A card's button: Open log or Remove (a finished job only).
     param([Parameter(Mandatory)]$Ctx, [Parameter(Mandatory)][string]$Action)
@@ -228,14 +206,10 @@ function Invoke-ProgressJobButton {
 function Remove-ProgressJob {
     # Takes a finished job off the window; the window closes when nothing is left.
     param([Parameter(Mandatory)]$Ctx)
-    if ($null -ne $Ctx.Panel) {
-        # A card in a page: off the page, which hides the panel when it was the last one.
-        if ($Ctx.Timer.IsEnabled -or -not $script:PanelJobs.Contains($Ctx)) { return }
+    if ($Ctx.NoWindow) {
+        if ($Ctx.Timer.IsEnabled) { return }
         if ($Ctx.RemoveTimer) { $Ctx.RemoveTimer.Stop() }
-        $script:PanelJobs.Remove($Ctx)
-        $items = $Ctx.Panel.ItemsSource
-        if ($null -ne $items) { [void]$items.Remove($Ctx.View) }
-        if ($null -eq $items -or $items.Count -eq 0) { $Ctx.Panel.Visibility = 'Collapsed' }
+        $script:WindowlessJobs.Remove($Ctx)
         return
     }
     if ($Ctx.Timer.IsEnabled -or -not $script:ProgressWindows.Contains($Ctx)) { return }
@@ -380,4 +354,7 @@ function Update-BuildProgressWindow {
             Stop-ProgressJob $Ctx
         }
     } catch { $v.Summary = "Can't read the progress: $($_.Exception.Message)" }
+    finally {
+        if ($Ctx.OnUpdate) { try { & $Ctx.OnUpdate $Ctx } catch { } }
+    }
 }
