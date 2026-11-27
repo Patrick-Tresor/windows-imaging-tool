@@ -1242,10 +1242,10 @@ function Search-AdComputers {
         if ($find.Ip) {
             $found = @($found | Where-Object { $find.Name -and $_.Name -eq $find.Name.ToUpperInvariant() })
             if (-not $found) {
-                # Not in Active Directory (or no name answered): a PC outside the domain, reimaged with its own local
-                # administrator account, asked for at Reimage (Patrick, 2026-11-22).
+                # Not in Active Directory (or no name answered): a PC outside the domain. It has no agent, so it is
+                # reimaged from the USB stick.
                 $found = @(New-LocalComputerRow -Ip $find.Ip -Name $find.Name)
-                $localNote = " $($find.Ip) is not in Active Directory: Reimage asks for its local administrator account."
+                $localNote = " $($find.Ip) is not in Active Directory: reimage it from the USB stick."
             }
             foreach ($r in $found) { $r.Address = $find.Ip }
         }

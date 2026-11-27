@@ -51,8 +51,6 @@ function ConvertFrom-AgentTime($Value) {
 
 #region Where things are
 
-function Get-AgentInstallFolder { $script:AgentDir }
-function Get-AgentTaskName { $script:AgentTaskName }
 function Get-AgentFileNames { $script:AgentFiles }
 
 function Get-AgentFolder {
@@ -922,7 +920,7 @@ function Publish-AgentInstaller {
 
 #endregion
 
-Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-AgentInstallFolder, Get-AgentTaskName, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
+Export-ModuleMember -Function Get-AgentStateScript, Get-AgentLocalState, Get-AgentFileNames, Get-AgentFolder, Get-AgentStatusFolder, Get-AgentJobFolder,
     New-AgentKeyPair, Get-AgentSigningKey, ConvertTo-AgentPublicKey, Get-AgentPublicKey, Get-AgentKeyId,
     Get-AgentJobText, Get-AgentPayloadHash, Get-AgentCodeHash, Get-AgentVersionText, Select-AgentsToUpdate, Get-SilentAgents, Copy-AgentFolder, Get-AgentJobApps, Update-AgentDeployStatus, Sync-AgentBitLockerCheck, Set-AgentJobSignature, Test-AgentJobSignature, New-AgentJob, Set-AgentJobFolderAccess, Get-AgentJob, Remove-AgentJob, Test-AgentJob,
     New-AgentCheckIn, Save-AgentCheckIn, Get-AgentCheckIns, Find-AgentCheckIn, Format-AgentLastSeen, ConvertTo-AgentTargetInfo, Get-AgentKnownAddresses, Get-AgentRowView,

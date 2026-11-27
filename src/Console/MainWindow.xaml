@@ -174,7 +174,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource SectionTitle}" Text="Build deployment media"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build opens its own window and takes several minutes."/>
+          <TextBlock Style="{StaticResource Hint}" Text="Builds WinPE with the deploy tool inside, using the settings from this content root. Needs the Windows ADK and the WinPE add-on on this PC. The build shows in the Progress window and takes several minutes."/>
 
           <Border x:Name="BrdAdk" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,14">
             <DockPanel>
