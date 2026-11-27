@@ -355,7 +355,7 @@ Assert-Equal ($start -match "Not reimaged: it has no agent") $true 'a PC without
 $console = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
 Assert-Equal ($console -match 'Start-AgentInstall -Rows \$noAgent') $true 'Reimage installs the agent first on a PC without one'
 Assert-Equal ($console -match 'if \(\$script:bootBuilding -or \$p\.WaitingAgent\) \{ return \}') $true 'and starts the reimage only once the agent install and the boot image build are both done'
-Assert-Equal ($console -match "Find-AgentCheckIn -CheckIns \$checkIns -ComputerName \$_\.Name; \$a -and \$a\.Online") $true 'only the PCs whose agent checks in then are reimaged'
+Assert-Equal ($console -match 'Find-AgentCheckIn -CheckIns \$checkIns -ComputerName \$_\.Name; \$a -and \$a\.Online') $true 'only the PCs whose agent checks in then are reimaged'
 Assert-Equal ($console -match "not in the domain, so it can't have the agent") $true 'a PC outside the domain is refused (USB stick)'
 Assert-Equal ($console -match "'-StatusFolder'.*'-KeyRoot'") $true 'the console tells the reimage where the agents check in and which key signs'
 Assert-Equal ($console -match 'Install-RemoteAgent\.ps1') $true 'Install agent puts it on PCs imaged before'
