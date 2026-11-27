@@ -177,6 +177,38 @@ function Resolve-ComputerName {
     $name.Substring(0, [Math]::Min(15, $name.Length)).TrimEnd('-')
 }
 
+function Get-ComputerNameExample {
+    <#
+    .SYNOPSIS
+        The answer file editor's example on the Computer name page: the name Resolve-ComputerName builds on this PC
+        (random digits fixed so it does not jump while typing) and short notes on what changed it.
+    #>
+    param(
+        [Parameter(Mandatory)]$Answer,
+        [string]$WmiValue,
+        [string]$Serial
+    )
+    $notes = [Collections.Generic.List[string]]::new()
+    $usesWmi = $Answer.NamingMode -in 'WMI', 'Prompt'
+    if ($usesWmi -and -not "$WmiValue".Trim()) { $notes.Add('The WMI query returned nothing on this PC, so a made-up PC-###### name would be used.') }
+    if ($Answer.NamingMode -eq 'Custom' -and "$($Answer.CustomScheme)" -match '\{SERIAL\}' -and -not "$Serial".Trim()) { $notes.Add('This PC has no serial number.') }
+    $body = switch ($Answer.NamingMode) {
+        'Custom' { ("$($Answer.CustomScheme)" -replace '\{SERIAL\}', $Serial) -replace '#', '0' }
+        default  { $WmiValue }
+    }
+    $raw = "$($Answer.Prefix)$body"
+    $clean = ($raw -replace '[^A-Za-z0-9-]', '').Trim('-')
+    if ($raw -match '[^A-Za-z0-9-]') { $notes.Add('Spaces and other characters are removed.') }
+    if ($clean -match '^[0-9]+$') { $notes.Add('PC- is added: a name cannot be only digits.') }
+    elseif ($clean.Length -gt 15) { $notes.Add("Cut to 15 characters ($($clean.ToUpperInvariant())).") }
+    if ($Answer.NamingMode -eq 'Custom' -and "$($Answer.CustomScheme)" -match '#') { $notes.Add('Each # is a different random digit on every PC.') }
+    if ($Answer.NamingMode -eq 'Prompt') { $notes.Add('The deploy wizard suggests this name and the technician types the real one.') }
+    [pscustomobject]@{
+        Name  = Resolve-ComputerName -Answer $Answer -WmiValue $WmiValue -Serial $Serial -Random ([Random]::new(7))
+        Notes = @($notes)
+    }
+}
+
 function Test-UnattendComputerName {
     # Why Windows Setup would reject a computer name in the specialize pass, or nothing when it is valid. Also the
     # WinPE wizard's check of the name the operator types, so both use the same rules.
@@ -713,7 +745,7 @@ function Get-AnswerFileUsage {
     $usage
 }
 
-Export-ModuleMember -Function Read-AnswerFile, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
+Export-ModuleMember -Function Read-AnswerFile, Get-ComputerNameExample, Get-AnswerFileNames, Get-AnswerFileUsage, Join-ContentPath, Test-AnswerFile, Resolve-ComputerName, Get-WmiNamingValue,
     ConvertFrom-SecretBytes, Resolve-JoinAccount, New-UnattendXml, Test-UnattendXml, Test-UnattendComputerName,
     Test-ProductKeyValue, Test-TimeZoneId, Get-FirstBootTaskName, Get-FirstBootTaskCommand, New-FirstBootPlan, Get-AppDefinition, Export-AnswerFile,
     Join-InputLocale, Get-DefaultKeyboardId, Get-RegionalSettings

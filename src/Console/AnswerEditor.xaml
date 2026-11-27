@@ -136,28 +136,34 @@
       <ScrollViewer x:Name="Sec4" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
         <StackPanel>
           <TextBlock Style="{StaticResource Title}" Text="Computer name"/>
-          <TextBlock Style="{StaticResource Hint}" Text="Names are cleaned to letters, digits and dashes and cut to 15 characters."/>
-          <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number"/>
+          <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Text="How new PCs are named. Names keep letters, digits and dashes and are cut to 15 characters. A PC reimaged from the Computers tab keeps its name and OU."/>
+          <RadioButton x:Name="RbNameWmi" GroupName="Naming" Content="From the hardware (WMI), for example the serial number" Margin="0,8,0,0"/>
+          <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="22,0,0,4" Text="Prefix + the value the WMI query returns on each PC."/>
           <RadioButton x:Name="RbNameCustom" GroupName="Naming" Content="Custom scheme"/>
-          <RadioButton x:Name="RbNamePrompt" GroupName="Naming" Content="Ask the technician (interactive mode; uses the WMI value otherwise)"/>
+          <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="22,0,0,4" Text="{}Prefix + the scheme: # is a random digit and {SERIAL} the serial number, for example LAB-#### or {SERIAL}-A."/>
+          <RadioButton x:Name="RbNamePrompt" GroupName="Naming" Content="Ask the technician"/>
+          <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="22,0,0,4" Text="The deploy wizard asks for the name, with the hardware name filled in. An unattended deploy uses the hardware name."/>
           <Grid Margin="0,10,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
             <Label Content="Prefix"/>
-            <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left"/>
-            <Label Grid.Row="1" Content="WMI query"/>
-            <ComboBox x:Name="CmbWmi" Grid.Row="1" Grid.Column="1" IsEditable="True">
-              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
-              <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
-              <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
-              <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
-            </ComboBox>
-            <Label Grid.Row="2" Content="Custom scheme"/>
+            <TextBox x:Name="TxtPrefix" Grid.Column="1" Width="160" HorizontalAlignment="Left" ToolTip="Optional, for example LAB-"/>
+            <Label x:Name="LblWmi" Grid.Row="1" Content="WMI query"/>
+            <StackPanel x:Name="PnlWmi" Grid.Row="1" Grid.Column="1">
+              <ComboBox x:Name="CmbWmi" IsEditable="True">
+                <ComboBoxItem Content="SELECT SerialNumber FROM Win32_BIOS"/>
+                <ComboBoxItem Content="SELECT SerialNumber FROM Win32_SystemEnclosure"/>
+                <ComboBoxItem Content="SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct"/>
+                <ComboBoxItem Content="SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure"/>
+              </ComboBox>
+              <TextBlock x:Name="TxtWmiMeaning" Style="{StaticResource Hint}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Label x:Name="LblScheme" Grid.Row="2" Content="Custom scheme"/>
             <TextBox x:Name="TxtScheme" Grid.Row="2" Grid.Column="1" ToolTip="# = random digit, {SERIAL} = BIOS serial. Example: LAB-####"/>
             <Label Grid.Row="3" Content="Example on this PC"/>
-            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-              <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0"/>
-              <Button x:Name="BtnNamePreview" Content="Preview"/>
+            <StackPanel Grid.Row="3" Grid.Column="1">
+              <TextBlock x:Name="TxtNamePreview" FontFamily="Consolas" FontSize="16" FontWeight="SemiBold" Margin="0,4,0,2"/>
+              <TextBlock x:Name="TxtNamePreviewNote" Style="{StaticResource Hint}" TextWrapping="Wrap"/>
             </StackPanel>
           </Grid>
         </StackPanel>

@@ -84,7 +84,7 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   **Delete** one (it asks first).
   **New** and **Edit** (or double-click) open the answer file editor, where every
   setting is a form field: General, Image and disk, Applications (pick and order
-  them, or add a new installer), Windows settings, Computer name (with a preview),
+  them, or add a new installer), Windows settings, Computer name (with a live example),
   Domain or workgroup, Tasks and BitLocker. Passwords are typed into password
   boxes and saved in the answer file, encrypted (see Passwords below).
 - **Apps and Tasks**: one list of application packs and task scripts, with
@@ -306,6 +306,8 @@ the console; the format is documented in the commented
   `Win32_SystemEnclosure`) with a prefix, a custom scheme like `A########`
   (`#` = random digit, `{SERIAL}` = BIOS serial), or ask the technician (the
   deploy wizard asks for the name; an unattended deploy uses the WMI value).
+  The editor shows the name this PC would get as you type, with a note when it
+  is cut to 15 characters, gets `PC-` added or the query returns nothing.
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the

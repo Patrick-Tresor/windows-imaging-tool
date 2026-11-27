@@ -156,8 +156,8 @@ function Show-AnswerEditor {
 
     $syncEnabled = {
         $e.PwdAdmin.IsEnabled = [bool]$e.ChkAdmin.IsChecked
-        $e.CmbWmi.IsEnabled = -not $e.RbNameCustom.IsChecked
-        $e.TxtScheme.IsEnabled = [bool]$e.RbNameCustom.IsChecked
+        foreach ($c in 'LblWmi', 'PnlWmi') { $e[$c].IsEnabled = -not $e.RbNameCustom.IsChecked }
+        foreach ($c in 'LblScheme', 'TxtScheme') { $e[$c].IsEnabled = [bool]$e.RbNameCustom.IsChecked }
         $dom = [bool]$e.RbDomain.IsChecked
         foreach ($c in 'TxtDomain', 'TxtOU', 'TxtJoinUser', 'TxtJoinDomain', 'PwdJoin') { $e[$c].IsEnabled = $dom }
         $e.TxtWorkgroup.IsEnabled = -not $dom
@@ -249,13 +249,55 @@ function Show-AnswerEditor {
         $a.BitLocker.RequireBackup     = $true
     }
 
-    $e.BtnNamePreview.Add_Click({
-        & $collect
-        try {
-            $wmi = Get-WmiNamingValue -Query $a.WmiQuery
-            $e.TxtNamePreview.Text = Resolve-ComputerName -Answer $a -WmiValue $wmi -Serial (Get-CimInstance Win32_BIOS).SerialNumber
-        } catch { $e.TxtNamePreview.Text = "Query failed: $($_.Exception.Message)" }
-    })
+    # The example updates by itself as the choice, prefix, query or scheme change. This PC's serial is read once and
+    # each WMI query's value is kept, so typing does not run WMI again for a query already read.
+    $wmiMeaning = @{
+        'SELECT SerialNumber FROM Win32_BIOS'                       = 'The serial number (service tag) from the BIOS. Best for most PCs.'
+        'SELECT SerialNumber FROM Win32_SystemEnclosure'            = 'The serial number printed on the case.'
+        'SELECT IdentifyingNumber FROM Win32_ComputerSystemProduct' = 'The product serial number.'
+        'SELECT SMBIOSAssetTag FROM Win32_SystemEnclosure'          = 'The asset tag set in the BIOS. Empty on PCs without one.'
+    }
+    $state.WmiValues = @{}
+    $updateNamePreview = {
+        $query = $e.CmbWmi.Text.Trim()
+        $known = $wmiMeaning.Keys | Where-Object { $_ -eq $query } | Select-Object -First 1
+        $e.TxtWmiMeaning.Text = if ($known) { $wmiMeaning[$known] } else { 'Your own query: its first value names the PC.' }
+        if ($null -eq $state.Serial) {
+            $state.Serial = try { "$((Get-CimInstance Win32_BIOS -ErrorAction Stop).SerialNumber)".Trim() } catch { '' }
+        }
+        $mode = if ($e.RbNameCustom.IsChecked) { 'Custom' } elseif ($e.RbNamePrompt.IsChecked) { 'Prompt' } else { 'WMI' }
+        $wmiValue = ''
+        $failed = ''
+        if ($mode -ne 'Custom' -and $query) {
+            if (-not $state.WmiValues.ContainsKey($query)) {
+                $state.WmiValues[$query] = try { [pscustomobject]@{ Value = "$(Get-WmiNamingValue -Query $query)"; Error = '' } }
+                                           catch { [pscustomobject]@{ Value = ''; Error = $_.Exception.Message } }
+            }
+            $wmiValue = $state.WmiValues[$query].Value
+            $failed = $state.WmiValues[$query].Error
+        }
+        $sample = [pscustomobject]@{ NamingMode = $mode; Prefix = $e.TxtPrefix.Text.Trim(); WmiQuery = $query; CustomScheme = $e.TxtScheme.Text.Trim() }
+        if ($mode -eq 'Custom' -and -not $sample.CustomScheme) {
+            $e.TxtNamePreview.Text = ''
+            $e.TxtNamePreviewNote.Text = 'Type a scheme, for example LAB-####.'
+            return
+        }
+        if ($failed) {
+            $e.TxtNamePreview.Text = ''
+            $e.TxtNamePreviewNote.Text = "The WMI query does not work on this PC: $failed"
+            return
+        }
+        $example = Get-ComputerNameExample -Answer $sample -WmiValue $wmiValue -Serial $state.Serial
+        $e.TxtNamePreview.Text = $example.Name
+        $e.TxtNamePreviewNote.Text = @($example.Notes) -join ' '
+    }
+    # Only while the page shows, so opening the editor does not wait for WMI.
+    $queueNamePreview = { if ($e.Sec4.Visibility -eq 'Visible') { $win.Dispatcher.BeginInvoke([Action]{ & $updateNamePreview }) | Out-Null } }
+    foreach ($c in 'RbNameWmi', 'RbNameCustom', 'RbNamePrompt') { $e[$c].Add_Checked($queueNamePreview) }
+    foreach ($c in 'TxtPrefix', 'TxtScheme') { $e[$c].Add_TextChanged($queueNamePreview) }
+    $e.CmbWmi.Add_SelectionChanged($queueNamePreview)
+    $e.CmbWmi.Add_LostKeyboardFocus($queueNamePreview)
+    $e.LstSections.Add_SelectionChanged($queueNamePreview)
 
     $e.BtnCancel.Add_Click({ $win.Close() })
     $e.BtnSave.Add_Click({

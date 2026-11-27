@@ -20,6 +20,18 @@ try {
     $p = [pscustomobject]@{ NamingMode = 'Prompt'; Prefix = ''; CustomScheme = '' }
     Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1' -Typed 'kiosk 01') 'KIOSK01' 'typed name wins in prompt mode'
     Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1') 'SER1' 'prompt mode without a typed name uses the WMI value'
+    # The editor's example and its notes.
+    $ex = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'WMI'; Prefix = 'LAB-'; CustomScheme = '' }) -WmiValue '5CG1234XYZ' -Serial '5CG1234XYZ'
+    Assert-Equal "$($ex.Name)|$($ex.Notes.Count)" 'LAB-5CG1234XYZ|0' 'example: prefix + WMI value, no notes'
+    $ex = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'WMI'; Prefix = 'LABORATORY-'; CustomScheme = '' }) -WmiValue '5CG1234XYZ'
+    Assert-Equal ($ex.Name.Length -le 15 -and ($ex.Notes -join ' ') -match 'Cut to 15') $true "example: a long name is cut and says so ($($ex.Name))"
+    $ex = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'WMI'; Prefix = ''; CustomScheme = '' }) -WmiValue ''
+    Assert-Equal (($ex.Notes -join ' ') -match 'returned nothing') $true 'example: an empty WMI value is explained'
+    $ex = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'Custom'; Prefix = ''; CustomScheme = 'LAB-####' }) -Serial 'X'
+    $again = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'Custom'; Prefix = ''; CustomScheme = 'LAB-####' }) -Serial 'X'
+    Assert-Equal ($ex.Name -match '^LAB-\d{4}$' -and $ex.Name -eq $again.Name -and ($ex.Notes -join ' ') -match 'random') $true "example: random digits stay put while typing ($($ex.Name))"
+    $ex = Get-ComputerNameExample -Answer ([pscustomobject]@{ NamingMode = 'Prompt'; Prefix = ''; CustomScheme = '' }) -WmiValue '12345'
+    Assert-Equal "$($ex.Name)|$((($ex.Notes -join ' ') -match 'only digits') -and (($ex.Notes -join ' ') -match 'technician'))" 'PC-12345|True' 'example: digits-only and ask the technician notes'
 
     # Validation.
     $bad = $default.PSObject.Copy()
