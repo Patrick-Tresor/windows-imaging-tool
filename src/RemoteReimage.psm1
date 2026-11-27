@@ -646,7 +646,7 @@ function Open-RemoteChannel {
     if ($Method -eq 'Local') { return $ch }
     if ($Method -eq 'Wmi') {
         # Packet privacy: what Windows asks of DCOM since its 2022 hardening (KB5004442).
-        $opt = New-CimSessionOption -Protocol Dcom -Impersonation Impersonate -PacketPrivacy
+        $opt = New-CimSessionOption -Impersonation Impersonate -PacketPrivacy   # these options make it a DCOM session
         $a = @{ ComputerName = $ComputerName; SessionOption = $opt; ErrorAction = 'Stop' }
         if ($Credential) { $a.Credential = $Credential }
         try {
