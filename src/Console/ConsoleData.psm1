@@ -1051,8 +1051,11 @@ function Save-DeploySettingsPage {
     $winpe = { param($o) "$($o.share.path)|$($o.share.user)|$(if ($o.share.PSObject.Properties['encryptedPassword']) { $o.share.encryptedPassword })|$(if ($o.PSObject.Properties['reporting'] -and $o.reporting) { $o.reporting.path })" }
     $old = $before | ConvertFrom-Json
     $oldWinpe = if ($old.PSObject.Properties['share'] -and $old.share) { & $winpe $old } else { '' }
+    $outOfDate = [bool]$NewPassword -or ((& $winpe $s) -replace '\|aes256:[^|]*', '|') -ne ($oldWinpe -replace '\|aes256:[^|]*', '|')
+    # When it changed something WinPE reads: a stick built before then gets the console's Update the stick banner.
+    if ($outOfDate) { & $set $s 'winpeChangedAt' (Get-Date).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) }
     Save-DeploySettings -ContentRoot $ContentRoot -Settings $s
-    [pscustomobject]@{ MediaOutOfDate = [bool]$NewPassword -or ((& $winpe $s) -replace '\|aes256:[^|]*', '|') -ne ($oldWinpe -replace '\|aes256:[^|]*', '|') }
+    [pscustomobject]@{ MediaOutOfDate = $outOfDate }
 }
 
 function Get-ShareErrorText([int]$Code) {

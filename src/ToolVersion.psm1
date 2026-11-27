@@ -138,18 +138,28 @@ function Compare-ToolVersion {
     'Unknown'
 }
 
+function Test-StickStale {
+    # A stick needs Update the stick: built with an older version of the tool, or (-SettingsChanged, the
+    # 'yyyy-MM-dd HH:mm' Deploy Settings last changed something WinPE reads) built before that change.
+    param([Parameter(Mandatory)]$Console, $Stick, [string]$SettingsChanged)
+    if ((Compare-ToolVersion -Console $Console -Stick $Stick) -eq 'Older') { return $true }
+    [bool]($SettingsChanged -and $Stick -and $Stick.Built -and [string]::CompareOrdinal("$($Stick.Built)", $SettingsChanged) -lt 0)
+}
+
 function Get-StaleStickMessage {
-    # One line for the console's banner, or $null when every plugged-in stick is up to date.
-    param([Parameter(Mandatory)]$Console, [string[]]$StickRoots)
+    # One line for the console's banner, or $null when every plugged-in stick is up to date: older version of the
+    # tool, or built before the Deploy Settings changed (-SettingsChanged, see Test-StickStale).
+    param([Parameter(Mandatory)]$Console, [string[]]$StickRoots, [string]$SettingsChanged)
     $lines = foreach ($root in @($StickRoots | Where-Object { $_ })) {
         $s = Get-StickToolVersion -StickRoot $root
-        if ((Compare-ToolVersion -Console $Console -Stick $s) -ne 'Older') { continue }
+        if (-not (Test-StickStale -Console $Console -Stick $s -SettingsChanged $SettingsChanged)) { continue }
         $drive = $root.TrimEnd('\')
-        if ($s) { "The USB stick in $drive was built with version $($s.Text)$(if ($s.Built) { " on $($s.Built)" }); this console is $($Console.Text)." }
+        if ((Compare-ToolVersion -Console $Console -Stick $s) -ne 'Older') { "The USB stick in $drive was built on $($s.Built), before the Deploy Settings changed on $SettingsChanged." }
+        elseif ($s) { "The USB stick in $drive was built with version $($s.Text)$(if ($s.Built) { " on $($s.Built)" }); this console is $($Console.Text)." }
         else { "The USB stick in $drive was built before this console stamped versions; this console is $($Console.Text)." }
     }
     if (-not $lines) { return $null }
-    (@($lines) -join ' ') + ' Click Update the stick so it has the latest fixes.'
+    (@($lines) -join ' ') + ' Click Update the stick to bring it up to date.'
 }
 
 function Get-StaleBootImageMessage {
@@ -165,4 +175,4 @@ function Get-StaleBootImageMessage {
 }
 
 Export-ModuleMember -Function Get-ToolReleaseNumber, ConvertTo-ToolVersion, New-ToolVersion, Get-ToolVersion, ConvertTo-ToolVersionRecord, Read-ToolVersionFile,
-    Get-StickToolVersion, Compare-ToolVersion, Get-StaleStickMessage, Get-StaleBootImageMessage
+    Get-StickToolVersion, Compare-ToolVersion, Test-StickStale, Get-StaleStickMessage, Get-StaleBootImageMessage

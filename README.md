@@ -32,7 +32,8 @@ the details go to `%LOCALAPPDATA%\ImagingConsole\console-error.log`.
 The header shows the tool's version, `v1.NN`, where NN counts the pull requests merged since v1.00
 (from `src\version.txt` in a downloaded zip, or git in a clone). The same number is written on every
 stick and network boot image, in WinPE and at the top of `Deploy.log`; a yellow banner says when a
-plugged-in stick is older than the console, with **Update the stick** (an older network boot image is
+plugged-in stick is older than the console, or was built before Deploy Settings last changed
+something WinPE reads (share, account, password), with **Update the stick** (an older network boot image is
 rebuilt by **Reimage...** itself). Builds, captures, updates, downloads and reimages show as cards in
 one **Progress** window. A job that worked leaves it 10 seconds after it ends, and the window closes
 by itself once nothing is left; a failed job, or one with a failed row (such as Office not downloaded), stays, with its log. **Show progress** in the header opens

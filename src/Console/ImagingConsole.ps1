@@ -672,11 +672,25 @@ function Update-UsbMode {
         else { 'Not built by this tool: everything on it is erased.' }
 }
 
+function Get-SettingsChangedAt {
+    # When Deploy Settings last changed something WinPE reads ('yyyy-MM-dd HH:mm'), or '' (Save-DeploySettingsPage).
+    # The stick banner asks every 5 seconds: read again at most every 30 seconds (the share can be slow), and at once
+    # after a save (-Fresh).
+    param([switch]$Fresh)
+    if (-not (Test-ContentRoot $script:root)) { return '' }
+    $c = $script:settingsChangedCache
+    if (-not $Fresh -and $c -and $c.Root -eq $script:root -and ((Get-Date) - $c.At).TotalSeconds -lt 30) { return $c.Value }
+    $s = try { Get-DeploySettings -ContentRoot $script:root } catch { $null }
+    $v = if ($s -and $s.PSObject.Properties['winpeChangedAt']) { "$($s.winpeChangedAt)" } else { '' }
+    $script:settingsChangedCache = [pscustomobject]@{ Root = $script:root; At = Get-Date; Value = $v }
+    $v
+}
+
 function Update-StickVersionBanner {
-    # A banner at the top when a plugged-in stick was built with an older version of the tool: the fix the operator
-    # expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
+    # A banner at the top when a plugged-in stick was built with an older version of the tool, or before the Deploy
+    # Settings last changed something WinPE reads: the fix or setting the operator expects is then not on the stick. "Not now" hides it until another stick (or another version) is plugged in.
     # (An older network boot image needs no banner: Reimage rebuilds it first.)
-    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots)
+    $msg = Get-StaleStickMessage -Console $script:toolVersion -StickRoots (Get-DeployStickRoots) -SettingsChanged (Get-SettingsChangedAt)
     if ($msg -and $msg -ne $script:stickOldHidden) {
         $ui.TxtStickOld.Text = $msg
         $ui.BdrStickOld.Visibility = 'Visible'
@@ -691,7 +705,8 @@ function Select-StickForUpdate {
     # writes, and for the WinPE password when that box is empty).
     $ui.Tabs.SelectedItem = $ui.TabMedia
     Update-UsbDisks
-    $old = @(Get-DeployStickRoots | Where-Object { (Compare-ToolVersion -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_)) -eq 'Older' })
+    $changed = Get-SettingsChangedAt
+    $old = @(Get-DeployStickRoots | Where-Object { Test-StickStale -Console $script:toolVersion -Stick (Get-StickToolVersion -StickRoot $_) -SettingsChanged $changed })
     $item = $null
     if ($old) {
         $disk = try { (Get-Partition -DriveLetter $old[0].Substring(0, 1) -ErrorAction Stop).DiskNumber } catch { $null }
@@ -1611,8 +1626,9 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     Save-AdSettings -Server $ui.TxtAdServer.Text
     # The Computers tab uses this account and share: show the change there too.
     Update-Answers; Update-Settings; Update-Computers; Update-Dashboard
-    if ($r.MediaOutOfDate) { $ui.BdrSettingsStale.Visibility = 'Visible' }
-    Set-Status 'Deploy settings saved'
+    $null = Get-SettingsChangedAt -Fresh
+    Update-StickVersionBanner
+    Set-Status $(if ($r.MediaOutOfDate) { 'Deploy settings saved. WinPE reads them from the boot image: a stick built before now gets the Update the stick banner when it is plugged in (Reimage rebuilds the network boot image by itself).' } else { 'Deploy settings saved' })
 } })
 
 #endregion

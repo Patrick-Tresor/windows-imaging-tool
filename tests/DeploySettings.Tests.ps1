@@ -65,6 +65,7 @@ try {
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'Old-Pass1' 'saving again keeps the password'
     $r = Save-DeploySettingsPage -ContentRoot $root -SharePath '\\SRV01\Deploy' -ShareUser 'CORP\svc-deploy' -NewPassword 'N3w-Pass!'
     Assert-Equal $r.MediaOutOfDate $true 'a new password means the stick needs updating'
+    Assert-Equal ("$((Get-DeploySettings -ContentRoot $root).winpeChangedAt)" -match '^\d{4}-\d\d-\d\d \d\d:\d\d$') $true 'and the time of that change is saved, for the stick banner'
     Assert-Equal (Get-SharePassword -ContentRoot $root) 'N3w-Pass!' 'the typed password is saved'
 
     # WinPE reads it from the boot image's copy of the settings with the answer file key, no passwordFile needed.
@@ -116,7 +117,7 @@ $names = @([regex]::Matches($xamlText, 'x:Name="([^"]+)"') | ForEach-Object { $_
 $consoleText = Get-Content -Raw -LiteralPath (Join-Path $repo 'src/Console/ImagingConsole.ps1')
 $used = @([regex]::Matches($consoleText, '\$ui\.([A-Za-z0-9_]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
 Assert-Equal (@($used | Where-Object { $_ -notin $names }) -join ', ') '' 'every $ui control exists in MainWindow.xaml'
-foreach ($n in 'TxtSharePath', 'PwdShare', 'BtnShareTest', 'BdrSettingsStale') {
+foreach ($n in 'TxtSharePath', 'PwdShare', 'BtnShareTest') {
     Assert-Equal ($n -in $names) $true "Deploy Settings has $n"
 }
 Assert-Equal ($names -contains 'TxtSharePwFile') $false 'no password file box any more'
