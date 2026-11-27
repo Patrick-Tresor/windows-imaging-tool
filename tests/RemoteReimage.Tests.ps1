@@ -212,6 +212,14 @@ try {
     $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $closedPort -OtherPorts $sp -TimeoutMs 2000
     Assert-Equal $s['127.0.0.1'].State 'No access' 'a PC that answers on another port only is on, with both ways blocked'
     Assert-Equal $s['127.0.0.1'].Online $false 'no way in is not online'
+    # DPF5VT945 (Patrick, 2026-11-27): only the RPC port 135 answers, so the agent goes in over WMI.
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $closedPort -OtherPorts $sp -RpcPort $sp -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].State 'Yes (WMI)' 'a PC that answers on the RPC port only is reached over WMI'
+    Assert-Equal $s['127.0.0.1'].Method 'Wmi' 'WMI is the last way in'
+    Assert-Equal $s['127.0.0.1'].Online $true 'WMI counts as online'
+    Assert-Equal $s['127.0.0.1'].Rpc $true 'the check says the RPC port answered'
+    $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $sp -OtherPorts $sp -RpcPort $sp -TimeoutMs 2000
+    Assert-Equal $s['127.0.0.1'].Method 'Smb' 'the admin share before WMI when both answer'
     $s = Get-RemoteOnlineState -ComputerName '127.0.0.1' -Port $closedPort -SmbPort $closedPort -OtherPorts $closedPort -TimeoutMs 2000
     Assert-Equal $s['127.0.0.1'].State 'No answer' 'a PC that answers on no port says No answer'
     $s = Get-RemoteOnlineState -ComputerName 'localhost.pc-that-does-not-exist.invalid' -Port $wp -SmbPort $sp -OtherPorts $closedPort -TimeoutMs 2000
@@ -338,6 +346,34 @@ try {
     Assert-Equal $out[0] '4:/set {r} ramdisksdidevice partition=C:' 'each bcdedit step keeps its own arguments over the admin share'
     Assert-Equal $out[-1] '60' 'the arguments after the steps arrive too'
 } finally { Remove-Item $run -Recurse -Force -ErrorAction SilentlyContinue }
+# Without WinRM and file sharing: WMI, the files carried in a registry key.
+Assert-Equal (@(Split-WmiText -Text ('x' * 10) -Size 4) -join '|') 'xxxx|xxxx|xx' 'long text is cut for registry values'
+Assert-Equal @(Split-WmiText -Text '').Count 0 'no text, no value'
+$boot = Get-WmiBootstrapScript -Key 'SOFTWARE\ImagingTool\Remote\ab12' -Folder 'C:\Windows\Temp\ImagingTool-ab12'
+$errors = $null; [void][Management.Automation.Language.Parser]::ParseInput($boot, [ref]$null, [ref]$errors)
+Assert-Equal @($errors).Count 0 'the WMI bootstrap script parses'
+Assert-Equal ($boot -match "'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\ImagingTool\\Remote\\ab12'") $true 'the bootstrap reads its own key'
+Assert-Equal ($boot -match '(?s)finally \{\s*Set-ItemProperty -LiteralPath \$k -Name ''done''') $true 'the bootstrap always says when it is done'
+Assert-Equal ([Text.Encoding]::Unicode.GetBytes($boot).Length * 4 / 3 -lt 8000) $true 'the bootstrap fits on a command line'
+Assert-Equal ((Get-WmiProblemText -Message 'WMI on 10.10.2.115: The RPC server is unavailable. (Exception from HRESULT: 0x800706BA)') -like '*WMI-In*') $true 'blocked WMI ports say which firewall rule to allow'
+Assert-Equal ((Get-WmiProblemText -Message 'Access is denied.') -like '*not an administrator*') $true 'access denied over WMI says the account is not an admin'
+$isAdmin = $false
+if ([Environment]::OSVersion.Platform -eq 'Win32NT') { $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+if ($isAdmin) {
+    # The whole WMI way, on this PC: DCOM to itself, the registry key, Win32_Process, the result back.
+    $ch = Open-RemoteChannel -ComputerName 'localhost' -Method Wmi
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ("wmi-" + [guid]::NewGuid())
+    try {
+        $out = @(Invoke-RemoteChannel -Channel $ch -ArgumentList 'a b', 3, @('x', 'y') -ScriptBlock { param($Text, $N, $List) "$Text|$($N * 2)|$($List -join '+')"; 'second' } -TimeoutSeconds 120)
+        Assert-Equal ($out -join ',') 'a b|6|x+y,second' 'over WMI the arguments arrive and every output comes back'
+        Assert-Throws { Invoke-RemoteChannel -Channel $ch -ScriptBlock { throw 'it broke' } -TimeoutSeconds 120 } 'an error on the PC is thrown over WMI'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $src = Join-Path $dir 'src.bin'; $bytes = [byte[]](0..255) * 2000; [IO.File]::WriteAllBytes($src, $bytes)
+        Copy-ToRemoteChannel -Channel $ch -Path $src -Destination (Join-Path $dir 'dst.bin')
+        Assert-Equal ((Get-FileHash (Join-Path $dir 'dst.bin')).Hash) ((Get-FileHash $src).Hash) 'a file copied over WMI arrives whole'
+        Assert-Equal (Test-Path 'HKLM:\SOFTWARE\ImagingTool\Remote\*') $false 'the registry key is removed after each run'
+    } finally { Close-RemoteChannel $ch; Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+} else { Write-Host 'Skipped the WMI channel run: needs Windows and an administrator' }
 $mod = Get-Content -Raw (Join-Path $repo 'src/RemoteReimage.psm1')
 Assert-Equal ($mod -match 'GetNetworkCredential\(\)\.Password, \$Credential\.UserName') $true 'the share password goes to WNetAddConnection2, never on a command line'
 foreach ($f in 'Invoke-LocalDiskBoot') {

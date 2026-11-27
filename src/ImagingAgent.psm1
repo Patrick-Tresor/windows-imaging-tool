@@ -652,6 +652,7 @@ function Get-AgentRowView {
             switch ($state) {
                 'Yes'       { 'None, PC online' }
                 'Yes (SMB)' { 'None, PC online' }
+                'Yes (WMI)' { 'None, PC online' }
                 'No access' { 'None, PC blocked' }
                 'Not found' { 'None, name not found' }
                 'Old DNS'   { 'None, old DNS' }
@@ -659,7 +660,7 @@ function Get-AgentRowView {
                 default     { 'None' }
             }
         }
-        $detail += $(if ($Check -and $Check.Online) { 'No agent: select the PC and click Install agent, then Reimage.' } else { 'No agent: it is put on each PC deployed while the network share is set, or with Install agent (the PC must be on, with PowerShell remoting or file sharing allowed).' })
+        $detail += $(if ($Check -and $Check.Online) { 'No agent: select the PC and click Install agent, then Reimage.' } else { 'No agent: it is put on each PC deployed while the network share is set, or with Install agent (the PC must be on, with PowerShell remoting, file sharing or WMI allowed).' })
     }
     if ($Check) { $detail += "$Name $($Check.Detail)" }
     [pscustomobject]@{ Agent = $text; AgentDetail = ($detail -join "`n") }

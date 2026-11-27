@@ -172,7 +172,13 @@ on the ones you pick, with nobody at the PCs.
      one-time SYSTEM service that it deletes right after, the way Windows admin
      tools do. Some antivirus products block services that start PowerShell;
      the progress window then says the PC did not run the command.
-   - **None, PC blocked**: the PC is on, but its firewall blocks both. Allow
+     When the firewall blocks both but lets the RPC port 135 in, the console
+     goes through WMI (DCOM), as Windows admin tools do: the agent files go
+     through a temporary registry key on the PC and a PowerShell started by WMI
+     writes them out. If WMI's own ports are blocked too, the row says to allow
+     the predefined firewall rule **Windows Management Instrumentation
+     (WMI-In)**, or PowerShell remoting, with a Group Policy.
+   - **None, PC blocked**: the PC is on, but its firewall blocks all three. Allow
      *File and Printer Sharing (SMB-In)*, or turn on remoting
      (`Enable-PSRemoting -Force`, or for a whole OU the Group Policy *Computer
      Configuration > Administrative Templates > Windows Components > Windows
@@ -254,10 +260,10 @@ the share, written as the computer account, like first boot's status.
   restarts into WinPE from its own disk with the same 60 second notice. If the
   agent has not taken the job within 10 minutes, that PC is not reimaged and
   its row says why.
-- **Install agent** puts it on PCs imaged before it existed (over WinRM or the
-  admin share, with your account as administrator), and waits for each one's
+- **Install agent** puts it on PCs imaged before it existed (over WinRM, the
+  admin share or WMI, with your account as administrator), and waits for each one's
   first check-in. **Reimage...** does the same first for PCs with no agent. It is the only thing the console does over WinRM or the admin share.
-- **On a PC the console can't reach** (WinRM and file sharing blocked): on that
+- **On a PC the console can't reach** (WinRM, file sharing and WMI blocked): on that
   PC, right-click `\\<server>\<share>\Agent\Install-Agent.cmd` and pick **Run as
   administrator**. The console keeps that folder up to date (the agent files and
   `agent.json` with the status folder and its public key, nothing secret) each

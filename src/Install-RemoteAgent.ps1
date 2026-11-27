@@ -4,7 +4,7 @@
 .DESCRIPTION
     Run by the console's Computers tab (Install agent, hidden, with its progress in a progress window), or by hand.
     For each PC: reaches it over PowerShell remoting, or when that is off its admin share and a one-time SYSTEM
-    service (RemoteReimage.psm1), copies the agent to C:\ProgramData\ImagingTool\Agent (administrators and SYSTEM
+    service, or when both are blocked by its firewall WMI over the RPC port 135 (RemoteReimage.psm1), copies the agent to C:\ProgramData\ImagingTool\Agent (administrators and SYSTEM
     only) with agent.json (the status folder and the console's public key), makes the SYSTEM task ImagingTool\Agent
     and starts it (ImagingAgent.psm1, Install-AgentOnRemotePC). Then waits up to 3 minutes for its first check-in.
     Newly deployed PCs get the agent at deploy; this is only for the ones already out there.
@@ -69,9 +69,11 @@ try {
         try {
             try { $ch = Open-RemoteChannel -ComputerName $check.Address -Credential $credential -Method $method }
             catch {
-                if ($method -ne 'WinRM' -or -not $check.Smb -or -not (Test-WinRMSignInError $_.Exception.Message)) { throw }
-                Write-Host "$($p.Name): WinRM would not sign in from this PC; going through its admin share instead"
-                $ch = Open-RemoteChannel -ComputerName $check.Address -Credential $credential -Method 'Smb'
+                $next = if ($check.Smb) { 'Smb' } elseif ($check.PSObject.Properties['Rpc'] -and $check.Rpc) { 'Wmi' } else { '' }
+                if ($method -ne 'WinRM' -or -not $next -or -not (Test-WinRMSignInError $_.Exception.Message)) { throw }
+                Write-Host "$($p.Name): WinRM would not sign in from this PC; going through $(if ($next -eq 'Smb') { 'its admin share' } else { 'WMI' }) instead"
+                $method = $next
+                $ch = Open-RemoteChannel -ComputerName $check.Address -Credential $credential -Method $next
             }
             Set-BuildStepProgress $p.Id -Percent 30 -Detail 'Copying the agent'
             $config = New-AgentConfig -StatusFolder $StatusFolder -PublicKeys @($publicKey) -CheckInSeconds $CheckInSeconds `
@@ -82,6 +84,12 @@ try {
             Set-BuildStepProgress $p.Id -Percent 70 -Detail 'Waiting for its first check-in'
         } catch {
             Write-Host "$($p.Name): $($_.Exception.Message)"
+            if ($method -eq 'Wmi') {
+                if ($_.Exception.Message -match '(?i)RPC server|0x800706BA') {
+                    Write-Host "$($p.Name): port 135 answers but WMI's own ports are blocked by its firewall. Fix it for every PC with a Group Policy: Computer Configuration > Policies > Windows Settings > Security Settings > Windows Defender Firewall > Inbound Rules > New rule > Predefined 'Windows Management Instrumentation (WMI)' > allow, for the Domain profile. Or turn on PowerShell remoting: Computer Configuration > Policies > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the predefined rule 'Windows Remote Management'."
+                }
+                Stop-PcStep $p (Get-WmiProblemText -Message $_.Exception.Message); continue
+            }
             Stop-PcStep $p (Get-RemotingProblemText -Message $_.Exception.Message -Account $(if ($credential) { $credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME" }))
         } finally { Close-RemoteChannel $ch }
     }
