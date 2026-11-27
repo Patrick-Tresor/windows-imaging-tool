@@ -85,7 +85,7 @@ try {
         } catch {
             Write-Host "$($p.Name): $($_.Exception.Message)"
             if ($method -eq 'Wmi') {
-                if ($_.Exception.Message -match '(?i)RPC server|0x800706BA') {
+                if ($_.Exception.Message -match '(?i)RPC server|serveur RPC|0x800706BA') {
                     Write-Host "$($p.Name): port 135 answers but WMI's own ports are blocked by its firewall. Fix it for every PC with a Group Policy: Computer Configuration > Policies > Windows Settings > Security Settings > Windows Defender Firewall > Inbound Rules > New rule > Predefined 'Windows Management Instrumentation (WMI)' > allow, for the Domain profile. Or turn on PowerShell remoting: Computer Configuration > Policies > Administrative Templates > Windows Components > Windows Remote Management > WinRM Service > Allow remote server management through WinRM, plus the predefined rule 'Windows Remote Management'."
                 }
                 Stop-PcStep $p (Get-WmiProblemText -Message $_.Exception.Message); continue
