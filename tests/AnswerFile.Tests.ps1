@@ -16,7 +16,10 @@ try {
     Assert-Equal $default.Applications.Count 0 'commented-out applications are ignored'
     $promptXml = Join-Path $tmp 'Prompt.xml'
     (Get-Content -Raw (Join-Path $repo 'config/answer-files/Default.xml')) -replace '<naming mode="WMI">', '<naming mode="Prompt">' | Set-Content -LiteralPath $promptXml
-    Assert-Equal (Read-AnswerFile -Path $promptXml).NamingMode 'WMI' 'an older answer file that asked the technician names PCs from the hardware'
+    Assert-Equal (Read-AnswerFile -Path $promptXml).NamingMode 'Prompt' 'an answer file that asks the technician keeps Prompt'
+    $p = [pscustomobject]@{ NamingMode = 'Prompt'; Prefix = ''; CustomScheme = '' }
+    Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1' -Typed 'kiosk 01') 'KIOSK01' 'typed name wins in prompt mode'
+    Assert-Equal (Resolve-ComputerName -Answer $p -WmiValue 'SER1') 'SER1' 'prompt mode without a typed name uses the WMI value'
 
     # Validation.
     $bad = $default.PSObject.Copy()

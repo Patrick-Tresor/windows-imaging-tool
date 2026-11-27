@@ -513,6 +513,7 @@ function Show-DeployWizard {
         $w.NameHint.Text = switch ($a.NamingMode) {
             'WMI'    { 'Suggested from the hardware. You can change it.' }
             'Custom' { "Suggested from the scheme $($a.CustomScheme). You can change it." }
+            'Prompt' { 'Type the name for this PC.' }
         }
         $isDomain = $a.Membership -eq 'Domain'
         $w.JoinLabel.Text = if ($isDomain) { "Joins the domain $($a.Domain)" } else { "Joins the workgroup $($a.Workgroup)" }

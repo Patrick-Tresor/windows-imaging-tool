@@ -67,8 +67,7 @@ function Read-AnswerFile {
         UILanguage           = Get-XmlText $d 'regional/uiLanguage'
         UILanguageFallback   = Get-XmlText $d 'regional/uiLanguageFallback'
         UserLocale           = Get-XmlText $d 'regional/userLocale'
-        # 'Prompt' (ask the technician) was removed: an older answer file with it names PCs from the hardware.
-        NamingMode           = $(if ((Get-XmlText $d 'identification/naming/@mode' 'WMI') -eq 'Custom') { 'Custom' } else { 'WMI' })
+        NamingMode           = $(switch (Get-XmlText $d 'identification/naming/@mode' 'WMI') { 'Custom' { 'Custom' } 'Prompt' { 'Prompt' } default { 'WMI' } })
         WmiQuery             = Get-XmlText $d 'identification/naming/wmiQuery' 'SELECT SerialNumber FROM Win32_BIOS'
         CustomScheme         = Get-XmlText $d 'identification/naming/customScheme'
         Prefix               = Get-XmlText $d 'identification/naming/prefix' ''
@@ -115,7 +114,7 @@ function Test-AnswerFile {
     if ($a.ImageIndex -lt 1) { 'image/index must be 1 or more.' }
     if ($a.ImageVersion -and $a.ImageVersion -notmatch '^\d{8}-\d{4}(-\d+)?$') { "image/version '$($a.ImageVersion)' must be a version time stamp such as 20261022-1530, or empty for the current image." }
     if ($a.DiskOption -ne 'Recreate') { "disk/option '$($a.DiskOption)' is not supported yet; only Recreate (wipe the disk and recreate partitions)." }
-    if ($a.NamingMode -notin 'WMI', 'Custom') { "identification/naming mode must be WMI or Custom, not '$($a.NamingMode)'." }
+    if ($a.NamingMode -notin 'WMI', 'Custom', 'Prompt') { "identification/naming mode must be WMI, Custom or Prompt, not '$($a.NamingMode)'." }
     if ($a.NamingMode -eq 'Custom' -and -not $a.CustomScheme) { 'Custom naming needs identification/naming/customScheme.' }
     if ($a.Membership -notin 'Domain', 'Workgroup') { "network/membership must be Domain or Workgroup, not '$($a.Membership)'." }
     if ($a.Membership -eq 'Domain') {
@@ -160,10 +159,12 @@ function Resolve-ComputerName {
         [Parameter(Mandatory)]$Answer,
         [string]$WmiValue,          # result of the answer file's WMI query (Get-WmiNamingValue)
         [string]$Serial,
+        [string]$Typed,             # operator's answer when NamingMode is Prompt
         [Random]$Random = [Random]::new()
     )
     $body = switch ($Answer.NamingMode) {
         'WMI'    { $WmiValue }
+        'Prompt' { if ($Typed) { $Typed } else { $WmiValue } }
         'Custom' {
             $s = $Answer.CustomScheme -replace '\{SERIAL\}', $Serial
             -join ($s.ToCharArray() | ForEach-Object { if ($_ -eq '#') { $Random.Next(0, 10) } else { $_ } })

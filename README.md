@@ -304,8 +304,8 @@ the console; the format is documented in the commented
   locales such as `fr-CA`).
 - **computer naming**: a WMI query (for example the serial from
   `Win32_SystemEnclosure`) with a prefix, a custom scheme like `A########`
-  (`#` = random digit, `{SERIAL}` = BIOS serial). Older answer files that asked
-  the technician use the serial instead.
+  (`#` = random digit, `{SERIAL}` = BIOS serial), or ask the technician (the
+  deploy wizard asks for the name; an unattended deploy uses the WMI value).
 - **domain or workgroup**, with OU and join account.
 - **tasks** by phase: `POSTIMAGE` (in WinPE, `%OSDRIVE%` is the new Windows
   drive, `%DEPLOYROOT%` the content root), `FIRSTBOOT` (as SYSTEM after the
