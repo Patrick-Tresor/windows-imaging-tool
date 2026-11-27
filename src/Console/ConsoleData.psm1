@@ -62,11 +62,10 @@ function Test-ContentRoot {
 function Get-ImageList {
     param([Parameter(Mandatory)][string]$ContentRoot)
     $dir = Join-Path $ContentRoot 'Images'
-    # Split images: list only the first part (Name.swm); Name2.swm, Name3.swm... belong to it.
     $files = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -in '.wim', '.esd' -or ($_.Extension -eq '.swm' -and $_.BaseName -notmatch '\d+$') }
+        Where-Object { $_.Extension -in '.wim', '.esd' }
     foreach ($f in $files) {
-        $parts = @(Get-ImagePartFiles -ImagePath $f.FullName)
+        $parts = @(Get-ImageFileItem -ImagePath $f.FullName)
         $indexes = ''
         if (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue) {
             try {
@@ -78,7 +77,6 @@ function Get-ImageList {
         [pscustomobject]@{
             Name     = $f.Name
             SizeGB   = [Math]::Round((($parts | Measure-Object Length -Sum).Sum) / 1GB, 2)
-            Parts    = $parts.Count
             Modified = $f.LastWriteTime
             Indexes  = $indexes
             Versions = @(Get-ImageVersions -ImagePath $f.FullName).Count
@@ -618,7 +616,7 @@ function Get-ImageVersionRows {
     $path = Join-ContentPath $ContentRoot "Images\$ImageName"
     $usage = Get-ImageVersionUsage -ContentRoot $ContentRoot -ImageName $ImageName
     $pinnedBy = { param($v) if ($usage.ContainsKey($v)) { $usage[$v] -join ', ' } else { '' } }
-    $parts = @(Get-ImagePartFiles -ImagePath $path)
+    $parts = @(Get-ImageFileItem -ImagePath $path)
     if ($parts) {
         [pscustomobject]@{
             Version   = ''

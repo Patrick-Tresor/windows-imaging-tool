@@ -60,10 +60,10 @@ try {
     Set-Content (Join-Path $v1.Folder 'Win11.wim') 'v1'
     Assert-Equal (Get-Content (Join-Path $v1.Folder 'Win11.wim')) 'v1' 'the chosen version is still archived after a rollback'
 
-    # Split images move all their parts.
-    Set-Content (Join-Path $images 'Big.swm') 'a'; Set-Content (Join-Path $images 'Big2.swm') 'b'
-    $big = Save-ImageVersion -ImagePath (Join-Path $images 'Big.swm') -Move
-    Assert-Equal ((Get-ChildItem $big.Folder -Filter *.swm).Name -join ',') 'Big.swm,Big2.swm' 'every part of a split image is archived'
+    # An .esd moves like a .wim.
+    Set-Content (Join-Path $images 'Big.esd') 'a'
+    $big = Save-ImageVersion -ImagePath (Join-Path $images 'Big.esd') -Move
+    Assert-Equal ((Get-ChildItem $big.Folder -Filter *.esd).Name -join ',') 'Big.esd' 'an .esd image is archived'
 
     # Answer files: version pinned in XML, round trip, validation, console issues.
     $answerPath = Get-AnswerFilePath -ContentRoot $root -Name 'Default'

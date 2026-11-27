@@ -633,9 +633,8 @@ try {
     New-DiskpartScript -DiskNumber $answer.DiskNumber | Set-Content -Path $dp -Encoding ascii
     Invoke-Native -FilePath 'diskpart.exe' -ArgumentList @('/s', $dp)
 
-    # 2. Apply the image. Split images (.swm) need /SWMFile.
+    # 2. Apply the image.
     $applyArgs = @('/Apply-Image', "/ImageFile:$imagePath", "/Index:$($answer.ImageIndex)", '/ApplyDir:W:\')
-    if ($imagePath -like '*.swm') { $applyArgs += "/SWMFile:$($imagePath -replace '\.swm$', '*.swm')" }
     # The longest step: DISM's percentage maps to 10-70 % overall. The window on this PC follows every few seconds;
     # the dashboard gets a write at most every 15 s (Update-NativeStepStatus).
     Set-DeployStatus -Step 'Applying the image' -Percent 10

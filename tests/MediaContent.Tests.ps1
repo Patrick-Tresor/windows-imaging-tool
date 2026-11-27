@@ -37,11 +37,10 @@ try {
 
     # Two answer files: only the checked one and its image go on the stick.
     Copy-Item (Join-Path $answers 'Default.xml') (Join-Path $answers 'Lab.xml')
-    Set-AnswerImage (Join-Path $answers 'Lab.xml') 'Images\Lab.swm' ''
-    Set-Content (Join-Path $images 'Lab.swm') 'p1'
-    Set-Content (Join-Path $images 'Lab2.swm') 'p2'
+    Set-AnswerImage (Join-Path $answers 'Lab.xml') 'Images\Lab.esd' ''
+    Set-Content (Join-Path $images 'Lab.esd') 'p1'
     $c = Get-MediaContent -ContentRoot $root -AnswerFiles 'Lab'
-    Assert-Equal ($c.Files -join ';') 'AnswerFiles\Lab.xml;Images\Lab.swm;Images\Lab2.swm' 'split image: every part, and only the checked answer file'
+    Assert-Equal ($c.Files -join ';') 'AnswerFiles\Lab.xml;Images\Lab.esd' 'only the checked answer file and its image'
     $c = Get-MediaContent -ContentRoot $root
     Assert-Equal ($c.AnswerFiles.Name -join ',') 'Default,Lab' 'no names given: every answer file'
 
@@ -137,7 +136,7 @@ try {
     Assert-Equal ((Get-MediaContent -ContentRoot $root -AnswerFiles 'Nope').Problems[0]) "Answer file Nope is not in $root\AnswerFiles." 'unknown answer file'
     $choices = @(Get-MediaAnswerChoices -ContentRoot $root)
     Assert-Equal ($choices.Name -join ',') 'Default,Lab' 'Media tab lists every answer file'
-    Assert-Equal ($choices[1].Label -like 'Lab  ->  Images\Lab.swm*') $true 'Media tab shows the image each one deploys'
+    Assert-Equal ($choices[1].Label -like 'Lab  ->  Images\Lab.esd*') $true 'Media tab shows the image each one deploys'
     Remove-Item (Join-Path $answers '*.xml')
     Assert-Equal ((Get-MediaContent -ContentRoot $root).Problems[0] -like 'There are no answer files*') $true 'no answer files at all'
 

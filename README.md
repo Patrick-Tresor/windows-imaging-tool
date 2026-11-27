@@ -607,8 +607,7 @@ components, and commits. It then exports the result to a fresh file (which drops
 the space the old components took), moves the old version to
 `Images\Previous\<name>_<date>\` and puts the new one in its place, under the same
 name, so answer files pick it up without changes. An `.esd` image is exported to a
-.wim, updated and exported back. Split images (`.swm`) from older captures are
-joined, updated and split again (new captures are never split). The Images tab shows when each image was last updated and
+.wim, updated and exported back. The Images tab shows when each image was last updated and
 with which KBs, and **Open log** shows its `SERVICE-<name>` log.
 
 It needs about three times the image size free on the system drive (or pass

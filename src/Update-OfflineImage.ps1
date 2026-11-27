@@ -33,7 +33,6 @@ param(
     [int[]]$Index,                                    # default: every edition in the image
     [switch]$Cleanup,                                 # DISM /StartComponentCleanup after the updates
     [switch]$ResetBase,                               # with -Cleanup: smaller, but the updates can no longer be removed
-    [int]$SplitSizeMB = 3800,                         # part size when the image is split (.swm)
     [string]$WorkDir = (Join-Path $env:ProgramData 'ImagingConsole\Servicing'),
     [switch]$NoPrompt,
     [string]$ProgressFile,                            # step-by-step progress for the console's Progress window
@@ -59,10 +58,9 @@ $rebootRequired = 3010
 $image = Get-Item -LiteralPath $ImagePath
 $name = $image.BaseName
 $imagesDir = $image.DirectoryName
-$isSplit = $image.Extension -eq '.swm'
+if ($image.Extension -eq '.swm') { throw "$($image.Name) is a split image (.swm), which this tool no longer uses. Join it into one .wim first (dism /Export-Image /SWMFile)." }
 # An .esd (Smallest compression) cannot be mounted: it is exported to a .wim to service, and back to .esd at the end.
 $isEsd = $image.Extension -eq '.esd'
-$parts = if ($isSplit) { @(Get-ChildItem -LiteralPath $imagesDir -Filter "$name*.swm" | Where-Object { $_.BaseName -match "^$([regex]::Escape($name))\d*$" }) } else { @($image) }
 
 # Logs go to the content root's Logs folder when the image is in <root>\Images, so the console shows them.
 $contentRoot = Split-Path $imagesDir -Parent
@@ -131,23 +129,17 @@ try {
     Remove-Item -LiteralPath $sourceWim, $outWim -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $mountDir, $scratchDir -Force | Out-Null
 
-    $imageBytes = ($parts | Measure-Object Length -Sum).Sum
+    $imageBytes = $image.Length
     $drive = Get-PSDrive -Name (Split-Path $WorkDir -Qualifier).TrimEnd(':')
     if ($drive.Free -lt ($imageBytes * 3 + 10GB)) {
         throw ('{0} has {1:N0} GB free; servicing this {2:N1} GB image needs about {3:N0} GB. Use -WorkDir on a bigger drive.' -f `
             $drive.Root, ($drive.Free / 1GB), ($imageBytes / 1GB), (($imageBytes * 3 + 10GB) / 1GB))
     }
 
-    # Work on a local single-file copy. Split images are joined back into one .wim first.
+    # Work on a local copy.
     Write-DeployLog "Copying $($image.Name) to $WorkDir"
     Start-BuildStep 'copy' -Detail $WorkDir
-    if ($isSplit) {
-        $swmPattern = Join-Path $imagesDir "$name*.swm"
-        foreach ($i in (Get-WindowsImage -ImagePath $image.FullName).ImageIndex) {
-            Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Export-Image', "/SourceImageFile:$($image.FullName)", "/SWMFile:$swmPattern",
-                "/SourceIndex:$i", "/DestinationImageFile:$sourceWim", '/Compress:max', '/CheckIntegrity')
-        }
-    } elseif ($isEsd) {
+    if ($isEsd) {
         foreach ($i in (Get-WindowsImage -ImagePath $image.FullName).ImageIndex) {
             Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Export-Image', "/SourceImageFile:$($image.FullName)", "/SourceIndex:$i",
                 "/DestinationImageFile:$sourceWim", '/Compress:max', '/CheckIntegrity')
@@ -220,12 +212,8 @@ try {
     $backup = $kept.Folder
     Write-DeployLog "Moved the previous version to $backup"
 
-    if ($isSplit) {
-        Invoke-Native -FilePath 'dism.exe' -ArgumentList @('/Split-Image', "/ImageFile:$outWim", "/SWMFile:$(Join-Path $imagesDir "$name.swm")", "/FileSize:$SplitSizeMB")
-    } else {
-        Write-DeployLog "Copying the updated image to $imagesDir"
-        Copy-Item -LiteralPath $outFile -Destination (Join-Path $imagesDir $image.Name)
-    }
+    Write-DeployLog "Copying the updated image to $imagesDir"
+    Copy-Item -LiteralPath $outFile -Destination (Join-Path $imagesDir $image.Name)
 
     Add-ImageServicingRecord -ImagePath (Join-Path $imagesDir $image.Name) -Results $results `
         -Builds $builds `

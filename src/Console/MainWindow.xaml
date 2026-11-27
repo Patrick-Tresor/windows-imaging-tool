@@ -72,7 +72,6 @@
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
               <DataGridTextColumn Header="Used by" Binding="{Binding UsedBy}" Width="2*"/>
               <DataGridTextColumn Header="Size (GB)" Binding="{Binding SizeGB}" Width="90"/>
-              <DataGridTextColumn Header="Parts" Binding="{Binding Parts}" Width="60"/>
               <DataGridTextColumn Header="Earlier versions" Binding="{Binding Versions}" Width="110"/>
               <DataGridTextColumn Header="Modified" Binding="{Binding Modified, StringFormat=yyyy-MM-dd HH:mm}" Width="130"/>
               <DataGridTextColumn Header="Last updated" Binding="{Binding Updated}" Width="2*"/>
