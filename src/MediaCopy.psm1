@@ -392,4 +392,22 @@ function Remove-StaleMediaFiles {
     }
 }
 
-Export-ModuleMember -Function Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy, Get-MediaUpdatePlan, Remove-StaleMediaFiles
+function Clear-StickContent {
+    # A stick made WinPE only: its answer files, images, drivers, applications, tasks, tools and config are deleted
+    # (Logs and Status stay), so WinPE loads all of it from the share. Returns the bytes freed.
+    param([Parameter(Mandatory)][string]$Destination)
+    $freed = [int64]0
+    foreach ($folder in $script:ManagedFolders) {
+        $full = [IO.Path]::Combine($Destination, $folder)
+        if (-not [IO.Directory]::Exists($full)) { continue }
+        foreach ($f in [IO.Directory]::GetFiles($full, '*', [IO.SearchOption]::AllDirectories)) {
+            $fi = New-Object IO.FileInfo $f
+            $freed += $fi.Length
+            if ($fi.IsReadOnly) { $fi.IsReadOnly = $false }
+        }
+        [IO.Directory]::Delete($full, $true)
+    }
+    $freed
+}
+
+Export-ModuleMember -Function Get-MediaCopyPlan, Copy-MediaContent, Test-NativeCopy, Get-MediaUpdatePlan, Remove-StaleMediaFiles, Clear-StickContent

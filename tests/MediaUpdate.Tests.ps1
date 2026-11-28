@@ -67,8 +67,28 @@ try {
 }
 finally { Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue }
 
+# A stick made WinPE only: its content goes (read-only files too), Logs and the version file stay.
+$light = Join-Path ([IO.Path]::GetTempPath()) ("imaging-light-" + [guid]::NewGuid())
+try {
+    New-File (Join-Path $light 'Images/Win11.wim') '12345'
+    New-File (Join-Path $light 'Drivers/Dell/5521.wim') '123'
+    New-File (Join-Path $light 'AnswerFiles/Staff.xml') '<a/>'
+    New-File (Join-Path $light 'Logs/PC1/Deploy.log') 'log'
+    New-File (Join-Path $light 'tool-version.json') '{}'
+    (Get-Item -LiteralPath (Join-Path $light 'Drivers/Dell/5521.wim')).IsReadOnly = $true
+    $freed = Clear-StickContent -Destination $light
+    Assert-Equal $freed ([int64]12) 'bytes freed: every content file'
+    Assert-Equal ([IO.Directory]::Exists((Join-Path $light 'Images')) -or [IO.Directory]::Exists((Join-Path $light 'Drivers')) -or [IO.Directory]::Exists((Join-Path $light 'AnswerFiles'))) $false 'images, drivers and answer files deleted'
+    Assert-Equal ((Test-Path (Join-Path $light 'Logs/PC1/Deploy.log')) -and (Test-Path (Join-Path $light 'tool-version.json'))) $true 'logs and the version file stay'
+    Assert-Equal (Clear-StickContent -Destination $light) ([int64]0) 'nothing left: nothing freed'
+}
+finally { Remove-Item $light -Recurse -Force -ErrorAction SilentlyContinue }
+
 # The build: an update never erases.
 $build = Get-Content -Raw (Join-Path $repo 'src/New-DeploymentMedia.ps1')
 Assert-Equal ($build -match '(?s)if \(-not \$UpdateOnly\) \{.*Reset-UsbDisk') $true 'Reset-UsbDisk only when not updating'
+# A WinPE-only stick: no Images folder (Find-ContentRoot would use the stick), the marker, old content deleted on update.
+Assert-Equal ($build.Contains('if (-not $ContentFromShare) { New-Item -ItemType Directory -Path "${dataLetter}:\Images"')) $true 'Images folder only on a full stick'
+Assert-Equal ($build -match 'network-stick\.json' -and $build -match 'Clear-StickContent') $true 'WinPE-only stick: marker written, old content cleared'
 
 Complete-Tests 'All media update checks passed'

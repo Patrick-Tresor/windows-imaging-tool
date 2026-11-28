@@ -785,7 +785,9 @@ function Get-DeployStickRoots {
     # DEPLOY partitions of sticks this tool built that are plugged into this PC. DriveInfo, not Get-Volume: the
     # dashboard calls this every 10 seconds.
     @([IO.DriveInfo]::GetDrives() | Where-Object {
-        try { $_.IsReady -and $_.VolumeLabel -eq 'DEPLOY' -and [IO.Directory]::Exists([IO.Path]::Combine($_.RootDirectory.FullName, 'Images')) } catch { $false }
+        # Images: a stick with its content; network-stick.json: a WinPE-only stick that loads it from the share.
+        try { $_.IsReady -and $_.VolumeLabel -eq 'DEPLOY' -and ([IO.Directory]::Exists([IO.Path]::Combine($_.RootDirectory.FullName, 'Images')) -or
+            [IO.File]::Exists([IO.Path]::Combine($_.RootDirectory.FullName, 'network-stick.json'))) } catch { $false }
     } | ForEach-Object { $_.RootDirectory.FullName })
 }
 

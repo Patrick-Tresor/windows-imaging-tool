@@ -50,8 +50,10 @@ Assert-Equal ($err -match 'Could not reach \\\\IMAGER\\imager from WinPE') $true
 
 # Deploy-Image's Find-ContentRoot uses them.
 $text = [IO.File]::ReadAllText((Join-Path $repo 'src/DeployCommon.psm1'))
-$find = $text.Substring($text.IndexOf('function Find-ContentRoot'), 2500)
+$find = $text.Substring($text.IndexOf('function Find-ContentRoot'), 3500)
 Assert-Equal ($find -match 'Wait-DeployNetwork' -and $find -match 'Connect-DeployShare' -and $find -match 'share-hosts\.json') $true 'Find-ContentRoot waits for an address and tries every name'
+# A WinPE-only stick (network-stick.json, no Images) is not used as content: WinPE maps the share instead.
+Assert-Equal ($find -match "network-stick\.json" -and $find.IndexOf("'Images'") -lt $find.IndexOf('network-stick.json')) $true 'a WinPE-only stick falls through to the share'
 Assert-Equal ([IO.File]::ReadAllText((Join-Path $repo 'src/New-DeploymentMedia.ps1')) -match 'share-hosts\.json') $true 'the build writes the server names into boot.wim'
 
 Complete-Tests 'All deploy network tests passed.'

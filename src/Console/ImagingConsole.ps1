@@ -278,6 +278,25 @@ function Update-MediaAnswers {
     foreach ($c in $choices) {
         if (-not $old.ContainsKey($c.Name) -or $old[$c.Name]) { [void]$ui.LstMediaAnswers.SelectedItems.Add($c) }
     }
+    Update-MediaKind
+}
+
+function Get-MediaShare {
+    # The share in this content root's Deploy Settings, which a WinPE-only stick loads everything from, or ''.
+    if (-not (Test-ContentRoot $script:root)) { return '' }
+    $s = try { Get-DeploySettings -ContentRoot $script:root } catch { $null }
+    if ($s) { "$($s.share.path)".Trim() } else { '' }
+}
+
+function Update-MediaKind {
+    # Full stick: answer file and driver pack lists. WinPE only: no lists, the share it loads everything from instead.
+    $fromShare = $ui.RdoMediaShare.IsChecked -eq $true
+    $vis = if ($fromShare) { 'Collapsed' } else { 'Visible' }
+    foreach ($n in 'LblMediaAnswers', 'PnlMediaAnswers', 'LblMediaPacks', 'PnlMediaPacks') { $ui[$n].Visibility = $vis }
+    $share = Get-MediaShare
+    $ui.TxtMediaShare.Visibility = if ($fromShare) { 'Visible' } else { 'Collapsed' }
+    $ui.TxtMediaShare.Text = if (-not $share) { 'No network share yet: set it on the Deploy Settings tab first.' }
+        else { "At deploy, WinPE maps $share and shows every answer file there, with the images, drivers and apps on that share. Build it on any PC; only the WinPE password and the Deploy Settings go on the stick." }
 }
 
 function Update-Drivers {
@@ -710,6 +729,12 @@ function Select-StickForUpdate {
         if ($item) { $ui.CmbUsb.SelectedItem = $item }
     }
     if (-not $item) { Set-Status 'Pick the stick, check the answer files and driver packs, then click Build media.'; return }
+    if (Test-NetworkStick -StickRoot $old[0]) {
+        $ui.RdoMediaShare.IsChecked = $true
+        $ui.BtnBuild.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        return
+    }
+    $ui.RdoMediaFull.IsChecked = $true
     $on = Get-StickContentChoice -StickRoot $old[0]
     $answers = @($ui.LstMediaAnswers.Items | Where-Object { $on.AnswerFiles -contains $_.Name })
     if ($answers) {
@@ -1518,6 +1543,18 @@ $ui.BtnAdAgent.Add_Click({ Invoke-Safely {
 #region Media
 
 $ui.LstMediaPacks.Add_SelectionChanged({ Update-MediaPackTotal })
+# The stick type picked last time on this PC (console.json).
+if ($config.PSObject.Properties['mediaFromShare'] -and $config.mediaFromShare) { $ui.RdoMediaShare.IsChecked = $true }
+$onMediaKind = {
+    Invoke-Safely {
+        Update-MediaKind
+        $c = Get-ConsoleConfig
+        $c | Add-Member -NotePropertyName mediaFromShare -NotePropertyValue ($ui.RdoMediaShare.IsChecked -eq $true) -Force
+        Save-ConsoleConfig $c
+    }
+}
+$ui.RdoMediaFull.Add_Checked($onMediaKind)
+$ui.RdoMediaShare.Add_Checked($onMediaKind)
 $ui.BtnUsbRefresh.Add_Click({ Invoke-Safely { Update-UsbDisks } })
 $ui.CmbUsb.Add_SelectionChanged({ Invoke-Safely { Update-UsbMode } })
 $ui.PwdWinPE.Add_PasswordChanged({ Update-WinPEPasswordAgain })
@@ -1538,27 +1575,51 @@ $ui.BtnBuild.Add_Click({ Invoke-Safely {
     if (-not $pePw) { Show-Error 'Type the WinPE password. Every stick needs one: it locks the passwords on the stick.'; [void]$ui.PwdWinPE.Focus(); return }
     if ($pePw -ne $ui.PwdWinPE2.Password) { Show-Error 'The two WinPE passwords are not the same.'; [void]$ui.PwdWinPE2.Focus(); return }
     if ($pePw.Length -lt 8) { Show-Error 'The WinPE password needs at least 8 characters.'; [void]$ui.PwdWinPE.Focus(); return }
-    # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
-    $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
-    if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
-    # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
-    $packArgs = @{}
-    $allPacks = @($ui.LstMediaPacks.Items)
-    $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
-    if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
-    $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
-    if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
-    if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
-    if ($disk.Ours) {
-        if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
-    } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+    $fromShare = $ui.RdoMediaShare.IsChecked -eq $true
+    if ($fromShare) {
+        # WinPE only: the share must be set, its account usable at deploy, and hold answer files. A share this PC
+        # can't read is not a stop: the deploy uses the share account, which this Windows account may not have.
+        $share = Get-MediaShare
+        $shareNames = @(); $unreachable = $false
+        if ($share) {
+            try {
+                if ([IO.Directory]::Exists($share)) {
+                    $af = [IO.Path]::Combine($share, 'AnswerFiles')
+                    if ([IO.Directory]::Exists($af)) { $shareNames = @([IO.Directory]::GetFiles($af, '*.xml') | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) }) }
+                } else { $unreachable = $true }
+            } catch { $unreachable = $true }
+        }
+        $problems = @(Get-NetworkStickProblems -Settings (Get-DeploySettings -ContentRoot $script:root) -ShareAnswerFiles $shareNames -ShareUnreachable:$unreachable)
+        if ($problems) { Show-Error $problems[0]; return }
+        $text = if ($disk.Ours) { "USB disk $($disk.Label) becomes a WinPE-only stick: WinPE is replaced and any images, drivers and apps on it are deleted (its Logs folder is kept)." }
+            else { "Everything on USB disk $($disk.Label) will be erased." }
+        $text += "`n`nAt deploy it loads everything from $share, so the PC needs a network cable."
+        if ($unreachable) { $text += " This PC can't open $share right now, so its answer files were not checked." }
+        if (-not (Confirm-Action "$text`n`nContinue?")) { return }
+    } else {
+        # Check the answer files and their images before erasing the stick: without them it boots but can't deploy.
+        $names = @($ui.LstMediaAnswers.SelectedItems | ForEach-Object Name)
+        if (-not $names) { Show-Error 'Check at least one answer file to put on the USB stick. It says which image the stick deploys.'; return }
+        # Every pack checked: the whole driver folder, as before. Otherwise only the checked packs.
+        $packArgs = @{}
+        $allPacks = @($ui.LstMediaPacks.Items)
+        $packs = @($ui.LstMediaPacks.SelectedItems | ForEach-Object Path)
+        if ($allPacks -and $packs.Count -lt $allPacks.Count) { $packArgs.DriverPacks = $packs }
+        $content = Get-MediaContent -ContentRoot $script:root -AnswerFiles $names @packArgs
+        if ($content.Problems) { Show-Error ("The USB stick would not deploy:`n`n" + ($content.Problems -join "`n`n")); return }
+        if ($allPacks -and -not $packs -and -not (Confirm-Action 'No driver packs are checked, so PCs deployed from this stick get Windows inbox drivers only. Continue?')) { return }
+        if ($disk.Ours) {
+            if (-not (Confirm-Action "USB disk $($disk.Label) is updated in place: WinPE is replaced, changed files are copied and files the new content no longer has are deleted (its Logs folder is kept). Continue?")) { return }
+        } elseif (-not (Confirm-Action "Everything on USB disk $($disk.Label) will be erased. Continue?")) { return }
+    }
     # Deployments the stick holds go to the dashboard first: erasing it would lose them.
     $dashFolder = Get-DashboardFolder
     if ($dashFolder) { Import-StickDashboard $dashFolder }
     $buildArgs += @('-Target', 'Usb', '-UsbDiskNumber', $disk.Number, '-Force')
     if ($disk.Ours) { $buildArgs += '-UpdateOnly' }
-    $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ','))
-    if ($packArgs.ContainsKey('DriverPacks')) {
+    if ($fromShare) { $buildArgs += '-ContentFromShare' }
+    else { $buildArgs += @('-ContentSource', (ConvertTo-Arg $script:root), '-AnswerFiles', ($names -join ',')) }
+    if (-not $fromShare -and $packArgs.ContainsKey('DriverPacks')) {
         if ($packs) { $buildArgs += @('-DriverPacks', (ConvertTo-Arg ($packs -join '|'))) } else { $buildArgs += '-NoDriverPacks' }
     }
     # WinPE password: checked here, handed to the build in a file in %TEMP% that the build deletes once read
@@ -1634,6 +1695,7 @@ $ui.BtnSettingsSave.Add_Click({ Invoke-Safely {
     }
     if ($s.PSObject.Properties['checks']) { $s.checks = $checks } else { $s | Add-Member -NotePropertyName checks -NotePropertyValue $checks }
     Save-DeploySettings -ContentRoot $script:root -Settings $s
+    Update-MediaKind   # the Media tab names the share a WinPE-only stick loads from
     # The domain controller is this console's own (console.json). The Computers tab's next Search uses this account
     # and domain controller.
     Save-AdSettings -Server $ui.TxtAdServer.Text

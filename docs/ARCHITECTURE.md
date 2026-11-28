@@ -178,7 +178,9 @@ All three use the same WinPE image and the same `Deploy-Image.ps1`. Only the
    boot code, so it also boots legacy BIOS machines (a capture VM, say); deploys
    still need UEFI.
 2. **LAN share**: WinPE boots from a small USB or ISO, then maps
-   `\\server\Deploy` using `config/deploy-settings.json`.
+   `\\server\Deploy` using `config/deploy-settings.json`. The small USB is a WinPE-only stick
+   (`New-DeploymentMedia -ContentFromShare`, Media tab **WinPE only**): its DEPLOY partition has
+   `network-stick.json` and no `Images\` folder, so `Find-ContentRoot` skips it and maps the share.
 
 Every medium boots both UEFI and legacy BIOS;
 the deploy itself stops on a PC that started WinPE in legacy BIOS mode. The ISO carries both

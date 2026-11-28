@@ -745,11 +745,15 @@ function Find-ContentRoot {
     # USB first: any volume labelled DEPLOY that holds an Images folder. Otherwise map the share from settings.
     # Decrypt: turns the share password the console encrypted in the settings into text (Get-ShareCredential).
     param([string]$SettingsPath, [scriptblock]$Decrypt)
+    $networkStick = $null
     foreach ($vol in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystemLabel -eq 'DEPLOY' }) {
         $root = "$($vol.DriveLetter):\"
         # .NET, not Test-Path/Join-Path: a volume PowerShell has no drive for makes those fail in WinPE.
         if ([IO.Directory]::Exists([IO.Path]::Combine($root, 'Images'))) { Write-DeployLog "Using USB content at $root"; return $root }
+        # A WinPE-only stick (built with "Content from the share"): everything comes from the share below.
+        if ([IO.File]::Exists([IO.Path]::Combine($root, 'network-stick.json'))) { $networkStick = $root }
     }
+    if ($networkStick) { Write-DeployLog "The USB stick at $networkStick is WinPE only: loading the answer files, images, drivers and apps from the share" }
 
     if (-not $SettingsPath -or -not (Test-Path $SettingsPath)) { throw 'No DEPLOY volume found and no settings file to locate a network share.' }
     $settings = Get-Content -Raw $SettingsPath | ConvertFrom-Json
@@ -760,7 +764,7 @@ function Find-ContentRoot {
     # WaitForNetwork returns at once even with no cable (GWHZLG3, on Wi-Fi in Windows: "System error 53" 20 s later).
     $net = Wait-DeployNetwork
     Write-DeployLog "Network: $($net.Text)"
-    if (-not $net.Ok) { throw (Get-NoNetworkMessage -Adapters $net.Adapters) }
+    if (-not $net.Ok) { throw ($(if ($networkStick) { 'This stick loads the images from the share. ' }) + (Get-NoNetworkMessage -Adapters $net.Adapters)) }
 
     $cred = Get-ShareCredential -SettingsPath $SettingsPath -Decrypt $Decrypt
     # The server's full name and IP addresses, written when the boot image was built: WinPE may not resolve the short name.

@@ -79,7 +79,13 @@ reloads when you open it, so there are no Refresh buttons. The tabs, top to bott
   is erased; the tab says which), check the **Driver packs on USB** you need (the packs for the
   models you have, from the Dashboard and the agents' check-ins, start checked), type the
   **WinPE password** (twice the first time; the console remembers it for your Windows
-  account on this PC, encrypted) and click **Build media**. When Windows refused the console's
+  account on this PC, encrypted) and click **Build media**.
+  **What goes on the stick** picks the kind of stick: **Everything** (above, deploys without a network)
+  or **WinPE only**: no images, drivers or apps on it, so it builds in a few minutes on any PC. At deploy
+  WinPE maps the share from Deploy Settings and shows every answer file there, like the network boot
+  image, so the PC needs a network cable. To build sticks on another PC from your server, run the console
+  there with the server's share (`\\SERVER\Share`, never a mapped letter) as the content root: either
+  kind of stick then takes everything from the server. When Windows refused the console's
   Defender folder exclusions, a tip lists the folders with **Open Windows Security**.
 - **Answer Files**: create, edit and check deployment profiles, and
   **Delete** one (it asks first).
@@ -722,7 +728,9 @@ that is redeployed replaces its earlier entry. PCs with a placeholder serial
 1. **Build media** (admin PC with the ADK + WinPE add-on) from the console's
    Media tab, or from the command line:
    `.\src\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare`
-   (`-Target Wim -OutputPath <root>\Boot` builds the network boot image and its ISO).
+   (`-Target Wim -OutputPath <root>\Boot` builds the network boot image and its ISO;
+   `-ContentFromShare` instead of `-ContentSource` builds a WinPE-only stick that loads everything from the share in
+   `-SettingsPath`, and turns a full stick into one with `-UpdateOnly`, deleting its old content).
    Add `-AnswerFiles Staff-W11,Lab` to put only those answer files and their images on the stick.
    On the Media tab, uncheck the driver packs for models the stick won't image to keep it small
    (`-DriverPacks 'Dell\Latitude 5440|Dell\_Generic WinPE-Storage-Net'`, or `-NoDriverPacks`). A PC whose

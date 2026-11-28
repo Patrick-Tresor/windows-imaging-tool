@@ -156,6 +156,30 @@ try {
     Assert-Equal (Test-ToolStickLabels @('deploy', $null, 'WinPE')) $true 'labels in any case'
     Assert-Equal (Test-ToolStickLabels @('KINGSTON')) $false 'any other stick is erased'
     Assert-Equal (Test-ToolStickLabels @()) $false 'no partitions: erased'
+
+    # A WinPE-only stick: network-stick.json and no Images folder.
+    $light = Join-Path $root 'light'
+    New-Item -ItemType Directory -Path $light -Force | Out-Null
+    Assert-Equal (Test-NetworkStick -StickRoot $light) $false 'no marker: not a WinPE-only stick'
+    Set-Content (Join-Path $light 'network-stick.json') '{"share":"\\\\IMAGER\\Imager"}'
+    Assert-Equal (Test-NetworkStick -StickRoot $light) $true 'marker and no Images: WinPE only'
+    New-Item -ItemType Directory -Path (Join-Path $light 'Images') -Force | Out-Null
+    Assert-Equal (Test-NetworkStick -StickRoot $light) $false 'an Images folder wins: the stick has its content'
+
+    # What stops a WinPE-only stick, before the stick is erased.
+    $set = { param($path, $user, $enc) [pscustomobject]@{ share = [pscustomobject]@{ path = $path; user = $user; encryptedPassword = $enc } } }
+    $p = @(Get-NetworkStickProblems -Settings (& $set '' '' '') -ShareAnswerFiles @('Staff'))
+    Assert-Equal ($p.Count -eq 1 -and $p[0] -like 'No network share*') $true 'no share: one line, set it on Deploy Settings'
+    $p = @(Get-NetworkStickProblems -Settings (& $set 'Z:\Deploy' '' '') -ShareAnswerFiles @('Staff'))
+    Assert-Equal ($p[0] -like '*is not a \\SERVER\Share path*') $true 'a drive letter is not a share'
+    $p = @(Get-NetworkStickProblems -Settings (& $set '\\IMAGER\Imager' 'DOM\svc' '') -ShareAnswerFiles @('Staff'))
+    Assert-Equal ($p[0] -like '*DOM\svc has no saved password*') $true 'share account without its password'
+    $p = @(Get-NetworkStickProblems -Settings (& $set '\\IMAGER\Imager' 'DOM\svc' 'aes256:k:x') -ShareAnswerFiles @())
+    Assert-Equal ($p[0] -like '\\IMAGER\Imager has no answer file*') $true 'a share without answer files has nothing to deploy'
+    $p = @(Get-NetworkStickProblems -Settings (& $set '\\IMAGER\Imager' 'DOM\svc' 'aes256:k:x') -ShareAnswerFiles @() -ShareUnreachable)
+    Assert-Equal $p.Count 0 'a share this PC cannot read does not stop the build'
+    $p = @(Get-NetworkStickProblems -Settings (& $set '\\IMAGER\Imager' '' '') -ShareAnswerFiles @('Staff', 'Lab'))
+    Assert-Equal $p.Count 0 'share with answer files: ready'
 }
 finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
 

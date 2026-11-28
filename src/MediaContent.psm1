@@ -272,4 +272,32 @@ function Get-StickContentChoice {
     [pscustomobject]@{ AnswerFiles = $names; DriverPacks = @($packs | Sort-Object -Unique) }
 }
 
-Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks, Test-ToolStickLabels, Get-StickContentChoice
+function Test-NetworkStick {
+    # A "WinPE only" stick (New-DeploymentMedia -ContentFromShare): DEPLOY holds network-stick.json and no Images
+    # folder, so WinPE loads the answer files, images, drivers and apps from the share in the deploy settings.
+    param([Parameter(Mandatory)][string]$StickRoot)
+    [IO.File]::Exists([IO.Path]::Combine($StickRoot, 'network-stick.json')) -and -not [IO.Directory]::Exists([IO.Path]::Combine($StickRoot, 'Images'))
+}
+
+function Get-NetworkStickProblems {
+    <#
+    .SYNOPSIS
+        What stops a WinPE-only stick from deploying, checked before the stick is erased, one short line each.
+        Settings: the content root's deploy-settings.json. ShareAnswerFiles: the answer file names on the share;
+        -ShareUnreachable when this PC can't read the share (that alone does not stop the build: the deploy uses
+        the share account, which this PC may not).
+    #>
+    param([Parameter(Mandatory)]$Settings, [AllowNull()][AllowEmptyCollection()][string[]]$ShareAnswerFiles, [switch]$ShareUnreachable)
+    $share = "$($Settings.share.path)".Trim()
+    if (-not $share) { 'No network share: set it on the Deploy Settings tab. A WinPE-only stick loads everything from there.'; return }
+    if ($share -notmatch '^\\\\[^\\]+\\[^\\]+') { "The share $share is not a \\SERVER\Share path: set it on the Deploy Settings tab."; return }
+    $user = "$($Settings.share.user)".Trim()
+    if ($user -and -not ($Settings.share.PSObject.Properties['encryptedPassword'] -and "$($Settings.share.encryptedPassword)")) {
+        "The share account $user has no saved password: type it on the Deploy Settings tab and click Save."
+    }
+    if (-not $ShareUnreachable -and -not @($ShareAnswerFiles | Where-Object { $_ }).Count) {
+        "$share has no answer file (AnswerFiles\*.xml), so the stick would have nothing to deploy."
+    }
+}
+
+Export-ModuleMember -Function Get-MediaSecretExcludes, Get-MediaContent, Get-MediaAnswerChoices, Get-MediaDriverPacks, Test-ToolStickLabels, Get-StickContentChoice, Test-NetworkStick, Get-NetworkStickProblems
