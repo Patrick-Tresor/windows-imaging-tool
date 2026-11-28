@@ -26,7 +26,14 @@ Assert-Equal (Get-ControlSetName -Lines @()) 'ControlSet001' 'control set defaul
 Assert-Equal (Test-RegQueryHasValue -Name 'PreventDeviceEncryption' -Lines @('HKEY_LOCAL_MACHINE\T\X', '    PreventDeviceEncryption    REG_DWORD    0x0')) $true 'a listed value is found'
 Assert-Equal (Test-RegQueryHasValue -Name 'PreventDeviceEncryption' -Lines @()) $false 'a missing key has no value'
 
-Assert-Equal ((Get-SysprepArguments -UnattendPath 'C:\ProgramData\ImagingTool\Sysprep\unattend.xml') -join ' ') '/generalize /oobe /reboot /quiet /unattend:C:\ProgramData\ImagingTool\Sysprep\unattend.xml' 'sysprep generalizes, goes to OOBE with the answer file, restarts'
+Assert-Equal ((Get-SysprepArguments -UnattendPath 'C:\ProgramData\ImagingTool\Sysprep\unattend.xml') -join ' ') '/generalize /oobe /quit /quiet /unattend:C:\ProgramData\ImagingTool\Sysprep\unattend.xml' 'sysprep generalizes, goes to OOBE with the answer file, and quits (the script fixes the boot entry, then restarts)'
+$repair = @(Get-BootEntryRepairArgs -SystemDrive 'C:')
+Assert-Equal $repair.Count 2 'two bcdedit calls repair the boot entry'
+Assert-Equal ($repair[0] -join ' ') '/set {default} device partition=C:' 'boot entry device back on C: (sysprep leaves locate=)'
+Assert-Equal ($repair[1] -join ' ') '/set {default} osdevice partition=C:' 'boot entry osdevice back on C:'
+Assert-Equal ((Get-BootEntryRepairArgs -SystemDrive 'C:\')[0] -join ' ') '/set {default} device partition=C:' 'a trailing backslash is dropped'
+$script = Get-Content (Join-Path $PSScriptRoot '..\src\Invoke-SysprepAtDeploy.ps1') -Raw
+Assert-Equal ($script -match "Repair-BootEntry\s*\r?\n\s*Write-Log 'Sysprep finished") $true 'the boot entry is repaired after sysprep, before the restart'
 
 $cbs = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
 $wu = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'

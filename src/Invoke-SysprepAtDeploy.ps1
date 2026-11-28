@@ -15,7 +15,8 @@
     -Stage Run restarts first when Windows servicing waits for one (up to 2 restarts; Windows Update's own flag alone
     is no reason), runs Prepare-Reference.ps1 -CheckOnly -RemoveUserApps -SkipRebootCheck (BitLocker, Store apps
     that break sysprep, a missing Microsoft Store), then
-    sysprep /generalize /oobe /reboot /unattend. After the restart Windows setup applies the answer file and
+    sysprep /generalize /oobe /quit /unattend, points the boot entry back at C: (sysprep leaves it on
+    'locate=', which some PCs never find) and restarts. After the restart Windows setup applies the answer file and
     SetupComplete.cmd starts FirstBoot.ps1, as with a sysprepped image.
 
     When anything fails, the startup command is turned off, the logon screen says so (the PC is still a copy of the reference VM) and the details
@@ -51,6 +52,16 @@ function Set-Notice([string]$Caption, [string]$Text) {
 }
 
 $script:InHook = $false
+
+function Repair-BootEntry {
+    # sysprep /generalize left the boot entry on 'locate=' (search every disk), which some PCs never find at boot
+    # (winload.efi 0xc000000f): point it back at this Windows partition. A failure is only logged.
+    foreach ($a in (Get-BootEntryRepairArgs -SystemDrive $env:SystemDrive)) {
+        $out = (& bcdedit.exe @a 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { Write-Log "bcdedit $($a -join ' ') failed (exit $LASTEXITCODE): $out" 'WARN' }
+    }
+    Write-Log "Boot entry set to partition=$env:SystemDrive"
+}
 
 function Wait-ForRestart {
     # In the hook, returning would let Windows carry on with this boot (and, after sysprep, with the startup
@@ -204,7 +215,11 @@ function Invoke-RunStage {
         if ($outcome.Ok) {
             # sysprep keeps its own copy in Windows\Panther; this one holds the deploy's passwords.
             if ([IO.File]::Exists($unattend)) { try { [IO.File]::Delete($unattend) } catch { } }
-            Set-RunState 'done'; Write-Log 'Sysprep finished; Windows restarts into setup.'; Wait-ForRestart; exit 0
+            Set-RunState 'done'
+            Repair-BootEntry
+            Write-Log 'Sysprep finished; Windows restarts into setup.'
+            & shutdown.exe /r /t 0 2>&1 | Out-Null
+            Wait-ForRestart; exit 0
         }
         $actLog = [IO.Path]::Combine($panther, 'setupact.log')
         $lines = @($errors) + @(if ([IO.File]::Exists($actLog)) { [IO.File]::ReadAllLines($actLog) })
