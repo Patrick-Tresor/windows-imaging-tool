@@ -24,6 +24,10 @@
     .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentSource D:\DeployShare -UpdateOnly
     Updates a stick built earlier without erasing it: new WinPE, and only the content files that changed.
 .EXAMPLE
+    .\New-DeploymentMedia.ps1 -Target Usb -UsbDiskNumber 2 -ContentFromShare -SettingsPath \\IMAGER\Imager\config\deploy-settings.json -WinPEPasswordFile C:\Temp\pe.txt
+    A WinPE-only stick: no images, drivers or apps on it. At deploy WinPE maps the share in the settings and shows
+    every answer file there, like the network boot image. Needs a network cable at deploy; quick to build anywhere.
+.EXAMPLE
     .\New-DeploymentMedia.ps1 -Target Wim -OutputPath D:\DeployShare\Boot -SettingsPath D:\DeployShare\config\deploy-settings.json
     Writes boot.wim, boot.json and Deploy-WinPE.iso to the folder (the console's Computers tab starts boot.wim on PCs
     over the network; the ISO boots a VM or a PC from the same share).
@@ -47,6 +51,7 @@ param(
     [switch]$NoAppDownloads,         # with -ContentSource: don't download online applications onto the stick (each PC downloads them at first boot)
     [switch]$LooseDriverFiles,       # with -ContentSource: copy driver packs as plain files, not one .wim each (much slower to copy to a stick)
     [switch]$UpdateOnly,             # with -Target Usb: update a stick this tool built (WINPE + DEPLOY) without erasing it
+    [switch]$ContentFromShare,       # with -Target Usb: WinPE only on the stick; at deploy it loads everything from the share in the settings
     [string]$ProgressFile,           # JSON file the console's Build progress window reads: each step, its percent and time
     [string]$LogPath,                # transcript of the build (the progress window's Open log button)
     [switch]$Force                   # skip the USB erase prompt (the console confirms before calling)
@@ -84,7 +89,7 @@ switch ($Target) {
         if ($UpdateOnly) { $steps += @(@('stick', 'Checking what changed on the stick'), @('bootfiles', 'Updating WinPE on the stick')) }
         else { $steps += @(@('stick', 'Partitioning the USB stick'), @('bootfiles', 'Copying WinPE to the stick')) }
         if ($ContentSource) { $steps += , @('content', $(if ($UpdateOnly) { 'Copying changed images and content' } else { 'Copying images and content' })) }
-        if (-not $NoVendorWinPEDrivers) { $steps += , @('packs', 'Copying WinPE driver packs to the stick') }
+        if (-not $NoVendorWinPEDrivers -and -not $ContentFromShare) { $steps += , @('packs', 'Copying WinPE driver packs to the stick') }
     }
     'Wim' { $steps += @(@('wim', 'Writing boot.wim'), @('iso', 'Making the ISO')) }
 }
@@ -151,6 +156,15 @@ if ($WinPEPasswordFile) {
 }
 if ($winPEPassword -and $Target -eq 'Wim') { throw '-WinPEPasswordFile is for USB sticks: the network boot image starts on PCs nobody is at to type it.' }
 if ($UpdateOnly -and $Target -ne 'Usb') { throw '-UpdateOnly needs -Target Usb.' }
+$stickShare = $null
+if ($ContentFromShare) {
+    # WinPE only: the deploy maps the share, so the settings must name one, and nothing else goes on the stick.
+    if ($Target -ne 'Usb') { throw '-ContentFromShare needs -Target Usb (the network boot image always loads from the share).' }
+    if ($ContentSource) { throw 'Pass -ContentFromShare or -ContentSource, not both.' }
+    $stickShare = "$((Get-Content -Raw $SettingsPath | ConvertFrom-Json).share.path)".Trim()
+    if (-not $stickShare) { throw "No network share in $SettingsPath`: a WinPE-only stick loads everything from it. Set it on the Deploy Settings tab." }
+    Write-Host "WinPE-only stick: at deploy it loads the answer files, images, drivers and apps from $stickShare"
+}
 $packArgs = @{}
 if ($NoDriverPacks) { $packArgs.DriverPacks = @() } elseif ($DriverPacks) { $packArgs.DriverPacks = $DriverPacks }
 $content = $null
@@ -504,6 +518,12 @@ switch ($Target) {
             Start-BuildStep 'stick'
             $sticks = Get-UsbStickVolumes -DiskNumber $UsbDiskNumber
             $bootLetter = $sticks.Boot.Letter; $dataLetter = $sticks.Data.Letter
+            $stickDetail = ''
+            if ($ContentFromShare) {
+                # The stick may hold images from a full build: they go, or WinPE would deploy them instead of the share's.
+                $freed = Clear-StickContent -Destination "${dataLetter}:\"
+                if ($freed) { Write-Host "Deleted the content on the stick ($(Format-ByteSize $freed)): it now loads everything from $stickShare"; $stickDetail = "Deleted $(Format-ByteSize $freed) of old content" }
+            }
             if ($copyPlan) {
                 $update = Get-MediaUpdatePlan -Plan $copyPlan -Destination "${dataLetter}:\"
                 Write-Host ('Update: {0} file(s) to copy ({1}), {2} unchanged, {3} to delete' -f $update.Copy.FileCount, (Format-ByteSize $update.Copy.TotalBytes), $update.Unchanged, @($update.Stale).Count)
@@ -511,7 +531,7 @@ switch ($Target) {
                     throw ('The update needs {0} more but the stick''s DEPLOY partition has {1} free. Use a bigger stick, or put fewer answer files or driver packs on it.' -f (Format-ByteSize $update.NeededBytes), (Format-ByteSize $sticks.Data.FreeBytes))
                 }
             }
-            Complete-BuildStep 'stick' -Detail $(if ($update) { '{0} file(s) to copy, {1} unchanged, {2} to delete' -f $update.Copy.FileCount, $update.Unchanged, @($update.Stale).Count } else { '' })
+            Complete-BuildStep 'stick' -Detail $(if ($update) { '{0} file(s) to copy, {1} unchanged, {2} to delete' -f $update.Copy.FileCount, $update.Unchanged, @($update.Stale).Count } else { $stickDetail })
             Write-Host "Updating WinPE on ${bootLetter}:..."
             Start-BuildStep 'bootfiles' -Detail "${bootLetter}:"
             robocopy "$WorkDir\media" "${bootLetter}:\" /MIR /NFL /NDL /NJH /NJS | Out-Null
@@ -558,8 +578,8 @@ switch ($Target) {
             & $bootsect /nt60 "${bootLetter}:" /force /mbr | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'bootsect failed' }
             Complete-BuildStep 'bootfiles'
-            # Find-ContentRoot recognizes the stick by its Images folder.
-            New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null
+            # Find-ContentRoot recognizes the stick by its Images folder (a WinPE-only stick has none: it maps the share).
+            if (-not $ContentFromShare) { New-Item -ItemType Directory -Path "${dataLetter}:\Images" -Force | Out-Null }
             if ($copyPlan) {
                 # The answer files, the image each one names, and what they use, copied in chunks with a progress bar: a 5 GB image takes minutes on a USB stick.
                 Start-BuildStep 'content'
@@ -571,6 +591,12 @@ switch ($Target) {
         if ($content) { Write-Host "Answer files on the stick: $(($content.AnswerFiles | ForEach-Object Name) -join ', ')" }
         # The version on the DEPLOY partition too, where the console can read it without opening boot.wim.
         Save-JsonFile -Path "${dataLetter}:\tool-version.json" -InputObject $versionRecord
+        # network-stick.json marks a WinPE-only stick (Find-ContentRoot, the console's Media tab); a full build removes it.
+        $marker = "${dataLetter}:\network-stick.json"
+        if ($ContentFromShare) { Save-JsonFile -Path $marker -InputObject ([ordered]@{ share = $stickShare; built = (Get-Date).ToString('yyyy-MM-dd HH:mm') }) }
+        elseif (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        # A WinPE-only stick needs no copy of the vendor WinPE packs: they are in boot.wim, and the rest comes from the share.
+        if ($ContentFromShare) { $vendorPacks = @() }
         # The vendor WinPE packs on the stick too, so WinPE can load them with drvload when boot.wim lacks a driver.
         # Only the x64 drivers, with progress, and on an update only the files that changed.
         if ($vendorPacks) { Start-BuildStep 'packs' }
@@ -590,7 +616,8 @@ switch ($Target) {
         Write-Host ''
         Write-Host '==============================================' -ForegroundColor Green
         Write-Host ' USB media ready' -ForegroundColor Green
-        Write-Host " WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)" -ForegroundColor Green
+        if ($ContentFromShare) { Write-Host " WinPE on ${bootLetter}:, content from $stickShare at deploy (needs a network cable)" -ForegroundColor Green }
+        else { Write-Host " WinPE on ${bootLetter}:, content on ${dataLetter}: (DEPLOY)" -ForegroundColor Green }
         Write-Host " Tool version $($toolVersion.Text)" -ForegroundColor Green
         Write-Host ' Eject the stick in Windows before you unplug it.' -ForegroundColor Green
         Write-Host ' Boot menu key: Dell F12, HP F9, Lenovo F12 (or the Novo button), Microsoft Surface: hold Volume down' -ForegroundColor Green

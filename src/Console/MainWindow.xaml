@@ -192,7 +192,7 @@
             </DockPanel>
           </Border>
 
-          <TextBlock Style="{StaticResource Hint}" Text="A USB stick deploys offline: WinPE plus the answer files, their images and drivers. For a VM or a PC without a stick, Reimage on the Computers tab builds the network boot image, which also makes Boot\Deploy-WinPE.iso: it loads everything from the share."/>
+          <TextBlock Style="{StaticResource Hint}" Text="A full USB stick deploys offline: WinPE plus the answer files, their images and drivers. A WinPE-only stick is quick to build on any PC and loads all of that from the share at deploy. For a VM or a PC without a stick, Reimage on the Computers tab builds the network boot image, which also makes Boot\Deploy-WinPE.iso: it loads everything from the share."/>
 
           <Grid Margin="0,12,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -202,16 +202,23 @@
             <ComboBox x:Name="CmbUsb" Grid.Column="1" DisplayMemberPath="Label"/>
             <Button x:Name="BtnUsbRefresh" Grid.Column="2" Content="Refresh" Margin="8,0,0,0"/>
 
-            <Label Grid.Row="2" Content="Copy content to USB" VerticalAlignment="Top"/>
-            <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
-              <TextBlock x:Name="TxtUsbMode" DockPanel.Dock="Top" Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold"/>
+            <Label Grid.Row="2" Content="What goes on the stick" VerticalAlignment="Top"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+              <TextBlock x:Name="TxtUsbMode" Margin="0,0,0,8" TextWrapping="Wrap" FontWeight="SemiBold"/>
+              <RadioButton x:Name="RdoMediaFull" GroupName="MediaKind" IsChecked="True" Content="Everything: images, drivers and apps (deploys without a network)"/>
+              <RadioButton x:Name="RdoMediaShare" GroupName="MediaKind" Margin="0,6,0,0" Content="WinPE only: everything comes from the share at deploy (needs a network cable)"/>
+              <TextBlock x:Name="TxtMediaShare" Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <Label x:Name="LblMediaAnswers" Grid.Row="4" Content="Copy content to USB" VerticalAlignment="Top"/>
+            <DockPanel x:Name="PnlMediaAnswers" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="The stick gets the answer files checked below, the image each one deploys, drivers, applications and config. An answer file names the image it deploys (Answer Files tab, Image page). Only the images of the checked answer files go on the stick. Click a line to check or uncheck it."/>
               <ListBox x:Name="LstMediaAnswers" SelectionMode="Multiple" MaxHeight="160" ItemTemplate="{DynamicResource CheckItemTemplate}"/>
             </DockPanel>
 
-            <Label Grid.Row="4" Content="Driver packs on USB" VerticalAlignment="Top"/>
-            <DockPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
+            <Label x:Name="LblMediaPacks" Grid.Row="6" Content="Driver packs on USB" VerticalAlignment="Top"/>
+            <DockPanel x:Name="PnlMediaPacks" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2">
               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,0,0,4"
                          Text="The packs for the models you have are checked (from the Dashboard and the agents); check others for models this stick will image. A PC whose pack is left off gets its maker's fallback pack if that is checked, otherwise Windows inbox drivers. Packs come from the Driver Library tab."/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
