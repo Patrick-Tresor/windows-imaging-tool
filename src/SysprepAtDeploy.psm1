@@ -1,7 +1,7 @@
 # Sysprep at deploy time: an image captured from a VM that was only shut down, not sysprepped, is generalized by
 # each PC at its first start. WinPE (Deploy-Image.ps1) sets a one-time startup command in the new Windows'
 # offline registry; that command (Invoke-SysprepAtDeploy.ps1) runs the reference checks and sysprep /generalize
-# /oobe /reboot with the deploy's answer file, and the PC then goes through Windows setup as with a sysprepped image.
+# /oobe /quit with the deploy's answer file (boot entry repaired, then a restart), and the PC then goes through Windows setup as with a sysprepped image.
 # Pure helpers are unit-tested (tests\SysprepAtDeploy.Tests.ps1); the registry writes run in WinPE or on the PC.
 # .NET file calls, not Join-Path/Test-Path: in WinPE a volume can have no PowerShell drive.
 
@@ -75,7 +75,22 @@ function Test-RegQueryHasValue {
 function Get-SysprepArguments {
     # sysprep's command line for a deployed PC: generalize, back to OOBE with the deploy's answer file, restart.
     param([Parameter(Mandatory)][string]$UnattendPath)
-    @('/generalize', '/oobe', '/reboot', '/quiet', "/unattend:$UnattendPath")
+    # /quit, not /reboot: the boot entry is put back on the Windows partition before the restart (Get-BootEntryRepairArgs).
+    @('/generalize', '/oobe', '/quit', '/quiet', "/unattend:$UnattendPath")
+}
+
+function Get-BootEntryRepairArgs {
+    <#
+    .SYNOPSIS
+        bcdedit argument lists that point the Windows boot entry back at the Windows partition after sysprep.
+    .DESCRIPTION
+        sysprep /generalize turns the boot entry's device and osdevice into 'locate=\Windows\system32\winload.efi'
+        (search every disk at boot). Some firmware never finds it that way: a ThinkPad T14 Gen 6 (2026-11-26) stopped
+        at "winload.efi 0xc000000f" after the sysprep restart. partition=C: is what bcdboot writes in WinPE.
+    #>
+    param([string]$SystemDrive = 'C:')
+    $d = "partition=$($SystemDrive.TrimEnd('\'))"
+    @(@('/set', '{default}', 'device', $d), @('/set', '{default}', 'osdevice', $d))
 }
 
 function Get-PendingRebootMarkers {
@@ -188,6 +203,6 @@ function Test-SysprepTaskNeverStarted {
 }
 
 Export-ModuleMember -Function Test-SysprepTaskNeverStarted, Test-HibernatedWindows, Get-SysprepHookCommand, Get-SysprepHookRegArgs,
-    Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
+    Get-ControlSetName, Test-RegQueryHasValue, Get-SysprepArguments, Get-BootEntryRepairArgs, Get-PendingRebootMarkers, Test-RebootPendingFor, Get-SysprepOutcome,
     Get-SysprepFailureNotice, Get-SysprepWaitMinutes, Test-SysprepHookDone, Test-ReservedStorageInUse,
     Get-SysprepBlockingPackages, Get-AppxPackageNameFromFullName
